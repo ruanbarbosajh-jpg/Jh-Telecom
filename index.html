@@ -6365,7 +6365,16 @@ async function salvarPresencaEscritorio(pessoa, data, campo, novoValor) {
   registrarPresencaEscritorioLog(pessoa, data, campo, anterior, novoValor, quem);
   if (!supa) return { ok: true, offline: true };
   try {
-    const { error } = await supa.from('presenca_escritorio').upsert({ pessoa, data, [campo]: novoValor || null, atualizado_em: agora, atualizado_por: quem }, { onConflict: 'pessoa,data' });
+    // manda os DOIS campos, não só o que mudou: "status" é NOT NULL no banco,
+    // então criar a linha só com "turno" (1º clique num sábado/domingo sem
+    // status ainda) quebrava com "null value in column status violates
+    // not-null constraint". '' em vez de null nos dois — satisfaz a coluna
+    // sem precisar mexer no schema, e o resto do código já trata '' como
+    // "sem valor" (mesma regra do select em branco).
+    const { error } = await supa.from('presenca_escritorio').upsert(
+      { pessoa, data, status: atualizado.status || '', turno: atualizado.turno || '', atualizado_em: agora, atualizado_por: quem },
+      { onConflict: 'pessoa,data' }
+    );
     if (error) return { ok: false, error };
     return { ok: true };
   } catch (e) { return { ok: false, error: e }; }
