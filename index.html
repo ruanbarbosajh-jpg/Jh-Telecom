@@ -926,6 +926,13 @@ async function loadAllFromSupabase(onProgresso) {
   // (ex.: "Guarujá" e "GUARUJA" como cidades "diferentes") — corrige ao carregar.
   normalizarCidadesEmTudo();
 }
+// Diz em qual script SQL (sql/PASSO-N-*.sql) cada tabela nova foi criada —
+// usado só pra apontar o script certo no aviso de "tabela faltando" abaixo.
+// Tabela que não estiver aqui (ex.: as do PASSO-1) não costuma faltar sozinha.
+const SCRIPT_DA_TABELA = {
+  pcr_mo: 'PASSO-3', valores_ordens: 'PASSO-3', frota_revisao: 'PASSO-3',
+  presenca_tecnicos: 'PASSO-4', presenca: 'PASSO-4', presenca_log: 'PASSO-4',
+};
 // Barra de aviso do topo. Substitui o alerta que travava a tela a cada login:
 // tabela que falta não impede nada, então vira uma linha discreta com o que
 // fazer — e só quem importa planilha (Analista/Admin) precisa ver isso.
@@ -943,10 +950,14 @@ function mostrarAvisoSupabase() {
     return;
   }
   if (SUPABASE_TABELAS_FALTANDO.length && podeResolver) {
+    // cada tabela nova entrou num script de criação diferente (PASSO-3,
+    // PASSO-4...) — antes o aviso sempre mandava rodar o PASSO-3, mesmo
+    // quando a tabela faltando era do PASSO-4 (ex.: presenca_tecnicos)
+    const scripts = [...new Set(SUPABASE_TABELAS_FALTANDO.map(t => SCRIPT_DA_TABELA[t] || 'PASSO-3 ou PASSO-4'))];
     banner.style.display = '';
     banner.innerHTML = `Faltam criar no banco: <b>${SUPABASE_TABELAS_FALTANDO.join(', ')}</b>. ` +
       `O resto do sistema está funcionando normalmente — o que for importado para essas tabelas vale só nesta sessão. ` +
-      `Rode o script <b>PASSO-3</b> no SQL Editor do Supabase para resolver.`;
+      `Rode o script <b>${scripts.join('</b> e <b>')}</b> no SQL Editor do Supabase para resolver.`;
     return;
   }
   // limpa o texto junto: assim o recado técnico não fica escondido no HTML de
@@ -1011,6 +1022,12 @@ function atualizarCampoNome(idPerfil, idCampoNome, idNome) {
   if (!nomes) { campo.style.display = 'none'; selNome.innerHTML = ''; return; }
   campo.style.display = '';
   selNome.innerHTML = nomes.map(n => `<option value="${n.nome}">${n.nome}</option>`).join('');
+}
+// Modo offline: acha qual perfil (SUPERCOOR/ANALISTA/...) é dono de um LOGIN
+// individual (ex.: "MATHEUS" -> "SUPERCOOR") — usado em "Alterar usuário" pra
+// voltar pro perfil certo quando quem está logado é uma das 5 pessoas.
+function perfilLoginDoLoginOffline(login) {
+  return Object.keys(NOMES_POR_PERFIL).find(perfil => NOMES_POR_PERFIL[perfil].some(n => n.login === login)) || login;
 }
 // Quais telas cada perfil NÃO pode ver. Só o Analista importa planilhas —
 // todo o resto (inclusive Administrador) fica sem a aba "Importar Excel".
@@ -1347,8 +1364,19 @@ function abrirTrocaUsuario() {
     document.getElementById('tr-email').value = '';
     if (currentUser && currentUser.perfilLogin) document.getElementById('tr-user').value = currentUser.perfilLogin;
   } else if (currentUser) {
-    document.getElementById('tr-user').value = currentUser.login;
+    // um dos 5 logins individuais (ex.: MATHEUS) não é opção do seletor de
+    // perfil — o perfil dele é o dono desse login em NOMES_POR_PERFIL
+    // (hoje só SUPERCOOR); os outros 5 perfis fixos usam o próprio login.
+    const ehOpcaoDoPerfil = [...document.getElementById('tr-user').options].some(o => o.value === currentUser.login);
+    document.getElementById('tr-user').value = ehOpcaoDoPerfil ? currentUser.login : perfilLoginDoLoginOffline(currentUser.login);
     alternarCampoSenha('tr-user','tr-senha-label','tr-password');
+  }
+  // preenche/mostra o seletor de nome (ex.: Sebastião/Matheus/...) já com
+  // quem está logado agora, senão o modal sempre abre no primeiro nome da lista
+  atualizarCampoNome('tr-user','tr-campo-nome','tr-nome');
+  if (currentUser) {
+    const selNome = document.getElementById('tr-nome');
+    if ([...selNome.options].some(o => o.value === currentUser.nome)) selNome.value = currentUser.nome;
   }
   m.classList.add('active');
   setTimeout(() => document.getElementById('tr-password').focus(), 50);
@@ -1435,8 +1463,19 @@ async function perfilDoUsuario(u) {
     if (data) { role = data.role || role; nome = data.nome || nome; }
   } catch (e) { /* tabela ainda não criada: cai no metadata / no padrão abaixo */ }
   role = perfilValido(role);
-  const perfilLogin = Object.keys(CONTAS_POR_PERFIL).find(k => CONTAS_POR_PERFIL[k].toLowerCase() === String(u.email || '').toLowerCase());
+  const perfilLogin = perfilLoginDoEmail(u.email);
   return { login: u.email, email: u.email, nome: nome || u.email, role: role || 'escritorio', perfilLogin };
+}
+// Acha a opção do seletor "Perfil" (SUPERCOOR/ANALISTA/...) dona de um e-mail.
+// Cobre tanto as 5 contas fixas (CONTAS_POR_PERFIL) quanto as 5 contas
+// individuais do Supervisor/Coordenador (NOMES_POR_PERFIL) — sem isso, entrar
+// como sebastiao@... por exemplo não achava perfil nenhum, e "Alterar usuário"
+// não sabia pra qual opção do dropdown voltar.
+function perfilLoginDoEmail(email) {
+  const e = String(email || '').toLowerCase();
+  const direto = Object.keys(CONTAS_POR_PERFIL).find(k => CONTAS_POR_PERFIL[k].toLowerCase() === e);
+  if (direto) return direto;
+  return Object.keys(NOMES_POR_PERFIL).find(perfil => NOMES_POR_PERFIL[perfil].some(n => n.email.toLowerCase() === e));
 }
 // mensagens do Supabase vêm em inglês — traduz as mais comuns
 function erroLoginPT(msg) {
