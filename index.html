@@ -1181,13 +1181,35 @@ function upsertRowByDate(table, index, key, row, dateField, opts = {}) {
     // de uma base já gravada não conserta ordens salvas com o status errado).
     // É sempre a MESMA visita sendo completada fora de ordem, nunca uma ordem nova.
     const venceSempre = opts.venceSempre && opts.venceSempre(existente, row);
+    // opts.novaVisitaSe: a mesma O.S. reabriu de verdade (cliente reclamou, o
+    // técnico voltou) — dia diferente, técnico diferente, ou horário diferente
+    // no mesmo dia (comum quando o cliente tem mais de 1 ponto de internet no
+    // endereço). Isso é um ATENDIMENTO NOVO: entra como linha separada em vez
+    // de sobrescrever a existente, pra continuar contando como 2 ordens.
+    // Precisa ser checado ANTES do branch de "data mais antiga" logo abaixo:
+    // o Excel não garante ordem cronológica entre as linhas de uma mesma O.S.,
+    // então a visita mais ANTIGA de uma reabertura pode chegar DEPOIS na
+    // importação. Achado real: O.S. 12298704 (Bertioga) — a visita de 04/08
+    // ("ATÉ 24hrs") chegou depois da de 07/08 ("MAIOR QUE 48Hrs") já salva; por
+    // ter data menor, caía direto no "só completa campo vazio" e a visita de
+    // 04/08 sumia (Bertioga contava 97 até-24h em vez de 98).
+    if (!venceSempre && opts.novaVisitaSe && opts.novaVisitaSe(existente, row)) {
+      table.push(row);
+      // só move o índice pra linha nova se ela for a mais recente das duas —
+      // senão (caso acima) o índice continua apontando pra visita mais nova
+      // mesmo que a reabertura mais antiga tenha chegado por último.
+      const rowEhMaisRecente = !existente[dateField] || !row[dateField] || row[dateField] >= existente[dateField];
+      if (rowEhMaisRecente) index.set(key, table.length - 1);
+      return row;
+    }
     if (!venceSempre && existente[dateField] && row[dateField] && row[dateField] < existente[dateField]) {
-      // Linha mais ANTIGA chegando depois: não pode sobrescrever o estado mais
-      // novo (status, data...), mas ainda pode PREENCHER campos que estão
-      // vazios no registro atual. Sem isso, a ordem de importação mudava o
-      // resultado: importar BASE PRODUÇÃO depois da BASE_REPARO_CONCLUIDO
-      // apagava a marcação IFI/IRR, o OFENSOR e os DIAS da ordem — dados que
-      // só a aba de reparos traz e que nada tem a ver com o status atual.
+      // Linha mais ANTIGA chegando depois, mas da MESMA visita (novaVisitaSe já
+      // devolveu falso acima): não pode sobrescrever o estado mais novo (status,
+      // data...), mas ainda pode PREENCHER campos que estão vazios no registro
+      // atual. Sem isso, a ordem de importação mudava o resultado: importar
+      // BASE PRODUÇÃO depois da BASE_REPARO_CONCLUIDO apagava a marcação
+      // IFI/IRR, o OFENSOR e os DIAS da ordem — dados que só a aba de reparos
+      // traz e que nada tem a ver com o status atual.
       const complementado = { ...existente };
       let mudou = false;
       for (const campo in row) {
@@ -1197,18 +1219,6 @@ function upsertRowByDate(table, index, key, row, dateField, opts = {}) {
       }
       if (mudou) { table[i] = complementado; return complementado; }
       return existente;
-    }
-    // opts.novaVisitaSe: a mesma O.S. reabriu de verdade (cliente reclamou, o
-    // técnico voltou) — dia diferente, técnico diferente, ou horário diferente
-    // no mesmo dia (comum quando o cliente tem mais de 1 ponto de internet no
-    // endereço). Isso é um ATENDIMENTO NOVO: entra como linha separada em vez
-    // de sobrescrever a existente, pra continuar contando como 2 ordens.
-    // venceSempre já tratou "é a mesma visita, só chegou fora de ordem" acima,
-    // então só chega aqui quem realmente é mais novo (ou igual) e diferente.
-    if (!venceSempre && opts.novaVisitaSe && opts.novaVisitaSe(existente, row)) {
-      index.set(key, table.length);
-      table.push(row);
-      return row;
     }
   }
   return upsertRow(table, index, key, row);
