@@ -302,6 +302,7 @@
   .badge.ok { background: rgba(34,197,94,0.15); color: var(--success); }
   .badge.warn { background: rgba(239,68,68,0.15); color: var(--danger); }
   .badge.neutral { background: rgba(147,160,189,0.15); color: var(--text-secondary); }
+  .badge.amber { background: rgba(234,179,8,0.18); color: #eab308; }
 
   .gauge-arc-wrap { text-align: center; padding: 4px 0 2px; }
   .gauge-arc { width: 100%; max-width: 260px; height: auto; display: block; margin: 4px auto 0; }
@@ -4061,7 +4062,7 @@ function renderTable() {
       <p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">${rows.length} retorno(s) no filtro${rows.length > 300 ? ' — <b>exibindo os 300 primeiros</b>. Filtre por cidade ou técnico para ver o resto.' : '.'}</p>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
       <th>Técnico</th><th>Nome Cliente</th><th>Cidade</th><th>Contrato</th><th>Repetida</th><th>Data ordem anterior</th><th>Dias</th><th>Ofensor</th><th>IFI/IRR</th><th>Motivo</th></tr></thead><tbody>
-      ${rows.slice(0,300).map(r=>`<tr><td>${esc(r.recurso)}</td><td>${esc(r.nome)||'-'}</td><td>${esc(r.cidade)||'-'}</td><td>${esc(r.contrato)}</td><td>${esc(r.repetida)}</td><td>${r.data_ordem_anterior?formatDate(r.data_ordem_anterior):'-'}</td><td>${esc(r.dias)}</td><td>${esc(r.ofensor)}</td><td><span class="badge ${r.ifi_irr==='IFI'?'warn':'neutral'}">${esc(r.ifi_irr)}</span></td><td>${esc(r.motivo || r.tipo_ordem) || '-'}</td></tr>`).join('')}
+      ${rows.slice(0,300).map(r=>`<tr><td>${esc(r.recurso)}</td><td>${esc(r.nome)||'-'}</td><td>${esc(r.cidade)||'-'}</td><td>${esc(r.contrato)}</td><td>${esc(r.repetida)}</td><td>${r.data_ordem_anterior?formatDate(r.data_ordem_anterior):'-'}</td><td>${esc(r.dias)}</td><td>${esc(r.ofensor)}</td><td><span class="badge ${r.ifi_irr==='IFI'?'warn':'amber'}">${esc(r.ifi_irr)}</span></td><td>${esc(r.motivo || r.tipo_ordem) || '-'}</td></tr>`).join('')}
       </tbody></table></div>
       <div id="pdf-export-area"></div>`;
     barsChart('c-motivo', motivos);
@@ -4715,7 +4716,7 @@ function abrirPainelTecnico(tecnico, rows, retornos, dia) {
       <td style="color:${cor};font-weight:700">${quanto}</td></tr>`;
   };
   const linhaRet = r => `<tr>
-      <td style="font-weight:700;color:${r.ifi_irr === 'IFI' ? '#f59e0b' : '#ef4444'}">${r.ifi_irr}</td>
+      <td style="font-weight:700;color:${r.ifi_irr === 'IFI' ? '#f59e0b' : '#eab308'}">${r.ifi_irr}</td>
       <td class="cat-cell">${r.os}</td><td>${r.cliente || '-'}</td><td>${r.cidade || '-'}</td>
       <td style="color:${isConcluido(r.status) ? 'var(--success)' : 'var(--warn-text)'};font-weight:600">${r.status || '-'}</td>
       <td>${mesmo(r.ofensor)
@@ -5091,7 +5092,7 @@ function renderPCR() {
         <th>Com quem está hoje</th><th>Nome Cliente</th><th>De quem é o retorno</th><th>Serviço anterior</th><th>O.S anterior</th><th>Data anterior</th><th>Dias</th><th>Restam</th>
       </tr></thead><tbody>
         ${retornos.map(r=>`<tr>
-          <td style="font-weight:700;color:${r.ifi_irr==='IFI'?'#f59e0b':'#ef4444'}">${r.ifi_irr}</td>
+          <td style="font-weight:700;color:${r.ifi_irr==='IFI'?'#f59e0b':'#eab308'}">${r.ifi_irr}</td>
           <td>${formatDate(r.data)}</td><td class="cat-cell">${r.os}</td><td>${r.contrato||'-'}</td><td>${r.cidade||'-'}</td><td>${r.tipo||'-'}</td>
           <td style="color:${isConcluido(r.status)?'var(--success)':'var(--warn-text)'};font-weight:600">${r.status||'-'}</td>
           <td>${ehRecursoTecnico(r.tecnico_atual)?r.tecnico_atual:'-'}</td>
@@ -6248,7 +6249,7 @@ function renderGestaoPresenca() {
     const tabStatus = document.getElementById('gp-resumo-status');
     if (tabStatus) tabStatus.innerHTML = `
       <thead><tr><th>Status</th>${dias.map(d => `<th style="text-align:center">${formatDate(d).slice(0, 5)}</th>`).join('')}</tr></thead>
-      <tbody>${resumoStatus.map(r => `<tr><td>${STATUS_PRESENCA[r.status].label} (${r.status})</td>${r.porDia.map(v => `<td style="text-align:center">${v || 0}</td>`).join('')}</tr>`).join('')}</tbody>`;
+      <tbody>${resumoStatus.map(r => `<tr><td style="color:${STATUS_PRESENCA[r.status].cor};font-weight:600">${STATUS_PRESENCA[r.status].label} (${r.status})</td>${r.porDia.map(v => `<td style="text-align:center;${v ? `color:${STATUS_PRESENCA[r.status].cor};font-weight:700` : ''}">${v || 0}</td>`).join('')}</tr>`).join('')}</tbody>`;
 
     const cidadesNoFiltro = [...new Set(roster.map(t => t.cidade))].sort();
     const resumoCidade = cidadesNoFiltro.map(c => ({ cidade: c, porDia: dias.map(d => roster.filter(t => t.cidade === c && STATUS_ATIVOS_PRESENCA.includes(statusDe(t.tecnico, d))).length) }));
@@ -6650,17 +6651,17 @@ function renderGestaoPresencaEscritorio() {
     </div>`;
 
     const linhasResumo = [
-      { label: 'Trabalhando', teste: trabalhandoEscritorio },
-      { label: 'Folga', teste: s => s === 'FOLGA' },
-      { label: 'Falta', teste: s => s === 'F' },
-      { label: 'Atestado', teste: s => s === 'ATT' },
-      { label: 'Férias', teste: s => s === 'FR' },
+      { label: 'Trabalhando', teste: trabalhandoEscritorio, cor: '#22c55e' },
+      { label: 'Folga', teste: s => s === 'FOLGA', cor: COR_STATUS_ESCRITORIO.FOLGA },
+      { label: 'Falta', teste: s => s === 'F', cor: COR_STATUS_ESCRITORIO.F },
+      { label: 'Atestado', teste: s => s === 'ATT', cor: COR_STATUS_ESCRITORIO.ATT },
+      { label: 'Férias', teste: s => s === 'FR', cor: COR_STATUS_ESCRITORIO.FR },
     ];
-    const resumo = linhasResumo.map(l => ({ label: l.label, porDia: dias.map(d => pessoas.filter(p => l.teste(statusDe(p.pessoa, d, 'status'))).length) }));
+    const resumo = linhasResumo.map(l => ({ label: l.label, cor: l.cor, porDia: dias.map(d => pessoas.filter(p => l.teste(statusDe(p.pessoa, d, 'status'))).length) }));
     const tab = document.getElementById('ge-resumo-status');
     if (tab) tab.innerHTML = `
       <thead><tr><th>Status</th>${dias.map(d => `<th style="text-align:center">${formatDate(d).slice(0, 5)}</th>`).join('')}</tr></thead>
-      <tbody>${resumo.map(r => `<tr><td>${r.label}</td>${r.porDia.map(v => `<td style="text-align:center">${v || 0}</td>`).join('')}</tr>`).join('')}</tbody>`;
+      <tbody>${resumo.map(r => `<tr><td style="color:${r.cor};font-weight:600">${r.label}</td>${r.porDia.map(v => `<td style="text-align:center;${v ? `color:${r.cor};font-weight:700` : ''}">${v || 0}</td>`).join('')}</tr>`).join('')}</tbody>`;
 
     const logOrdenado = [...DB.presencaEscritorioLog].sort((a, b) => new Date(b.quando) - new Date(a.quando));
     const log = document.getElementById('ge-log');
@@ -7889,9 +7890,9 @@ function renderComparisonsFromPivot() {
         <th>Despesas / Receitas</th>${selecionados.map(p=>`<th>${p}</th>`).join('')}<th>Total do período selecionado</th>${penultimo?`<th>Variação (${penultimo} → ${ultimo})</th>`:''}
       </tr></thead><tbody>
         ${categorias.map(c=>`<tr><td class="cat-cell">${c}</td>${selecionados.map(p=>`<td>${pivot.porCategoria[c][p] ? formatCurrency(pivot.porCategoria[c][p]) : '-'}</td>`).join('')}<td style="font-weight:700">${formatCurrency(totalCategoria(c))}</td>${penultimo?`<td>${diffMoney(val(pivot.porCategoria[c],penultimo),val(pivot.porCategoria[c],ultimo),true)}</td>`:''}</tr>`).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL DESPESAS</td>${selecionados.map(p=>`<td>${formatCurrency(val(pivot.totalDespesas,p))}</td>`).join('')}<td>${formatCurrency(totalLinha(pivot.totalDespesas))}</td>${penultimo?`<td>${diffMoney(val(pivot.totalDespesas,penultimo),val(pivot.totalDespesas,ultimo),true)}</td>`:''}</tr>
-        <tr class="total-row"><td class="cat-cell">RECEITA DAS ORDENS</td>${selecionados.map(p=>`<td>${formatCurrency(val(pivot.receitaOrdens,p))}</td>`).join('')}<td style="color:var(--success)">${formatCurrency(totalLinha(pivot.receitaOrdens))}</td>${penultimo?`<td>${diffMoney(val(pivot.receitaOrdens,penultimo),val(pivot.receitaOrdens,ultimo))}</td>`:''}</tr>
-        <tr class="total-row"><td class="cat-cell">LUCRO</td>${selecionados.map(p=>`<td>${formatCurrency(val(pivot.lucro,p))}</td>`).join('')}<td>${formatCurrency(totalLinha(pivot.lucro))}</td>${penultimo?`<td>${diffMoney(val(pivot.lucro,penultimo),val(pivot.lucro,ultimo))}</td>`:''}</tr>
+        <tr class="total-row"><td class="cat-cell" style="color:var(--danger)">TOTAL DESPESAS</td>${selecionados.map(p=>`<td style="color:var(--danger)">${formatCurrency(val(pivot.totalDespesas,p))}</td>`).join('')}<td style="color:var(--danger)">${formatCurrency(totalLinha(pivot.totalDespesas))}</td>${penultimo?`<td style="color:var(--danger)">${diffMoney(val(pivot.totalDespesas,penultimo),val(pivot.totalDespesas,ultimo),true)}</td>`:''}</tr>
+        <tr class="total-row"><td class="cat-cell" style="color:var(--accent)">RECEITA DAS ORDENS</td>${selecionados.map(p=>`<td style="color:var(--accent)">${formatCurrency(val(pivot.receitaOrdens,p))}</td>`).join('')}<td style="color:var(--accent)">${formatCurrency(totalLinha(pivot.receitaOrdens))}</td>${penultimo?`<td style="color:var(--accent)">${diffMoney(val(pivot.receitaOrdens,penultimo),val(pivot.receitaOrdens,ultimo))}</td>`:''}</tr>
+        <tr class="total-row"><td class="cat-cell" style="color:var(--success)">LUCRO</td>${selecionados.map(p=>`<td style="color:var(--success)">${formatCurrency(val(pivot.lucro,p))}</td>`).join('')}<td style="color:var(--success)">${formatCurrency(totalLinha(pivot.lucro))}</td>${penultimo?`<td style="color:var(--success)">${diffMoney(val(pivot.lucro,penultimo),val(pivot.lucro,ultimo))}</td>`:''}</tr>
       </tbody></table></div>
       ${narrativa}
       <div id="pdf-export-area"></div>`;
@@ -7998,9 +7999,9 @@ function renderComparisonsFromBase() {
         <th>Despesas / Receitas</th>${dados.map(d=>`<th>${d.periodo}</th>`).join('')}<th>Total do período selecionado</th>${penultimo?`<th>Variação (${penultimo.periodo} → ${ultimo.periodo})</th>`:''}
       </tr></thead><tbody>
         ${categorias.map(c=>`<tr><td class="cat-cell">${c}</td>${dados.map(d=>`<td>${d.porCategoria[c] ? formatCurrency(d.porCategoria[c]) : '-'}</td>`).join('')}<td style="font-weight:700">${formatCurrency(totalCategoria(c))}</td>${penultimo?`<td>${diffMoney(penultimo.porCategoria[c]||0,ultimo.porCategoria[c]||0,true)}</td>`:''}</tr>`).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL DESPESAS</td>${dados.map(d=>`<td>${formatCurrency(d.despesa)}</td>`).join('')}<td>${formatCurrency(totalDespesa)}</td>${penultimo?`<td>${diffMoney(penultimo.despesa,ultimo.despesa,true)}</td>`:''}</tr>
-        <tr class="total-row"><td class="cat-cell">RECEITA DAS ORDENS</td>${dados.map(d=>`<td>${formatCurrency(d.receita)}</td>`).join('')}<td style="color:var(--success)">${formatCurrency(totalReceita)}</td>${penultimo?`<td>${diffMoney(penultimo.receita,ultimo.receita)}</td>`:''}</tr>
-        <tr class="total-row"><td class="cat-cell">LUCRO</td>${dados.map(d=>`<td>${formatCurrency(d.lucro)}</td>`).join('')}<td>${formatCurrency(totalLucro)}</td>${penultimo?`<td>${diffMoney(penultimo.lucro,ultimo.lucro)}</td>`:''}</tr>
+        <tr class="total-row"><td class="cat-cell" style="color:var(--danger)">TOTAL DESPESAS</td>${dados.map(d=>`<td style="color:var(--danger)">${formatCurrency(d.despesa)}</td>`).join('')}<td style="color:var(--danger)">${formatCurrency(totalDespesa)}</td>${penultimo?`<td style="color:var(--danger)">${diffMoney(penultimo.despesa,ultimo.despesa,true)}</td>`:''}</tr>
+        <tr class="total-row"><td class="cat-cell" style="color:var(--accent)">RECEITA DAS ORDENS</td>${dados.map(d=>`<td style="color:var(--accent)">${formatCurrency(d.receita)}</td>`).join('')}<td style="color:var(--accent)">${formatCurrency(totalReceita)}</td>${penultimo?`<td style="color:var(--accent)">${diffMoney(penultimo.receita,ultimo.receita)}</td>`:''}</tr>
+        <tr class="total-row"><td class="cat-cell" style="color:var(--success)">LUCRO</td>${dados.map(d=>`<td style="color:var(--success)">${formatCurrency(d.lucro)}</td>`).join('')}<td style="color:var(--success)">${formatCurrency(totalLucro)}</td>${penultimo?`<td style="color:var(--success)">${diffMoney(penultimo.lucro,ultimo.lucro)}</td>`:''}</tr>
       </tbody></table></div>
       ${narrativa}
       <div id="pdf-export-area"></div>`;
