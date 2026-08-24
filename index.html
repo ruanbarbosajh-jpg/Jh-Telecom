@@ -5961,14 +5961,14 @@ async function inativarTecnicoRoster(nome) {
     return { ok: true };
   } catch (e) { return { ok: false, error: e }; }
 }
-function fecharModalTecnicoPresenca() { fecharModalTecnico(); }
 function abrirModalNovoTecnico() {
   const m = document.getElementById('modal-tecnico');
   m.querySelector('.mt-corpo').innerHTML = `
     <h3 style="margin:0 0 4px">Novo técnico</h3>
     <p style="margin:0 0 16px;font-size:13px;color:var(--text-secondary)">Adiciona ao quadro de presença.</p>
     <label>Nome</label>
-    <input type="text" id="nt-nome" placeholder="Nome do técnico">
+    <input type="text" id="nt-nome" placeholder="Nome do técnico" list="nt-nomes-fixos" autocomplete="off">
+    <datalist id="nt-nomes-fixos">${TECNICOS_FIXOS.filter(t => !DB_INDEX.presencaTecnicos.has(t)).map(t => `<option value="${esc(t)}">`).join('')}</datalist>
     <label>Cidade</label>
     <select id="nt-cidade">${CIDADES_PRESENCA.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
     <label>Supervisor</label>
@@ -5994,82 +5994,6 @@ function abrirModalNovoTecnico() {
     renderGestaoPresenca();
   });
 }
-// Cidade mais frequente de cada técnico, olhando o histórico da Produção —
-// só usado aqui pra CHUTAR a cidade de cada nome da lista fixa (TECNICOS_FIXOS)
-// no modal de importar; quem revisa pode sempre trocar antes de confirmar.
-// Comparação por nome normalizado (sem acento/maiúscula) porque a grafia do
-// nome na lista fixa não é garantida bater com a da planilha de Produção.
-function cidadeMaisFrequentePorTecnico() {
-  const porTecnico = {};
-  DB.producao.forEach(r => {
-    if (!ehRecursoTecnico(r.recurso)) return;
-    const chave = normalizeHeader(r.recurso);
-    if (!porTecnico[chave]) porTecnico[chave] = {};
-    const c = r.cidade || '';
-    porTecnico[chave][c] = (porTecnico[chave][c] || 0) + 1;
-  });
-  const resultado = {};
-  Object.keys(porTecnico).forEach(chave => {
-    const porCidade = porTecnico[chave];
-    resultado[chave] = Object.keys(porCidade).sort((a, b) => porCidade[b] - porCidade[a])[0] || '';
-  });
-  return resultado;
-}
-function abrirModalImportarTecnicos() {
-  const cidadePorNome = cidadeMaisFrequentePorTecnico();
-  const candidatos = TECNICOS_FIXOS.filter(t => !DB_INDEX.presencaTecnicos.has(t))
-    .map(t => ({ tecnico: t, cidade: cidadePorNome[normalizeHeader(t)] || '' }));
-  const m = document.getElementById('modal-tecnico');
-  m.querySelector('.mt-corpo').innerHTML = `
-    <h3 style="margin:0 0 4px">Importar técnicos</h3>
-    <p style="margin:0 0 16px;font-size:13px;color:var(--text-secondary)">Lista de técnicos ativos na planta. Confira a cidade de cada um (a sugerida vem do histórico de Produção) e desmarque quem não deve entrar no quadro.</p>
-    ${!candidatos.length ? '<div class="empty">Todo mundo da lista já está no quadro.</div>' : `
-    <div style="margin-bottom:8px"><button type="button" class="btn-secundario" id="mi-todos" style="padding:4px 10px;font-size:12px">Marcar todos</button>
-      <button type="button" class="btn-secundario" id="mi-nenhum" style="padding:4px 10px;font-size:12px">Desmarcar todos</button></div>
-    <div style="max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px 12px">
-      ${candidatos.map((c, i) => `<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px">
-        <input type="checkbox" class="mi-check" value="${esc(c.tecnico)}" checked>
-        <span style="flex:1">${esc(c.tecnico)}</span>
-        <select class="mi-cidade" id="mi-cidade-${i}" style="font-size:12px;padding:3px 6px;border-radius:6px;border:1px solid var(--border);background:var(--bg-page);color:var(--text-primary)">
-          <option value=""${!c.cidade ? ' selected' : ''}>Escolher cidade</option>
-          ${CIDADES_PRESENCA.map(ci => `<option value="${ci}"${c.cidade === ci ? ' selected' : ''}>${ci}</option>`).join('')}
-        </select>
-      </label>`).join('')}
-    </div>`}
-    <p id="mi-erro" class="error-msg"></p>
-    <div class="modal-acoes">
-      <button type="button" class="btn-secundario" id="mi-cancelar">Cancelar</button>
-      ${candidatos.length ? '<button type="button" class="btn-primario" id="mi-importar">Adicionar selecionados</button>' : ''}
-    </div>`;
-  m.classList.add('active');
-  document.getElementById('mi-cancelar').addEventListener('click', fecharModalTecnico);
-  if (!candidatos.length) return;
-  document.getElementById('mi-todos').addEventListener('click', () => m.querySelectorAll('.mi-check').forEach(c => c.checked = true));
-  document.getElementById('mi-nenhum').addEventListener('click', () => m.querySelectorAll('.mi-check').forEach(c => c.checked = false));
-  document.getElementById('mi-importar').addEventListener('click', async () => {
-    const linhas = [...m.querySelectorAll('.mi-check')].map(chk => ({ chk, cidade: chk.closest('label').querySelector('.mi-cidade').value }));
-    const marcados = linhas.filter(l => l.chk.checked);
-    const erro = document.getElementById('mi-erro');
-    if (!marcados.length) { erro.textContent = 'Marque pelo menos um técnico.'; return; }
-    // não bloqueia o lote inteiro por causa de quem ficou sem cidade sugerida
-    // (a maioria não vai ter, já que a Produção não tem o nome de todo mundo) —
-    // adiciona quem já tem cidade escolhida e avisa quem ficou de fora, pra
-    // resolver numa próxima passada
-    const comCidade = marcados.filter(l => l.cidade);
-    const semCidade = marcados.filter(l => !l.cidade);
-    if (!comCidade.length) { erro.textContent = 'Escolha a cidade de pelo menos 1 técnico marcado antes de adicionar.'; return; }
-    erro.style.color = ''; erro.textContent = `Adicionando ${comCidade.length}...`;
-    let falhas = 0;
-    for (const l of comCidade) {
-      const r = await adicionarTecnicoRoster(l.chk.value, l.cidade, '');
-      if (!r.ok) falhas++;
-    }
-    if (falhas) { erro.textContent = `${falhas} de ${comCidade.length} não salvaram no servidor. Tente de novo.`; renderGestaoPresenca(); return; }
-    fecharModalTecnico();
-    renderGestaoPresenca();
-    if (semCidade.length) alert(`${comCidade.length} técnico(s) adicionado(s). ${semCidade.length} ficaram de fora por falta de cidade — abra "Importar técnicos" de novo e escolha a cidade deles:\n\n${semCidade.map(l => l.chk.value).join('\n')}`);
-  });
-}
 function renderGestaoPresenca() {
   const hoje = hojeISOLocal();
   document.getElementById('content').innerHTML = `
@@ -6078,7 +6002,7 @@ function renderGestaoPresenca() {
       <button type="button" class="btn" id="gp-prev" title="7 dias antes">◀ 7 dias</button>
       <button type="button" class="btn" id="gp-next" title="7 dias depois">7 dias ▶</button>
       ${multiCityField('gp-cidades', 'Cidades')}
-      ${podeEditarPresenca() ? '<button type="button" class="btn" id="gp-import-tec">Importar técnicos</button><button type="button" class="btn" id="gp-add-tec">+ Técnico</button>' : ''}
+      ${podeEditarPresenca() ? '<button type="button" class="btn" id="gp-add-tec">+ Técnico</button>' : ''}
       <button type="button" class="btn" id="f-apply">Filtrar</button>
     </div>
     <div id="gp-body"></div>`;
@@ -6086,50 +6010,37 @@ function renderGestaoPresenca() {
   document.getElementById('f-apply').addEventListener('click', load);
   document.getElementById('gp-prev').addEventListener('click', () => { const el = document.getElementById('gp-inicio'); el.value = isoAddDias(el.value, -7); load(); });
   document.getElementById('gp-next').addEventListener('click', () => { const el = document.getElementById('gp-inicio'); el.value = isoAddDias(el.value, 7); load(); });
-  if (podeEditarPresenca()) {
-    document.getElementById('gp-add-tec').addEventListener('click', abrirModalNovoTecnico);
-    document.getElementById('gp-import-tec').addEventListener('click', abrirModalImportarTecnicos);
-  }
+  if (podeEditarPresenca()) document.getElementById('gp-add-tec').addEventListener('click', abrirModalNovoTecnico);
+  // guardados aqui fora do load() pra "mudar 1 status" (o caso mais comum, de
+  // longe) não precisar reconstruir o quadro inteiro — só os números dos
+  // painéis de resumo. Redesenhar a tabela toda a cada clique perdia a posição
+  // de rolagem e "tremia" a tela; ver atualizarResumos().
+  let dias = [], roster = [];
+  const statusDe = (tecnico, data) => {
+    const i = DB_INDEX.presenca.get(tecnico + '|' + data);
+    return i !== undefined ? DB.presenca[i].status : '';
+  };
+  const statusKeys = Object.keys(STATUS_PRESENCA);
   load();
   function load() {
     const inicio = document.getElementById('gp-inicio').value || hoje;
-    const dias = Array.from({ length: 7 }, (_, i) => isoAddDias(inicio, i));
+    dias = Array.from({ length: 7 }, (_, i) => isoAddDias(inicio, i));
     refreshCityField('gp-cidades', DB.presencaTecnicos.filter(t => t.ativo !== false), { label: 'Cidades' });
     const cidadesSel = getSelectedCities('gp-cidades');
-    const roster = DB.presencaTecnicos.filter(t => t.ativo !== false && cidadesSel.includes(t.cidade))
+    roster = DB.presencaTecnicos.filter(t => t.ativo !== false && cidadesSel.includes(t.cidade))
       .sort((a, b) => a.tecnico.localeCompare(b.tecnico));
-    const statusDe = (tecnico, data) => {
-      const i = DB_INDEX.presenca.get(tecnico + '|' + data);
-      return i !== undefined ? DB.presenca[i].status : '';
-    };
-    const totalPlanta = DB.presencaTecnicos.filter(t => t.ativo !== false).length;
-    const statusHoje = DB.presencaTecnicos.filter(t => t.ativo !== false).map(t => statusDe(t.tecnico, hoje));
-    const presentesHoje = statusHoje.filter(s => STATUS_ATIVOS_PRESENCA.includes(s)).length;
-    const folgaHoje = statusHoje.filter(s => s === 'FG').length;
-    const ausentesHoje = statusHoje.filter(s => ['F', 'ATT', 'FR'].includes(s)).length;
 
     const body = document.getElementById('gp-body');
     if (!DB.presencaTecnicos.filter(t => t.ativo !== false).length) {
-      body.innerHTML = `<div class="panel"><div class="empty">Nenhum técnico cadastrado no quadro${podeEditarPresenca() ? ' — clique em "Importar técnicos" pra trazer a lista de ativos, ou em "+ Técnico" pra cadastrar um novo.' : '.'}</div></div>`;
+      body.innerHTML = `<div class="panel"><div class="empty">Nenhum técnico cadastrado no quadro${podeEditarPresenca() ? ' — clique em "+ Técnico" para começar.' : '.'}</div></div>`;
       return;
     }
     if (!roster.length) {
       body.innerHTML = '<div class="panel"><div class="empty">Nenhum técnico ativo nas cidades selecionadas.</div></div>';
       return;
     }
-    const statusKeys = Object.keys(STATUS_PRESENCA);
-    const resumoStatus = statusKeys.map(k => ({ status: k, porDia: dias.map(d => roster.filter(t => statusDe(t.tecnico, d) === k).length) }));
-    const cidadesNoFiltro = [...new Set(roster.map(t => t.cidade))].sort();
-    const resumoCidade = cidadesNoFiltro.map(c => ({ cidade: c, porDia: dias.map(d => roster.filter(t => t.cidade === c && STATUS_ATIVOS_PRESENCA.includes(statusDe(t.tecnico, d))).length) }));
-    const logOrdenado = [...DB.presencaLog].sort((a, b) => new Date(b.quando) - new Date(a.quando));
-
     body.innerHTML = `
-      <div class="metrics-grid" style="margin-bottom:1.5rem">
-        ${metricCard('Total na Planta', totalPlanta)}
-        ${metricCard('Presentes hoje', presentesHoje, false, { positive: true })}
-        ${metricCard('Ausentes hoje', ausentesHoje, ausentesHoje > 0)}
-        ${metricCard('Folga hoje', folgaHoje)}
-      </div>
+      <div id="gp-metrics" style="margin-bottom:1.5rem"></div>
       <div class="panel" style="margin-bottom:1.5rem;overflow:auto">
         <div class="section-heading" style="margin-top:0">Quadro de presença — ${formatDate(dias[0])} a ${formatDate(dias[6])}</div>
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
@@ -6158,28 +6069,15 @@ function renderGestaoPresenca() {
       </div>
       <div class="panel" style="margin-bottom:1.5rem;overflow:auto">
         <div class="section-heading" style="margin-top:0">Resumo por status</div>
-        <div class="table-wrap"><table class="data-table">
-          <thead><tr><th>Status</th>${dias.map(d => `<th style="text-align:center">${formatDate(d).slice(0, 5)}</th>`).join('')}</tr></thead>
-          <tbody>${resumoStatus.map(r => `<tr><td>${STATUS_PRESENCA[r.status].label} (${r.status})</td>${r.porDia.map(v => `<td style="text-align:center">${v || 0}</td>`).join('')}</tr>`).join('')}</tbody>
-        </table></div>
+        <div class="table-wrap"><table class="data-table" id="gp-resumo-status"></table></div>
       </div>
       <div class="panel" style="margin-bottom:1.5rem;overflow:auto">
         <div class="section-heading" style="margin-top:0">Ativos por cidade</div>
-        <div class="table-wrap"><table class="data-table">
-          <thead><tr><th>Cidade</th>${dias.map(d => `<th style="text-align:center">${formatDate(d).slice(0, 5)}</th>`).join('')}</tr></thead>
-          <tbody>${resumoCidade.map(r => `<tr><td>${esc(r.cidade)}</td>${r.porDia.map(v => `<td style="text-align:center">${v || 0}</td>`).join('')}</tr>`).join('')}</tbody>
-        </table></div>
+        <div class="table-wrap"><table class="data-table" id="gp-resumo-cidade"></table></div>
       </div>
       <div class="panel">
         <div class="section-heading" style="margin-top:0">Histórico de alterações</div>
-        ${!logOrdenado.length ? '<div class="empty">Nenhuma alteração registrada ainda.</div>' : `
-        <div class="table-wrap" style="max-height:320px;overflow:auto"><table class="data-table">
-          <thead><tr><th>Quando</th><th>Quem</th><th>Técnico</th><th>Data</th><th>O que mudou</th></tr></thead>
-          <tbody>${logOrdenado.slice(0, 200).map(l => `<tr>
-            <td>${new Date(l.quando).toLocaleString('pt-BR')}</td><td>${esc(l.usuario)}</td><td>${esc(l.tecnico)}</td><td>${formatDate(l.data)}</td>
-            <td>mudou de <b>${l.de ? esc(l.de) : '—'}</b> para <b>${esc(l.para)}</b></td>
-          </tr>`).join('')}</tbody>
-        </table></div>`}
+        <div id="gp-log"></div>
       </div>`;
 
     if (podeEditarPresenca()) {
@@ -6187,9 +6085,14 @@ function renderGestaoPresenca() {
         sel.addEventListener('change', async () => {
           const tecnico = sel.dataset.tecnico, data = sel.dataset.data, novo = sel.value;
           sel.disabled = true;
+          // pinta a célula na hora — não espera o servidor nem redesenha o
+          // quadro inteiro (é isso que fazia a tabela "tremer" a cada clique)
+          sel.style.background = novo ? STATUS_PRESENCA[novo].cor : 'var(--bg-page)';
+          sel.style.color = novo ? '#fff' : 'var(--text-secondary)';
           const r = await salvarPresenca(tecnico, data, novo);
+          sel.disabled = false;
           if (!r.ok) alert('Não consegui salvar essa alteração no servidor. Tente de novo — ' + ((r.error && r.error.message) || ''));
-          load();
+          atualizarResumos();
         });
       });
       body.querySelectorAll('[data-inativar]').forEach(btn => {
@@ -6201,6 +6104,48 @@ function renderGestaoPresenca() {
         });
       });
     }
+    atualizarResumos();
+  }
+  // Recalcula só os cards e os painéis de resumo/log a partir do estado atual
+  // — nunca mexe no quadro principal, então não reseta o scroll horizontal
+  // nem "pisca" a tabela grande a cada status alterado.
+  function atualizarResumos() {
+    const totalPlanta = DB.presencaTecnicos.filter(t => t.ativo !== false).length;
+    const statusHoje = DB.presencaTecnicos.filter(t => t.ativo !== false).map(t => statusDe(t.tecnico, hoje));
+    const presentesHoje = statusHoje.filter(s => STATUS_ATIVOS_PRESENCA.includes(s)).length;
+    const folgaHoje = statusHoje.filter(s => s === 'FG').length;
+    const ausentesHoje = statusHoje.filter(s => ['F', 'ATT', 'FR'].includes(s)).length;
+    const metrics = document.getElementById('gp-metrics');
+    if (metrics) metrics.innerHTML = `<div class="metrics-grid">
+      ${metricCard('Total na Planta', totalPlanta)}
+      ${metricCard('Presentes hoje', presentesHoje, false, { positive: true })}
+      ${metricCard('Ausentes hoje', ausentesHoje, ausentesHoje > 0)}
+      ${metricCard('Folga hoje', folgaHoje)}
+    </div>`;
+
+    const resumoStatus = statusKeys.map(k => ({ status: k, porDia: dias.map(d => roster.filter(t => statusDe(t.tecnico, d) === k).length) }));
+    const tabStatus = document.getElementById('gp-resumo-status');
+    if (tabStatus) tabStatus.innerHTML = `
+      <thead><tr><th>Status</th>${dias.map(d => `<th style="text-align:center">${formatDate(d).slice(0, 5)}</th>`).join('')}</tr></thead>
+      <tbody>${resumoStatus.map(r => `<tr><td>${STATUS_PRESENCA[r.status].label} (${r.status})</td>${r.porDia.map(v => `<td style="text-align:center">${v || 0}</td>`).join('')}</tr>`).join('')}</tbody>`;
+
+    const cidadesNoFiltro = [...new Set(roster.map(t => t.cidade))].sort();
+    const resumoCidade = cidadesNoFiltro.map(c => ({ cidade: c, porDia: dias.map(d => roster.filter(t => t.cidade === c && STATUS_ATIVOS_PRESENCA.includes(statusDe(t.tecnico, d))).length) }));
+    const tabCidade = document.getElementById('gp-resumo-cidade');
+    if (tabCidade) tabCidade.innerHTML = `
+      <thead><tr><th>Cidade</th>${dias.map(d => `<th style="text-align:center">${formatDate(d).slice(0, 5)}</th>`).join('')}</tr></thead>
+      <tbody>${resumoCidade.map(r => `<tr><td>${esc(r.cidade)}</td>${r.porDia.map(v => `<td style="text-align:center">${v || 0}</td>`).join('')}</tr>`).join('')}</tbody>`;
+
+    const logOrdenado = [...DB.presencaLog].sort((a, b) => new Date(b.quando) - new Date(a.quando));
+    const log = document.getElementById('gp-log');
+    if (log) log.innerHTML = !logOrdenado.length ? '<div class="empty">Nenhuma alteração registrada ainda.</div>' : `
+      <div class="table-wrap" style="max-height:320px;overflow:auto"><table class="data-table">
+        <thead><tr><th>Quando</th><th>Quem</th><th>Técnico</th><th>Data</th><th>O que mudou</th></tr></thead>
+        <tbody>${logOrdenado.slice(0, 200).map(l => `<tr>
+          <td>${new Date(l.quando).toLocaleString('pt-BR')}</td><td>${esc(l.usuario)}</td><td>${esc(l.tecnico)}</td><td>${formatDate(l.data)}</td>
+          <td>mudou de <b>${l.de ? esc(l.de) : '—'}</b> para <b>${esc(l.para)}</b></td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
   }
 }
 
