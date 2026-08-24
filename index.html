@@ -478,6 +478,10 @@
         <option value="ESCRITORIO">Escritório</option>
       </select>
     </div>
+    <div id="tr-campo-nome" style="display:none">
+      <label>Nome</label>
+      <select id="tr-nome"></select>
+    </div>
     <label id="tr-senha-label">Senha</label>
     <input type="password" id="tr-password" placeholder="sua senha" autocomplete="off">
     <p id="tr-erro" class="error-msg"></p>
@@ -564,6 +568,10 @@
           <option value="ESCRITORIO">Escritório</option>
         </select>
       </div>
+      <div id="li-campo-nome" style="display:none">
+        <label>Nome</label>
+        <select id="li-nome"></select>
+      </div>
       <div id="li-campo-email" style="display:none">
         <label>E-mail</label>
         <input type="email" id="li-email" placeholder="e-mail da conta" autocomplete="username" />
@@ -587,6 +595,8 @@
       <a data-route="production"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2.5" y="8.5" width="3" height="7" rx="0.8"/><rect x="7.5" y="3.5" width="3" height="12" rx="0.8"/><rect x="12.5" y="10.5" width="3" height="5" rx="0.8"/></svg></i> Produção</a>
       <a data-route="acomtec"><i class="nav-ic"><svg viewBox="0 0 18 18"><circle cx="7" cy="5.5" r="2.6"/><path d="M2 16c0-3.2 2.1-5.3 5-5.3"/><path d="M11 12.5l2 2 3.5-4"/></svg></i> Acompanhamento Téc.</a>
       <a data-route="bi"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M2 14.5 6 9l3.2 3.2L16 4.5"/><path d="M11.8 4.5H16v4.2"/></svg></i> Resumo Geral - Operação</a>
+      <div class="sidebar-group">Presença</div>
+      <a data-route="presenca"><i class="nav-ic"><svg viewBox="0 0 18 18"><circle cx="5.5" cy="5" r="2.1"/><circle cx="12.5" cy="5" r="2.1"/><path d="M1.8 15.5c0-2.8 1.8-4.5 3.7-4.5s3.7 1.7 3.7 4.5"/><path d="M9.8 15.5c0-2.5 1.4-4.3 2.7-4.3s2.7 1.8 2.7 4.3"/></svg></i> Gestão Presença</a>
       <div class="sidebar-group">IFI / IRR</div>
       <a data-route="ofensor"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M8.3 2.2 1.3 15h14L8.3 2.2Z"/><line x1="8.3" y1="7.5" x2="8.3" y2="11"/><line x1="8.3" y1="13" x2="8.3" y2="13.02"/></svg></i> Ofensor</a>
       <a data-route="table"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="2.5" y1="4.5" x2="15.5" y2="4.5"/><line x1="2.5" y1="9" x2="15.5" y2="9"/><line x1="2.5" y1="13.5" x2="15.5" y2="13.5"/></svg></i> Detalhe de Retornos</a>
@@ -655,18 +665,58 @@ const SUPABASE_TABLES = {
   frotaRevisao:    { table: 'frota_revisao',      conflict: 'placa,data_revisao' },
   pedagio:         { table: 'pedagio',            conflict: 'data_transacao,hora,placa' },
   financeiro:      { table: 'financeiro',         conflict: 'periodo,categoria,tipo' },
-  folhaPagamento:  { table: 'folha_pagamento',    conflict: 'tecnico,periodo' },
+  // A planilha "FOLHA DE PAGAMENTO" quase nunca traz coluna de período (ver
+  // SEM_PERIODO_FOLHA) — então a chave tecnico+periodo vira tecnico+NULL. O
+  // Postgres nunca considera duas linhas NULL iguais, então o ON CONFLICT
+  // (tecnico,periodo) não encontra a linha antiga e cada reimportação vira
+  // linha NOVA em vez de atualizar. Achado real em produção: 128 linhas pra
+  // 44 técnicos, "Total a receber" quase 3x maior que o correto. Enquanto o
+  // banco não é limpo (ver sql/PASSO-4-limpar-folha-duplicada.sql), a tela
+  // sempre limpa as duplicatas na carga.
+  folhaPagamento:  { table: 'folha_pagamento',    conflict: 'tecnico,periodo', dedupe: deduplicarFolhaPagamento },
   // PCR: as linhas do CSV de atividades. Diferente das outras tabelas, essas
   // linhas carregam DATAS de verdade (abertura, limite, encerramento, início) —
   // no banco viram texto ISO, então precisam voltar a ser Date ao carregar,
   // senão as contas de prazo e de "tempo em rota" quebram.
   pcr:             { table: 'pcr',                conflict: 'chave', hydrate: hidratarLinhaPCR },
   valoresOrdens:   { table: 'valores_ordens',     conflict: 'tipo_ordem' },
+  // Gestão Presença: quadro de técnicos (roster) + status por dia + log de
+  // auditoria (quem alterou o quê). presencaLog é só de INSERT (nunca upsert de
+  // verdade) — o "conflict" abaixo só existe pra esse loader genérico conseguir
+  // montar o índice em memória, igual às demais tabelas.
+  presencaTecnicos:{ table: 'presenca_tecnicos',  conflict: 'tecnico' },
+  presenca:        { table: 'presenca',           conflict: 'tecnico,data' },
+  presencaLog:     { table: 'presenca_log',        conflict: 'id' },
 };
 // devolve os campos de data de uma linha do PCR ao formato Date
 function hidratarLinhaPCR(r) {
   const dt = v => (v === null || v === undefined || v === '') ? null : (v instanceof Date ? v : new Date(v));
   return { ...r, abertura: dt(r.abertura), limite: dt(r.limite), encerramento: dt(r.encerramento), inicio: dt(r.inicio) };
+}
+// Texto usado como período quando a planilha da Folha de Pagamento não traz
+// coluna de período (a maioria dos casos) e o prompt de importação não é
+// respondido com nada. NUNCA usar '' nem deixar undefined aqui: o Postgres
+// trata NULL <> NULL, então duas linhas "sem período" nunca colidem no ON
+// CONFLICT (tecnico,periodo) — cada reimportação virava linha nova em vez de
+// atualizar a existente (é a causa das duplicatas que deduplicarFolhaPagamento
+// limpa na carga). Uma string fixa faz duas reimportações colidirem de verdade.
+const SEM_PERIODO_FOLHA = '(sem período informado)';
+// Mantém só uma linha por técnico+período, ficando com a de maior "total de
+// ordens" (a mais completa/recente do ciclo) — as duplicatas causadas pelo
+// bug do período NULL têm sempre o mesmo técnico+período e valores diferentes
+// só pela quantidade de ordens já fechadas no momento de cada reimportação.
+// Linhas antigas (periodo null/'' vindas do banco antes do SEM_PERIODO_FOLHA)
+// entram no mesmo balde das novas linhas-sentinela, senão as duas formas de
+// "sem período" nunca se juntam e continuam aparecendo como duplicata na tela.
+function deduplicarFolhaPagamento(rows) {
+  const porChave = new Map();
+  rows.forEach(r => {
+    const periodoChave = (!r.periodo || r.periodo === SEM_PERIODO_FOLHA) ? '' : r.periodo;
+    const chave = `${r.tecnico}|${periodoChave}`;
+    const atual = porChave.get(chave);
+    if (!atual || (r.total_ordens || 0) > (atual.total_ordens || 0)) porChave.set(chave, r);
+  });
+  return [...porChave.values()];
 }
 let supabaseStatus = { ok: null, mensagem: '' }; // preenchido no primeiro uso
 
@@ -837,7 +887,8 @@ async function loadAllFromSupabase(onProgresso) {
   await Promise.all(entradas.map(async ([jsName, cfg]) => {
     try {
       const brutas = await fetchAllRows(cfg.table);
-      const rows = cfg.hydrate ? brutas.map(cfg.hydrate) : brutas;
+      let rows = cfg.hydrate ? brutas.map(cfg.hydrate) : brutas;
+      if (cfg.dedupe) rows = cfg.dedupe(rows);
       DB[jsName] = rows;
       DB_INDEX[jsName] = new Map();
       rows.forEach((r, i) => {
@@ -926,7 +977,41 @@ const USERS = [
   // enxerga Prazo/PCR e IFI-IRR. Como o login é feito PELA SENHA, esse é o
   // único caso em que a escolha do campo "Perfil" precisa ser respeitada.
   { login: 'ESCRITORIO', senha: '', nome: 'Escritório', role: 'escritorio' },
+  // As 5 pessoas que usam o perfil Supervisor/Coordenador — cada uma com login
+  // e senha PRÓPRIOS (pedido do cliente, pra saber exatamente quem mexeu em
+  // quê na Gestão de Presença). Modo offline casa pela senha; com Supabase
+  // ligado, cada uma é uma conta de verdade — ver sql/PASSO-4-gestao-presenca.sql.
+  { login: 'SEBASTIAO', senha: 'Sebastiao26', nome: 'Sebastião', role: 'admin' },
+  { login: 'MATHEUS', senha: 'Matheus26', nome: 'Matheus', role: 'admin' },
+  { login: 'THAIS', senha: 'Thais26', nome: 'Thaís', role: 'admin' },
+  { login: 'REBECA', senha: 'Rebeca26', nome: 'Rebeca', role: 'admin' },
+  { login: 'VITORIA', senha: 'Vitoria26', nome: 'Vitória', role: 'admin' },
 ];
+// Nomes específicos do perfil Supervisor/Coordenador — o e-mail é a conta de
+// verdade no Supabase (uma por pessoa); "login" é a chave usada no modo
+// offline (USERS acima). Perfil que não está aqui continua com 1 conta só,
+// como sempre foi (CONTAS_POR_PERFIL).
+const NOMES_POR_PERFIL = {
+  SUPERCOOR: [
+    { nome: 'Sebastião', login: 'SEBASTIAO', email: 'sebastiao@jhtelecom.com.br' },
+    { nome: 'Matheus',   login: 'MATHEUS',   email: 'matheus@jhtelecom.com.br' },
+    { nome: 'Thaís',     login: 'THAIS',     email: 'thais@jhtelecom.com.br' },
+    { nome: 'Rebeca',    login: 'REBECA',    email: 'rebeca@jhtelecom.com.br' },
+    { nome: 'Vitória',   login: 'VITORIA',   email: 'vitoria@jhtelecom.com.br' },
+  ],
+};
+// Mostra/esconde e preenche o seletor de nome quando o perfil escolhido tem
+// mais de uma pessoa (hoje só Supervisor/Coordenador). Sem isso, o campo
+// "Senha" sozinho não dá pra saber QUEM está entrando — e é exatamente isso
+// que a Gestão de Presença precisa registrar no log de alterações.
+function atualizarCampoNome(idPerfil, idCampoNome, idNome) {
+  const selPerfil = document.getElementById(idPerfil), campo = document.getElementById(idCampoNome), selNome = document.getElementById(idNome);
+  if (!selPerfil || !campo || !selNome) return;
+  const nomes = NOMES_POR_PERFIL[selPerfil.value];
+  if (!nomes) { campo.style.display = 'none'; selNome.innerHTML = ''; return; }
+  campo.style.display = '';
+  selNome.innerHTML = nomes.map(n => `<option value="${n.nome}">${n.nome}</option>`).join('');
+}
 // Quais telas cada perfil NÃO pode ver. Só o Analista importa planilhas —
 // todo o resto (inclusive Administrador) fica sem a aba "Importar Excel".
 const ROUTE_PERMISSIONS = {
@@ -965,6 +1050,10 @@ function ehAnalista() { return !!currentUser && currentUser.role === 'analista';
 // de consulta. O valor fica salvo no Supabase e vale para todos, então não
 // pode ser mexido por quem só acompanha.
 function podeEditarMO() { return !!currentUser && currentUser.role !== 'escritorio'; }
+// Mesma regra na Gestão de Presença: todo mundo edita, menos o Escritório
+// (perfil de consulta) — pedido do cliente: "NESSA ABA O ESCRITORIO NAO
+// CONSEGUE EDITAR".
+function podeEditarPresenca() { return !!currentUser && currentUser.role !== 'escritorio'; }
 function podeAcessar(role, route) {
   const bloqueadas = ROUTE_PERMISSIONS[perfilValido(role)];
   return !bloqueadas || !bloqueadas.includes(route);
@@ -983,6 +1072,8 @@ const DB = {
   // do Excel e o do sistema — a lista abaixo é mostrada na página de Prazo pra
   // dar pra conferir ordem por ordem, sem precisar caçar na planilha.
   prazoDuplicados: [],
+  // Gestão Presença: quadro de técnicos, status por dia e log de alterações.
+  presencaTecnicos: [], presenca: [], presencaLog: [],
 };
 // Índices por "chave natural" — permitem que reimportar a mesma planilha (ou uma
 // versão atualizada dela) SUBSTITUA os registros já existentes em vez de duplicar.
@@ -992,6 +1083,7 @@ const DB_INDEX = {
   producao: new Map(), fechamento: new Map(), prazo: new Map(), folhaPagamento: new Map(), baseDoDia: new Map(), prazoReparoDia: new Map(), valoresOrdens: new Map(),
   frotaLinks: new Map(), frotaTroca: new Map(), frotaManutencao: new Map(), frotaDesvinc: new Map(), frotaMultas: new Map(), frotaRevisao: new Map(),
   pedagio: new Map(), financeiro: new Map(), pcr: new Map(),
+  presencaTecnicos: new Map(), presenca: new Map(),
 };
 // upsert: se a chave já existe, MESCLA o registro novo em cima do antigo — só
 // sobrescreve os campos que vierem preenchidos, mantendo o que já existia nos
@@ -1140,9 +1232,16 @@ function alternarCampoSenha(idSelect, idLabel, idInput) {
   inp.style.display = semSenha ? 'none' : '';
   if (semSenha) inp.value = '';
 }
-document.getElementById('li-user').addEventListener('change', () => alternarCampoSenha('li-user','li-senha-label','li-password'));
-document.getElementById('tr-user').addEventListener('change', () => alternarCampoSenha('tr-user','tr-senha-label','tr-password'));
+document.getElementById('li-user').addEventListener('change', () => {
+  alternarCampoSenha('li-user','li-senha-label','li-password');
+  atualizarCampoNome('li-user','li-campo-nome','li-nome');
+});
+document.getElementById('tr-user').addEventListener('change', () => {
+  alternarCampoSenha('tr-user','tr-senha-label','tr-password');
+  atualizarCampoNome('tr-user','tr-campo-nome','tr-nome');
+});
 alternarCampoSenha('li-user','li-senha-label','li-password');
+atualizarCampoNome('li-user','li-campo-nome','li-nome');
 // Muitas páginas redesenham as tabelas ao clicar em "Filtrar", ou seja depois
 // que navigate() já rodou. Este observador reaplica a linha de filtros sempre
 // que aparece tabela nova, sem precisar chamar nada em cada página.
@@ -1255,14 +1354,39 @@ function abrirTrocaUsuario() {
   setTimeout(() => document.getElementById('tr-password').focus(), 50);
 }
 function fecharTrocaUsuario() { document.getElementById('modal-trocar').classList.remove('active'); }
+// Perfil com mais de uma pessoa (hoje só Supervisor/Coordenador — ver
+// NOMES_POR_PERFIL): o e-mail de verdade sai do NOME escolhido, não direto do
+// perfil. Perfil de conta única continua igual, usando CONTAS_POR_PERFIL.
+function emailDoLogin(idPerfil, idNome) {
+  const perfil = document.getElementById(idPerfil).value;
+  const nomes = NOMES_POR_PERFIL[perfil];
+  if (nomes) {
+    const nomeEl = document.getElementById(idNome);
+    const achado = nomes.find(n => n.nome === (nomeEl ? nomeEl.value : ''));
+    return achado ? achado.email : null;
+  }
+  return CONTAS_POR_PERFIL[perfil];
+}
+// Mesma ideia no modo offline: se o perfil tem nomes, casa por NOME + senha
+// (senão a senha de qualquer um dos 5 entraria como "a primeira que bater").
+function usuarioOffline(idPerfil, idNome, senha) {
+  const perfil = document.getElementById(idPerfil).value;
+  const nomes = NOMES_POR_PERFIL[perfil];
+  if (nomes) {
+    const nomeEl = document.getElementById(idNome);
+    const escolhido = nomes.find(n => n.nome === (nomeEl ? nomeEl.value : ''));
+    return escolhido ? USERS.find(u => u.login === escolhido.login && u.senha === senha) : null;
+  }
+  return senha === '' ? USERS.find(u => u.login === 'ESCRITORIO') : USERS.find(u => u.senha === senha);
+}
 async function confirmarTrocaUsuario() {
   const senha = document.getElementById('tr-password').value;
   const erro = document.getElementById('tr-erro');
   erro.textContent = '';
   if (USA_AUTH) {
     // trocar de usuário = sair da conta atual e entrar na outra de verdade
-    const email = CONTAS_POR_PERFIL[document.getElementById('tr-user').value];
-    if (!email || !senha) { erro.textContent = 'Escolha o perfil e digite a senha.'; return; }
+    const email = emailDoLogin('tr-user', 'tr-nome');
+    if (!email || !senha) { erro.textContent = 'Escolha o perfil (e o nome, se pedir) e digite a senha.'; return; }
     erro.style.color = ''; erro.textContent = 'Entrando...';
     let r;
     try { r = await supa.auth.signInWithPassword({ email, password: senha }); }
@@ -1360,10 +1484,11 @@ async function doLogin() {
   errorEl.textContent = '';
 
   if (USA_AUTH) {
-    // por padrão o e-mail sai do perfil escolhido; o campo de e-mail só aparece
-    // se a pessoa clicar em "entrar com outro e-mail"
-    const email = CONTAS_POR_PERFIL[document.getElementById('li-user').value];
-    if (!email) { errorEl.textContent = 'Informe o e-mail da conta.'; return; }
+    // por padrão o e-mail sai do perfil escolhido (ou do perfil + nome, para
+    // Supervisor/Coordenador); o campo de e-mail só aparece se a pessoa clicar
+    // em "entrar com outro e-mail"
+    const email = emailDoLogin('li-user', 'li-nome');
+    if (!email) { errorEl.textContent = 'Informe o e-mail da conta (escolha o nome, se pedir).'; return; }
     if (!senha)  { errorEl.textContent = 'Informe a senha.'; return; }
     btn.disabled = true; btn.textContent = 'Entrando...';
     let resposta;
@@ -1380,8 +1505,8 @@ async function doLogin() {
     return;
   }
 
-  // ---- modo offline (sem Supabase): senha local do perfil ----
-  const user = senha === '' ? USERS.find(u => u.login === 'ESCRITORIO') : USERS.find(u => u.senha === senha);
+  // ---- modo offline (sem Supabase): senha local do perfil (ou nome+senha) ----
+  const user = usuarioOffline('li-user', 'li-nome', senha);
   if (!user) { errorEl.textContent = 'Senha inválida.'; return; }
   document.getElementById('li-user').value = user.login;
   btn.disabled = true; btn.textContent = 'Entrando...';
@@ -2584,8 +2709,9 @@ function insertRow(target, map, row, extra) {
     case 'folhaPagamento': {
       const tecnico = s('tecnico');
       // a planilha às vezes não tem coluna de período — se não tiver, usamos o
-      // que foi perguntado uma vez no início da importação (ver importSheet)
-      const periodo = s('periodo') || (extra && extra.periodo) || '';
+      // que foi perguntado uma vez no início da importação (ver importSheet).
+      // Nunca fica em '' nem null — ver SEM_PERIODO_FOLHA.
+      const periodo = s('periodo') || (extra && extra.periodo) || SEM_PERIODO_FOLHA;
       const obj = {
         tecnico, periodo, total_ordens: n('total_ordens'), valor_total_ordens: money('valor_total_ordens'),
         dias_trab: n('dias_trab'), bonus: s('bonus'), frota: s('frota'), dias_aluguel: n('dias_aluguel'),
@@ -2731,6 +2857,7 @@ const PAGES = {
   production: { title: 'Produção', render: renderProduction },
   acomtec: { title: 'Acompanhamento Técnico', render: renderAcomTec },
   bi: { title: 'Resumo Geral - Operação', render: renderPainelBI },
+  presenca: { title: 'Gestão Presença', render: renderGestaoPresenca },
   ofensor: { title: 'Ofensor — IFI / IRR', render: renderOfensor },
   table: { title: 'Detalhe de Retornos', render: renderTable },
   prazo: { title: 'Prazo — Reparo (24h)', render: renderPrazo },
@@ -5702,6 +5829,243 @@ function renderParcialDoDia() {
   }
 }
 
+// ===================== GESTÃO DE PRESENÇA =====================
+// Quadro diário de presença dos técnicos (igual à planilha "PLANTA" que o
+// cliente usa hoje): quem está presente, de folga, atestado etc, por dia e
+// por cidade. Editável por todo mundo menos o Escritório (podeEditarPresenca).
+const STATUS_PRESENCA = {
+  P:   { label: 'Presente',       cor: '#22c55e' },
+  ADM: { label: 'Administrativo', cor: '#a855f7' },
+  FG:  { label: 'Folga',          cor: '#3b82f6' },
+  FR:  { label: 'Férias',         cor: '#14b8a6' },
+  ATT: { label: 'Atestado',       cor: '#f2882e' },
+  F:   { label: 'Falta',          cor: '#ef4444' },
+  OFF: { label: 'Desligado',      cor: '#6b7593' },
+};
+// entra na conta de "ativo" (presente/trabalhando) nos cards e no resumo por cidade
+const STATUS_ATIVOS_PRESENCA = ['P', 'ADM'];
+// cidades da planilha do cliente — "LITORAL NORTE" é um agrupamento de rota
+// dele, não uma cidade de verdade, mas é assim que ele organiza o quadro
+const CIDADES_PRESENCA = ['GUARUJA','BERTIOGA','CUBATAO','SANTOS','SAO VICENTE','MONGAGUA','LITORAL NORTE','PRAIA GRANDE'];
+function isoAddDias(iso, n) {
+  const d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function diaSemanaCurto(iso) { return ['dom','seg','ter','qua','qui','sex','sáb'][new Date(iso + 'T00:00:00').getDay()]; }
+// Salva 1 célula do quadro (1 técnico, 1 dia) e registra no log quem mudou o
+// quê. Ao contrário do salvarMoManual (que engole erro de propósito — CLAUDE.md
+// pendência #6), aqui o erro de gravação VOLTA pra tela: presença é dado que
+// vira bônus e folha, não pode "parecer salvo" sem estar.
+async function salvarPresenca(tecnico, data, novoStatus) {
+  const key = tecnico + '|' + data;
+  const idx = DB_INDEX.presenca.get(key);
+  const anterior = idx !== undefined ? DB.presenca[idx].status : null;
+  if (anterior === novoStatus) return { ok: true };
+  const quem = currentUser ? (currentUser.nome || currentUser.login) : '?';
+  const row = { tecnico, data, status: novoStatus, atualizado_em: new Date().toISOString(), atualizado_por: quem };
+  upsertRow(DB.presenca, DB_INDEX.presenca, key, row);
+  registrarPresencaLog(tecnico, data, anterior, novoStatus, quem);
+  if (!supa) return { ok: true, offline: true };
+  try {
+    const { error } = await supa.from('presenca').upsert(row, { onConflict: 'tecnico,data' });
+    if (error) return { ok: false, error };
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e }; }
+}
+async function registrarPresencaLog(tecnico, data, de, para, quem) {
+  const registro = { tecnico, data, de: de || null, para, usuario: quem, quando: new Date().toISOString() };
+  DB.presencaLog.unshift(registro);
+  if (!supa) return;
+  try { await supa.from('presenca_log').insert(registro); } catch (e) { /* fica só local nesta sessão */ }
+}
+// Adiciona técnico ao quadro. "ativo" controla se ele some do quadro sem
+// apagar o histórico de presença dele (ver inativarTecnicoRoster).
+async function adicionarTecnicoRoster(nome, cidade, supervisor) {
+  const row = { tecnico: nome, cidade, supervisor: supervisor || '', ativo: true, criado_em: new Date().toISOString() };
+  upsertRow(DB.presencaTecnicos, DB_INDEX.presencaTecnicos, nome, row);
+  if (!supa) return { ok: true, offline: true };
+  try {
+    const { error } = await supa.from('presenca_tecnicos').upsert(row, { onConflict: 'tecnico' });
+    if (error) return { ok: false, error };
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e }; }
+}
+async function inativarTecnicoRoster(nome) {
+  const idx = DB_INDEX.presencaTecnicos.get(nome);
+  if (idx === undefined) return { ok: true };
+  DB.presencaTecnicos[idx] = { ...DB.presencaTecnicos[idx], ativo: false };
+  if (!supa) return { ok: true, offline: true };
+  try {
+    const { error } = await supa.from('presenca_tecnicos').update({ ativo: false }).eq('tecnico', nome);
+    if (error) return { ok: false, error };
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e }; }
+}
+function fecharModalTecnicoPresenca() { fecharModalTecnico(); }
+function abrirModalNovoTecnico() {
+  const m = document.getElementById('modal-tecnico');
+  m.querySelector('.mt-corpo').innerHTML = `
+    <h3 style="margin:0 0 4px">Novo técnico</h3>
+    <p style="margin:0 0 16px;font-size:13px;color:var(--text-secondary)">Adiciona ao quadro de presença.</p>
+    <label>Nome</label>
+    <input type="text" id="nt-nome" placeholder="Nome do técnico">
+    <label>Cidade</label>
+    <select id="nt-cidade">${CIDADES_PRESENCA.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
+    <label>Supervisor</label>
+    <input type="text" id="nt-supervisor" placeholder="Opcional">
+    <p id="nt-erro" class="error-msg"></p>
+    <div class="modal-acoes">
+      <button type="button" class="btn-secundario" id="nt-cancelar">Cancelar</button>
+      <button type="button" class="btn-primario" id="nt-salvar">Adicionar</button>
+    </div>`;
+  m.classList.add('active');
+  document.getElementById('nt-cancelar').addEventListener('click', fecharModalTecnico);
+  document.getElementById('nt-salvar').addEventListener('click', async () => {
+    const nome = document.getElementById('nt-nome').value.trim();
+    const cidade = document.getElementById('nt-cidade').value;
+    const supervisor = document.getElementById('nt-supervisor').value.trim();
+    const erro = document.getElementById('nt-erro');
+    if (!nome) { erro.textContent = 'Informe o nome do técnico.'; return; }
+    if (DB_INDEX.presencaTecnicos.has(nome)) { erro.textContent = 'Já existe um técnico com esse nome no quadro.'; return; }
+    erro.style.color = ''; erro.textContent = 'Salvando...';
+    const r = await adicionarTecnicoRoster(nome, cidade, supervisor);
+    if (!r.ok) { erro.textContent = 'Não consegui salvar no servidor: ' + ((r.error && r.error.message) || 'tente de novo.'); return; }
+    fecharModalTecnico();
+    renderGestaoPresenca();
+  });
+}
+function renderGestaoPresenca() {
+  const hoje = hojeISOLocal();
+  document.getElementById('content').innerHTML = `
+    <div class="toolbar">
+      <div class="field"><label>Início da semana</label><input type="date" id="gp-inicio" value="${hoje}"></div>
+      <button type="button" class="btn" id="gp-prev" title="7 dias antes">◀ 7 dias</button>
+      <button type="button" class="btn" id="gp-next" title="7 dias depois">7 dias ▶</button>
+      ${multiCityField('gp-cidades', 'Cidades')}
+      ${podeEditarPresenca() ? '<button type="button" class="btn" id="gp-add-tec">+ Técnico</button>' : ''}
+      <button type="button" class="btn" id="f-apply">Filtrar</button>
+    </div>
+    <div id="gp-body"></div>`;
+  wireMultiCityField('gp-cidades');
+  document.getElementById('f-apply').addEventListener('click', load);
+  document.getElementById('gp-prev').addEventListener('click', () => { const el = document.getElementById('gp-inicio'); el.value = isoAddDias(el.value, -7); load(); });
+  document.getElementById('gp-next').addEventListener('click', () => { const el = document.getElementById('gp-inicio'); el.value = isoAddDias(el.value, 7); load(); });
+  if (podeEditarPresenca()) document.getElementById('gp-add-tec').addEventListener('click', abrirModalNovoTecnico);
+  load();
+  function load() {
+    const inicio = document.getElementById('gp-inicio').value || hoje;
+    const dias = Array.from({ length: 7 }, (_, i) => isoAddDias(inicio, i));
+    refreshCityField('gp-cidades', DB.presencaTecnicos.filter(t => t.ativo !== false), { label: 'Cidades' });
+    const cidadesSel = getSelectedCities('gp-cidades');
+    const roster = DB.presencaTecnicos.filter(t => t.ativo !== false && cidadesSel.includes(t.cidade))
+      .sort((a, b) => a.tecnico.localeCompare(b.tecnico));
+    const statusDe = (tecnico, data) => {
+      const i = DB_INDEX.presenca.get(tecnico + '|' + data);
+      return i !== undefined ? DB.presenca[i].status : '';
+    };
+    const totalPlanta = DB.presencaTecnicos.filter(t => t.ativo !== false).length;
+    const statusHoje = DB.presencaTecnicos.filter(t => t.ativo !== false).map(t => statusDe(t.tecnico, hoje));
+    const presentesHoje = statusHoje.filter(s => STATUS_ATIVOS_PRESENCA.includes(s)).length;
+    const folgaHoje = statusHoje.filter(s => s === 'FG').length;
+    const ausentesHoje = statusHoje.filter(s => ['F', 'ATT', 'FR'].includes(s)).length;
+
+    const body = document.getElementById('gp-body');
+    if (!DB.presencaTecnicos.filter(t => t.ativo !== false).length) {
+      body.innerHTML = `<div class="panel"><div class="empty">Nenhum técnico cadastrado no quadro${podeEditarPresenca() ? ' — clique em "+ Técnico" para começar.' : '.'}</div></div>`;
+      return;
+    }
+    if (!roster.length) {
+      body.innerHTML = '<div class="panel"><div class="empty">Nenhum técnico ativo nas cidades selecionadas.</div></div>';
+      return;
+    }
+    const statusKeys = Object.keys(STATUS_PRESENCA);
+    const resumoStatus = statusKeys.map(k => ({ status: k, porDia: dias.map(d => roster.filter(t => statusDe(t.tecnico, d) === k).length) }));
+    const cidadesNoFiltro = [...new Set(roster.map(t => t.cidade))].sort();
+    const resumoCidade = cidadesNoFiltro.map(c => ({ cidade: c, porDia: dias.map(d => roster.filter(t => t.cidade === c && STATUS_ATIVOS_PRESENCA.includes(statusDe(t.tecnico, d))).length) }));
+    const logOrdenado = [...DB.presencaLog].sort((a, b) => new Date(b.quando) - new Date(a.quando));
+
+    body.innerHTML = `
+      <div class="metrics-grid" style="margin-bottom:1.5rem">
+        ${metricCard('Total na Planta', totalPlanta)}
+        ${metricCard('Presentes hoje', presentesHoje, false, { positive: true })}
+        ${metricCard('Ausentes hoje', ausentesHoje, ausentesHoje > 0)}
+        ${metricCard('Folga hoje', folgaHoje)}
+      </div>
+      <div class="panel" style="margin-bottom:1.5rem;overflow:auto">
+        <div class="section-heading" style="margin-top:0">Quadro de presença — ${formatDate(dias[0])} a ${formatDate(dias[6])}</div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
+          ${statusKeys.map(k => `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:14px"><span style="width:10px;height:10px;border-radius:3px;background:${STATUS_PRESENCA[k].cor};display:inline-block"></span>${k} — ${STATUS_PRESENCA[k].label}</span>`).join('')}
+        </div>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Técnico</th><th>Cidade</th><th>Supervisor</th>
+            ${dias.map(d => `<th style="text-align:center">${diaSemanaCurto(d)}<br>${formatDate(d).slice(0, 5)}</th>`).join('')}
+            ${podeEditarPresenca() ? '<th></th>' : ''}
+          </tr></thead>
+          <tbody>${roster.map(t => `<tr>
+            <td>${esc(t.tecnico)}</td><td>${esc(t.cidade)}</td><td>${esc(t.supervisor || '-')}</td>
+            ${dias.map(d => {
+              const atual = statusDe(t.tecnico, d);
+              return `<td style="text-align:center">${podeEditarPresenca()
+                ? `<select data-tecnico="${esc(t.tecnico)}" data-data="${d}" class="pres-select" style="background:${atual ? STATUS_PRESENCA[atual].cor : 'var(--bg-page)'};color:${atual ? '#fff' : 'var(--text-secondary)'};border:1px solid var(--border);border-radius:6px;padding:5px 4px;font-weight:600;font-size:12px">
+                    <option value=""${!atual ? ' selected' : ''}>—</option>
+                    ${statusKeys.map(k => `<option value="${k}"${atual === k ? ' selected' : ''}>${k}</option>`).join('')}
+                  </select>`
+                : (atual ? `<span style="background:${STATUS_PRESENCA[atual].cor};color:#fff;border-radius:6px;padding:4px 8px;font-weight:600;font-size:12px">${atual}</span>` : '<span style="color:var(--text-muted)">—</span>')
+              }</td>`;
+            }).join('')}
+            ${podeEditarPresenca() ? `<td><button type="button" class="btn-icon" data-inativar="${esc(t.tecnico)}" title="Tirar do quadro">✕</button></td>` : ''}
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>
+      <div class="panel" style="margin-bottom:1.5rem;overflow:auto">
+        <div class="section-heading" style="margin-top:0">Resumo por status</div>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Status</th>${dias.map(d => `<th style="text-align:center">${formatDate(d).slice(0, 5)}</th>`).join('')}</tr></thead>
+          <tbody>${resumoStatus.map(r => `<tr><td>${STATUS_PRESENCA[r.status].label} (${r.status})</td>${r.porDia.map(v => `<td style="text-align:center">${v || 0}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table></div>
+      </div>
+      <div class="panel" style="margin-bottom:1.5rem;overflow:auto">
+        <div class="section-heading" style="margin-top:0">Ativos por cidade</div>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Cidade</th>${dias.map(d => `<th style="text-align:center">${formatDate(d).slice(0, 5)}</th>`).join('')}</tr></thead>
+          <tbody>${resumoCidade.map(r => `<tr><td>${esc(r.cidade)}</td>${r.porDia.map(v => `<td style="text-align:center">${v || 0}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table></div>
+      </div>
+      <div class="panel">
+        <div class="section-heading" style="margin-top:0">Histórico de alterações</div>
+        ${!logOrdenado.length ? '<div class="empty">Nenhuma alteração registrada ainda.</div>' : `
+        <div class="table-wrap" style="max-height:320px;overflow:auto"><table class="data-table">
+          <thead><tr><th>Quando</th><th>Quem</th><th>Técnico</th><th>Data</th><th>O que mudou</th></tr></thead>
+          <tbody>${logOrdenado.slice(0, 200).map(l => `<tr>
+            <td>${new Date(l.quando).toLocaleString('pt-BR')}</td><td>${esc(l.usuario)}</td><td>${esc(l.tecnico)}</td><td>${formatDate(l.data)}</td>
+            <td>mudou de <b>${l.de ? esc(l.de) : '—'}</b> para <b>${esc(l.para)}</b></td>
+          </tr>`).join('')}</tbody>
+        </table></div>`}
+      </div>`;
+
+    if (podeEditarPresenca()) {
+      body.querySelectorAll('.pres-select').forEach(sel => {
+        sel.addEventListener('change', async () => {
+          const tecnico = sel.dataset.tecnico, data = sel.dataset.data, novo = sel.value;
+          sel.disabled = true;
+          const r = await salvarPresenca(tecnico, data, novo);
+          if (!r.ok) alert('Não consegui salvar essa alteração no servidor. Tente de novo — ' + ((r.error && r.error.message) || ''));
+          load();
+        });
+      });
+      body.querySelectorAll('[data-inativar]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm(`Tirar "${btn.dataset.inativar}" do quadro de presença? O histórico dele continua salvo.`)) return;
+          const r = await inativarTecnicoRoster(btn.dataset.inativar);
+          if (!r.ok) alert('Não consegui salvar no servidor. Tente de novo — ' + ((r.error && r.error.message) || ''));
+          load();
+        });
+      });
+    }
+  }
+}
+
 function renderPrazo() {
   const { start, end } = defaultMonthPeriod();
   const mesesDisponiveis = getAvailableMonths(DB.prazo);
@@ -6609,8 +6973,11 @@ function renderFolhaPagamento() {
   // lote (inclusive o mais antigo, importado sem período preenchido no prompt),
   // senão a tela parece não ter histórico nenhum quando na verdade só falta
   // escolher qual "folha" olhar.
-  const periodosNomeados = [...new Set(DB.folhaPagamento.map(r=>r.periodo).filter(Boolean))];
-  const temSemPeriodo = DB.folhaPagamento.some(r => !r.periodo);
+  // linhas antigas (de antes do SEM_PERIODO_FOLHA) ainda podem ter periodo
+  // null/'' vindo do banco — tratamos junto com o texto-sentinela como "sem período"
+  const ehSemPeriodoFolha = p => !p || p === SEM_PERIODO_FOLHA;
+  const periodosNomeados = [...new Set(DB.folhaPagamento.map(r=>r.periodo).filter(p => p && !ehSemPeriodoFolha(p)))];
+  const temSemPeriodo = DB.folhaPagamento.some(r => ehSemPeriodoFolha(r.periodo));
   document.getElementById('content').innerHTML = `<div class="toolbar">
     <div class="field"><label>Técnico</label><input type="text" id="f-tech" placeholder="Nome" list="tech-list"></div>
     ${DB.folhaPagamento.length ? `<div class="field"><label>Período</label><select id="f-periodo">
@@ -6635,7 +7002,7 @@ function renderFolhaPagamento() {
     const tech = document.getElementById('f-tech').value.toLowerCase();
     const periodoEl = document.getElementById('f-periodo');
     const periodo = periodoEl ? periodoEl.value : '';
-    const matchPeriodo = r => !periodo || (periodo === '__sem_periodo__' ? !r.periodo : r.periodo === periodo);
+    const matchPeriodo = r => !periodo || (periodo === '__sem_periodo__' ? ehSemPeriodoFolha(r.periodo) : r.periodo === periodo);
     const brutas = DB.folhaPagamento.filter(r => (!tech || (r.tecnico||'').toLowerCase().includes(tech)) && matchPeriodo(r));
     const body = document.getElementById('folha-body');
     if (!brutas.length) { body.innerHTML = '<div class="panel"><div class="empty">Nenhum lançamento encontrado. Importe a aba "FOLHA DE PAGAMENTO".</div></div>'; return; }
