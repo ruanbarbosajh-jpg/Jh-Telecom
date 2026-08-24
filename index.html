@@ -5886,6 +5886,26 @@ const STATUS_ATIVOS_PRESENCA = ['P', 'ADM'];
 // cidades da planilha do cliente — "LITORAL NORTE" é um agrupamento de rota
 // dele, não uma cidade de verdade, mas é assim que ele organiza o quadro
 const CIDADES_PRESENCA = ['GUARUJA','BERTIOGA','CUBATAO','SANTOS','SAO VICENTE','MONGAGUA','LITORAL NORTE','PRAIA GRANDE'];
+// Lista fixa dos técnicos ativos na planta hoje — passada pelo cliente em
+// 24/08/2026, já sem quem foi desligado. Puxar da Produção sozinho trazia de
+// volta gente que já saiu (a Produção carrega meses de histórico, não só quem
+// está ativo agora); esta lista é a fonte de verdade até o cliente avisar de
+// novo (atualizar aqui quando isso acontecer).
+const TECNICOS_FIXOS = [
+  'ADILSON GONCALVES DA SILVA', 'ANDERSON LOPES GARCIA', 'Bruno de Souza Carvalho Quirino',
+  'CAIO REINAN DE ANDRADE REIS', 'CARLOS ANDRÉ DIAS BARBOSA CAMPOS', 'Carlos da Silva Souza',
+  'Carlos Henrique Menezes Santanna', 'CARLOS JOSE SILVA DE ALMEIDA', 'Douglas Sierro Dos Santos Souza',
+  'EDMILSON PANAJOTTO ROSA', 'Emerson Barbosa de Sousa', 'Everthon Soares Zago',
+  'FABIANO DOS SANTOS PARADA', 'Gleydson Vinício de Souza Santos', 'GUILHERME MARQUES FELICIANO RODRIGUES',
+  'Igor Araujo de Souza', 'ISAQUE IZIDORIO DOS SANTOS', 'JEFFERSON BARBOSA DA SILVA',
+  'JOSÉ AUGUSTO TAKAHASHI', 'Leandro Araújo dos Santos', 'MARCELO EDUARDO DE SIQUEIRA',
+  'Marcelo Martins Verissimo Espirito Santo', 'MARCO AURÉLIO NICODEMOS DO PRADO', 'Marcos dos Santos Belo',
+  'Mario Eduardo lima bezerra', 'MURILO CRUZ DOS SANTOS', 'Rafael de Melo Goncalves',
+  'RODOLFO VELUDO GENEROZO', 'RODRIGO SANTOS RAMOS', 'SAMUEL DO NASCIMENTO BARBOSA',
+  'SERGIO SILVA DA CONCEIÇÃO', 'SINVALDO BRITO DA SILVA', 'Vinicius Guedes Wells Ruiz',
+  'GABRIEL MESSIAS DE OLIVEIRA', 'Nailson Miranda Santos', 'Paschoal Carvalho Palinkas',
+  'GUILHERME MESSIAS DE OLIVEIRA', 'GUILHERME FERREIRA DA SILVA', 'Ricardo taconi Dantas',
+];
 function isoAddDias(iso, n) {
   const d = new Date(iso + 'T00:00:00');
   d.setDate(d.getDate() + n);
@@ -5974,39 +5994,46 @@ function abrirModalNovoTecnico() {
     renderGestaoPresenca();
   });
 }
-// Nomes de técnico que o sistema JÁ conhece (vieram da Produção — milhares de
-// ordens importadas trazem "quem fez o serviço" junto com a cidade). Sem isso,
-// o quadro de presença nascia vazio e cada um dos ~34 técnicos tinha que ser
-// digitado na mão; a planilha do cliente já vinha com os nomes prontos, então
-// aqui também deveria — o trabalho diário é só marcar P/F/FG etc, não cadastrar
-// gente. A cidade escolhida é a mais frequente do técnico na Produção.
-function tecnicosConhecidosDoSistema() {
+// Cidade mais frequente de cada técnico, olhando o histórico da Produção —
+// só usado aqui pra CHUTAR a cidade de cada nome da lista fixa (TECNICOS_FIXOS)
+// no modal de importar; quem revisa pode sempre trocar antes de confirmar.
+// Comparação por nome normalizado (sem acento/maiúscula) porque a grafia do
+// nome na lista fixa não é garantida bater com a da planilha de Produção.
+function cidadeMaisFrequentePorTecnico() {
   const porTecnico = {};
   DB.producao.forEach(r => {
     if (!ehRecursoTecnico(r.recurso)) return;
-    if (!porTecnico[r.recurso]) porTecnico[r.recurso] = {};
+    const chave = normalizeHeader(r.recurso);
+    if (!porTecnico[chave]) porTecnico[chave] = {};
     const c = r.cidade || '';
-    porTecnico[r.recurso][c] = (porTecnico[r.recurso][c] || 0) + 1;
+    porTecnico[chave][c] = (porTecnico[chave][c] || 0) + 1;
   });
-  return Object.keys(porTecnico).sort().map(t => {
-    const porCidade = porTecnico[t];
-    const cidade = Object.keys(porCidade).sort((a, b) => porCidade[b] - porCidade[a])[0] || '';
-    return { tecnico: t, cidade };
+  const resultado = {};
+  Object.keys(porTecnico).forEach(chave => {
+    const porCidade = porTecnico[chave];
+    resultado[chave] = Object.keys(porCidade).sort((a, b) => porCidade[b] - porCidade[a])[0] || '';
   });
+  return resultado;
 }
 function abrirModalImportarTecnicos() {
-  const candidatos = tecnicosConhecidosDoSistema().filter(t => !DB_INDEX.presencaTecnicos.has(t.tecnico));
+  const cidadePorNome = cidadeMaisFrequentePorTecnico();
+  const candidatos = TECNICOS_FIXOS.filter(t => !DB_INDEX.presencaTecnicos.has(t))
+    .map(t => ({ tecnico: t, cidade: cidadePorNome[normalizeHeader(t)] || '' }));
   const m = document.getElementById('modal-tecnico');
   m.querySelector('.mt-corpo').innerHTML = `
-    <h3 style="margin:0 0 4px">Importar técnicos do sistema</h3>
-    <p style="margin:0 0 16px;font-size:13px;color:var(--text-secondary)">Nomes que já apareceram na Produção — não precisa digitar de novo. Desmarque quem não deve entrar no quadro.</p>
-    ${!candidatos.length ? '<div class="empty">Nenhum técnico novo encontrado (todo mundo que aparece na Produção já está no quadro).</div>' : `
+    <h3 style="margin:0 0 4px">Importar técnicos</h3>
+    <p style="margin:0 0 16px;font-size:13px;color:var(--text-secondary)">Lista de técnicos ativos na planta. Confira a cidade de cada um (a sugerida vem do histórico de Produção) e desmarque quem não deve entrar no quadro.</p>
+    ${!candidatos.length ? '<div class="empty">Todo mundo da lista já está no quadro.</div>' : `
     <div style="margin-bottom:8px"><button type="button" class="btn-secundario" id="mi-todos" style="padding:4px 10px;font-size:12px">Marcar todos</button>
       <button type="button" class="btn-secundario" id="mi-nenhum" style="padding:4px 10px;font-size:12px">Desmarcar todos</button></div>
     <div style="max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px 12px">
-      ${candidatos.map(c => `<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px">
-        <input type="checkbox" class="mi-check" value="${esc(c.tecnico)}" data-cidade="${esc(c.cidade)}" checked>
-        ${esc(c.tecnico)} <span style="color:var(--text-secondary);margin-left:auto">${esc(c.cidade || 'sem cidade')}</span>
+      ${candidatos.map((c, i) => `<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px">
+        <input type="checkbox" class="mi-check" value="${esc(c.tecnico)}" checked>
+        <span style="flex:1">${esc(c.tecnico)}</span>
+        <select class="mi-cidade" id="mi-cidade-${i}" style="font-size:12px;padding:3px 6px;border-radius:6px;border:1px solid var(--border);background:var(--bg-page);color:var(--text-primary)">
+          <option value=""${!c.cidade ? ' selected' : ''}>Escolher cidade</option>
+          ${CIDADES_PRESENCA.map(ci => `<option value="${ci}"${c.cidade === ci ? ' selected' : ''}>${ci}</option>`).join('')}
+        </select>
       </label>`).join('')}
     </div>`}
     <p id="mi-erro" class="error-msg"></p>
@@ -6020,18 +6047,27 @@ function abrirModalImportarTecnicos() {
   document.getElementById('mi-todos').addEventListener('click', () => m.querySelectorAll('.mi-check').forEach(c => c.checked = true));
   document.getElementById('mi-nenhum').addEventListener('click', () => m.querySelectorAll('.mi-check').forEach(c => c.checked = false));
   document.getElementById('mi-importar').addEventListener('click', async () => {
-    const marcados = [...m.querySelectorAll('.mi-check:checked')];
+    const linhas = [...m.querySelectorAll('.mi-check')].map(chk => ({ chk, cidade: chk.closest('label').querySelector('.mi-cidade').value }));
+    const marcados = linhas.filter(l => l.chk.checked);
     const erro = document.getElementById('mi-erro');
     if (!marcados.length) { erro.textContent = 'Marque pelo menos um técnico.'; return; }
-    erro.style.color = ''; erro.textContent = `Adicionando ${marcados.length}...`;
+    // não bloqueia o lote inteiro por causa de quem ficou sem cidade sugerida
+    // (a maioria não vai ter, já que a Produção não tem o nome de todo mundo) —
+    // adiciona quem já tem cidade escolhida e avisa quem ficou de fora, pra
+    // resolver numa próxima passada
+    const comCidade = marcados.filter(l => l.cidade);
+    const semCidade = marcados.filter(l => !l.cidade);
+    if (!comCidade.length) { erro.textContent = 'Escolha a cidade de pelo menos 1 técnico marcado antes de adicionar.'; return; }
+    erro.style.color = ''; erro.textContent = `Adicionando ${comCidade.length}...`;
     let falhas = 0;
-    for (const chk of marcados) {
-      const r = await adicionarTecnicoRoster(chk.value, chk.dataset.cidade, '');
+    for (const l of comCidade) {
+      const r = await adicionarTecnicoRoster(l.chk.value, l.cidade, '');
       if (!r.ok) falhas++;
     }
-    if (falhas) { erro.textContent = `${falhas} de ${marcados.length} não salvaram no servidor. Tente de novo.`; renderGestaoPresenca(); return; }
+    if (falhas) { erro.textContent = `${falhas} de ${comCidade.length} não salvaram no servidor. Tente de novo.`; renderGestaoPresenca(); return; }
     fecharModalTecnico();
     renderGestaoPresenca();
+    if (semCidade.length) alert(`${comCidade.length} técnico(s) adicionado(s). ${semCidade.length} ficaram de fora por falta de cidade — abra "Importar técnicos" de novo e escolha a cidade deles:\n\n${semCidade.map(l => l.chk.value).join('\n')}`);
   });
 }
 function renderGestaoPresenca() {
@@ -6042,7 +6078,7 @@ function renderGestaoPresenca() {
       <button type="button" class="btn" id="gp-prev" title="7 dias antes">◀ 7 dias</button>
       <button type="button" class="btn" id="gp-next" title="7 dias depois">7 dias ▶</button>
       ${multiCityField('gp-cidades', 'Cidades')}
-      ${podeEditarPresenca() ? '<button type="button" class="btn" id="gp-import-tec">Importar do sistema</button><button type="button" class="btn" id="gp-add-tec">+ Técnico</button>' : ''}
+      ${podeEditarPresenca() ? '<button type="button" class="btn" id="gp-import-tec">Importar técnicos</button><button type="button" class="btn" id="gp-add-tec">+ Técnico</button>' : ''}
       <button type="button" class="btn" id="f-apply">Filtrar</button>
     </div>
     <div id="gp-body"></div>`;
@@ -6074,7 +6110,7 @@ function renderGestaoPresenca() {
 
     const body = document.getElementById('gp-body');
     if (!DB.presencaTecnicos.filter(t => t.ativo !== false).length) {
-      body.innerHTML = `<div class="panel"><div class="empty">Nenhum técnico cadastrado no quadro${podeEditarPresenca() ? ' — clique em "Importar do sistema" pra trazer quem já apareceu na Produção, ou em "+ Técnico" pra cadastrar um novo.' : '.'}</div></div>`;
+      body.innerHTML = `<div class="panel"><div class="empty">Nenhum técnico cadastrado no quadro${podeEditarPresenca() ? ' — clique em "Importar técnicos" pra trazer a lista de ativos, ou em "+ Técnico" pra cadastrar um novo.' : '.'}</div></div>`;
       return;
     }
     if (!roster.length) {
