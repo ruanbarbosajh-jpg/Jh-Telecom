@@ -936,8 +936,12 @@ const ROUTE_PERMISSIONS = {
   // "Resumo Geral - Operação" (visão executiva combinando produção/financeiro/
   // IFI-IRR/prazo/frota/pedágio) é exclusivo do Analista — o único perfil SEM
   // 'bi' bloqueado abaixo.
-  admin: ['import', 'parcialdia', 'bi'],
-  rh: ['dashboard', 'acomtec', 'parcialdia', 'import', 'bi'],
+  // Supervisor/Coordenador: fica de fora do Relatório de Eficiência, Pedágio e
+  // de todo o Financeiro (tela + comparativo) — pedido do cliente.
+  admin: ['import', 'parcialdia', 'bi', 'dashboard', 'toll', 'finance', 'comparisons'],
+  // RH: fica de fora do Relatório de Eficiência e das telas de Prazo (Reparo
+  // 24h e Ativações 36h) — pedido do cliente.
+  rh: ['dashboard', 'acomtec', 'parcialdia', 'import', 'bi', 'prazo', 'prazoativacao'],
   gestao: ['dashboard', 'finance', 'folha', 'toll', 'comparisons', 'import', 'parcialdia', 'bi'],
   // Escritório: acompanha PRAZO (reparo 24h, ativações 36h, ofensores de prazo,
   // PCR e Parcial do Dia) e QUALIDADE (IFI/IRR). Fica de fora de produção, frota,
@@ -7241,11 +7245,23 @@ function renderImport() {
         const falhasSync = results.filter(r=>r.syncResult && r.syncResult.ok === false);
         // colunas que o banco ainda não tem: gravou o resto, mas essas se perdem ao
         // recarregar. É o que fazia a tela de Prazo voltar vazia depois do F5.
-        const colsFaltando = [...new Set(results.flatMap(r => (r.syncResult && r.syncResult.colunasIgnoradas) || []))];
-        const sqlAlter = colsFaltando.length
-          ? `<div class="warning-box" style="margin-top:10px">Estas colunas ainda não existem no Supabase e <b>não foram salvas</b>: ${colsFaltando.join(', ')}.
+        // Uma importação mistura várias abas com destinos (tabelas) diferentes —
+        // "alter table prazo" fixo aqui já mandou o ALTER TABLE certo pro nome
+        // errado quando quem faltava a coluna era prazo_reparo_dia ou base_do_dia.
+        // Agora agrupa por tabela de verdade (SUPABASE_TABLES[r.target].table).
+        const colsPorTabela = {};
+        results.forEach(r => {
+          const faltando = r.syncResult && r.syncResult.colunasIgnoradas;
+          if (!faltando || !faltando.length) return;
+          const tabela = (SUPABASE_TABLES[r.target] && SUPABASE_TABLES[r.target].table) || r.target;
+          if (!colsPorTabela[tabela]) colsPorTabela[tabela] = new Set();
+          faltando.forEach(c => colsPorTabela[tabela].add(c));
+        });
+        const tabelasComColunaFaltando = Object.keys(colsPorTabela);
+        const sqlAlter = tabelasComColunaFaltando.length
+          ? `<div class="warning-box" style="margin-top:10px">Estas colunas ainda não existem no Supabase e <b>não foram salvas</b>: ${tabelasComColunaFaltando.map(t=>`${[...colsPorTabela[t]].join(', ')} (tabela <code>${t}</code>)`).join('; ')}.
                Enquanto isso, elas somem quando você recarrega a página. Rode isso uma vez no SQL Editor do Supabase:<br>
-               <code>${colsFaltando.map(c=>`alter table prazo add column if not exists ${c} text;`).join('<br>')}</code></div>`
+               <code>${tabelasComColunaFaltando.flatMap(t=>[...colsPorTabela[t]].map(c=>`alter table ${t} add column if not exists ${c} text;`)).join('<br>')}</code></div>`
           : '';
         // abas cujo destino não tem tabela no Supabase: valem só nesta sessão
         const soNaSessao = results.filter(r => r.target && r.syncResult && r.syncResult.naoPersistido).map(r => r.sheet);
