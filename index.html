@@ -5917,6 +5917,9 @@ function diaSemanaCurto(iso) { return ['dom','seg','ter','qua','qui','sex','sáb
 // pendência #6), aqui o erro de gravação VOLTA pra tela: presença é dado que
 // vira bônus e folha, não pode "parecer salvo" sem estar.
 async function salvarPresenca(tecnico, data, novoStatus) {
+  // dia já passado é só consulta — travado aqui também (não só escondendo o
+  // select na tela), pra não depender só da UI pra valer essa regra.
+  if (data < hojeISOLocal()) return { ok: false, error: { message: 'Dia passado — não dá mais pra alterar.' } };
   const key = tecnico + '|' + data;
   const idx = DB_INDEX.presenca.get(key);
   const anterior = idx !== undefined ? DB.presenca[idx].status : null;
@@ -6055,12 +6058,16 @@ function renderGestaoPresenca() {
             <td>${esc(t.tecnico)}</td><td>${esc(t.cidade)}</td><td>${esc(t.supervisor || '-')}</td>
             ${dias.map(d => {
               const atual = statusDe(t.tecnico, d);
-              return `<td style="text-align:center">${podeEditarPresenca()
+              // dia já passado: só consulta, não edita mais — mudar o passado
+              // bagunçaria bônus/folha já fechados em cima daquele dia. Só hoje
+              // e os dias futuros continuam editáveis.
+              const editavel = podeEditarPresenca() && d >= hoje;
+              return `<td style="text-align:center">${editavel
                 ? `<select data-tecnico="${esc(t.tecnico)}" data-data="${d}" class="pres-select" style="background:${atual ? STATUS_PRESENCA[atual].cor : 'var(--bg-page)'};color:${atual ? '#fff' : 'var(--text-secondary)'};border:1px solid var(--border);border-radius:6px;padding:5px 4px;font-weight:600;font-size:12px">
                     <option value=""${!atual ? ' selected' : ''}>—</option>
                     ${statusKeys.map(k => `<option value="${k}"${atual === k ? ' selected' : ''}>${k}</option>`).join('')}
                   </select>`
-                : (atual ? `<span style="background:${STATUS_PRESENCA[atual].cor};color:#fff;border-radius:6px;padding:4px 8px;font-weight:600;font-size:12px">${atual}</span>` : '<span style="color:var(--text-muted)">—</span>')
+                : (atual ? `<span style="background:${STATUS_PRESENCA[atual].cor};color:#fff;border-radius:6px;padding:4px 8px;font-weight:600;font-size:12px" title="${d < hoje ? 'Dia passado — não dá mais pra alterar' : ''}">${atual}</span>` : `<span style="color:var(--text-muted)" title="${d < hoje ? 'Dia passado — não dá mais pra alterar' : ''}">—</span>`)
               }</td>`;
             }).join('')}
             ${podeEditarPresenca() ? `<td><button type="button" class="btn-icon" data-inativar="${esc(t.tecnico)}" title="Tirar do quadro">✕</button></td>` : ''}
