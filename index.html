@@ -1178,6 +1178,7 @@ function upsertRowByDate(table, index, key, row, dateField, opts = {}) {
     // opts.venceSempre: linha que precisa entrar mesmo sendo de data ANTERIOR à
     // que já está salva (ver ehConclusaoChegando — sem isso, reimportar por cima
     // de uma base já gravada não conserta ordens salvas com o status errado).
+    // É sempre a MESMA visita sendo completada fora de ordem, nunca uma ordem nova.
     const venceSempre = opts.venceSempre && opts.venceSempre(existente, row);
     if (!venceSempre && existente[dateField] && row[dateField] && row[dateField] < existente[dateField]) {
       // Linha mais ANTIGA chegando depois: não pode sobrescrever o estado mais
@@ -1196,8 +1197,28 @@ function upsertRowByDate(table, index, key, row, dateField, opts = {}) {
       if (mudou) { table[i] = complementado; return complementado; }
       return existente;
     }
+    // opts.novaVisitaSe: a mesma O.S. reabriu de verdade (cliente reclamou, o
+    // técnico voltou) — dia diferente, técnico diferente, ou horário diferente
+    // no mesmo dia (comum quando o cliente tem mais de 1 ponto de internet no
+    // endereço). Isso é um ATENDIMENTO NOVO: entra como linha separada em vez
+    // de sobrescrever a existente, pra continuar contando como 2 ordens.
+    // venceSempre já tratou "é a mesma visita, só chegou fora de ordem" acima,
+    // então só chega aqui quem realmente é mais novo (ou igual) e diferente.
+    if (!venceSempre && opts.novaVisitaSe && opts.novaVisitaSe(existente, row)) {
+      index.set(key, table.length);
+      table.push(row);
+      return row;
+    }
   }
   return upsertRow(table, index, key, row);
+}
+// Reabertura de verdade da mesma O.S.: dia diferente, técnico diferente, ou
+// horário de atendimento diferente (2 trechos no mesmo dia — cliente com mais
+// de 1 ponto de internet no endereço, por exemplo). Só compara campo que está
+// preenchido nos dois lados, pra "não temos essa informação" não virar
+// "é diferente" por engano.
+function ehVisitaNova(existente, novo) {
+  return ['data', 'recurso', 'inicio'].some(c => existente[c] && novo[c] && existente[c] !== novo[c]);
 }
 // Contrapartida de ehLimpezaCanceladaAposConcluido: se a ordem está salva com
 // um status não-concluído e chega a linha da conclusão dela, essa conclusão
@@ -2492,6 +2513,10 @@ const SCHEMAS = {
     nome: ['nome'],
     data_ordem_anterior: ['data ordem anterior'], dias: ['dias'], ifi_irr: ['ifi irr'],
     motivo: ['motivo de encerramento das atividades','motivo de encerramento','motivo encerramento','motivo do retorno','motivo da repetida','motivo repetida','material trocado','equipamento trocado','motivo'],
+    // só usado pra saber se 2 linhas da MESMA O.S. são o mesmo atendimento ou
+    // 2 atendimentos diferentes no mesmo dia (cliente com 2 pontos de internet,
+    // por exemplo) — não vira Date, só compara igual/diferente (ver upsertRowByDate)
+    inicio: ['inicio','início'],
   }},
   // aba "PRAZO REPARO DO DIA" (dentro de PRAZOS_ESCRITÓRIO.xlsx): já vem com o
   // cálculo de NO PRAZO/FORA DO PRAZO pronto (coluna ACOMP.) e a classificação
@@ -2527,12 +2552,14 @@ const SCHEMAS = {
     cidade: ['cidade'], tipo_atividade: ['tipo de atividade 2','tipo de atividade'],
     os: ['ordem de servico','ordem de serviço'], contrato: ['numero do contrato','número do contrato'],
     status_prazo: ['status prazo'], tempo_limite: ['tempo limite'],
+    inicio: ['inicio','início'],
   }},
   prazo: { fields: {
     recurso: ['recurso'], data: ['data'], mes: ['mes','mês'], status: ['status da atividade'],
     cidade: ['cidade'], os: ['ordem de servico','ordem de serviço'], contrato: ['numero do contrato','número do contrato'],
     tempo_limite: ['tempo limite'], encerramento: ['encerramento'], aging: ['aging'], status_prazo: ['status prazo'],
     tipo_atividade: ['tipo de atividade 2','tipo de atividade'],
+    inicio: ['inicio','início'],
   }},
   frotaLinks: { fields: {
     motorista: ['nome do motorista'], placa: ['veiculo placa'], supervisor: ['supervisor'],
@@ -2667,17 +2694,21 @@ function insertRow(target, map, row, extra) {
         recurso: s('recurso'), data: d('data'), mes: s('mes'), status: s('status'), cidade: s('cidade'),
         tipo_atividade: s('tipo_atividade'), os, contrato: s('contrato'), repetida: s('repetida'),
         ofensor: s('ofensor'), tipo_ordem: s('tipo_ordem'), data_ordem_anterior: d('data_ordem_anterior'),
-        dias: s('dias'), ifi_irr: s('ifi_irr'), motivo: s('motivo'), nome: s('nome'),
+        dias: s('dias'), ifi_irr: s('ifi_irr'), motivo: s('motivo'), nome: s('nome'), inicio: s('inicio'),
       };
       // a MESMA ordem de serviço aparece em REPAROS OK, BASE_PRODUÇÃO e BASE GERAL
       // CONCLUIDO ao mesmo tempo — sem deduplicar por OS, o total de ordens dobra
       // (ou triplica) só de importar as duas planilhas. E dentro da própria
       // BASE_PRODUÇÃO a mesma ordem também repete uma linha por status/dia
-      // (cancelado → reatribuída → concluído) — por isso o merge usa a data
-      // pra sempre ficar com o status mais recente, não o último do arquivo
-      // (e "cancelado" nunca reabre uma ordem já concluída — ver nota em
-      // ehLimpezaCanceladaAposConcluido).
-      return upsertRowByDate(DB.producao, DB_INDEX.producao, os || null, obj, 'data', { ignoreIf: ehLimpezaCanceladaAposConcluido, venceSempre: ehConclusaoChegando });
+      // (cancelado → reatribuída → concluído, ao longo do MESMO atendimento) —
+      // por isso o merge usa a data pra sempre ficar com o status mais recente
+      // do MESMO atendimento, não o último do arquivo ("cancelado" nunca reabre
+      // um atendimento já concluído — ver ehLimpezaCanceladaAposConcluido).
+      // Só que a mesma OS também REABRE de verdade quando o cliente reclama e
+      // o técnico volta (confirmado com o cliente) — isso é um atendimento
+      // NOVO, não uma atualização do mesmo, e entra como linha separada (ver
+      // ehVisitaNova) pra continuar contando como 2 ordens.
+      return upsertRowByDate(DB.producao, DB_INDEX.producao, os || null, obj, 'data', { ignoreIf: ehLimpezaCanceladaAposConcluido, venceSempre: ehConclusaoChegando, novaVisitaSe: ehVisitaNova });
       break;
     }
     case 'prazoReparoDia': {
@@ -2708,9 +2739,9 @@ function insertRow(target, map, row, extra) {
       const obj = {
         recurso: s('recurso'), data: d('data'), mes: s('mes'), status: s('status'), cidade: s('cidade'),
         tipo_atividade: s('tipo_atividade'), os, contrato: s('contrato'),
-        status_prazo: s('status_prazo'), tempo_limite: s('tempo_limite'),
+        status_prazo: s('status_prazo'), tempo_limite: s('tempo_limite'), inicio: s('inicio'),
       };
-      return upsertRowByDate(DB.baseDoDia, DB_INDEX.baseDoDia, os || null, obj, 'data', { ignoreIf: ehLimpezaCanceladaAposConcluido, venceSempre: ehConclusaoChegando });
+      return upsertRowByDate(DB.baseDoDia, DB_INDEX.baseDoDia, os || null, obj, 'data', { ignoreIf: ehLimpezaCanceladaAposConcluido, venceSempre: ehConclusaoChegando, novaVisitaSe: ehVisitaNova });
       break;
     }
     case 'prazo': {
@@ -2718,11 +2749,12 @@ function insertRow(target, map, row, extra) {
       const obj = {
         recurso: s('recurso'), data: d('data'), mes: s('mes'), status: s('status'), cidade: s('cidade'),
         os, contrato: s('contrato'), tempo_limite: s('tempo_limite'), encerramento: s('encerramento'),
-        aging: n('aging'), status_prazo: s('status_prazo'), tipo_atividade: s('tipo_atividade'),
+        aging: n('aging'), status_prazo: s('status_prazo'), tipo_atividade: s('tipo_atividade'), inicio: s('inicio'),
       };
-      // Diagnóstico do "gap do prazo": mesma OS chegando com OUTRA data = 2º
-      // atendimento. Registramos as duas pontas antes de mesclar, pra montar a
-      // tabela "Ordens atendidas mais de uma vez" na página de Prazo.
+      // Mesma OS chegando com OUTRA data = 2º atendimento (reabertura de
+      // verdade — ver ehVisitaNova). Registramos as duas pontas antes do merge
+      // pra montar a tabela "Ordens atendidas mais de uma vez" na página de
+      // Prazo (as duas já entram como ordens separadas no total).
       if (os && DB_INDEX.prazo.has(os)) {
         const anterior = DB.prazo[DB_INDEX.prazo.get(os)];
         if (anterior && anterior.data && obj.data && anterior.data !== obj.data) {
@@ -2733,7 +2765,7 @@ function insertRow(target, map, row, extra) {
           });
         }
       }
-      return upsertRowByDate(DB.prazo, DB_INDEX.prazo, os || null, obj, 'data', { ignoreIf: ehLimpezaCanceladaAposConcluido, venceSempre: ehConclusaoChegando });
+      return upsertRowByDate(DB.prazo, DB_INDEX.prazo, os || null, obj, 'data', { ignoreIf: ehLimpezaCanceladaAposConcluido, venceSempre: ehConclusaoChegando, novaVisitaSe: ehVisitaNova });
       break;
     }
     case 'frotaLinks': {
@@ -6825,10 +6857,13 @@ function renderPrazo() {
       return `<span class="badge ${p>=TARGET?'ok':'warn'}">${p.toFixed(2)}%</span>`;
     };
 
-    // ---- Ordens atendidas mais de uma vez (a diferença pro total do Excel) ----
-    // O COUNTIFS da planilha conta cada LINHA, então uma OS atendida 2x soma 2;
-    // aqui a ordem tem um registro só. A tabela abaixo mostra exatamente quais
-    // são, pra dar pra bater ordem por ordem com a planilha.
+    // ---- Ordens atendidas mais de uma vez (reabertura de verdade — conta as 2) ----
+    // A mesma O.S. reabre quando o cliente reclama e o técnico volta (dia
+    // diferente, técnico diferente, ou até no mesmo dia — ex.: 2 pontos de
+    // internet no mesmo endereço). Desde que isso foi confirmado com o cliente,
+    // os dois atendimentos entram como ordens separadas no total (ver
+    // ehVisitaNova em upsertRowByDate) — esta tabela só lista quem teve mais de
+    // 1 atendimento, pra dar pra conferir ordem por ordem.
     const dups = DB.prazoDuplicados.filter(dp =>
       cidadesSelecionadas.includes(dp.cidade) &&
       (inRange(dp.data_a, s, e) || inRange(dp.data_b, s, e)));
@@ -6836,25 +6871,22 @@ function renderPrazo() {
       <div class="panel" style="margin-bottom:1.5rem">
         <h3>Ordens atendidas mais de uma vez <span style="font-weight:400;color:var(--text-muted);font-size:13px">(${dups.length})</span></h3>
         <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px">
-          Estas O.S aparecem em mais de uma data na BASE DE DADOS. A planilha conta cada linha separadamente
-          (por isso o total dela fica ${dups.length} acima); aqui cada ordem conta uma vez, no atendimento mais recente.
+          Estas O.S tiveram mais de um atendimento (reabertura) — os dois contam como ordens separadas no total acima.
         </p>
         <div class="table-wrap"><table class="data-table"><thead><tr>
-          <th>O.S</th><th>Cidade</th><th>1º atendimento</th><th>Faixa</th><th>2º atendimento</th><th>Faixa</th><th>Contada como</th>
+          <th>O.S</th><th>Cidade</th><th>1º atendimento</th><th>Faixa</th><th>2º atendimento</th><th>Faixa</th>
         </tr></thead><tbody>
           ${dups.map(dp => {
             // A ordem em que as duas pontas foram registradas depende de como a
             // planilha estava ordenada na importação — então aqui a gente
             // ordena pela DATA: 1º atendimento é sempre o mais antigo, 2º é o
-            // mais recente. "Contada como" é a faixa do 2º (o que o sistema
-            // guarda, por ser o estado atual da ordem).
+            // mais recente.
             const p1 = { data: dp.data_a, faixa: dp.faixa_a };
             const p2 = { data: dp.data_b, faixa: dp.faixa_b };
             const [primeiro, segundo] = (p1.data || '') <= (p2.data || '') ? [p1, p2] : [p2, p1];
             return `<tr><td class="cat-cell">${dp.os}</td><td>${dp.cidade || '-'}</td>
               <td>${primeiro.data ? formatDate(primeiro.data) : '-'}</td><td>${primeiro.faixa || '-'}</td>
-              <td>${segundo.data ? formatDate(segundo.data) : '-'}</td><td>${segundo.faixa || '-'}</td>
-              <td style="font-weight:600">${segundo.faixa || '-'}</td></tr>`;
+              <td>${segundo.data ? formatDate(segundo.data) : '-'}</td><td>${segundo.faixa || '-'}</td></tr>`;
           }).join('')}
         </tbody></table></div>
       </div>`;
