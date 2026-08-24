@@ -1067,10 +1067,14 @@ function ehAnalista() { return !!currentUser && currentUser.role === 'analista';
 // de consulta. O valor fica salvo no Supabase e vale para todos, então não
 // pode ser mexido por quem só acompanha.
 function podeEditarMO() { return !!currentUser && currentUser.role !== 'escritorio'; }
-// Mesma regra na Gestão de Presença: todo mundo edita, menos o Escritório
-// (perfil de consulta) — pedido do cliente: "NESSA ABA O ESCRITORIO NAO
-// CONSEGUE EDITAR".
-function podeEditarPresenca() { return !!currentUser && currentUser.role !== 'escritorio'; }
+// Gestão de Presença: regra mais restrita que o resto do sistema — não é mais
+// "todo mundo menos Escritório" (pedido do cliente revisado). Marcar presença
+// / cadastrar técnico no dia a dia é só Matheus e Sebastião; tirar técnico do
+// quadro é só o Analista (ver podeExcluirTecnicoPresenca) — duas permissões
+// separadas de propósito, pra ninguém apagar gente por engano.
+const NOMES_PRESENCA_EDITAM = ['Matheus', 'Sebastião'];
+function podeEditarPresenca() { return !!currentUser && NOMES_PRESENCA_EDITAM.includes(currentUser.nome); }
+function podeExcluirTecnicoPresenca() { return !!currentUser && currentUser.role === 'analista'; }
 function podeAcessar(role, route) {
   const bloqueadas = ROUTE_PERMISSIONS[perfilValido(role)];
   return !bloqueadas || !bloqueadas.includes(route);
@@ -3012,6 +3016,11 @@ function ativarFiltrosDeColuna(raiz) {
   const alvo = raiz || document.getElementById('content');
   if (!alvo) return;
   alvo.querySelectorAll('table.data-table').forEach(tab => {
+    // Tabela com células "vivas" (ex.: o <select> de status por dia da Gestão
+    // Presença) não pode entrar aqui: textContent de um <select> junta o texto
+    // de TODAS as <option>, não só a marcada — o filtro virava uma lista com
+    // um valor tipo "—PADMFGFRATTOFF" em vez de um valor por dia.
+    if (tab.dataset.semFiltroColuna === '1') return;
     const thead = tab.querySelector('thead'), tbody = tab.querySelector('tbody');
     if (!thead || !tbody) return;
     const linhaCab = [...thead.querySelectorAll('tr')].filter(tr => tr.querySelector('th')).pop();
@@ -6049,10 +6058,10 @@ function renderGestaoPresenca() {
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
           ${statusKeys.map(k => `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:14px"><span style="width:10px;height:10px;border-radius:3px;background:${STATUS_PRESENCA[k].cor};display:inline-block"></span>${k} — ${STATUS_PRESENCA[k].label}</span>`).join('')}
         </div>
-        <div class="table-wrap"><table class="data-table">
+        <div class="table-wrap"><table class="data-table" data-sem-filtro-coluna="1">
           <thead><tr><th>Técnico</th><th>Cidade</th><th>Supervisor</th>
             ${dias.map(d => `<th style="text-align:center">${diaSemanaCurto(d)}<br>${formatDate(d).slice(0, 5)}</th>`).join('')}
-            ${podeEditarPresenca() ? '<th></th>' : ''}
+            ${podeExcluirTecnicoPresenca() ? '<th></th>' : ''}
           </tr></thead>
           <tbody>${roster.map(t => `<tr>
             <td>${esc(t.tecnico)}</td><td>${esc(t.cidade)}</td><td>${esc(t.supervisor || '-')}</td>
@@ -6070,7 +6079,7 @@ function renderGestaoPresenca() {
                 : (atual ? `<span style="background:${STATUS_PRESENCA[atual].cor};color:#fff;border-radius:6px;padding:4px 8px;font-weight:600;font-size:12px" title="${d < hoje ? 'Dia passado — não dá mais pra alterar' : ''}">${atual}</span>` : `<span style="color:var(--text-muted)" title="${d < hoje ? 'Dia passado — não dá mais pra alterar' : ''}">—</span>`)
               }</td>`;
             }).join('')}
-            ${podeEditarPresenca() ? `<td><button type="button" class="btn-icon" data-inativar="${esc(t.tecnico)}" title="Tirar do quadro">✕</button></td>` : ''}
+            ${podeExcluirTecnicoPresenca() ? `<td><button type="button" class="btn-icon" data-inativar="${esc(t.tecnico)}" title="Tirar do quadro">✕</button></td>` : ''}
           </tr>`).join('')}</tbody>
         </table></div>
       </div>
@@ -6102,6 +6111,8 @@ function renderGestaoPresenca() {
           atualizarResumos();
         });
       });
+    }
+    if (podeExcluirTecnicoPresenca()) {
       body.querySelectorAll('[data-inativar]').forEach(btn => {
         btn.addEventListener('click', async () => {
           if (!confirm(`Tirar "${btn.dataset.inativar}" do quadro de presença? O histórico dele continua salvo.`)) return;
