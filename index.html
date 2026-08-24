@@ -645,6 +645,7 @@
 
 <datalist id="tech-list"></datalist>
 <datalist id="condutor-list"></datalist>
+<datalist id="city-list"></datalist>
 
 <script>
 // ===================== SUPABASE (persistência) =====================
@@ -1953,6 +1954,9 @@ function refreshNameLists() {
   DB.pedagio.forEach(r => r.cadastro && condutores.add(r.cadastro));
   const condListEl = document.getElementById('condutor-list');
   if (condListEl) condListEl.innerHTML = [...condutores].sort().map(t => `<option value="${t}">`).join('');
+
+  const cityListEl = document.getElementById('city-list');
+  if (cityListEl) cityListEl.innerHTML = getKnownCities().map(c => `<option value="${c}">`).join('');
 }
 function getKnownCities() {
   const cities = new Set();
@@ -7430,6 +7434,8 @@ function cmpPeriodToolbar(opts = {}) {
     </select></div>`}
     ${opts.techCompare ? `<div class="field"><label>Comparar Técnico A (usa Período A)</label><input type="text" id="cmp-tech-a2" placeholder="Nome do técnico" list="tech-list"></div>
     <div class="field"><label>Comparar Técnico B (usa Período B)</label><input type="text" id="cmp-tech-b2" placeholder="Nome do técnico" list="tech-list"></div>` : ''}
+    ${opts.cityCompare ? `<div class="field"><label>Comparar Cidade A (usa Período A)</label><input type="text" id="cmp-city-a2" placeholder="Nome da cidade" list="city-list"></div>
+    <div class="field"><label>Comparar Cidade B (usa Período B)</label><input type="text" id="cmp-city-b2" placeholder="Nome da cidade" list="city-list"></div>` : ''}
     <button class="btn" id="f-apply">Comparar</button>
   </div>`;
 }
@@ -7441,7 +7447,9 @@ function cmpFilters() {
   const statusOk = st => statusFilter==='concluido' ? isConcluido(st) : statusFilter==='cancelado' ? /cancel/i.test(st) : statusFilter==='naoconcluido' ? (!isConcluido(st) && !/cancel/i.test(st)) : true;
   const techAEl = document.getElementById('cmp-tech-a2'), techBEl = document.getElementById('cmp-tech-b2');
   const techA = techAEl ? techAEl.value.trim() : '', techB = techBEl ? techBEl.value.trim() : '';
-  return { tech, city, statusOk, techA, techB };
+  const cityAEl = document.getElementById('cmp-city-a2'), cityBEl = document.getElementById('cmp-city-b2');
+  const cidadeA = cityAEl ? cityAEl.value.trim() : '', cidadeB = cityBEl ? cityBEl.value.trim() : '';
+  return { tech, city, statusOk, techA, techB, cidadeA, cidadeB };
 }
 // Painel "Comparar Técnico A × Técnico B": recalcula o mesmo `summary()` da
 // página (produção ou IFI/IRR), mas filtrando por técnico em vez de cidade.
@@ -7461,6 +7469,27 @@ function renderTechCompare(f, sa, ea, sb, eb, summaryFn, linhas) {
   }).join('');
   return `
     <div class="section-heading">Comparar Técnicos</div>
+    <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+      <th>Indicador</th><th>${nomeA} (${periodLabel(sa,ea)})</th><th>${nomeB} (${periodLabel(sb,eb)})</th><th>Variação (A → B)</th>
+    </tr></thead><tbody>${linhasHtml}</tbody></table></div>`;
+}
+// Painel "Comparar Cidade A × Cidade B": mesma ideia do renderTechCompare, mas
+// filtrando por cidade em vez de técnico. Cidade A sempre no Período A e
+// Cidade B sempre no Período B — dá pra comparar a MESMA cidade em dois
+// períodos, ou duas cidades diferentes (ex.: Guarujá × Santos no mesmo mês,
+// preenchendo Período A e B com as mesmas datas).
+function renderCityCompare(f, sa, ea, sb, eb, summaryFn, linhas) {
+  if (!f.cidadeA && !f.cidadeB) return '';
+  const nomeA = f.cidadeA || '(vazio)', nomeB = f.cidadeB || '(vazio)';
+  const dA = f.cidadeA ? summaryFn(sa, ea, { ...f, city: f.cidadeA.toLowerCase(), tech: '' }) : null;
+  const dB = f.cidadeB ? summaryFn(sb, eb, { ...f, city: f.cidadeB.toLowerCase(), tech: '' }) : null;
+  const linhasHtml = linhas.map(l => {
+    const va = dA ? l.get(dA) : '-', vb = dB ? l.get(dB) : '-';
+    const variacao = (dA && dB) ? (l.invert !== undefined ? diffBadge(l.raw(dA), l.raw(dB), l.invert) : '-') : '-';
+    return `<tr><td class="cat-cell">${l.label}</td><td>${va}</td><td>${vb}</td><td>${variacao}</td></tr>`;
+  }).join('');
+  return `
+    <div class="section-heading">Comparar Cidades</div>
     <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
       <th>Indicador</th><th>${nomeA} (${periodLabel(sa,ea)})</th><th>${nomeB} (${periodLabel(sb,eb)})</th><th>Variação (A → B)</th>
     </tr></thead><tbody>${linhasHtml}</tbody></table></div>`;
@@ -7488,7 +7517,7 @@ function diffQty(x,y,invert) {
 
 // ===================== COMPARATIVO DE PRODUÇÃO =====================
 function renderCmpProducao() {
-  document.getElementById('content').innerHTML = `${cmpPeriodToolbar({techCompare:true})}<div id="cmp-body"></div>`;
+  document.getElementById('content').innerHTML = `${cmpPeriodToolbar({techCompare:true, cityCompare:true})}<div id="cmp-body"></div>`;
   document.getElementById('f-apply').addEventListener('click', load);
   load();
   function summary(s,e,f) {
@@ -7538,6 +7567,12 @@ function renderCmpProducao() {
         {label:'Não concluídas', get:d=>d.naoConcluidos, raw:d=>d.naoConcluidos, invert:true},
         {label:'Canceladas', get:d=>d.cancelados, raw:d=>d.cancelados, invert:true},
       ])}
+      ${renderCityCompare(f, sa, ea, sb, eb, summary, [
+        {label:'Total O.S', get:d=>d.total, raw:d=>d.total},
+        {label:'Concluídas', get:d=>d.concluidos, raw:d=>d.concluidos, invert:false},
+        {label:'Não concluídas', get:d=>d.naoConcluidos, raw:d=>d.naoConcluidos, invert:true},
+        {label:'Canceladas', get:d=>d.cancelados, raw:d=>d.cancelados, invert:true},
+      ])}
       <div id="pdf-export-area"></div>`;
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
@@ -7561,7 +7596,7 @@ function renderCmpProducao() {
 
 // ===================== COMPARATIVO DE IFI / IRR =====================
 function renderCmpIfiIrr() {
-  document.getElementById('content').innerHTML = `${cmpPeriodToolbar({techCompare:true})}<div id="cmp-body"></div>`;
+  document.getElementById('content').innerHTML = `${cmpPeriodToolbar({techCompare:true, cityCompare:true})}<div id="cmp-body"></div>`;
   document.getElementById('f-apply').addEventListener('click', load);
   load();
   function summary(s,e,f) {
@@ -7594,6 +7629,12 @@ function renderCmpIfiIrr() {
         {label:'% IFI', get:d=>d.pctIfi.toFixed(2)+'%', raw:d=>d.pctIfi, invert:true},
         {label:'% IRR', get:d=>d.pctIrr.toFixed(2)+'%', raw:d=>d.pctIrr, invert:true},
       ])}
+      ${renderCityCompare(f, sa, ea, sb, eb, summary, [
+        {label:'Qtd. IFI', get:d=>d.qtdIfi, raw:d=>d.qtdIfi, invert:true},
+        {label:'Qtd. IRR', get:d=>d.qtdIrr, raw:d=>d.qtdIrr, invert:true},
+        {label:'% IFI', get:d=>d.pctIfi.toFixed(2)+'%', raw:d=>d.pctIfi, invert:true},
+        {label:'% IRR', get:d=>d.pctIrr.toFixed(2)+'%', raw:d=>d.pctIrr, invert:true},
+      ])}
       <div id="pdf-export-area"></div>`;
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
@@ -7610,7 +7651,7 @@ function renderCmpIfiIrr() {
 
 // ===================== COMPARATIVO DE PRAZO =====================
 function renderCmpPrazo() {
-  document.getElementById('content').innerHTML = `${cmpPeriodToolbar({semStatus:true})}<div id="cmp-body"></div>`;
+  document.getElementById('content').innerHTML = `${cmpPeriodToolbar({semStatus:true, cityCompare:true})}<div id="cmp-body"></div>`;
   document.getElementById('f-apply').addEventListener('click', load);
   load();
   // (usa o classifyBucket global — antes havia uma cópia idêntica aqui dentro,
@@ -7658,6 +7699,11 @@ function renderCmpPrazo() {
         <tr><td class="cat-cell">Outliers</td><td>${a.buckets.outlier}</td><td>${pctBucket(a.buckets.outlier,a.total)}</td><td>${b.buckets.outlier}</td><td>${pctBucket(b.buckets.outlier,b.total)}</td><td>${diffQty(a.buckets.outlier,b.buckets.outlier,true)}</td></tr>
         <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${a.total}</td><td>100%</td><td>${b.total}</td><td>100%</td><td>${diffQty(a.total,b.total)}</td></tr>
       </tbody></table></div>
+      ${renderCityCompare(f, sa, ea, sb, eb, summary, [
+        {label:'Total concluído', get:d=>d.total, raw:d=>d.total},
+        {label:'Até 24h', get:d=>d.dentro24, raw:d=>d.dentro24},
+        {label:'% no prazo', get:d=>d.pct.toFixed(2)+'%', raw:d=>d.pct},
+      ])}
       <div id="pdf-export-area"></div>`;
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
