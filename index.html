@@ -5974,6 +5974,66 @@ function abrirModalNovoTecnico() {
     renderGestaoPresenca();
   });
 }
+// Nomes de técnico que o sistema JÁ conhece (vieram da Produção — milhares de
+// ordens importadas trazem "quem fez o serviço" junto com a cidade). Sem isso,
+// o quadro de presença nascia vazio e cada um dos ~34 técnicos tinha que ser
+// digitado na mão; a planilha do cliente já vinha com os nomes prontos, então
+// aqui também deveria — o trabalho diário é só marcar P/F/FG etc, não cadastrar
+// gente. A cidade escolhida é a mais frequente do técnico na Produção.
+function tecnicosConhecidosDoSistema() {
+  const porTecnico = {};
+  DB.producao.forEach(r => {
+    if (!ehRecursoTecnico(r.recurso)) return;
+    if (!porTecnico[r.recurso]) porTecnico[r.recurso] = {};
+    const c = r.cidade || '';
+    porTecnico[r.recurso][c] = (porTecnico[r.recurso][c] || 0) + 1;
+  });
+  return Object.keys(porTecnico).sort().map(t => {
+    const porCidade = porTecnico[t];
+    const cidade = Object.keys(porCidade).sort((a, b) => porCidade[b] - porCidade[a])[0] || '';
+    return { tecnico: t, cidade };
+  });
+}
+function abrirModalImportarTecnicos() {
+  const candidatos = tecnicosConhecidosDoSistema().filter(t => !DB_INDEX.presencaTecnicos.has(t.tecnico));
+  const m = document.getElementById('modal-tecnico');
+  m.querySelector('.mt-corpo').innerHTML = `
+    <h3 style="margin:0 0 4px">Importar técnicos do sistema</h3>
+    <p style="margin:0 0 16px;font-size:13px;color:var(--text-secondary)">Nomes que já apareceram na Produção — não precisa digitar de novo. Desmarque quem não deve entrar no quadro.</p>
+    ${!candidatos.length ? '<div class="empty">Nenhum técnico novo encontrado (todo mundo que aparece na Produção já está no quadro).</div>' : `
+    <div style="margin-bottom:8px"><button type="button" class="btn-secundario" id="mi-todos" style="padding:4px 10px;font-size:12px">Marcar todos</button>
+      <button type="button" class="btn-secundario" id="mi-nenhum" style="padding:4px 10px;font-size:12px">Desmarcar todos</button></div>
+    <div style="max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px 12px">
+      ${candidatos.map(c => `<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px">
+        <input type="checkbox" class="mi-check" value="${esc(c.tecnico)}" data-cidade="${esc(c.cidade)}" checked>
+        ${esc(c.tecnico)} <span style="color:var(--text-secondary);margin-left:auto">${esc(c.cidade || 'sem cidade')}</span>
+      </label>`).join('')}
+    </div>`}
+    <p id="mi-erro" class="error-msg"></p>
+    <div class="modal-acoes">
+      <button type="button" class="btn-secundario" id="mi-cancelar">Cancelar</button>
+      ${candidatos.length ? '<button type="button" class="btn-primario" id="mi-importar">Adicionar selecionados</button>' : ''}
+    </div>`;
+  m.classList.add('active');
+  document.getElementById('mi-cancelar').addEventListener('click', fecharModalTecnico);
+  if (!candidatos.length) return;
+  document.getElementById('mi-todos').addEventListener('click', () => m.querySelectorAll('.mi-check').forEach(c => c.checked = true));
+  document.getElementById('mi-nenhum').addEventListener('click', () => m.querySelectorAll('.mi-check').forEach(c => c.checked = false));
+  document.getElementById('mi-importar').addEventListener('click', async () => {
+    const marcados = [...m.querySelectorAll('.mi-check:checked')];
+    const erro = document.getElementById('mi-erro');
+    if (!marcados.length) { erro.textContent = 'Marque pelo menos um técnico.'; return; }
+    erro.style.color = ''; erro.textContent = `Adicionando ${marcados.length}...`;
+    let falhas = 0;
+    for (const chk of marcados) {
+      const r = await adicionarTecnicoRoster(chk.value, chk.dataset.cidade, '');
+      if (!r.ok) falhas++;
+    }
+    if (falhas) { erro.textContent = `${falhas} de ${marcados.length} não salvaram no servidor. Tente de novo.`; renderGestaoPresenca(); return; }
+    fecharModalTecnico();
+    renderGestaoPresenca();
+  });
+}
 function renderGestaoPresenca() {
   const hoje = hojeISOLocal();
   document.getElementById('content').innerHTML = `
@@ -5982,7 +6042,7 @@ function renderGestaoPresenca() {
       <button type="button" class="btn" id="gp-prev" title="7 dias antes">◀ 7 dias</button>
       <button type="button" class="btn" id="gp-next" title="7 dias depois">7 dias ▶</button>
       ${multiCityField('gp-cidades', 'Cidades')}
-      ${podeEditarPresenca() ? '<button type="button" class="btn" id="gp-add-tec">+ Técnico</button>' : ''}
+      ${podeEditarPresenca() ? '<button type="button" class="btn" id="gp-import-tec">Importar do sistema</button><button type="button" class="btn" id="gp-add-tec">+ Técnico</button>' : ''}
       <button type="button" class="btn" id="f-apply">Filtrar</button>
     </div>
     <div id="gp-body"></div>`;
@@ -5990,7 +6050,10 @@ function renderGestaoPresenca() {
   document.getElementById('f-apply').addEventListener('click', load);
   document.getElementById('gp-prev').addEventListener('click', () => { const el = document.getElementById('gp-inicio'); el.value = isoAddDias(el.value, -7); load(); });
   document.getElementById('gp-next').addEventListener('click', () => { const el = document.getElementById('gp-inicio'); el.value = isoAddDias(el.value, 7); load(); });
-  if (podeEditarPresenca()) document.getElementById('gp-add-tec').addEventListener('click', abrirModalNovoTecnico);
+  if (podeEditarPresenca()) {
+    document.getElementById('gp-add-tec').addEventListener('click', abrirModalNovoTecnico);
+    document.getElementById('gp-import-tec').addEventListener('click', abrirModalImportarTecnicos);
+  }
   load();
   function load() {
     const inicio = document.getElementById('gp-inicio').value || hoje;
@@ -6011,7 +6074,7 @@ function renderGestaoPresenca() {
 
     const body = document.getElementById('gp-body');
     if (!DB.presencaTecnicos.filter(t => t.ativo !== false).length) {
-      body.innerHTML = `<div class="panel"><div class="empty">Nenhum técnico cadastrado no quadro${podeEditarPresenca() ? ' — clique em "+ Técnico" para começar.' : '.'}</div></div>`;
+      body.innerHTML = `<div class="panel"><div class="empty">Nenhum técnico cadastrado no quadro${podeEditarPresenca() ? ' — clique em "Importar do sistema" pra trazer quem já apareceu na Produção, ou em "+ Técnico" pra cadastrar um novo.' : '.'}</div></div>`;
       return;
     }
     if (!roster.length) {
