@@ -5620,42 +5620,14 @@ function renderParcialDoDia() {
   const dataPadrao = datasDisponiveis[0] || hojeISOLocal();
   document.getElementById('content').innerHTML = `
     <div class="toolbar">
-      <div class="field"><label>Arquivo CSV de atividades</label><input type="file" id="pd-file" accept=".csv,text/csv"></div>
       <div class="field"><label>Data</label><input type="date" id="f-data" value="${dataPadrao}"></div>
       ${multiCityField('pd-cidades', 'Cidades')}
       <button class="btn" id="f-apply">Filtrar</button>
     </div>
-    <p id="pd-msg" style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem"></p>
+    <p id="pd-msg" style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">O CSV de atividades é importado na aba PCR — o que for importado lá já aparece aqui, sem precisar importar de novo.</p>
     <div id="pd-body"></div>`;
   wireMultiCityField('pd-cidades');
   document.getElementById('f-apply').addEventListener('click', load);
-  // mesmo importador da PCR: o CSV é o mesmo arquivo, então importar aqui já
-  // alimenta as duas telas de uma vez
-  document.getElementById('pd-file').addEventListener('change', ev => {
-    const f = ev.target.files[0];
-    if (!f) return;
-    const msg = document.getElementById('pd-msg');
-    msg.textContent = 'Lendo ' + f.name + '...';
-    const leitor = new FileReader();
-    leitor.onload = () => {
-      const r = importarCsvPCR(String(leitor.result));
-      if (r.erro) { msg.innerHTML = `<span style="color:var(--danger)">${r.erro}</span>`; return; }
-      msg.innerHTML = `<span style="color:var(--success)">${r.total} atividades importadas de ${f.name}</span>`
-        + (supa ? ' — <span style="color:var(--text-muted)">salvando...</span>' : '');
-      if (r.syncPromise) r.syncPromise.then(res => {
-        const el = document.getElementById('pd-msg');
-        if (el) el.innerHTML = `<span style="color:var(--success)">${r.total} atividades importadas de ${f.name}</span> — `
-          + (res && res.ok ? '<span style="color:var(--success)">salvo (fica no histórico do dia)</span>'
-             : `<span style="color:var(--danger)">${ehAnalista() ? 'erro ao salvar: ' + ((res && res.error && res.error.message) || '?') : 'não consegui salvar no servidor'}</span>`);
-      });
-      renderParcialDoDia();
-      const dia = r.dias[r.dias.length - 1];
-      const campo = document.getElementById('f-data');
-      if (campo && dia) { campo.value = dia; document.getElementById('f-apply').click(); }
-    };
-    leitor.onerror = () => { msg.innerHTML = '<span style="color:var(--danger)">Não consegui ler o arquivo.</span>'; };
-    leitor.readAsText(f, 'utf-8');
-  });
   load();
   function load() {
     const data = document.getElementById('f-data').value;
