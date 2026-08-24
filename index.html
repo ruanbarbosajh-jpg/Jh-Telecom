@@ -7586,7 +7586,15 @@ function renderCmpPrazo() {
   function summary(s,e,f) {
     // mesma regra da página de Prazo: linha sem faixa válida não entra em nada
     // (é assim que o COUNTIFS da planilha se comporta)
-    const rows = DB.prazo.filter(p=>inRange(p.data,s,e) && isConcluido(p.status) && (!f.tech||(p.recurso||'').toLowerCase().includes(f.tech)) && (!f.city||(p.cidade||'').toLowerCase().includes(f.city)) && classifyBucket(p.status_prazo) !== 'outro' && ehPrazoDeReparo(p));
+    // "Prazo" só vale pras 6 cidades do contrato de SLA (CIDADES_COBRADAS_PRAZO)
+    // — sem essa trava, ordem de cidade de fora da área (Mauá, Ribeirão Pires,
+    // São Paulo, Suzano...) entrava na conta e inflava o total, derrubando a %.
+    // Bug real achado em julho/2026: aqui mostrava 2422 ordens / 84,97%, a
+    // planilha do cliente (só as 6 cidades) mostrava 2375 / 85,26%. Digitar uma
+    // cidade específica no campo ainda restringe mais, normal.
+    const cidadesSLA = CIDADES_COBRADAS_PRAZO.map(c => c.toUpperCase());
+    const cidadeOk = p => f.city ? (p.cidade||'').toLowerCase().includes(f.city) : cidadesSLA.includes((p.cidade||'').toUpperCase());
+    const rows = DB.prazo.filter(p=>inRange(p.data,s,e) && isConcluido(p.status) && (!f.tech||(p.recurso||'').toLowerCase().includes(f.tech)) && cidadeOk(p) && classifyBucket(p.status_prazo) !== 'outro' && ehPrazoDeReparo(p));
     const buckets = { ate24:0, ate48:0, maior48:0, outlier:0 };
     rows.forEach(r => { buckets[classifyBucket(r.status_prazo)]++; });
     return { total: rows.length, dentro24: buckets.ate24, buckets, pct: rows.length ? (buckets.ate24/rows.length)*100 : 0 };
