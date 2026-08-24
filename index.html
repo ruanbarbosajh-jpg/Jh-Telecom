@@ -1091,6 +1091,13 @@ function podeExcluirTecnicoPresenca() { return !!currentUser && currentUser.role
 const NOMES_ESCRITORIO_EDITAM = ['Thaís', 'Rebeca', 'Vitória'];
 function podeEditarPresencaEscritorio() { return !!currentUser && (currentUser.role === 'analista' || NOMES_ESCRITORIO_EDITAM.includes(currentUser.nome)); }
 function podeAcessar(role, route) {
+  // Presença — Escritório é mais restrita que o resto do sistema: só enxerga
+  // a aba quem edita (Analista, Thaís, Rebeca, Vitória). Mesmo Matheus e
+  // Sebastião — que têm o mesmo perfil "admin" só que cuidam do quadro de
+  // TÉCNICOS — ficam de fora, junto com Gestão e RH. Por isso não dá pra
+  // resolver isso só com ROUTE_PERMISSIONS (que bloqueia por PERFIL inteiro,
+  // não por pessoa dentro do mesmo perfil).
+  if (route === 'presencaescritorio') return podeEditarPresencaEscritorio();
   const bloqueadas = ROUTE_PERMISSIONS[perfilValido(role)];
   return !bloqueadas || !bloqueadas.includes(route);
 }
@@ -4320,6 +4327,28 @@ function exportarTabelaVisivel(tabela, nomeArquivo, ordemColunas) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   return { linhas: corpo.length, formato: 'csv' };
 }
+// Export dos quadros de Presença (técnicos/escritório): não dá pra usar
+// exportarTabelaVisivel direto porque as células do dia têm um <select>
+// dentro — o mesmo problema do filtro por coluna (textContent junta todas as
+// opções). Aqui os dados já vêm prontos (linhas montadas a partir do estado,
+// não lidos da tabela na tela).
+function exportarQuadroPresenca(nomeArquivo, cabecalho, linhas) {
+  const dados = [cabecalho, ...linhas];
+  if (typeof XLSX !== 'undefined' && XLSX.utils) {
+    const ws = XLSX.utils.aoa_to_sheet(dados);
+    ws['!cols'] = cabecalho.map((c, i) => ({ wch: Math.min(40, Math.max(String(c).length + 2, ...linhas.map(l => String(l[i] || '').length + 2))) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Presença');
+    XLSX.writeFile(wb, nomeArquivo + '.xlsx');
+    return;
+  }
+  const csv = '﻿' + dados.map(l => l.map(c => '"' + String(c).replace(/"/g,'""') + '"').join(';')).join('\r\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = nomeArquivo + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 // A aba de prazo do dia mistura, na mesma coluna, hora do Excel (fração ou
 // datetime) com texto ("PRAZO ESTOURADO") e erro de fórmula ("#REF!"). Estes
 // dois helpers deixam a tabela legível: hora vira HH:MM, data+hora vira
@@ -5922,6 +5951,14 @@ const STATUS_ATIVOS_PRESENCA = ['P', 'ADM'];
 // cidades da planilha do cliente — "LITORAL NORTE" é um agrupamento de rota
 // dele, não uma cidade de verdade, mas é assim que ele organiza o quadro
 const CIDADES_PRESENCA = ['GUARUJA','BERTIOGA','CUBATAO','SANTOS','SAO VICENTE','MONGAGUA','LITORAL NORTE','PRAIA GRANDE'];
+// A checagem de "já existe" ao cadastrar técnico/pessoa era sensível a
+// maiúscula/minúscula (Map.has faz comparação exata) — "adilson..." passava
+// mesmo já existindo "ADILSON...", criando duas linhas pra mesma pessoa
+// (mesmo tipo de problema achado antes na Folha de Pagamento).
+function nomeJaExisteNoMapa(mapa, nome) {
+  const alvo = nome.trim().toLowerCase();
+  return [...mapa.keys()].some(k => k.toLowerCase() === alvo);
+}
 // Lista fixa dos técnicos ativos na planta hoje — passada pelo cliente em
 // 24/08/2026, já sem quem foi desligado. Puxar da Produção sozinho trazia de
 // volta gente que já saiu (a Produção carrega meses de histórico, não só quem
@@ -5978,6 +6015,39 @@ async function registrarPresencaLog(tecnico, data, de, para, quem) {
   if (!supa) return;
   try { await supa.from('presenca_log').insert(registro); } catch (e) { /* fica só local nesta sessão */ }
 }
+// Salva várias células de uma vez (repetirDiaAnterior/marcarTodosPresentes)
+// num upsert só, em vez de 1 requisição por técnico em sequência — com o
+// quadro cheio (~60 pessoas), esperar 60 idas e vindas ao servidor uma atrás
+// da outra podia levar bem mais de 10s pra um clique só. Ignora quem já tá
+// no status pedido (mesma regra do salvarPresenca) e respeita a trava de dia
+// passado. atualizacoes: [{tecnico, data, status}].
+async function salvarPresencaEmLote(atualizacoes) {
+  const quem = currentUser ? (currentUser.nome || currentUser.login) : '?';
+  const agora = new Date().toISOString();
+  const linhas = [], logs = [];
+  atualizacoes.forEach(({ tecnico, data, status }) => {
+    if (data < hojeISOLocal()) return;
+    const key = tecnico + '|' + data;
+    const idx = DB_INDEX.presenca.get(key);
+    const anterior = idx !== undefined ? DB.presenca[idx].status : null;
+    if (anterior === status) return;
+    const row = { tecnico, data, status, atualizado_em: agora, atualizado_por: quem };
+    upsertRow(DB.presenca, DB_INDEX.presenca, key, row);
+    linhas.push(row);
+    logs.push({ tecnico, data, de: anterior || null, para: status, usuario: quem, quando: agora });
+  });
+  logs.forEach(l => DB.presencaLog.unshift(l));
+  if (!linhas.length) return { ok: true, total: 0 };
+  if (!supa) return { ok: true, offline: true, total: linhas.length };
+  try {
+    const [presResp, logResp] = await Promise.all([
+      supa.from('presenca').upsert(linhas, { onConflict: 'tecnico,data' }),
+      logs.length ? supa.from('presenca_log').insert(logs) : Promise.resolve({ error: null }),
+    ]);
+    if (presResp.error) return { ok: false, error: presResp.error, total: linhas.length };
+    return { ok: true, total: linhas.length };
+  } catch (e) { return { ok: false, error: e, total: linhas.length }; }
+}
 // Adiciona técnico ao quadro. "ativo" controla se ele some do quadro sem
 // apagar o histórico de presença dele (ver inativarTecnicoRoster).
 async function adicionarTecnicoRoster(nome, cidade, supervisor) {
@@ -6026,7 +6096,7 @@ function abrirModalNovoTecnico() {
     const supervisor = document.getElementById('nt-supervisor').value.trim();
     const erro = document.getElementById('nt-erro');
     if (!nome) { erro.textContent = 'Informe o nome do técnico.'; return; }
-    if (DB_INDEX.presencaTecnicos.has(nome)) { erro.textContent = 'Já existe um técnico com esse nome no quadro.'; return; }
+    if (nomeJaExisteNoMapa(DB_INDEX.presencaTecnicos, nome)) { erro.textContent = 'Já existe um técnico com esse nome no quadro.'; return; }
     erro.style.color = ''; erro.textContent = 'Salvando...';
     const r = await adicionarTecnicoRoster(nome, cidade, supervisor);
     if (!r.ok) { erro.textContent = 'Não consegui salvar no servidor: ' + ((r.error && r.error.message) || 'tente de novo.'); return; }
@@ -6041,8 +6111,10 @@ function renderGestaoPresenca() {
       <div class="field"><label>Início da semana</label><input type="date" id="gp-inicio" value="${hoje}"></div>
       <button type="button" class="btn" id="gp-prev" title="7 dias antes">◀ 7 dias</button>
       <button type="button" class="btn" id="gp-next" title="7 dias depois">7 dias ▶</button>
+      <button type="button" class="btn" id="gp-hoje" title="Volta a semana pra hoje">Hoje</button>
       ${multiCityField('gp-cidades', 'Cidades')}
       ${podeEditarPresenca() ? '<button type="button" class="btn" id="gp-add-tec">+ Técnico</button><button type="button" class="btn" id="gp-repetir" title="Copia o status de ontem pra hoje de quem ainda não tem status hoje">Repetir dia anterior</button><button type="button" class="btn" id="gp-marcar-todos" title="Marca hoje como Presente pra todo mundo filtrado">Marcar todos presentes</button>' : ''}
+      <button type="button" class="btn" id="gp-exportar">Exportar Excel</button>
       <button type="button" class="btn" id="f-apply">Filtrar</button>
     </div>
     <div id="gp-body"></div>`;
@@ -6050,6 +6122,12 @@ function renderGestaoPresenca() {
   document.getElementById('f-apply').addEventListener('click', load);
   document.getElementById('gp-prev').addEventListener('click', () => { const el = document.getElementById('gp-inicio'); el.value = isoAddDias(el.value, -7); load(); });
   document.getElementById('gp-next').addEventListener('click', () => { const el = document.getElementById('gp-inicio'); el.value = isoAddDias(el.value, 7); load(); });
+  document.getElementById('gp-hoje').addEventListener('click', () => { document.getElementById('gp-inicio').value = hoje; load(); });
+  document.getElementById('gp-exportar').addEventListener('click', () => {
+    const cab = ['Técnico', 'Cidade', 'Supervisor', ...dias.map(d => formatDate(d))];
+    const linhas = roster.map(t => [t.tecnico, t.cidade, t.supervisor || '-', ...dias.map(d => { const s = statusDe(t.tecnico, d); return s ? `${s} - ${STATUS_PRESENCA[s].label}` : ''; })]);
+    exportarQuadroPresenca(`presenca-tecnicos-${dias[0]}-a-${dias[6]}`, cab, linhas);
+  });
   if (podeEditarPresenca()) {
     document.getElementById('gp-add-tec').addEventListener('click', abrirModalNovoTecnico);
     document.getElementById('gp-repetir').addEventListener('click', repetirDiaAnterior);
@@ -6212,12 +6290,8 @@ function renderGestaoPresenca() {
     const pendentes = roster.filter(t => !statusDe(t.tecnico, hoje) && statusDe(t.tecnico, ontem));
     if (!pendentes.length) { alert('Nada pra repetir: ou já está tudo marcado hoje, ou ninguém tinha status ontem (nas cidades filtradas).'); return; }
     if (!confirm(`Repetir o status de ontem (${formatDate(ontem)}) pra hoje (${formatDate(hoje)}) em ${pendentes.length} técnico(s) sem marcação hoje?`)) return;
-    let falhas = 0;
-    for (const t of pendentes) {
-      const r = await salvarPresenca(t.tecnico, hoje, statusDe(t.tecnico, ontem));
-      if (!r.ok) falhas++;
-    }
-    if (falhas) alert(`${falhas} de ${pendentes.length} não salvaram no servidor. Tente de novo.`);
+    const r = await salvarPresencaEmLote(pendentes.map(t => ({ tecnico: t.tecnico, data: hoje, status: statusDe(t.tecnico, ontem) })));
+    if (!r.ok) alert(`Não consegui salvar no servidor. Tente de novo — ${(r.error && r.error.message) || ''}`);
     load();
   }
   // Marca HOJE como Presente pra todo mundo do recorte atual (cidades
@@ -6227,12 +6301,8 @@ function renderGestaoPresenca() {
   async function marcarTodosPresentes() {
     if (!roster.length) return;
     if (!confirm(`Marcar hoje (${formatDate(hoje)}) como Presente pra ${roster.length} técnico(s) do filtro atual? Isso sobrescreve o que já estiver marcado.`)) return;
-    let falhas = 0;
-    for (const t of roster) {
-      const r = await salvarPresenca(t.tecnico, hoje, 'P');
-      if (!r.ok) falhas++;
-    }
-    if (falhas) alert(`${falhas} de ${roster.length} não salvaram no servidor. Tente de novo.`);
+    const r = await salvarPresencaEmLote(roster.map(t => ({ tecnico: t.tecnico, data: hoje, status: 'P' })));
+    if (!r.ok) alert(`Não consegui salvar no servidor. Tente de novo — ${(r.error && r.error.message) || ''}`);
     load();
   }
 }
@@ -6243,6 +6313,20 @@ function renderGestaoPresenca() {
 // horário muda de pessoa pra pessoa e de dia da semana pra dia da semana),
 // mais uma tabela extra: o log de folgas de quem trabalhou fora da escala.
 const CARGOS_ESCRITORIO = ['Coordenadora', 'Supervisora', 'Atendente'];
+// Lista fixa das pessoas do escritório hoje (pedido do cliente, 24/08/2026) —
+// usada só pra preencher rápido o "+ Pessoa" (autocomplete de nome já traz
+// cargo/setor/horário fixo junto). Atualizar aqui quando o time mudar.
+const PESSOAS_ESCRITORIO_FIXAS = [
+  { nome: 'Thaís',    cargo: 'Coordenadora', setor: 'GESTÃO', horario_fixo: '' },
+  { nome: 'Vitória',  cargo: 'Supervisora',  setor: 'GESTÃO', horario_fixo: '' },
+  { nome: 'Rebeca',   cargo: 'Supervisora',  setor: 'GESTÃO', horario_fixo: '' },
+  { nome: 'Sandila',  cargo: 'Atendente',    setor: 'CERTIFICAÇÃO', horario_fixo: '8h às 17h' },
+  { nome: 'Luma',     cargo: 'Atendente',    setor: 'CIDADE', horario_fixo: '7h às 16h' },
+  { nome: 'Caio',     cargo: 'Atendente',    setor: 'CLEAN/UP - CIDADE', horario_fixo: '9h às 18h' },
+  { nome: 'Daniela',  cargo: 'Atendente',    setor: 'CIDADE', horario_fixo: '9h às 18h' },
+  { nome: 'Gabriele', cargo: 'Atendente',    setor: 'CIDADE', horario_fixo: '7h às 16h' },
+  { nome: 'Kimberly', cargo: 'Atendente',    setor: 'CIDADE', horario_fixo: '8h às 17h' },
+];
 const STATUS_GESTAO_ESCRITORIO = ['ABERTURA', 'FECHAMENTO', 'INTEGRAL'];
 // Turno das atendentes muda com o dia da semana: durante a semana são os 5
 // horários fixos de sempre; no fim de semana elas revezam janelas de 5h
@@ -6295,7 +6379,10 @@ async function registrarPresencaEscritorioLog(pessoa, data, de, para, quem) {
   try { await supa.from('presenca_escritorio_log').insert(registro); } catch (e) { /* fica só local nesta sessão */ }
 }
 async function adicionarPessoaEscritorio(nome, cargo, setor, horarioFixo) {
-  const row = { pessoa: nome, cargo, setor: setor || '', horario_fixo: horarioFixo || '', ativo: true, criado_em: new Date().toISOString() };
+  // também usada pra EDITAR (abrirModalPessoaEscritorio manda o mesmo nome de
+  // novo) — preserva a data de criação original em vez de resetar toda vez
+  const existente = DB.presencaEscritorioPessoas[DB_INDEX.presencaEscritorioPessoas.get(nome)];
+  const row = { pessoa: nome, cargo, setor: setor || '', horario_fixo: horarioFixo || '', ativo: true, criado_em: (existente && existente.criado_em) || new Date().toISOString() };
   upsertRow(DB.presencaEscritorioPessoas, DB_INDEX.presencaEscritorioPessoas, nome, row);
   if (!supa) return { ok: true, offline: true };
   try {
@@ -6355,34 +6442,53 @@ async function excluirFolgaEscritorio(id) {
     return { ok: true };
   } catch (e) { return { ok: false, error: e }; }
 }
-function abrirModalNovaPessoaEscritorio() {
+// Serve pra adicionar (sem argumento) e pra editar (passando o nome de quem
+// já está no quadro) — o nome fica travado na edição porque é a chave que
+// liga o histórico de presença dela (mudar o nome quebraria esse vínculo).
+function abrirModalPessoaEscritorio(nomeExistente) {
+  const idxExistente = nomeExistente ? DB_INDEX.presencaEscritorioPessoas.get(nomeExistente) : undefined;
+  const existente = idxExistente !== undefined ? DB.presencaEscritorioPessoas[idxExistente] : null;
   const m = document.getElementById('modal-tecnico');
   m.querySelector('.mt-corpo').innerHTML = `
-    <h3 style="margin:0 0 4px">Nova pessoa</h3>
-    <p style="margin:0 0 16px;font-size:13px;color:var(--text-secondary)">Adiciona ao quadro de presença do escritório.</p>
+    <h3 style="margin:0 0 4px">${existente ? 'Editar ' + esc(existente.pessoa) : 'Nova pessoa'}</h3>
+    <p style="margin:0 0 16px;font-size:13px;color:var(--text-secondary)">${existente ? 'O nome não pode ser alterado aqui — pra corrigir o nome, exclua e cadastre de novo.' : 'Adiciona ao quadro de presença do escritório.'}</p>
     <label>Nome</label>
-    <input type="text" id="np-nome" placeholder="Nome do colaborador">
+    <input type="text" id="np-nome" placeholder="Nome do colaborador"${existente ? ' readonly disabled' : ' list="np-nomes-fixos" autocomplete="off"'} value="${existente ? esc(existente.pessoa) : ''}">
+    ${existente ? '' : `<datalist id="np-nomes-fixos">${PESSOAS_ESCRITORIO_FIXAS.filter(p => !DB_INDEX.presencaEscritorioPessoas.has(p.nome)).map(p => `<option value="${esc(p.nome)}">`).join('')}</datalist>`}
     <label>Cargo</label>
-    <select id="np-cargo">${CARGOS_ESCRITORIO.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
+    <select id="np-cargo">${CARGOS_ESCRITORIO.map(c => `<option value="${c}"${(existente ? existente.cargo : '') === c ? ' selected' : ''}>${c}</option>`).join('')}</select>
     <label>Setor</label>
-    <input type="text" id="np-setor" placeholder="Ex.: Gestão, Cidade, Certificação">
+    <input type="text" id="np-setor" placeholder="Ex.: Gestão, Cidade, Certificação" value="${existente ? esc(existente.setor || '') : ''}">
     <label>Horário fixo (opcional)</label>
-    <input type="text" id="np-horario" placeholder="Ex.: 8h às 17h">
+    <input type="text" id="np-horario" placeholder="Ex.: 8h às 17h" value="${existente ? esc(existente.horario_fixo || '') : ''}">
     <p id="np-erro" class="error-msg"></p>
     <div class="modal-acoes">
       <button type="button" class="btn-secundario" id="np-cancelar">Cancelar</button>
-      <button type="button" class="btn-primario" id="np-salvar">Adicionar</button>
+      <button type="button" class="btn-primario" id="np-salvar">${existente ? 'Salvar' : 'Adicionar'}</button>
     </div>`;
   m.classList.add('active');
   document.getElementById('np-cancelar').addEventListener('click', fecharModalTecnico);
+  if (!existente) {
+    // nome escolhido na lista fixa já vem com cargo/setor/horário —
+    // agiliza cadastrar as 9 pessoas do escritório sem digitar tudo de novo
+    document.getElementById('np-nome').addEventListener('input', ev => {
+      const conhecida = PESSOAS_ESCRITORIO_FIXAS.find(p => p.nome === ev.target.value);
+      if (!conhecida) return;
+      document.getElementById('np-cargo').value = conhecida.cargo;
+      document.getElementById('np-setor').value = conhecida.setor;
+      document.getElementById('np-horario').value = conhecida.horario_fixo;
+    });
+  }
   document.getElementById('np-salvar').addEventListener('click', async () => {
-    const nome = document.getElementById('np-nome').value.trim();
+    const nome = existente ? existente.pessoa : document.getElementById('np-nome').value.trim();
     const cargo = document.getElementById('np-cargo').value;
     const setor = document.getElementById('np-setor').value.trim();
     const horario = document.getElementById('np-horario').value.trim();
     const erro = document.getElementById('np-erro');
-    if (!nome) { erro.textContent = 'Informe o nome.'; return; }
-    if (DB_INDEX.presencaEscritorioPessoas.has(nome)) { erro.textContent = 'Já existe alguém com esse nome no quadro.'; return; }
+    if (!existente) {
+      if (!nome) { erro.textContent = 'Informe o nome.'; return; }
+      if (nomeJaExisteNoMapa(DB_INDEX.presencaEscritorioPessoas, nome)) { erro.textContent = 'Já existe alguém com esse nome no quadro.'; return; }
+    }
     erro.style.color = ''; erro.textContent = 'Salvando...';
     const r = await adicionarPessoaEscritorio(nome, cargo, setor, horario);
     if (!r.ok) { erro.textContent = 'Não consegui salvar no servidor: ' + ((r.error && r.error.message) || 'tente de novo.'); return; }
@@ -6397,14 +6503,22 @@ function renderGestaoPresencaEscritorio() {
       <div class="field"><label>Início da semana</label><input type="date" id="ge-inicio" value="${hoje}"></div>
       <button type="button" class="btn" id="ge-prev" title="7 dias antes">◀ 7 dias</button>
       <button type="button" class="btn" id="ge-next" title="7 dias depois">7 dias ▶</button>
+      <button type="button" class="btn" id="ge-hoje" title="Volta a semana pra hoje">Hoje</button>
       ${podeEditarPresencaEscritorio() ? '<button type="button" class="btn" id="ge-add-pessoa">+ Pessoa</button>' : ''}
+      <button type="button" class="btn" id="ge-exportar">Exportar Excel</button>
       <button type="button" class="btn" id="f-apply">Filtrar</button>
     </div>
     <div id="ge-body"></div>`;
   document.getElementById('f-apply').addEventListener('click', load);
   document.getElementById('ge-prev').addEventListener('click', () => { const el = document.getElementById('ge-inicio'); el.value = isoAddDias(el.value, -7); load(); });
   document.getElementById('ge-next').addEventListener('click', () => { const el = document.getElementById('ge-inicio'); el.value = isoAddDias(el.value, 7); load(); });
-  if (podeEditarPresencaEscritorio()) document.getElementById('ge-add-pessoa').addEventListener('click', abrirModalNovaPessoaEscritorio);
+  document.getElementById('ge-hoje').addEventListener('click', () => { document.getElementById('ge-inicio').value = hoje; load(); });
+  document.getElementById('ge-exportar').addEventListener('click', () => {
+    const cab = ['Colaborador', 'Cargo', 'Setor', 'Horário Fixo', ...dias.map(d => formatDate(d))];
+    const linhas = pessoas.map(p => [p.pessoa, p.cargo, p.setor || '-', p.horario_fixo || '-', ...dias.map(d => labelStatusEscritorio(statusDe(p.pessoa, d)) || '')]);
+    exportarQuadroPresenca(`presenca-escritorio-${dias[0]}-a-${dias[6]}`, cab, linhas);
+  });
+  if (podeEditarPresencaEscritorio()) document.getElementById('ge-add-pessoa').addEventListener('click', () => abrirModalPessoaEscritorio());
   let dias = [], pessoas = [];
   const statusDe = (pessoa, data) => {
     const i = DB_INDEX.presencaEscritorio.get(pessoa + '|' + data);
@@ -6444,7 +6558,7 @@ function renderGestaoPresencaEscritorio() {
                 : (atual ? `<span style="background:${corStatusEscritorio(atual)};color:#fff;border-radius:6px;padding:4px 6px;font-weight:600;font-size:11px" title="${d < hoje ? 'Dia passado — não dá mais pra alterar' : ''}">${esc(labelStatusEscritorio(atual))}</span>` : `<span style="color:var(--text-muted)" title="${d < hoje ? 'Dia passado — não dá mais pra alterar' : ''}">—</span>`)
               }</td>`;
             }).join('')}
-            ${podeEditarPresencaEscritorio() ? `<td><button type="button" class="btn-icon" data-inativar-esc="${esc(p.pessoa)}" title="Tirar do quadro">✕</button></td>` : ''}
+            ${podeEditarPresencaEscritorio() ? `<td><button type="button" class="btn-icon" data-editar-esc="${esc(p.pessoa)}" title="Editar cargo/setor/horário">✎</button> <button type="button" class="btn-icon" data-inativar-esc="${esc(p.pessoa)}" title="Tirar do quadro">✕</button></td>` : ''}
           </tr>`).join('')}</tbody>
         </table></div>
       </div>
@@ -6479,6 +6593,9 @@ function renderGestaoPresencaEscritorio() {
           if (!r.ok) alert('Não consegui salvar no servidor. Tente de novo — ' + ((r.error && r.error.message) || ''));
           load();
         });
+      });
+      body.querySelectorAll('[data-editar-esc]').forEach(btn => {
+        btn.addEventListener('click', () => abrirModalPessoaEscritorio(btn.dataset.editarEsc));
       });
     }
     atualizarResumosEscritorio();
