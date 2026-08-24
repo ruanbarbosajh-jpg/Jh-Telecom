@@ -2840,7 +2840,7 @@ function importSheet(sheetName, rows) {
     const logEntry = { sheet_name: sheetName, target_table: 'comparativoFinanceiro', row_count: Object.keys(pivot.porCategoria).length, imported_at: new Date().toLocaleString('pt-BR') };
     DB.importsLog.unshift(logEntry);
     const syncPromise = syncPivotToSupabase(pivot);
-    logImportToSupabase({ ...logEntry, imported_by: currentUser ? currentUser.login : null });
+    logImportToSupabase({ ...logEntry, imported_by: currentUser ? (currentUser.nome || currentUser.login) : null });
     return { target: 'comparativoFinanceiro', inserted: Object.keys(pivot.porCategoria).length, syncPromise };
   }
 
@@ -2897,7 +2897,7 @@ function importSheet(sheetName, rows) {
   const logEntry = { sheet_name: sheetName, target_table: target, row_count: inserted, imported_at: new Date().toLocaleString('pt-BR') };
   DB.importsLog.unshift(logEntry);
   const syncPromise = syncBatchToSupabase(target, insertedObjs);
-  logImportToSupabase({ ...logEntry, imported_by: currentUser ? currentUser.login : null });
+  logImportToSupabase({ ...logEntry, imported_by: currentUser ? (currentUser.nome || currentUser.login) : null });
   return { target, inserted, errors, syncPromise };
 }
 async function importWorkbook(arrayBuffer) {
@@ -4201,7 +4201,7 @@ async function salvarMoManual(dia, cidade, mo) {
   if (!supa) return;
   try {
     await supa.from('pcr_mo').upsert(
-      { dia, cidade, mo, atualizado_em: new Date().toISOString(), atualizado_por: currentUser ? currentUser.login : null },
+      { dia, cidade, mo, atualizado_em: new Date().toISOString(), atualizado_por: currentUser ? (currentUser.nome || currentUser.login) : null },
       { onConflict: 'dia,cidade' });
   } catch (e) { /* sem rede: a correção continua valendo na tela desta sessão */ }
 }
@@ -4552,7 +4552,10 @@ function importarCsvPCR(texto) {
   // pro mesmo arquivo, reimportar o dia ATUALIZA as linhas em vez de duplicar.
   const vistos = {};
   const quando = new Date().toISOString();
-  const quem = currentUser ? currentUser.login : null;
+  // nome de verdade em vez do e-mail — no modo Supabase currentUser.login É o
+  // e-mail da conta, e "importado por xxx@jhtelecom.com.br" não dizia nada
+  // pra quem lê a tela (currentUser.nome já vem certo nos dois modos)
+  const quem = currentUser ? (currentUser.nome || currentUser.login) : null;
   out.forEach(r => {
     const base = `${r.data}|${r.os || 'sem-os'}`;
     vistos[base] = (vistos[base] || 0) + 1;
@@ -4606,7 +4609,7 @@ async function sincronizarPCR(linhas, dias) {
   }
   const logEntry = { sheet_name: 'CSV de atividades (PCR)', target_table: 'pcr', row_count: linhas.length, imported_at: new Date().toLocaleString('pt-BR') };
   DB.importsLog.unshift(logEntry);
-  logImportToSupabase({ ...logEntry, imported_by: currentUser ? currentUser.login : null });
+  logImportToSupabase({ ...logEntry, imported_by: currentUser ? (currentUser.nome || currentUser.login) : null });
   return res;
 }
 // "há 12 min", "há 3 h", "há 2 dias" — dá a noção de frescor do dado sem
