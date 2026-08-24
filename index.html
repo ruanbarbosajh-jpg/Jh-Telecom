@@ -6014,7 +6014,7 @@ function renderGestaoPresenca() {
       <button type="button" class="btn" id="gp-prev" title="7 dias antes">◀ 7 dias</button>
       <button type="button" class="btn" id="gp-next" title="7 dias depois">7 dias ▶</button>
       ${multiCityField('gp-cidades', 'Cidades')}
-      ${podeEditarPresenca() ? '<button type="button" class="btn" id="gp-add-tec">+ Técnico</button>' : ''}
+      ${podeEditarPresenca() ? '<button type="button" class="btn" id="gp-add-tec">+ Técnico</button><button type="button" class="btn" id="gp-repetir" title="Copia o status de ontem pra hoje de quem ainda não tem status hoje">Repetir dia anterior</button>' : ''}
       <button type="button" class="btn" id="f-apply">Filtrar</button>
     </div>
     <div id="gp-body"></div>`;
@@ -6022,7 +6022,10 @@ function renderGestaoPresenca() {
   document.getElementById('f-apply').addEventListener('click', load);
   document.getElementById('gp-prev').addEventListener('click', () => { const el = document.getElementById('gp-inicio'); el.value = isoAddDias(el.value, -7); load(); });
   document.getElementById('gp-next').addEventListener('click', () => { const el = document.getElementById('gp-inicio'); el.value = isoAddDias(el.value, 7); load(); });
-  if (podeEditarPresenca()) document.getElementById('gp-add-tec').addEventListener('click', abrirModalNovoTecnico);
+  if (podeEditarPresenca()) {
+    document.getElementById('gp-add-tec').addEventListener('click', abrirModalNovoTecnico);
+    document.getElementById('gp-repetir').addEventListener('click', repetirDiaAnterior);
+  }
   // guardados aqui fora do load() pra "mudar 1 status" (o caso mais comum, de
   // longe) não precisar reconstruir o quadro inteiro — só os números dos
   // painéis de resumo. Redesenhar a tabela toda a cada clique perdia a posição
@@ -6064,7 +6067,7 @@ function renderGestaoPresenca() {
             ${podeExcluirTecnicoPresenca() ? '<th></th>' : ''}
           </tr></thead>
           <tbody>${roster.map(t => `<tr>
-            <td>${esc(t.tecnico)}</td><td>${esc(t.cidade)}</td><td>${esc(t.supervisor || '-')}</td>
+            <td style="text-transform:uppercase">${esc(t.tecnico)}</td><td>${esc(t.cidade)}</td><td>${esc(t.supervisor || '-')}</td>
             ${dias.map(d => {
               const atual = statusDe(t.tecnico, d);
               // dia já passado: só consulta, não edita mais — mudar o passado
@@ -6160,10 +6163,28 @@ function renderGestaoPresenca() {
       <div class="table-wrap" style="max-height:320px;overflow:auto"><table class="data-table">
         <thead><tr><th>Quando</th><th>Quem</th><th>Técnico</th><th>Data</th><th>O que mudou</th></tr></thead>
         <tbody>${logOrdenado.slice(0, 200).map(l => `<tr>
-          <td>${new Date(l.quando).toLocaleString('pt-BR')}</td><td>${esc(l.usuario)}</td><td>${esc(l.tecnico)}</td><td>${formatDate(l.data)}</td>
+          <td>${new Date(l.quando).toLocaleString('pt-BR')}</td><td>${esc(l.usuario)}</td><td style="text-transform:uppercase">${esc(l.tecnico)}</td><td>${formatDate(l.data)}</td>
           <td>mudou de <b>${l.de ? esc(l.de) : '—'}</b> para <b>${esc(l.para)}</b></td>
         </tr>`).join('')}</tbody>
       </table></div>`;
+  }
+  // Copia o status de ONTEM pra HOJE — só de quem ainda não tem status hoje
+  // (nunca sobrescreve quem já foi marcado manualmente). Resolve o caso mais
+  // comum do dia a dia: a maioria repete "Presente" todo dia, então em vez de
+  // clicar técnico por técnico, 1 clique preenche todo mundo que não mudou, e
+  // sobra só ajustar as exceções (quem entrou de folga, atestado etc.).
+  async function repetirDiaAnterior() {
+    const ontem = isoAddDias(hoje, -1);
+    const pendentes = roster.filter(t => !statusDe(t.tecnico, hoje) && statusDe(t.tecnico, ontem));
+    if (!pendentes.length) { alert('Nada pra repetir: ou já está tudo marcado hoje, ou ninguém tinha status ontem (nas cidades filtradas).'); return; }
+    if (!confirm(`Repetir o status de ontem (${formatDate(ontem)}) pra hoje (${formatDate(hoje)}) em ${pendentes.length} técnico(s) sem marcação hoje?`)) return;
+    let falhas = 0;
+    for (const t of pendentes) {
+      const r = await salvarPresenca(t.tecnico, hoje, statusDe(t.tecnico, ontem));
+      if (!r.ok) falhas++;
+    }
+    if (falhas) alert(`${falhas} de ${pendentes.length} não salvaram no servidor. Tente de novo.`);
+    load();
   }
 }
 
