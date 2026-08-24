@@ -936,9 +936,9 @@ const ROUTE_PERMISSIONS = {
   // "Resumo Geral - Operação" (visão executiva combinando produção/financeiro/
   // IFI-IRR/prazo/frota/pedágio) é exclusivo do Analista — o único perfil SEM
   // 'bi' bloqueado abaixo.
-  // Supervisor/Coordenador: fica de fora do Relatório de Eficiência, Pedágio e
-  // de todo o Financeiro (tela + comparativo) — pedido do cliente.
-  admin: ['import', 'parcialdia', 'bi', 'dashboard', 'toll', 'finance', 'comparisons'],
+  // Supervisor/Coordenador: fica de fora do Relatório de Eficiência, Pedágio,
+  // de todo o Financeiro (tela + comparativo) e da Folha de Pagamento — pedido do cliente.
+  admin: ['import', 'parcialdia', 'bi', 'dashboard', 'toll', 'finance', 'comparisons', 'folha'],
   // RH: fica de fora do Relatório de Eficiência e das telas de Prazo (Reparo
   // 24h e Ativações 36h) — pedido do cliente.
   rh: ['dashboard', 'acomtec', 'parcialdia', 'import', 'bi', 'prazo', 'prazoativacao'],
@@ -6599,10 +6599,21 @@ function renderFolhaPagamento() {
   // metas de indicador (%) — declaradas ANTES de load(), senão o const cai na
   // "zona morta temporal" e a página inteira quebra silenciosamente ao abrir
   const IFI_TARGET = 2.50, IRR_TARGET = 4.50;
-  const periodos = [...new Set(DB.folhaPagamento.map(r=>r.periodo).filter(Boolean))];
+  // A folha pode ter mais de um período importado ao longo do tempo (cada
+  // reimportação com um período diferente entra como linha NOVA, não substitui
+  // — a chave é tecnico+periodo). O seletor precisa aparecer mesmo com um único
+  // lote (inclusive o mais antigo, importado sem período preenchido no prompt),
+  // senão a tela parece não ter histórico nenhum quando na verdade só falta
+  // escolher qual "folha" olhar.
+  const periodosNomeados = [...new Set(DB.folhaPagamento.map(r=>r.periodo).filter(Boolean))];
+  const temSemPeriodo = DB.folhaPagamento.some(r => !r.periodo);
   document.getElementById('content').innerHTML = `<div class="toolbar">
     <div class="field"><label>Técnico</label><input type="text" id="f-tech" placeholder="Nome" list="tech-list"></div>
-    ${periodos.length ? `<div class="field"><label>Período</label><select id="f-periodo"><option value="">Todos</option>${periodos.map(p=>`<option>${p}</option>`).join('')}</select></div>` : ''}
+    ${DB.folhaPagamento.length ? `<div class="field"><label>Período</label><select id="f-periodo">
+      <option value="">Todos os períodos</option>
+      ${periodosNomeados.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
+      ${temSemPeriodo ? `<option value="__sem_periodo__">(sem período definido)</option>` : ''}
+    </select></div>` : ''}
     <div class="field"><label>Retornos IFI/IRR — de</label><input type="date" id="fol-ret-de"></div>
     <div class="field"><label>até</label><input type="date" id="fol-ret-ate"></div>
     <button class="btn" id="f-apply">Filtrar</button>
@@ -6620,7 +6631,8 @@ function renderFolhaPagamento() {
     const tech = document.getElementById('f-tech').value.toLowerCase();
     const periodoEl = document.getElementById('f-periodo');
     const periodo = periodoEl ? periodoEl.value : '';
-    const brutas = DB.folhaPagamento.filter(r => (!tech || (r.tecnico||'').toLowerCase().includes(tech)) && (!periodo || r.periodo===periodo));
+    const matchPeriodo = r => !periodo || (periodo === '__sem_periodo__' ? !r.periodo : r.periodo === periodo);
+    const brutas = DB.folhaPagamento.filter(r => (!tech || (r.tecnico||'').toLowerCase().includes(tech)) && matchPeriodo(r));
     const body = document.getElementById('folha-body');
     if (!brutas.length) { body.innerHTML = '<div class="panel"><div class="empty">Nenhum lançamento encontrado. Importe a aba "FOLHA DE PAGAMENTO".</div></div>'; return; }
 
