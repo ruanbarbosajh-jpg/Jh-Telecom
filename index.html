@@ -275,6 +275,8 @@
   .metric-card .value { font-size: clamp(16px, 1.7vw, 22px); font-weight: 700; color: var(--accent); line-height: 1.25; overflow-wrap: anywhere; word-break: break-word; }
   .metric-card .value.negative { color: var(--danger); }
   .metric-card .value.positive { color: var(--success); }
+  /* destaque maior — usado em telas onde o número é o dado principal (ex.: Ofensor) */
+  .metric-card .value.big-value { font-size: clamp(22px, 2.6vw, 32px); }
   .metric-card .sub { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; }
 
   .panels-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 1.5rem; }
@@ -320,9 +322,14 @@
   .bar-fill { height: 100%; border-radius: 6px; transition: width .3s; }
   .bar-value { flex: 0 0 auto; text-align: right; font-weight: 700; color: var(--text-primary); white-space: nowrap; font-size: 12px; }
 
-  .donut-wrap { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; justify-content: center; }
-  .donut-holder { position: relative; width: 210px; height: 210px; flex-shrink: 0; }
-  .donut { width: 100%; height: 100%; border-radius: 50%; }
+  .donut-wrap { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; justify-content: center; max-width: 100%; }
+  /* responsivo: encolhe em painel/tela estreita, mas não passa de 260px */
+  .donut-holder { position: relative; width: clamp(160px, 34vw, 260px); height: clamp(160px, 34vw, 260px); aspect-ratio: 1 / 1; flex-shrink: 0; max-width: 100%; }
+  /* vira ANEL (miolo vazado) via máscara — mostra o fundo do card por trás,
+     então funciona igual nos 2 temas sem precisar de cor fixa no centro */
+  .donut { width: 100%; height: 100%; border-radius: 50%;
+    -webkit-mask-image: radial-gradient(closest-side, transparent 62%, #000 63%);
+    mask-image: radial-gradient(closest-side, transparent 62%, #000 63%); }
   .donut-slice-label { position: absolute; transform: translate(-50%,-50%); font-size: 11.5px; font-weight: 700; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.8); pointer-events: none; white-space: nowrap; }
   .donut-legend { font-size: 13.5px; display: flex; flex-direction: column; gap: 9px; }
   .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; flex-shrink: 0; }
@@ -344,6 +351,7 @@
   .trend-chart-svg, .grouped-bars-svg { width: 100%; height: 220px; overflow: visible; }
   .trend-gridline { stroke: var(--border); stroke-width: 1; }
   .trend-axis-label { fill: var(--text-muted); font-size: 10px; }
+  .grouped-bar-value { fill: var(--text-primary); font-size: 10.5px; font-weight: 700; }
   .trend-dot { cursor: pointer; transition: r .15s ease; }
   .trend-dot:hover { r: 6; }
   .grouped-bars-svg rect { transition: opacity .15s ease; cursor: pointer; }
@@ -2529,7 +2537,9 @@ function groupedBarsChart(elId, categorias, series, opts = {}) {
           const h = (v / max) * bodyH;
           const bx = groupX + si * barW;
           const by = H - PADY_B - h;
-          return `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${(barW - 3).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${s.color}"><title>${s.name} — ${cat}: ${v}</title></rect>`;
+          const labelX = bx + (barW - 3) / 2;
+          return `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${(barW - 3).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${s.color}"><title>${s.name} — ${cat}: ${v}</title></rect>
+            ${v ? `<text x="${labelX.toFixed(1)}" y="${(by - 4).toFixed(1)}" text-anchor="middle" class="grouped-bar-value">${v}</text>` : ''}`;
         }).join('');
         const labelX = groupX + (barW * series.length) / 2;
         return bars + `<text x="${labelX.toFixed(1)}" y="${H - 10}" text-anchor="middle" class="trend-axis-label">${cat}</text>`;
@@ -3255,7 +3265,7 @@ function ativarFiltrosDeColuna(raiz) {
 function metricCard(label, value, negative, opts = {}) {
   const icon = opts.icon ? `<span>${opts.icon}</span>` : '';
   const sub = opts.sub ? `<div class="sub">${opts.sub}</div>` : '';
-  const classe = opts.positive ? ' positive' : (negative ? ' negative' : '');
+  const classe = (opts.positive ? ' positive' : (negative ? ' negative' : '')) + (opts.big ? ' big-value' : '');
   return `<div class="metric-card${opts.accent?' accent':''}"><div class="label">${icon}${label}</div><div class="value${classe}">${value}</div>${sub}</div>`;
 }
 // Medidor em arco no estilo do Power BI: escala de 0 até `max`, com um traço
@@ -3756,7 +3766,9 @@ function renderProduction() {
     // rankings — baseados apenas em ordens CONCLUÍDAS (é o que gera receita)
     const cityCount = {}; concluidos.forEach(r=>{ const c=r.cidade||'Não informado'; cityCount[c]=(cityCount[c]||0)+1; });
     const cityList = Object.entries(cityCount).map(([label,value])=>({label,value})).sort((a,b)=>b.value-a.value);
-    const bottomCityList = [...cityList].sort((a,b)=>a.value-b.value);
+    // metade de cima (mais produz) em verde, metade de baixo (menos produz) em
+    // vermelho — antes eram 2 painéis separados repetindo a mesma informação
+    const cityRankColored = cityList.map((c,i) => ({ ...c, color: i < Math.ceil(cityList.length/2) ? '#22c55e' : '#ef4444' }));
 
     const techCount = {}; concluidos.forEach(r=>{ const t=r.recurso||'Não informado'; techCount[t]=(techCount[t]||0)+1; });
     const techList = Object.entries(techCount).map(([label,value])=>({label,value})).sort((a,b)=>b.value-a.value);
@@ -3783,10 +3795,7 @@ function renderProduction() {
         <div class="panel"><h3>Ordens por Status</h3><div id="c-status"></div></div>
         <div class="panel"><h3>Ordens por Tipo de Atividade${statusFilter?' (filtro aplicado)':''}</h3><div id="c-tipo"></div></div>
       </div>
-      <div class="panels-grid">
-        <div class="panel"><h3>Cidades que mais produzem (concluído)</h3><div id="c-city-top"></div></div>
-        <div class="panel"><h3>Cidades que menos produzem (concluído)</h3><div id="c-city-bottom"></div></div>
-      </div>
+      <div class="panel" style="margin-bottom:1.5rem"><h3>Produção por Cidade (concluído)</h3><div id="c-city-rank"></div></div>
       <div class="panels-grid">
         <div class="panel"><h3>Técnicos que mais produzem (concluído)</h3><div id="c-tech-top"></div></div>
         <div class="panel"><h3>Técnicos que menos produzem (concluído)</h3><div id="c-tech-bottom"></div></div>
@@ -3840,9 +3849,8 @@ function renderProduction() {
       {label:'Não concluídas', value:naoConcluidos.length, color:'#93a0bd'},
       {label:'Canceladas', value:cancelados.length, color:'#ef4444'},
     ]);
-    barsChartTopN('c-tipo', byTipo);
-    barsChartTopN('c-city-top', cityList, {color:'#22c55e', defaultN:5});
-    barsChartTopN('c-city-bottom', bottomCityList, {color:'#ef4444', defaultN:5});
+    barsChart('c-tipo', byTipo);
+    barsChart('c-city-rank', cityRankColored);
     barsChartTopN('c-tech-top', techList, {color:'#22c55e', defaultN:5});
     barsChartTopN('c-tech-bottom', bottomTechList, {color:'#ef4444', defaultN:5});
     barsChartTopN('c-desloc-mais', deslocList, {color:'#38bdf8', defaultN:5});
@@ -4089,11 +4097,11 @@ function renderOfensor() {
 
     body.innerHTML = `
       <div class="cards-grid wide">
-        ${metricCard('Cidade com mais retornos', topCity ? topCity.label : '-', false, {sub: topCity ? topCity.value+' retorno(s)' : '', accent:true})}
-        ${metricCard('Maior ofensor', topOfensor ? topOfensor.label : '-', false, {sub: topOfensor ? topOfensor.value+' retorno(s)' : ''})}
-        ${metricCard('Qtd. IFI', qtdIfi)}
-        ${metricCard('Qtd. IRR', qtdIrr)}
-        ${metricCard('Total de retornos', rows.length)}
+        ${metricCard('Cidade com mais retornos', topCity ? topCity.label : '-', false, {sub: topCity ? topCity.value+' retorno(s)' : '', accent:true, big:true})}
+        ${metricCard('Maior ofensor', topOfensor ? topOfensor.label : '-', false, {sub: topOfensor ? topOfensor.value+' retorno(s)' : '', big:true})}
+        ${metricCard('Qtd. IFI', qtdIfi, false, {big:true})}
+        ${metricCard('Qtd. IRR', qtdIrr, false, {big:true})}
+        ${metricCard('Total de retornos', rows.length, false, {big:true})}
       </div>
       <div class="panels-grid thirds">
         ${gaugePanel('% IRR', pctIrr, 4.50, {lowerIsBetter:true})}
@@ -6339,7 +6347,7 @@ function renderGestaoPresenca() {
     const folgaHoje = statusHoje.filter(s => s === 'FG').length;
     const ausentesHoje = statusHoje.filter(s => ['F', 'ATT', 'FR'].includes(s)).length;
     const metrics = document.getElementById('gp-metrics');
-    if (metrics) metrics.innerHTML = `<div class="metrics-grid">
+    if (metrics) metrics.innerHTML = `<div class="cards-grid">
       ${metricCard('Total na Planta', totalPlanta)}
       ${metricCard('Presentes hoje', presentesHoje, false, { positive: true })}
       ${metricCard('Ausentes hoje', ausentesHoje, ausentesHoje > 0)}
@@ -6744,7 +6752,7 @@ function renderGestaoPresencaEscritorio() {
     const folgaHoje = statusHoje.filter(s => s === 'FOLGA').length;
     const ausenteHoje = statusHoje.filter(s => ['F', 'ATT', 'FR'].includes(s)).length;
     const metrics = document.getElementById('ge-metrics');
-    if (metrics) metrics.innerHTML = `<div class="metrics-grid">
+    if (metrics) metrics.innerHTML = `<div class="cards-grid">
       ${metricCard('Total na Equipe', totalEquipe)}
       ${metricCard('Trabalhando hoje', trabalhandoHoje, false, { positive: true })}
       ${metricCard('Folga hoje', folgaHoje)}
@@ -8305,9 +8313,12 @@ function renderPainelBI() {
       };
     }).sort((a, b) => b.ordens - a.ordens);
 
-    // ---------- Evolução dos últimos ciclos — não depende do filtro acima de propósito,
-    // pra dar sempre a tendência recente mesmo enquanto o usuário compara outro período ----------
-    const ciclosEvo = ciclosDoFechamento().lista.slice(0, 6).reverse();
+    // ---------- Evolução dos ciclos dentro do período "De/Até" escolhido ----------
+    const ciclosNoFiltro = ciclosDoFechamento().lista.filter(c => overlaps(c.start, c.end, s, e));
+    // se nenhum ciclo cruza o período (ex.: filtro mais estreito que 1 ciclo),
+    // cai pra mostrar os últimos 6 mesmo assim, pra tela não ficar vazia à toa
+    const ciclosEvo = (ciclosNoFiltro.length ? ciclosNoFiltro : ciclosDoFechamento().lista.slice(0, 6))
+      .sort((a, b) => String(a.end).localeCompare(String(b.end)));
     const evoGiga = ciclosEvo.map(c => {
       const fs = DB.fechamento.filter(f => f.inicio === c.start && f.ate_o_dia === c.end);
       return { label: formatDate(c.end), value: fs.reduce((a, f) => a + (f.valor_pago_giga || 0), 0) };
@@ -8335,15 +8346,15 @@ function renderPainelBI() {
 
       <div class="section-heading">Qualidade & Prazo — cidades selecionadas</div>
       <div class="panels-grid">
-        ${gaugePanel('% Prazo Reparo (24h)', pctPrazoReparo, PRAZO_META, { decimals: 1 })}
-        ${gaugePanel('% Prazo Ativação (36h)', pctPrazoAtiv, PRAZO_ATIVACAO_META, { decimals: 1 })}
+        ${gaugePanel('% Prazo Reparo (24h)', pctPrazoReparo, PRAZO_META, { decimals: 2 })}
+        ${gaugePanel('% Prazo Ativação (36h)', pctPrazoAtiv, PRAZO_ATIVACAO_META, { decimals: 2 })}
       </div>
       <div class="panels-grid">
-        ${gaugePanel('% IRR', pctIrr, 4.50, { lowerIsBetter: true })}
-        ${gaugePanel('% IFI', pctIfi, 2.50, { lowerIsBetter: true })}
+        ${gaugePanel('% IRR', pctIrr, 4.50, { lowerIsBetter: true, decimals: 2 })}
+        ${gaugePanel('% IFI', pctIfi, 2.50, { lowerIsBetter: true, decimals: 2 })}
       </div>
 
-      <div class="section-heading">Evolução — últimos ciclos de fechamento (não muda com o filtro acima)</div>
+      <div class="section-heading">Evolução — ciclos de fechamento no período selecionado</div>
       <div class="panel" style="margin-bottom:1.5rem"><h3>Faturamento GIGA × Lucro por ciclo</h3><div id="bi-evolucao"></div></div>
 
       <div class="panels-grid">
