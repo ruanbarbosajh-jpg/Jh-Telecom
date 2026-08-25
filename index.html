@@ -711,7 +711,6 @@ const SUPABASE_TABLES = {
   // no banco viram texto ISO, então precisam voltar a ser Date ao carregar,
   // senão as contas de prazo e de "tempo em rota" quebram.
   pcr:             { table: 'pcr',                conflict: 'chave', hydrate: hidratarLinhaPCR },
-  valoresOrdens:   { table: 'valores_ordens',     conflict: 'tipo_ordem' },
   // Gestão Presença: quadro de técnicos (roster) + status por dia + log de
   // auditoria (quem alterou o quê). presencaLog é só de INSERT (nunca upsert de
   // verdade) — o "conflict" abaixo só existe pra esse loader genérico conseguir
@@ -1170,7 +1169,7 @@ function podeAcessar(role, route) {
 
 // ===================== ESTADO EM MEMÓRIA (some ao recarregar) =====================
 const DB = {
-  fechamento: [], producao: [], prazo: [], folhaPagamento: [], baseDoDia: [], prazoReparoDia: [], valoresOrdens: [],
+  fechamento: [], producao: [], prazo: [], folhaPagamento: [], baseDoDia: [], prazoReparoDia: [],
   frotaLinks: [], frotaTroca: [], frotaManutencao: [], frotaDesvinc: [], frotaMultas: [], frotaRevisao: [],
   pedagio: [], financeiro: [], importsLog: [],
   pcr: [], // linhas do CSV de atividades importado na aba PCR
@@ -1192,7 +1191,7 @@ const DB = {
 // Sem isso, importar REPAROS OK + BASE_PRODUÇÃO (que descrevem o mesmo universo de
 // ordens) ou reimportar o mesmo arquivo duas vezes soma tudo em dobro.
 const DB_INDEX = {
-  producao: new Map(), fechamento: new Map(), prazo: new Map(), folhaPagamento: new Map(), baseDoDia: new Map(), prazoReparoDia: new Map(), valoresOrdens: new Map(),
+  producao: new Map(), fechamento: new Map(), prazo: new Map(), folhaPagamento: new Map(), baseDoDia: new Map(), prazoReparoDia: new Map(),
   frotaLinks: new Map(), frotaTroca: new Map(), frotaManutencao: new Map(), frotaDesvinc: new Map(), frotaMultas: new Map(), frotaRevisao: new Map(),
   pedagio: new Map(), financeiro: new Map(), pcr: new Map(),
   presencaTecnicos: new Map(), presenca: new Map(),
@@ -1707,21 +1706,37 @@ window.addEventListener('beforeunload', () => guardarFiltros(ROTA_ATUAL.nome));
 
 // ===================== HELPERS =====================
 function formatCurrency(v) { return (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
-// Busca o valor GIGA->JH pra um Tipo de Atividade, casando por aproximação
-// (a planilha de produção usa nomes tipo "Reparo Corretivo" e a de preços usa
-// só "reparo" — por isso comparamos por inclusão, não igualdade exata).
-function precoGigaPorTipo(tipoAtividade) {
-  if (!DB.valoresOrdens.length) return null;
+// ---------- TABELA DE VALORES POR SERVIÇO (fixa) ----------
+// Decisão do cliente: esses valores NÃO vêm mais de planilha. São de contrato,
+// mudam muito raramente, e vinham de uma aba ("VALORES ORDENS") com layout
+// problemático — duas tabelas empilhadas, cabeçalho em 2 linhas e colunas
+// vazias à esquerda — que já causou valor zerado e coluna trocada mais de uma
+// vez. Ficam fixos aqui; pra mudar um preço, é só editar esta tabela.
+//   giga    = quanto a GIGA paga a JH pela ordem
+//   normal  = quanto a JH paga o técnico
+//   d26     = quanto a JH paga o técnico com 26 dias ou mais trabalhados
+// `re` casa com o "Tipo de Atividade" da base de produção, que usa nomes mais
+// compridos ("Reparo Corretivo", "Upgrade/Downgrade").
+const VALORES_ORDENS_FIXOS = [
+  { label: 'Ativação',            re: /ativa/,                giga: 194.25, normal: 48.50, d26: 53.00 },
+  { label: 'Reparo',              re: /reparo/,               giga: 107.00, normal: 38.50, d26: 42.00 },
+  { label: 'Mudança de Endereço', re: /mudan.*endereco/,      giga: 194.25, normal: 48.50, d26: 53.00 },
+  { label: 'Mudança de Cômodo',   re: /mudan.*comodo/,        giga:  97.13, normal: 30.00, d26: 30.00 },
+  { label: 'Upgrade/Downgrade',   re: /upgrade|downgrade/,    giga:  77.70, normal: 27.00, d26: 27.00 },
+];
+// Descontos por retorno — mesma origem, também de contrato.
+const DESCONTOS_RETORNO_FIXOS = [
+  { label: 'Desconto IFI', giga: 107.00, tecnico: 48.50 },
+  { label: 'Desconto IRR', giga: 107.00, tecnico: 38.50 },
+];
+function linhaValorOrdem(tipoAtividade) {
   const t = normalizeHeader(tipoAtividade);
-  const candidatos = DB.valoresOrdens.filter(v => t.includes(normalizeHeader(v.tipo_ordem)) || normalizeHeader(v.tipo_ordem).includes(t));
-  if (!candidatos.length) return null;
-  // pode haver mais de uma linha pro mesmo tipo (reimportações antigas com
-  // caixa diferente do texto, de antes do tipo_ordem virar chave normalizada
-  // — ver case 'valoresOrdens' em insertRow) — prefere a que já tem valor da
-  // GIGA preenchido, em vez de pegar sempre a primeira (podia ser uma linha
-  // velha zerada e nunca deixar o valor novo aparecer, mesmo reimportando).
-  const comValor = candidatos.find(v => v.valor_giga);
-  return (comValor || candidatos[0]).valor_giga;
+  return VALORES_ORDENS_FIXOS.find(v => v.re.test(t)) || null;
+}
+// Quanto a GIGA paga por uma ordem desse tipo (null = tipo não reconhecido).
+function precoGigaPorTipo(tipoAtividade) {
+  const l = linhaValorOrdem(tipoAtividade);
+  return l ? l.giga : null;
 }
 // Painel "Valor das Ordens — pago pela GIGA": Dashboard, Resumo Geral e
 // Financeiro mostravam a mesma tabela (3 cópias) — centralizado aqui. Mostra
@@ -2664,18 +2679,6 @@ const SCHEMAS = {
     // define a faixa 24h/48h/>48h/outlier)
     cliente: ['cliente'], status: ['status'], tempo: ['tempo'],
   }},
-  // aba "VALORES ORDENS" (dentro de FOLHA_DE_PAGAMENTO...xlsx): tabela de preço
-  // por tipo de ordem — quanto a GIGA paga a JH e quanto a JH paga o técnico
-  // (nas faixas "normal" e "26 dias/individual").
-  valoresOrdens: { fields: {
-    tipo_ordem: ['tipo de ordem'],
-    valor_giga: ['giga jh','giga>jh','valor giga jh','giga'],
-    valor_normal: ['normal'],
-    valor_26dias: ['26 dias ind','26 dias','26 dias individual'],
-  }},
-  // aba "BASE DO DIA" (dentro de PRAZOS_ESCRITÓRIO.xlsx) — mesma estrutura de
-  // produção, só que com status mais granular (Em Rota, Pendente, Iniciado etc.)
-  // e às vezes já com colunas de prazo do dia.
   baseDoDia: { fields: {
     recurso: ['recurso'], data: ['data'], mes: ['mes','mês'], status: ['status da atividade'],
     cidade: ['cidade'], tipo_atividade: ['tipo de atividade 2','tipo de atividade'],
@@ -2857,17 +2860,6 @@ function insertRow(target, map, row, extra) {
       return upsertRowByDate(DB.prazoReparoDia, DB_INDEX.prazoReparoDia, os || null, obj, 'data');
       break;
     }
-    case 'valoresOrdens': {
-      // chave normalizada (maiúsc/minúsc e acento não importam) — sem isso,
-      // reimportar a mesma planilha com "Ativação" numa vez e "ATIVAÇÃO" na
-      // outra criava uma linha NOVA em vez de atualizar a existente, e a
-      // busca por precoGigaPorTipo podia pegar a linha velha (às vezes
-      // zerada) em vez da recém-importada.
-      const tipo = normalizeHeader(s('tipo_ordem'));
-      const obj = { tipo_ordem: tipo, valor_giga: money('valor_giga'), valor_normal: money('valor_normal'), valor_26dias: money('valor_26dias') };
-      return upsertRow(DB.valoresOrdens, DB_INDEX.valoresOrdens, tipo || null, obj);
-      break;
-    }
     case 'baseDoDia': {
       const os = normalizeChaveOS(s('os'));
       const obj = {
@@ -2998,73 +2990,15 @@ function tryParsePivotFinanceiro(rows) {
   return { periodos: periodCols.map(p=>p.periodo), porCategoria, totalDespesas, receitaOrdens, lucro };
 }
 
-// ---------- Parser dedicado da aba "VALORES ORDENS" ----------
-// Essa aba não segue o formato "1 linha de cabeçalho + dados" que o importador
-// genérico espera. O arquivo real (FOLHA DE PAGAMENTO JH LT 2026) tem:
-//   - 3 colunas VAZIAS antes da primeira coluna com conteúdo;
-//   - DUAS tabelas empilhadas na mesma aba, separadas por linhas em branco —
-//     uma antiga (só "NORMAL" e "26 DIAS", sem o valor da GIGA) e a atual;
-//   - cabeçalho da tabela atual em DUAS linhas, com "GIGA->JH" numa e
-//     "TIPO DE ORDEM / NORMAL / 26 DIAS" na outra.
-// O importador genérico escolhia a tabela errada (ou a linha errada), então o
-// "Valor pago pela GIGA" saía R$ 0,00 e o valor do técnico vinha na coluna
-// trocada. Aqui a gente procura explicitamente a tabela que TEM a coluna da
-// GIGA e lê as colunas por "contém" (normalizeHeader não tira "/" nem ">",
-// então "GIGA->JH" e "26 DIAS/ IND." nunca batiam por igualdade exata).
-function parseValoresOrdens(rows) {
-  const norm = v => normalizeHeader(v).replace(/[\/>]/g, ' ').replace(/\s+/g, ' ').trim();
-  const acharCol = (linha, teste) => linha.findIndex(c => teste(norm(c)));
-  const ehTextoDeCabecalho = t => !t || ['ordens','tipo de ordem','antes','c'].includes(t)
-    || t.includes('giga') || t.includes('tecnico') || t.includes('normal') || t.includes('26 dias');
-
-  let melhor = null;
-  for (let i = 0; i < rows.length; i++) {
-    // combina a linha com a de cima, herdando só onde a de baixo está vazia —
-    // é assim que "GIGA->JH" (que só existe na linha de cima) entra na mesma
-    // linha "virtual" que "TIPO DE ORDEM" e "NORMAL"
-    const linha = rows[i].map((c, col) => (norm(c) ? c : (i > 0 ? rows[i - 1][col] : c)));
-    const idxTipo = acharCol(linha, t => t === 'tipo de ordem' || t === 'ordens');
-    if (idxTipo === -1) continue;
-    const idxGiga = acharCol(linha, t => t.includes('giga'));
-    const idxNormal = acharCol(linha, t => t === 'normal');
-    const idx26 = acharCol(linha, t => t.includes('26 dias'));
-    const pontos = (idxGiga !== -1 ? 4 : 0) + (idxNormal !== -1 ? 1 : 0) + (idx26 !== -1 ? 1 : 0);
-    // a tabela que traz o valor da GIGA sempre vence a legada que não traz
-    if (!melhor || pontos > melhor.pontos) melhor = { linhaIdx: i, idxTipo, idxGiga, idxNormal, idx26, pontos };
-  }
-  if (!melhor || melhor.pontos === 0) return null;
-
-  const itens = [];
-  for (let i = melhor.linhaIdx + 1; i < rows.length; i++) {
-    const tipoBruto = rows[i][melhor.idxTipo];
-    const t = norm(tipoBruto);
-    if (ehTextoDeCabecalho(t)) continue; // linha em branco, título ou o cabeçalho da outra tabela
-    const val = idx => idx === -1 ? 0 : parseMoney(rows[i][idx]);
-    itens.push({
-      tipo_ordem: t,
-      valor_giga: val(melhor.idxGiga),
-      valor_normal: val(melhor.idxNormal),
-      valor_26dias: val(melhor.idx26),
-    });
-  }
-  return itens.length ? itens : null;
-}
-
 function importSheet(sheetName, rows) {
   if (!rows || rows.length < 2) return { target: null, inserted: 0, headersSeen: [] };
 
-  // VALORES ORDENS tem formato próprio (2 tabelas empilhadas, cabeçalho em 2
-  // linhas) — resolve antes de cair no importador genérico.
+  // A aba "VALORES ORDENS" é IGNORADA de propósito: os valores de contrato
+  // agora são fixos no sistema (VALORES_ORDENS_FIXOS), decisão do cliente.
+  // O layout dela (2 tabelas empilhadas, cabeçalho em 2 linhas, colunas vazias
+  // à esquerda) já tinha causado valor zerado e coluna trocada mais de uma vez.
   if (normalizeHeader(sheetName).includes('valores ordens')) {
-    const itens = parseValoresOrdens(rows);
-    if (itens) {
-      const inseridos = itens.map(o => upsertRow(DB.valoresOrdens, DB_INDEX.valoresOrdens, o.tipo_ordem || null, o));
-      const logEntry = { sheet_name: sheetName, target_table: 'valoresOrdens', row_count: inseridos.length, imported_at: new Date().toLocaleString('pt-BR') };
-      DB.importsLog.unshift(logEntry);
-      const syncPromise = syncBatchToSupabase('valoresOrdens', inseridos);
-      logImportToSupabase({ ...logEntry, imported_by: currentUser ? (currentUser.nome || currentUser.login) : null });
-      return { target: 'valoresOrdens', inserted: inseridos.length, errors: 0, syncPromise };
-    }
+    return { target: null, inserted: 0, headersSeen: [], ignorada: 'Valores de serviço são fixos no sistema — essa aba não é mais importada.' };
   }
 
   const pivot = tryParsePivotFinanceiro(rows);
@@ -3093,8 +3027,6 @@ function importSheet(sheetName, rows) {
     ? 'prazoReparoDia'
     : sheetNorm.includes('base do dia') && best.maps.baseDoDia && Object.keys(best.maps.baseDoDia).length >= 4
     ? 'baseDoDia'
-    : sheetNorm.includes('valores ordens') && best.maps.valoresOrdens && Object.keys(best.maps.valoresOrdens).length >= 2
-    ? 'valoresOrdens'
     // "REVISÃO" tem CONDUTOR e PLACA igual a "MANUTENÇÕES" — sem olhar o nome da
     // aba, as revisões cairiam na tabela de manutenção
     : sheetNorm.includes('revisao') && best.maps.frotaRevisao && best.maps.frotaRevisao.placa !== undefined && best.maps.frotaRevisao.data_revisao !== undefined
@@ -3577,9 +3509,9 @@ function renderDashboard() {
     const piorEf = [...porEficiencia].reverse().map(f=>({label:f.tecnico, value:toPct(f.eficiencia), display:toPct(f.eficiencia).toFixed(1)+'%', color:'#ef4444'}));
     const topTechnicians = [...fech].sort((a,b)=>b.valor_ordens-a.valor_ordens).slice(0,10);
 
-    // Valor pago pela GIGA por tipo de serviço (preço-tabela × contagem) — usa
-    // DB.valoresOrdens (aba "VALORES ORDENS"), não o "Valor Ordens" interno da
-    // Folha (esse é métrica de produção, não o que a GIGA realmente paga).
+    // Valor pago pela GIGA por tipo de serviço (preço fixo × contagem) — usa
+    // VALORES_ORDENS_FIXOS, não o "Valor Ordens" interno da Folha (esse é
+    // métrica de produção, não o que a GIGA realmente paga).
     const itensGiga = [
       { label: 'Ativação', qtd: ativacao }, { label: 'Mudança de Cômodo', qtd: mc },
       { label: 'Mudança de Endereço', qtd: me }, { label: 'Reparos', qtd: reparos }, { label: 'Upgrade', qtd: upgrade },
@@ -7759,66 +7691,36 @@ function renderFinance() {
     const rows = DB.financeiro.filter(r => (!periodo || r.periodo===periodo) && (!cat || (r.categoria||'').toLowerCase().includes(cat)));
     const body = document.getElementById('fin-body');
 
-    // ---- Tabela de preços por serviço (aba VALORES ORDENS) ----
+    // ---- Tabela de valores por serviço (fixa — ver VALORES_ORDENS_FIXOS) ----
     // No Financeiro o que interessa não é a CONTAGEM de ordens (isso já está no
-    // Relatório de Eficiência e no Resumo Geral), e sim a tabela de preços:
-    // quanto a GIGA paga a JH por serviço e quanto a JH paga o técnico nas duas
-    // faixas (normal e 26 dias ou mais trabalhados).
-    const TIPOS_PRECO = [
-      ['Ativação', /ativa/], ['Reparo', /reparo/], ['Mudança de Endereço', /mudan.*endereco/],
-      ['Mudança de Cômodo', /mudan.*comodo/], ['Upgrade/Downgrade', /upgrade|downgrade/],
-    ];
-    // Pode haver mais de uma linha pro mesmo tipo (importações antigas com
-    // caixa/acento diferente, de antes do tipo_ordem virar chave normalizada) —
-    // fica com a que tem valor preenchido, senão a tabela mostra R$ 0,00 mesmo
-    // depois de reimportar a planilha certa. Mesma regra do precoGigaPorTipo.
-    const linhaPreco = re => {
-      const cand = DB.valoresOrdens.filter(v => re.test(normalizeHeader(v.tipo_ordem)));
-      return cand.find(v => v.valor_giga) || cand.find(v => v.valor_normal || v.valor_26dias) || cand[0] || null;
-    };
-    const precos = TIPOS_PRECO.map(([label, re]) => {
-      const l = linhaPreco(re);
-      return { label, giga: l ? l.valor_giga : null, normal: l ? l.valor_normal : null, d26: l ? l.valor_26dias : null };
-    });
-    // descontos (IFI/IRR) vêm na mesma aba, mas são cobrança e não pagamento —
-    // ficam numa tabelinha separada logo abaixo
-    const descontos = [['Desconto IFI', /desconto ifi/], ['Desconto IRR', /desconto irr/]].map(([label, re]) => {
-      const l = linhaPreco(re);
-      return { label, giga: l ? l.valor_giga : null, normal: l ? l.valor_normal : null };
-    }).filter(d => d.giga !== null || d.normal !== null);
+    // Relatório de Eficiência e no Resumo Geral), e sim quanto entra e quanto
+    // sai por ordem.
     const cel = v => v ? formatCurrency(v) : '-';
-    // margem por serviço = o que sobra pra JH depois de pagar o técnico
-    const margem = (giga, tec) => (giga && tec) ? formatCurrency(giga - tec) : '-';
-    const precosHtml = !DB.valoresOrdens.length
-      ? `<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Tabela de valores não importada — importe a aba "VALORES ORDENS" de FOLHA_DE_PAGAMENTO...xlsx em "Importar Excel".</div></div>`
-      : `<div class="panel" style="margin-bottom:1.5rem">
+    const precosHtml = `<div class="panel" style="margin-bottom:1.5rem">
         <h3>Valores por Serviço</h3>
         <p style="font-size:12px;color:var(--text-muted);margin:-8px 0 12px">
-          Vem da aba "VALORES ORDENS". "Normal" e "26 dias" são as duas faixas de pagamento ao técnico (26 dias ou mais trabalhados no ciclo).
+          Valores de contrato, fixos no sistema. "Normal" e "26 dias+" são as duas faixas de pagamento ao técnico (26 dias ou mais trabalhados no ciclo).
         </p>
         <div class="table-wrap"><table class="data-table"><thead><tr>
-          <th rowspan="2">Serviço</th><th rowspan="2">GIGA paga a JH</th><th colspan="2" style="text-align:center">JH paga o técnico</th><th colspan="2" style="text-align:center">Margem JH</th>
+          <th rowspan="2">Serviço</th><th rowspan="2">Valor pago pela GIGA</th><th colspan="2" style="text-align:center">JH → Técnico</th>
         </tr><tr>
-          <th>Normal</th><th>26 dias+</th><th>Normal</th><th>26 dias+</th>
+          <th>Normal</th><th>26 dias+</th>
         </tr></thead><tbody>
-          ${precos.map(p=>`<tr>
+          ${VALORES_ORDENS_FIXOS.map(p=>`<tr>
             <td class="cat-cell">${p.label}</td>
             <td style="color:var(--accent);font-weight:700">${cel(p.giga)}</td>
             <td>${cel(p.normal)}</td>
             <td>${cel(p.d26)}</td>
-            <td style="color:var(--success);font-weight:600">${margem(p.giga, p.normal)}</td>
-            <td style="color:var(--success);font-weight:600">${margem(p.giga, p.d26)}</td>
           </tr>`).join('')}
         </tbody></table></div>
-        ${descontos.length ? `
         <h3 style="margin-top:18px">Descontos por Retorno</h3>
         <div class="table-wrap"><table class="data-table"><thead><tr>
           <th>Tipo</th><th>GIGA desconta da JH</th><th>JH desconta do técnico</th>
         </tr></thead><tbody>
-          ${descontos.map(d=>`<tr><td class="cat-cell">${d.label}</td>
+          ${DESCONTOS_RETORNO_FIXOS.map(d=>`<tr><td class="cat-cell">${d.label}</td>
             <td style="color:var(--danger);font-weight:700">${cel(d.giga)}</td>
-            <td style="color:var(--danger);font-weight:600">${cel(d.normal)}</td></tr>`).join('')}
-        </tbody></table></div>` : ''}
+            <td style="color:var(--danger);font-weight:600">${cel(d.tecnico)}</td></tr>`).join('')}
+        </tbody></table></div>
       </div>`;
 
     if (!rows.length) { body.innerHTML = precosHtml + '<div class="panel"><div class="empty">Nenhum lançamento encontrado. Importe a aba "BASE" de base_dados_financeiro.xlsx.</div></div>'; return; }
@@ -7846,10 +7748,9 @@ function renderFinance() {
       resumo: () => secaoTabela('Resumo Financeiro', [
         {l:'Receita', v:formatCurrency(receita)}, {l:'Despesa', v:formatCurrency(despesa)}, {l:'Saldo', v:formatCurrency(receita-despesa)},
       ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
-      precos: () => secaoTabela('Valores por Serviço', precos, [
-        {header:'Serviço', get:r=>r.label}, {header:'GIGA paga a JH', get:r=>cel(r.giga)},
-        {header:'Técnico normal', get:r=>cel(r.normal)}, {header:'Técnico 26 dias+', get:r=>cel(r.d26)},
-        {header:'Margem normal', get:r=>margem(r.giga, r.normal)}, {header:'Margem 26 dias+', get:r=>margem(r.giga, r.d26)},
+      precos: () => secaoTabela('Valores por Serviço', VALORES_ORDENS_FIXOS, [
+        {header:'Serviço', get:r=>r.label}, {header:'Valor pago pela GIGA', get:r=>cel(r.giga)},
+        {header:'JH → Técnico (normal)', get:r=>cel(r.normal)}, {header:'JH → Técnico (26 dias+)', get:r=>cel(r.d26)},
       ]),
       categorias: () => secaoTabela('Despesas / Receitas — Detalhamento', Object.values(byCategory).sort((a,b)=>b.total-a.total), [
         {header:'Categoria', get:r=>r.categoria}, {header:'Tipo', get:r=>r.tipo}, {header:'Total', get:r=>formatCurrency(r.total)},
@@ -8627,8 +8528,8 @@ function renderPainelBI() {
           qtdME = contaTipo(/mudan[cç]a de endere[cç]o/i), qtdMC = contaTipo(/mudan[cç]a de c[oô]modo/i),
           qtdUpgrade = contaTipo(/upgrade|downgrade/i);
 
-    // Valor pago pela GIGA por tipo de serviço (preço-tabela × contagem) —
-    // DB.valoresOrdens (aba "VALORES ORDENS"), não o "Valor Ordens" interno.
+    // Valor pago pela GIGA por tipo de serviço (preço fixo × contagem) —
+    // VALORES_ORDENS_FIXOS, não o "Valor Ordens" interno da Folha.
     const itensGiga = [
       { label: 'Ativação', qtd: qtdAtivacao }, { label: 'Reparos', qtd: qtdReparo },
       { label: 'Mudança de Endereço', qtd: qtdME }, { label: 'Mudança de Cômodo', qtd: qtdMC },
@@ -8849,7 +8750,7 @@ const ARQUIVOS_IMPORT = [
   { nome: 'FROTA_LITORAL.xlsx', desc: 'Abas FROTA LITORAL, TROCA DE VEICULO, MANUTENÇÕES, DESVINCULAÇÕES, MULTAS', assinaturas: [{sheet:'FROTA LITORAL', target:'frotaLinks'}] },
   { nome: 'GESTAO_PEDAGIO.xlsx', desc: 'Passagens de pedágio (Taggy)', assinaturas: [{target:'pedagio'}] },
   { nome: 'base_dados_financeiro.xlsx', desc: 'Aba BASE — receitas/despesas da Base JH por período', assinaturas: [{sheet:'BASE', target:'financeiro'}] },
-  { nome: 'FOLHA_DE_PAGAMENTO...xlsx', desc: 'Abas FOLHA DE PAGAMENTO (ordens/descontos/bônus) e VALORES ORDENS (preço por tipo)', assinaturas: [{sheet:'FOLHA DE PAGAMENTO', target:'folhaPagamento'}, {sheet:'VALORES ORDENS', target:'valoresOrdens'}] },
+  { nome: 'FOLHA_DE_PAGAMENTO...xlsx', desc: 'Aba FOLHA DE PAGAMENTO (ordens/descontos/bônus). A aba VALORES ORDENS não é importada — os valores por serviço são fixos no sistema.', assinaturas: [{sheet:'FOLHA DE PAGAMENTO', target:'folhaPagamento'}] },
   { nome: 'COMPARATIVO.xlsx', desc: 'Abas BASE_PRODUCAO (produção) e COMAPARATIVO (tabela financeira pronta por período)', assinaturas: [{sheet:'BASE_PRODUCAO', target:'producao'}, {sheet:'COMAPARATIVO', target:'comparativoFinanceiro'}] },
 ];
 function renderImport() {
