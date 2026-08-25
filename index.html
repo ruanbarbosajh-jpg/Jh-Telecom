@@ -1286,13 +1286,31 @@ function upsertRowByDate(table, index, key, row, dateField, opts = {}) {
   }
   return upsertRow(table, index, key, row);
 }
+// Desfecho de um atendimento que NÃO é conclusão (o técnico foi e não fechou,
+// ou a ordem foi cancelada/suspensa). "concluído" fica de fora de propósito:
+// conclusão é tratada por ehConclusaoChegando, que MESCLA na mesma visita.
+function ehStatusTerminal(status) {
+  const s = normalizeHeader(status);
+  if (!s || isConcluido(s)) return false;
+  return /cancel|nao conclu|suspens/.test(s);
+}
 // Reabertura de verdade da mesma O.S.: dia diferente, técnico diferente, ou
 // horário de atendimento diferente (2 trechos no mesmo dia — cliente com mais
 // de 1 ponto de internet no endereço, por exemplo). Só compara campo que está
 // preenchido nos dois lados, pra "não temos essa informação" não virar
 // "é diferente" por engano.
 function ehVisitaNova(existente, novo) {
-  return ['data', 'recurso', 'inicio'].some(c => existente[c] && novo[c] && existente[c] !== novo[c]);
+  if (['data', 'recurso', 'inicio'].some(c => existente[c] && novo[c] && existente[c] !== novo[c])) return true;
+  // Mesmo dia e mesmo técnico, mas DOIS DESFECHOS diferentes: o técnico foi e
+  // não conseguiu concluir (improdutiva) e depois a ordem foi cancelada. São
+  // dois eventos, não duplicata — sem isso o cancelamento apagava a
+  // improdutiva e o trabalho do técnico sumia do Detalhamento de Serviços.
+  // Conferido contra a BASE PRODUÇÃO real: separa 324 linhas, TODAS com o
+  // mesmo técnico no mesmo dia (cancelado <-> não concluído e cancelado <->
+  // suspenso), e o total de CONCLUÍDAS não muda — porque conclusão nunca
+  // chega aqui (ehConclusaoChegando mescla antes).
+  return ehStatusTerminal(existente.status) && ehStatusTerminal(novo.status)
+    && normalizeHeader(existente.status) !== normalizeHeader(novo.status);
 }
 // Contrapartida de ehLimpezaCanceladaAposConcluido: se a ordem está salva com
 // um status não-concluído e chega a linha da conclusão dela, essa conclusão
@@ -4404,9 +4422,9 @@ function renderAcomTec() {
         const tabela = document.getElementById('det-tbody') && document.getElementById('det-tbody').closest('table');
         const linhas = filtrarPorColunasAtivas(tabela, detalheFiltrado, COLS_DETALHE);
         return secaoTabela(`Detalhamento dos Serviços (${linhas.length} de ${detalhe.length} ordens)`, linhas, [
-          {header:'Data', get:COLS_DETALHE[0], align:'center'}, {header:'Cliente', get:COLS_DETALHE[1], align:'right'},
+          {header:'Data', get:COLS_DETALHE[0], align:'center'}, {header:'Cliente', get:COLS_DETALHE[1], align:'left'},
           {header:'O.S', get:COLS_DETALHE[2], align:'center'}, {header:'Contrato', get:COLS_DETALHE[3], align:'center'},
-          {header:'Técnico', get:COLS_DETALHE[4], align:'right'}, {header:'Motivo da Baixa', get:COLS_DETALHE[5], align:'center'},
+          {header:'Técnico', get:COLS_DETALHE[4], align:'left'}, {header:'Motivo da Baixa', get:COLS_DETALHE[5], align:'center'},
           {header:'Tipo de Serviço', get:COLS_DETALHE[6], align:'center'}, {header:'Status', get:COLS_DETALHE[7], align:'center'},
         ]);
       },
