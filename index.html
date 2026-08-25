@@ -3404,6 +3404,15 @@ function renderDashboard() {
     const piorEf = [...porEficiencia].reverse().map(f=>({label:f.tecnico, value:toPct(f.eficiencia), display:toPct(f.eficiencia).toFixed(1)+'%', color:'#ef4444'}));
     const topTechnicians = [...fech].sort((a,b)=>b.valor_ordens-a.valor_ordens).slice(0,10);
 
+    // Valor pago pela GIGA por tipo de serviço (preço-tabela × contagem) — usa
+    // DB.valoresOrdens (aba "VALORES ORDENS"), não o "Valor Ordens" interno da
+    // Folha (esse é métrica de produção, não o que a GIGA realmente paga).
+    const itensGiga = [
+      { label: 'Ativação', qtd: ativacao }, { label: 'Mudança de Cômodo', qtd: mc },
+      { label: 'Mudança de Endereço', qtd: me }, { label: 'Reparos', qtd: reparos }, { label: 'Upgrade', qtd: upgrade },
+    ].map(i => { const preco = precoGigaPorTipo(i.label); return preco !== null ? { ...i, valor: i.qtd * preco } : { ...i, valor: null }; });
+    const totalQtdGiga = itensGiga.reduce((a,i)=>a+i.qtd,0), totalValorGiga = itensGiga.reduce((a,i)=>a+(i.valor||0),0);
+
     // Lucro = o que a GIGA paga − nossas despesas. Usamos a coluna LUCROS da
     // planilha (já vem pronta e bate com VALOR PAGO GIGA − DESPESAS); só cai no
     // cálculo manual se a coluna vier vazia.
@@ -3445,6 +3454,15 @@ function renderDashboard() {
         ${metricCard('Upgrade', upgrade)}
         ${metricCard('Técnicos', technicians)}
       </div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Valor das Ordens — pago pela GIGA</h3>
+        <div class="table-wrap"><table class="data-table"><thead><tr>
+          <th>Tipo</th><th>Contagem</th><th>Valor GIGA</th>
+        </tr></thead><tbody>
+          ${itensGiga.map(i=>`<tr><td class="cat-cell">${i.label}</td><td>${i.qtd.toLocaleString('pt-BR')}</td><td>${i.valor!==null?formatCurrency(i.valor):'-'}</td></tr>`).join('')}
+          <tr class="total-row"><td class="cat-cell">Total Geral</td><td>${totalQtdGiga.toLocaleString('pt-BR')}</td><td>${formatCurrency(totalValorGiga)}</td></tr>
+        </tbody></table></div>
+      </div>
       <div class="section-heading">Indicadores IFI / IRR</div>
       <div class="panels-grid thirds">
         ${gaugePanel('% IFI médio', ifi, 2.50, {lowerIsBetter:true, decimals:2})}
@@ -3483,15 +3501,10 @@ function renderDashboard() {
         { l:'Eficiência média', v: eficiencia.toFixed(1)+'%' },
       ], [ {header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v} ]),
       producao: () => {
-        const itensBase = [
-          { label: 'Ativação', qtd: ativacao }, { label: 'Mudança de Cômodo', qtd: mc },
-          { label: 'Mudança de Endereço', qtd: me }, { label: 'Reparos', qtd: reparos }, { label: 'Upgrade', qtd: upgrade },
-        ].map(i => { const preco = precoGigaPorTipo(i.label); return preco !== null ? { ...i, valor: i.qtd * preco } : { ...i, valor: null }; });
-        const total = itensBase.reduce((a,i)=>a+i.qtd,0), totalValor = itensBase.reduce((a,i)=>a+(i.valor||0),0);
-        return secaoTabela('Produção do Ciclo', itensBase, [
+        return secaoTabela('Produção do Ciclo — Valor pago pela GIGA', itensGiga, [
           {header:'Tipo', get:r=>r.label}, {header:'Contagem', get:r=>r.qtd.toLocaleString('pt-BR')},
           {header:'Valor GIGA', get:r=>r.valor!==null?formatCurrency(r.valor):'-'},
-        ], { totalRow: ['Total Geral', total.toLocaleString('pt-BR'), formatCurrency(totalValor)] });
+        ], { totalRow: ['Total Geral', totalQtdGiga.toLocaleString('pt-BR'), formatCurrency(totalValorGiga)] });
       },
       ranking: () => secaoTabela('Ranking de Técnicos', topTechnicians, [
         {header:'Técnico', get:r=>r.tecnico}, {header:'Ordens', get:r=>r.total_geral},
@@ -8234,6 +8247,15 @@ function renderPainelBI() {
           qtdME = contaTipo(/mudan[cç]a de endere[cç]o/i), qtdMC = contaTipo(/mudan[cç]a de c[oô]modo/i),
           qtdUpgrade = contaTipo(/upgrade|downgrade/i);
 
+    // Valor pago pela GIGA por tipo de serviço (preço-tabela × contagem) —
+    // DB.valoresOrdens (aba "VALORES ORDENS"), não o "Valor Ordens" interno.
+    const itensGiga = [
+      { label: 'Ativação', qtd: qtdAtivacao }, { label: 'Reparos', qtd: qtdReparo },
+      { label: 'Mudança de Endereço', qtd: qtdME }, { label: 'Mudança de Cômodo', qtd: qtdMC },
+      { label: 'Upgrade/Downgrade', qtd: qtdUpgrade },
+    ].map(i => { const preco = precoGigaPorTipo(i.label); return preco !== null ? { ...i, valor: i.qtd * preco } : { ...i, valor: null }; });
+    const totalQtdGiga = itensGiga.reduce((a,i)=>a+i.qtd,0), totalValorGiga = itensGiga.reduce((a,i)=>a+(i.valor||0),0);
+
     // ---------- IFI / IRR — mesma regra da tela Ofensor ----------
     const bases = basesIfiIrr(prod);
     const retornos = prod.filter(p => p.ifi_irr === 'IFI' || p.ifi_irr === 'IRR');
@@ -8327,6 +8349,16 @@ function renderPainelBI() {
       <div class="panels-grid">
         <div class="panel"><h3>Produção por Tipo de Serviço</h3><div id="bi-tipo"></div></div>
         <div class="panel"><h3>Despesas por Categoria (histórico importado)</h3><div id="bi-despesas"></div></div>
+      </div>
+
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Valor das Ordens — pago pela GIGA</h3>
+        <div class="table-wrap"><table class="data-table"><thead><tr>
+          <th>Tipo</th><th>Contagem</th><th>Valor GIGA</th>
+        </tr></thead><tbody>
+          ${itensGiga.map(i=>`<tr><td class="cat-cell">${i.label}</td><td>${i.qtd.toLocaleString('pt-BR')}</td><td>${i.valor!==null?formatCurrency(i.valor):'-'}</td></tr>`).join('')}
+          <tr class="total-row"><td class="cat-cell">Total Geral</td><td>${totalQtdGiga.toLocaleString('pt-BR')}</td><td>${formatCurrency(totalValorGiga)}</td></tr>
+        </tbody></table></div>
       </div>
 
       <div class="panel" style="margin-bottom:1.5rem"><h3>Produção por Cidade — Ativação × Reparo</h3><div id="bi-cidade-tipo"></div></div>
