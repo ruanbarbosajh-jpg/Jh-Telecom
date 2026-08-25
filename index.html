@@ -3273,6 +3273,22 @@ function navigate(route) {
 // combinam com E. A varredura é feita depois de cada render, então vale pra
 // qualquer tabela do sistema sem precisar mexer página por página.
 const FILTROS_TABELA = new WeakMap();
+// Aplica, sobre os OBJETOS que geraram a tabela, os mesmos filtros de coluna
+// que o usuário marcou no funil. Os filtros do funil mexem só no DOM (escondem
+// <tr>), então quem exporta a partir dos dados — PDF, por exemplo — não
+// enxergava nada disso e acabava levando a lista inteira, ignorando o que
+// estava filtrado na tela. `getters[idx]` precisa devolver o MESMO texto que
+// aparece na célula daquela coluna, senão a comparação não bate.
+function filtrarPorColunasAtivas(tabela, linhas, getters) {
+  const estado = tabela && FILTROS_TABELA.get(tabela);
+  if (!estado || !Object.keys(estado).length) return linhas;
+  return linhas.filter(r => Object.entries(estado).every(([idx, selecionados]) => {
+    const get = getters[Number(idx)];
+    if (!get) return true;
+    const valor = String(get(r) ?? '').trim() || '(vazio)';
+    return selecionados.has(valor);
+  }));
+}
 function fecharMenusFiltro() { document.querySelectorAll('.filtro-menu').forEach(m => m.remove()); }
 document.addEventListener('click', e => {
   if (!e.target.closest('.filtro-menu') && !e.target.closest('.filtro-btn')) fecharMenusFiltro();
@@ -4217,12 +4233,24 @@ function renderAcomTec() {
     `;
     // ---- Detalhamento: uma linha por ordem, com busca e limite de linhas ----
     const detalhe = [...rows].sort((a,b) => (b.data||'').localeCompare(a.data||'') || String(a.os||'').localeCompare(String(b.os||'')));
+    // recorte atual da busca — atualizado a cada desenhaDetalhe() e usado pela
+    // exportação, pra o relatório sair igual ao que está na tela
+    let detalheFiltrado = detalhe;
+    // como cada coluna da tabela de detalhe é montada — precisa devolver o mesmo
+    // texto da célula, senão o filtro de coluna não casa na exportação
+    const COLS_DETALHE = [
+      r => r.data ? formatDate(r.data) : '-', r => r.nome || '-', r => r.os || '-', r => r.contrato || '-',
+      r => r.recurso || '-', r => r.motivo || '-', r => r.tipo_atividade || '-', r => r.status || '-',
+    ];
     const corStatus = st => isConcluido(st) ? 'var(--success)' : /cancel/i.test(st||'') ? 'var(--danger)' : 'var(--text-primary)';
     function desenhaDetalhe() {
       const termo = normalizeHeader(document.getElementById('det-busca').value);
       const lim = document.getElementById('det-limite').value;
       const filtrados = !termo ? detalhe : detalhe.filter(r =>
         normalizeHeader(`${r.nome||''} ${r.os||''} ${r.contrato||''} ${r.recurso||''} ${r.motivo||''}`).includes(termo));
+      // guarda o resultado da busca pra exportação levar o MESMO recorte que
+      // está na tela (antes o PDF exportava a lista inteira, ignorando o filtro)
+      detalheFiltrado = filtrados;
       const mostrados = lim === 'Todos' ? filtrados : filtrados.slice(0, parseInt(lim));
       document.getElementById('det-tbody').innerHTML = mostrados.map(r => `<tr>
         <td>${r.data ? formatDate(r.data) : '-'}</td>
@@ -4249,7 +4277,7 @@ function renderAcomTec() {
       { id: 'resumo', label: 'Resumo por tipo de serviço' },
       { id: 'tecnico', label: 'Serviço por técnico' },
       { id: 'cidade', label: 'Serviço por cidade' },
-      { id: 'detalhe', label: 'Detalhamento dos serviços (todas as ordens)' },
+      { id: 'detalhe', label: 'Detalhamento dos serviços (conforme o filtro da tela)' },
     ]);
     wirePdfExportPanel('Acompanhamento Técnico', {
       resumo: () => secaoTabela('Resumo por Tipo de Serviço', [
@@ -4258,12 +4286,18 @@ function renderAcomTec() {
       ], [{header:'Tipo', get:r=>r.l}, {header:'Quantidade', get:r=>r.v}], { totalRow:['Total', total] }),
       tecnico: () => secaoTabela('Serviço por Técnico', byTechnician, [{header:'Técnico', get:r=>r.label}, {header:'Serviços', get:r=>r.value}]),
       cidade: () => secaoTabela('Serviço por Cidade', byCity, [{header:'Cidade', get:r=>r.label}, {header:'Serviços', get:r=>r.value}]),
-      detalhe: () => secaoTabela('Detalhamento dos Serviços', detalhe, [
-        {header:'Data', get:r=>r.data?formatDate(r.data):'-'}, {header:'Cliente', get:r=>r.nome||'-'},
-        {header:'O.S', get:r=>r.os||'-'}, {header:'Contrato', get:r=>r.contrato||'-'},
-        {header:'Técnico', get:r=>r.recurso||'-'}, {header:'Motivo da Baixa', get:r=>r.motivo||'-'},
-        {header:'Tipo de Serviço', get:r=>r.tipo_atividade||'-'}, {header:'Status', get:r=>r.status||'-'},
-      ]),
+      // leva o MESMO recorte da tela: a busca (detalheFiltrado) e os filtros de
+      // coluna do funil, que só escondiam <tr> e não chegavam até aqui
+      detalhe: () => {
+        const tabela = document.getElementById('det-tbody') && document.getElementById('det-tbody').closest('table');
+        const linhas = filtrarPorColunasAtivas(tabela, detalheFiltrado, COLS_DETALHE);
+        return secaoTabela(`Detalhamento dos Serviços (${linhas.length} de ${detalhe.length} ordens)`, linhas, [
+          {header:'Data', get:COLS_DETALHE[0]}, {header:'Cliente', get:COLS_DETALHE[1]},
+          {header:'O.S', get:COLS_DETALHE[2]}, {header:'Contrato', get:COLS_DETALHE[3]},
+          {header:'Técnico', get:COLS_DETALHE[4]}, {header:'Motivo da Baixa', get:COLS_DETALHE[5]},
+          {header:'Tipo de Serviço', get:COLS_DETALHE[6]}, {header:'Status', get:COLS_DETALHE[7]},
+        ]);
+      },
     });
   }
 }
