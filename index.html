@@ -1695,6 +1695,22 @@ function precoGigaPorTipo(tipoAtividade) {
   const linha = DB.valoresOrdens.find(v => t.includes(normalizeHeader(v.tipo_ordem)) || normalizeHeader(v.tipo_ordem).includes(t));
   return linha ? linha.valor_giga : null;
 }
+// Painel "Valor das Ordens — pago pela GIGA": Dashboard, Resumo Geral e
+// Financeiro mostravam a mesma tabela (3 cópias) — centralizado aqui. Mostra
+// a conta por extenso (contagem × valor unitário = valor GIGA) e destaca o
+// total numa cor diferente do resto da tabela.
+function painelValorGiga(itensGiga) {
+  const totalQtd = itensGiga.reduce((a,i)=>a+i.qtd,0), totalValor = itensGiga.reduce((a,i)=>a+(i.valor||0),0);
+  return `<div class="panel" style="margin-bottom:1.5rem">
+    <h3>Valor das Ordens — pago pela GIGA</h3>
+    <div class="table-wrap"><table class="data-table"><thead><tr>
+      <th>Tipo</th><th>Contagem</th><th>Valor Unitário</th><th>Valor GIGA</th>
+    </tr></thead><tbody>
+      ${itensGiga.map(i=>`<tr><td class="cat-cell">${i.label}</td><td>${i.qtd.toLocaleString('pt-BR')}</td><td>${i.preco!==null?formatCurrency(i.preco):'-'}</td><td>${i.valor!==null?formatCurrency(i.valor):'-'}</td></tr>`).join('')}
+      <tr class="total-row"><td class="cat-cell" style="color:var(--accent)">Total Geral</td><td style="color:var(--accent)">${totalQtd.toLocaleString('pt-BR')}</td><td style="color:var(--accent)">-</td><td style="color:var(--accent)">${formatCurrency(totalValor)}</td></tr>
+    </tbody></table></div>
+  </div>`;
+}
 
 // ===================== RELATÓRIO RÁPIDO EM PDF =====================
 // Gera um PDF simples com tabela + barra proporcional — mesmo layout usado
@@ -2960,16 +2976,41 @@ function importSheet(sheetName, rows) {
     ? 'frotaRevisao'
     : pickBestTarget(best.maps, best.scores);
   if (!target) return { target: null, inserted: 0, headersSeen: rows[headerRowIdx] || [] };
-  const map = best.maps[target];
-  // "VALORES ORDENS" tem cabeçalho em 2 linhas: "GIGA->JH" fica só na linha de
-  // cima (mesclada com "ORDENS"/"JH->TÉCNICO"), e a linha escolhida acima como
-  // cabeçalho (a que bate "TIPO DE ORDEM"/"NORMAL"/"26 DIAS") nunca tem essa
-  // coluna. Sem isso, valor_giga nunca era encontrado e o "Valor pago pela
-  // GIGA" saía sempre R$ 0,00 mesmo com a coluna preenchida na planilha.
-  if (target === 'valoresOrdens' && map.valor_giga === undefined && headerRowIdx > 0) {
-    const linhaAcima = rows[headerRowIdx - 1] || [];
-    const idxGiga = linhaAcima.findIndex(c => normalizeHeader(c).includes('giga'));
-    if (idxGiga !== -1) map.valor_giga = idxGiga;
+  let map = best.maps[target];
+  // "VALORES ORDENS" tem cabeçalho em 2 linhas: "ORDENS"/"GIGA->JH"/
+  // "JH->TÉCNICO" numa linha (mesclada, "GIGA->JH" é 1 coluna só) e
+  // "TIPO DE ORDEM"/"NORMAL"/"26 DIAS/IND" na linha de baixo. O jeito genérico
+  // de achar cabeçalho (1 linha só, a que bate mais apelidos) nunca vê as duas
+  // juntas — ou pega a linha de cima e perde tipo_ordem/normal/26dias, ou pega
+  // a de baixo e perde valor_giga (sempre R$ 0,00), ou, se tiver título/linha
+  // em branco antes das duas, pode nem achar nenhuma das duas e importar o
+  // próprio texto do cabeçalho como se fosse linha de dado.
+  // Resolve combinando cada linha candidata com a linha ANTERIOR (herda a
+  // célula de cima só onde a de baixo está em branco) antes de pontuar —
+  // assim a coluna "GIGA->JH" (em branco na linha de baixo) aparece combinada
+  // com "TIPO DE ORDEM"/"NORMAL"/"26 DIAS" na mesma linha "virtual".
+  if (target === 'valoresOrdens') {
+    let melhorIdx = -1, melhorScore = -1, melhorMap = null;
+    const limite = Math.min(15, rows.length);
+    for (let i = 0; i < limite; i++) {
+      const combinada = rows[i].map((c, col) => (normalizeHeader(c) ? c : (i > 0 ? rows[i - 1][col] : c)));
+      const { scores, maps } = buildColumnMap(combinada);
+      if ((scores.valoresOrdens || 0) > melhorScore) { melhorScore = scores.valoresOrdens; melhorIdx = i; melhorMap = maps.valoresOrdens; }
+    }
+    if (melhorIdx !== -1 && melhorMap && Object.keys(melhorMap).length >= 2) {
+      headerRowIdx = melhorIdx;
+      map = melhorMap;
+      // "GIGA->JH" normaliza pra "giga >jh" (normalizeHeader não tira o ">"),
+      // que não bate igual com nenhum apelido da lista (a comparação de
+      // apelido é por igualdade exata). Aqui, se ainda não achou, procura
+      // "contém giga" na linha combinada — mais tolerante a como o "->" vira
+      // espaço/símbolo depois de normalizar.
+      if (map.valor_giga === undefined) {
+        const combinadaFinal = rows[melhorIdx].map((c, col) => (normalizeHeader(c) ? c : (melhorIdx > 0 ? rows[melhorIdx - 1][col] : c)));
+        const idxGiga = combinadaFinal.findIndex(c => normalizeHeader(c).includes('giga'));
+        if (idxGiga !== -1) map.valor_giga = idxGiga;
+      }
+    }
   }
   // só entram linhas que tenham ALGUM identificador (O.S, cidade, data, técnico).
   // Sem isso, sobra de formatação da planilha — a aba "PRAZO REPARO DO DIA" tem
@@ -2981,7 +3022,17 @@ function importSheet(sheetName, rows) {
     const c = r[i];
     return c !== null && c !== undefined && String(c).trim() !== '';
   });
-  const dataRows = rows.slice(headerRowIdx + 1).filter(r => r.some(c => c !== null && c !== undefined && c !== '') && temConteudo(r));
+  let dataRows = rows.slice(headerRowIdx + 1).filter(r => r.some(c => c !== null && c !== undefined && c !== '') && temConteudo(r));
+  // trava extra pra "VALORES ORDENS": se o cabeçalho ficou 1 linha errado (ex.:
+  // por causa de título/linha em branco antes dele), o próprio texto do
+  // cabeçalho ("ORDENS", "TIPO DE ORDEM"...) vira "linha de dado" — barra
+  // qualquer linha cujo tipo_ordem seja vazio ou pareça texto de cabeçalho.
+  if (target === 'valoresOrdens' && map.tipo_ordem !== undefined) {
+    dataRows = dataRows.filter(r => {
+      const t = normalizeHeader(cell(r, map.tipo_ordem));
+      return t && t !== 'ordens' && t !== 'tipo de ordem' && !t.includes('giga') && !t.includes('tecnico');
+    });
+  }
   // a Folha de Pagamento nem sempre traz uma coluna de período — como pode vir
   // mais de um mês ao longo do tempo, primeiro tenta ler o ciclo do NOME DA
   // ABA (ex.: "FOLHA 21.07 a 20.08") e só pergunta na mão se isso falhar.
@@ -3430,7 +3481,7 @@ function renderDashboard() {
     const itensGiga = [
       { label: 'Ativação', qtd: ativacao }, { label: 'Mudança de Cômodo', qtd: mc },
       { label: 'Mudança de Endereço', qtd: me }, { label: 'Reparos', qtd: reparos }, { label: 'Upgrade', qtd: upgrade },
-    ].map(i => { const preco = precoGigaPorTipo(i.label); return preco !== null ? { ...i, valor: i.qtd * preco } : { ...i, valor: null }; });
+    ].map(i => { const preco = precoGigaPorTipo(i.label); return preco !== null ? { ...i, preco, valor: i.qtd * preco } : { ...i, preco: null, valor: null }; });
     const totalQtdGiga = itensGiga.reduce((a,i)=>a+i.qtd,0), totalValorGiga = itensGiga.reduce((a,i)=>a+(i.valor||0),0);
 
     // Lucro = o que a GIGA paga − nossas despesas. Usamos a coluna LUCROS da
@@ -3474,15 +3525,7 @@ function renderDashboard() {
         ${metricCard('Upgrade', upgrade)}
         ${metricCard('Técnicos', technicians)}
       </div>
-      <div class="panel" style="margin-bottom:1.5rem">
-        <h3>Valor das Ordens — pago pela GIGA</h3>
-        <div class="table-wrap"><table class="data-table"><thead><tr>
-          <th>Tipo</th><th>Contagem</th><th>Valor GIGA</th>
-        </tr></thead><tbody>
-          ${itensGiga.map(i=>`<tr><td class="cat-cell">${i.label}</td><td>${i.qtd.toLocaleString('pt-BR')}</td><td>${i.valor!==null?formatCurrency(i.valor):'-'}</td></tr>`).join('')}
-          <tr class="total-row"><td class="cat-cell">Total Geral</td><td>${totalQtdGiga.toLocaleString('pt-BR')}</td><td>${formatCurrency(totalValorGiga)}</td></tr>
-        </tbody></table></div>
-      </div>
+      ${painelValorGiga(itensGiga)}
       <div class="section-heading">Indicadores IFI / IRR</div>
       <div class="panels-grid thirds">
         ${gaugePanel('% IFI médio', ifi, 2.50, {lowerIsBetter:true, decimals:2})}
@@ -7479,18 +7522,9 @@ function renderFinance() {
       { label: 'Ativação', qtd: contaTipo(/ativa[cç][aã]o/i) }, { label: 'Mudança de Cômodo', qtd: contaTipo(/mudan[cç]a de c[oô]modo/i) },
       { label: 'Mudança de Endereço', qtd: contaTipo(/mudan[cç]a de endere[cç]o/i) }, { label: 'Reparos', qtd: contaTipo(/reparo/i) },
       { label: 'Upgrade', qtd: contaTipo(/upgrade|downgrade/i) },
-    ].map(i => { const preco = precoGigaPorTipo(i.label); return preco !== null ? { ...i, valor: i.qtd * preco } : { ...i, valor: null }; });
+    ].map(i => { const preco = precoGigaPorTipo(i.label); return preco !== null ? { ...i, preco, valor: i.qtd * preco } : { ...i, preco: null, valor: null }; });
     const totalQtdGiga = itensGiga.reduce((a,i)=>a+i.qtd,0), totalValorGiga = itensGiga.reduce((a,i)=>a+(i.valor||0),0);
-    const valorGigaHtml = `
-      <div class="panel" style="margin-bottom:1.5rem">
-        <h3>Valor das Ordens — pago pela GIGA</h3>
-        <div class="table-wrap"><table class="data-table"><thead><tr>
-          <th>Tipo</th><th>Contagem</th><th>Valor GIGA</th>
-        </tr></thead><tbody>
-          ${itensGiga.map(i=>`<tr><td class="cat-cell">${i.label}</td><td>${i.qtd.toLocaleString('pt-BR')}</td><td>${i.valor!==null?formatCurrency(i.valor):'-'}</td></tr>`).join('')}
-          <tr class="total-row"><td class="cat-cell">Total Geral</td><td>${totalQtdGiga.toLocaleString('pt-BR')}</td><td>${formatCurrency(totalValorGiga)}</td></tr>
-        </tbody></table></div>
-      </div>`;
+    const valorGigaHtml = painelValorGiga(itensGiga);
 
     if (!rows.length) { body.innerHTML = valorGigaHtml + '<div class="panel"><div class="empty">Nenhum lançamento encontrado. Importe a aba "BASE" de base_dados_financeiro.xlsx.</div></div>'; return; }
     const receita = rows.filter(r=>/receita/i.test(r.tipo)).reduce((a,r)=>a+r.valor,0);
@@ -8303,7 +8337,7 @@ function renderPainelBI() {
       { label: 'Ativação', qtd: qtdAtivacao }, { label: 'Reparos', qtd: qtdReparo },
       { label: 'Mudança de Endereço', qtd: qtdME }, { label: 'Mudança de Cômodo', qtd: qtdMC },
       { label: 'Upgrade/Downgrade', qtd: qtdUpgrade },
-    ].map(i => { const preco = precoGigaPorTipo(i.label); return preco !== null ? { ...i, valor: i.qtd * preco } : { ...i, valor: null }; });
+    ].map(i => { const preco = precoGigaPorTipo(i.label); return preco !== null ? { ...i, preco, valor: i.qtd * preco } : { ...i, preco: null, valor: null }; });
     const totalQtdGiga = itensGiga.reduce((a,i)=>a+i.qtd,0), totalValorGiga = itensGiga.reduce((a,i)=>a+(i.valor||0),0);
 
     // ---------- IFI / IRR — mesma regra da tela Ofensor ----------
@@ -8404,15 +8438,7 @@ function renderPainelBI() {
         <div class="panel"><h3>Despesas por Categoria (histórico importado)</h3><div id="bi-despesas"></div></div>
       </div>
 
-      <div class="panel" style="margin-bottom:1.5rem">
-        <h3>Valor das Ordens — pago pela GIGA</h3>
-        <div class="table-wrap"><table class="data-table"><thead><tr>
-          <th>Tipo</th><th>Contagem</th><th>Valor GIGA</th>
-        </tr></thead><tbody>
-          ${itensGiga.map(i=>`<tr><td class="cat-cell">${i.label}</td><td>${i.qtd.toLocaleString('pt-BR')}</td><td>${i.valor!==null?formatCurrency(i.valor):'-'}</td></tr>`).join('')}
-          <tr class="total-row"><td class="cat-cell">Total Geral</td><td>${totalQtdGiga.toLocaleString('pt-BR')}</td><td>${formatCurrency(totalValorGiga)}</td></tr>
-        </tbody></table></div>
-      </div>
+      ${painelValorGiga(itensGiga)}
 
       <div class="panel" style="margin-bottom:1.5rem"><h3>Produção por Cidade — Ativação × Reparo</h3><div id="bi-cidade-tipo"></div></div>
 
