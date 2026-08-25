@@ -7768,7 +7768,14 @@ function renderFinance() {
       ['Ativação', /ativa/], ['Reparo', /reparo/], ['Mudança de Endereço', /mudan.*endereco/],
       ['Mudança de Cômodo', /mudan.*comodo/], ['Upgrade/Downgrade', /upgrade|downgrade/],
     ];
-    const linhaPreco = re => DB.valoresOrdens.find(v => re.test(normalizeHeader(v.tipo_ordem)));
+    // Pode haver mais de uma linha pro mesmo tipo (importações antigas com
+    // caixa/acento diferente, de antes do tipo_ordem virar chave normalizada) —
+    // fica com a que tem valor preenchido, senão a tabela mostra R$ 0,00 mesmo
+    // depois de reimportar a planilha certa. Mesma regra do precoGigaPorTipo.
+    const linhaPreco = re => {
+      const cand = DB.valoresOrdens.filter(v => re.test(normalizeHeader(v.tipo_ordem)));
+      return cand.find(v => v.valor_giga) || cand.find(v => v.valor_normal || v.valor_26dias) || cand[0] || null;
+    };
     const precos = TIPOS_PRECO.map(([label, re]) => {
       const l = linhaPreco(re);
       return { label, giga: l ? l.valor_giga : null, normal: l ? l.valor_normal : null, d26: l ? l.valor_26dias : null };
