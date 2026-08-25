@@ -1826,6 +1826,10 @@ function secaoTabela(titulo, rows, columns, opts = {}) {
     totalRow: opts.totalRows ? null : (opts.totalRow || null),
     totalRows: opts.totalRows || (opts.totalRow ? [opts.totalRow] : null),
     alignRight: opts.alignRight || columns.map((c,i)=>i>0),
+    // alinhamento explícito por coluna ('left' | 'right' | 'center'), definido
+    // no próprio `columns`. Quando vem preenchido, manda no alignRight (que é
+    // só o padrão "primeira à esquerda, resto à direita").
+    align: columns.map(c => c.align || null),
   };
 }
 // tira as tags HTML (setas coloridas de variação etc.) pra virar texto puro no PDF
@@ -1916,13 +1920,18 @@ function gerarPDFMultiSecoes(titulo, secoes, opts = {}) {
     }
     const colStyles = {};
     sec.alignRight.forEach((r,i) => { if (r) colStyles[i] = { halign: 'right' }; });
+    // alinhamento explícito da seção vence o padrão acima
+    (sec.align || []).forEach((a,i) => { if (a) colStyles[i] = { ...(colStyles[i]||{}), halign: a }; });
     doc.autoTable({
       startY: y + 8, head: [sec.headers], body: sec.rows, foot: sec.totalRows || undefined,
       theme: 'grid',
-      headStyles: { fillColor: [15,31,61], textColor: 255, fontStyle: 'bold', fontSize: 9 },
-      footStyles: { fillColor: [232,236,243], textColor: 0, fontStyle: 'bold', fontSize: 9 },
+      headStyles: { fillColor: [15,31,61], textColor: 255, fontStyle: 'bold', fontSize: 7.5, halign: 'center' },
+      footStyles: { fillColor: [232,236,243], textColor: 0, fontStyle: 'bold', fontSize: 7.5 },
       alternateRowStyles: { fillColor: [242,244,248] },
-      styles: { fontSize: 8.5, cellPadding: 5 },
+      // fonte menor e padding mais justo: tabela larga (ex.: Detalhamento dos
+      // Serviços, com 8 colunas) quebrava o texto de quase toda célula em 2-3
+      // linhas e o conteúdo saía desalinhado
+      styles: { fontSize: 7.5, cellPadding: 3.5, valign: 'middle', overflow: 'linebreak' },
       columnStyles: colStyles,
       margin: { left: 40, right: 40 },
       didDrawPage: () => {},
@@ -4224,10 +4233,10 @@ function renderAcomTec() {
         const tabela = document.getElementById('det-tbody') && document.getElementById('det-tbody').closest('table');
         const linhas = filtrarPorColunasAtivas(tabela, detalheFiltrado, COLS_DETALHE);
         return secaoTabela(`Detalhamento dos Serviços (${linhas.length} de ${detalhe.length} ordens)`, linhas, [
-          {header:'Data', get:COLS_DETALHE[0]}, {header:'Cliente', get:COLS_DETALHE[1]},
-          {header:'O.S', get:COLS_DETALHE[2]}, {header:'Contrato', get:COLS_DETALHE[3]},
-          {header:'Técnico', get:COLS_DETALHE[4]}, {header:'Motivo da Baixa', get:COLS_DETALHE[5]},
-          {header:'Tipo de Serviço', get:COLS_DETALHE[6]}, {header:'Status', get:COLS_DETALHE[7]},
+          {header:'Data', get:COLS_DETALHE[0], align:'center'}, {header:'Cliente', get:COLS_DETALHE[1], align:'right'},
+          {header:'O.S', get:COLS_DETALHE[2], align:'center'}, {header:'Contrato', get:COLS_DETALHE[3], align:'center'},
+          {header:'Técnico', get:COLS_DETALHE[4], align:'right'}, {header:'Motivo da Baixa', get:COLS_DETALHE[5], align:'center'},
+          {header:'Tipo de Serviço', get:COLS_DETALHE[6], align:'center'}, {header:'Status', get:COLS_DETALHE[7], align:'center'},
         ]);
       },
     });
@@ -8600,10 +8609,12 @@ function renderPainelBI() {
     }).sort((a, b) => b.ordens - a.ordens);
 
     // ---------- Evolução dos ciclos dentro do período "De/Até" escolhido ----------
-    const ciclosNoFiltro = ciclosDoFechamento().lista.filter(c => overlaps(c.start, c.end, s, e));
-    // se nenhum ciclo cruza o período (ex.: filtro mais estreito que 1 ciclo),
-    // cai pra mostrar os últimos 6 mesmo assim, pra tela não ficar vazia à toa
-    const ciclosEvo = (ciclosNoFiltro.length ? ciclosNoFiltro : ciclosDoFechamento().lista.slice(0, 6))
+    // Segue ESTRITAMENTE o filtro: só entra ciclo que cai dentro do intervalo.
+    // Antes, quando nenhum ciclo cruzava o período, caía pra "últimos 6" — o
+    // gráfico mostrava ciclo de fora do filtro, o que confunde mais do que
+    // ajuda. Sem ciclo no período, o painel diz isso na cara.
+    const ciclosEvo = ciclosDoFechamento().lista
+      .filter(c => overlaps(c.start, c.end, s, e))
       .sort((a, b) => String(a.end).localeCompare(String(b.end)));
     // As 3 séries (GIGA, Despesas e Lucro) vêm da MESMA fonte: a aba RELATORIO
     // do Relatório Geral (DB.fechamento), somando os técnicos de cada ciclo.
@@ -8645,12 +8656,17 @@ function renderPainelBI() {
         ${gaugePanel('% IFI', pctIfi, 2.50, { lowerIsBetter: true, decimals: 2 })}
       </div>
 
-      <div class="section-heading">Evolução — ciclos de fechamento no período selecionado</div>
+      <div class="section-heading">Evolução — ${formatDate(s)} a ${formatDate(e)}</div>
       <div class="panel" style="margin-bottom:1.5rem">
         <h3>Faturamento GIGA × Despesas × Lucro por ciclo</h3>
         <p style="font-size:12px;color:var(--text-muted);margin:-8px 0 12px">
           Os três valores vêm da aba RELATORIO (Relatório Geral), somando todos os técnicos de cada ciclo.
+          Só entram os ciclos dentro do período filtrado (${formatDate(s)} a ${formatDate(e)}).
         </p>
+        ${!evoPorCiclo.length ? `<div class="empty">
+          Nenhum ciclo de fechamento dentro de ${formatDate(s)} a ${formatDate(e)}.
+          ${ciclosDoFechamento().lista.length ? 'Ciclos disponíveis: ' + ciclosDoFechamento().lista.map(c=>`${formatDate(c.start)} a ${formatDate(c.end)}`).join(' · ') : 'Importe a aba RELATORIO de RELATORIO_GERAL.xlsx.'}
+        </div>` : `
         <div id="bi-evolucao"></div>
         <div class="table-wrap" style="margin-top:14px"><table class="data-table"><thead><tr>
           <th>Ciclo</th><th>Técnicos</th><th>Pago pela GIGA</th><th>Despesas</th><th>Lucro</th><th>Margem</th>
@@ -8671,7 +8687,7 @@ function renderPainelBI() {
             <td style="color:var(--accent)">${formatCurrency(evoPorCiclo.reduce((a,c)=>a+c.lucro,0))}</td>
             <td style="color:var(--accent)">-</td>
           </tr>
-        </tbody></table></div>
+        </tbody></table></div>`}
       </div>
 
       <div class="panels-grid">
