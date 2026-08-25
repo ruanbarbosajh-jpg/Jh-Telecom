@@ -1783,48 +1783,32 @@ function gerarRelatorioPDF(opts) {
   const totalQtd = items.reduce((a,i)=>a+i.qtd, 0);
   const totalValor = items.reduce((a,i)=>a+(i.valor||0), 0);
 
-  doc.setFontSize(16); doc.setFont(undefined, 'bold');
-  doc.text(titulo, 40, 50);
-  doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(95,94,90);
-  doc.text(subtitulo, 40, 68);
-  doc.setTextColor(0,0,0);
+  let y = pdfCabecalho(doc, titulo, subtitulo);
 
   const head = temValor ? [['Item', 'Contagem', 'Valor']] : [['Item', 'Contagem']];
   const body = items.map(i => temValor ? [i.label, i.qtd.toLocaleString('pt-BR'), formatCurrency(i.valor)] : [i.label, i.qtd.toLocaleString('pt-BR')]);
   const foot = temValor ? [[totalLabel, totalQtd.toLocaleString('pt-BR'), formatCurrency(totalValor)]] : [[totalLabel, totalQtd.toLocaleString('pt-BR')]];
 
+  const estilo = pdfEstiloTabela(temValor ? { 1: {halign:'right'}, 2: {halign:'right'} } : { 1: {halign:'right'} });
   doc.autoTable({
-    startY: 90, head, body, foot,
-    theme: 'grid',
-    headStyles: { fillColor: [15,31,61], textColor: 255, fontStyle: 'bold' },
-    footStyles: { fillColor: [232,236,243], textColor: 0, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [242,244,248] },
-    styles: { fontSize: 10, cellPadding: 6 },
-    columnStyles: temValor ? { 1: {halign:'right'}, 2: {halign:'right'} } : { 1: {halign:'right'} },
+    startY: y + 4, head, body, foot,
+    ...estilo,
+    // essa tabela é curta (poucos tipos de serviço), então cabe corpo maior
+    styles: { ...estilo.styles, fontSize: 9.5, cellPadding: 6 },
+    headStyles: { ...estilo.headStyles, fontSize: 9 },
+    footStyles: { ...estilo.footStyles, fontSize: 9 },
   });
 
-  let y = doc.lastAutoTable.finalY + 30;
-  doc.setFontSize(12); doc.setFont(undefined, 'bold');
-  doc.text('Distribuição (barra proporcional à contagem)', 40, y);
-  y += 20;
-  doc.setFont(undefined, 'normal');
-  const maxQtd = Math.max(...items.map(i=>i.qtd), 1);
-  const barX = 160, barMaxW = 240, barH = 14;
-  items.forEach(i => {
-    doc.setFontSize(9); doc.setTextColor(28,35,51);
-    doc.text(i.label, 40, y + 10, { maxWidth: 110 });
-    doc.setFillColor(228,231,238); doc.rect(barX, y, barMaxW, barH, 'F');
-    const w = (i.qtd/maxQtd) * barMaxW;
-    doc.setFillColor(42,120,214); doc.rect(barX, y, w, barH, 'F');
-    doc.setFontSize(8); doc.setTextColor(95,94,90);
-    const label = temValor ? `${i.qtd.toLocaleString('pt-BR')}  (${formatCurrency(i.valor)})` : `${i.qtd.toLocaleString('pt-BR')}`;
-    doc.text(label, barX + barMaxW + 8, y + 10);
-    y += 26;
-  });
+  y = pdfTituloSecao(doc, 'Distribuição (barra proporcional à contagem)', doc.lastAutoTable.finalY + 34);
+  drawBarChartPDF(doc, {
+    items: items.map(i => ({
+      label: i.label, value: i.qtd,
+      display: temValor ? `${i.qtd.toLocaleString('pt-BR')}  (${formatCurrency(i.valor)})` : i.qtd.toLocaleString('pt-BR'),
+    })),
+    cor: '#4f7fff', maxItems: items.length,
+  }, y + 14);
 
-  doc.setFontSize(8); doc.setTextColor(150,150,150);
-  doc.text('Gerado pelo JH TELECOM · Nexus System em ' + new Date().toLocaleString('pt-BR'), 40, 810);
-
+  pdfFinalizar(doc, titulo);
   doc.save(opts.arquivo || 'relatorio.pdf');
 }
 
@@ -1860,30 +1844,123 @@ function hexToRgb(hex) {
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '#4f7fff');
   return m ? [parseInt(m[1],16), parseInt(m[2],16), parseInt(m[3],16)] : [79,127,255];
 }
+
+// ---------- Identidade visual dos PDFs ----------
+// Mesma paleta do sistema (navy + azul de destaque), pra o relatório impresso
+// parecer com a tela de onde saiu.
+const PDF_CORES = {
+  navy: [15, 31, 61], accent: [79, 127, 255], texto: [28, 35, 51],
+  muted: [122, 132, 152], linha: [214, 222, 236], zebra: [246, 248, 252],
+  totalBg: [226, 233, 246], trilho: [232, 236, 244],
+};
+const PDF_MARGEM = 40;
+// Faixa de marca no topo da primeira página + título e subtítulo. Devolve o Y
+// onde o conteúdo pode começar.
+function pdfCabecalho(doc, titulo, subtitulo) {
+  const W = doc.internal.pageSize.getWidth();
+  doc.setFillColor(...PDF_CORES.navy);
+  doc.rect(0, 0, W, 58, 'F');
+  doc.setFont(undefined, 'bold'); doc.setFontSize(12); doc.setTextColor(255, 255, 255);
+  doc.text('JH TELECOM', PDF_MARGEM, 28);
+  doc.setFont(undefined, 'normal'); doc.setFontSize(8.5); doc.setTextColor(...PDF_CORES.accent);
+  doc.text('Nexus System', PDF_MARGEM, 42);
+  doc.setFontSize(8); doc.setTextColor(198, 208, 228);
+  doc.text(new Date().toLocaleString('pt-BR'), W - PDF_MARGEM, 35, { align: 'right' });
+
+  doc.setFont(undefined, 'bold'); doc.setFontSize(15); doc.setTextColor(...PDF_CORES.texto);
+  doc.text(titulo, PDF_MARGEM, 92);
+  doc.setFillColor(...PDF_CORES.accent);
+  doc.rect(PDF_MARGEM, 100, 34, 3, 'F');
+  let y = 122;
+  if (subtitulo) {
+    doc.setFont(undefined, 'normal'); doc.setFontSize(9.5); doc.setTextColor(...PDF_CORES.muted);
+    doc.text(subtitulo, PDF_MARGEM, y);
+    y += 16;
+  }
+  return y;
+}
+// Título de seção com barrinha de destaque à esquerda. Devolve o novo Y.
+function pdfTituloSecao(doc, texto, y) {
+  doc.setFillColor(...PDF_CORES.accent);
+  doc.rect(PDF_MARGEM, y - 9, 3, 13, 'F');
+  doc.setFont(undefined, 'bold'); doc.setFontSize(11); doc.setTextColor(...PDF_CORES.texto);
+  doc.text(texto, PDF_MARGEM + 10, y + 1);
+  return y + 12;
+}
+// Passada final: faixa fina de continuação nas páginas 2+ e rodapé com
+// paginação em todas. Só dá pra numerar depois que o documento inteiro existe.
+function pdfFinalizar(doc, titulo) {
+  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+  const total = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= total; p++) {
+    doc.setPage(p);
+    if (p > 1) {
+      doc.setFillColor(...PDF_CORES.navy);
+      doc.rect(0, 0, W, 28, 'F');
+      doc.setFont(undefined, 'bold'); doc.setFontSize(8.5); doc.setTextColor(255, 255, 255);
+      doc.text('JH TELECOM · ' + titulo, PDF_MARGEM, 18);
+    }
+    doc.setDrawColor(...PDF_CORES.linha); doc.setLineWidth(0.6);
+    doc.line(PDF_MARGEM, H - 40, W - PDF_MARGEM, H - 40);
+    doc.setFont(undefined, 'normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_CORES.muted);
+    doc.text('Gerado pelo JH TELECOM · Nexus System', PDF_MARGEM, H - 26);
+    doc.text(`Página ${p} de ${total}`, W - PDF_MARGEM, H - 26, { align: 'right' });
+  }
+}
+// Estilo padrão das tabelas — bordas leves, zebra suave e linha de total
+// destacada, em vez do "grid" pesado de antes.
+function pdfEstiloTabela(colStyles) {
+  return {
+    theme: 'grid',
+    headStyles: { fillColor: PDF_CORES.navy, textColor: 255, fontStyle: 'bold', fontSize: 7.5, halign: 'center', cellPadding: 5, lineWidth: 0 },
+    footStyles: { fillColor: PDF_CORES.totalBg, textColor: PDF_CORES.texto, fontStyle: 'bold', fontSize: 7.5, lineWidth: 0.4, lineColor: PDF_CORES.linha },
+    alternateRowStyles: { fillColor: PDF_CORES.zebra },
+    // fonte menor e padding justo: tabela larga (ex.: Detalhamento dos
+    // Serviços, com 8 colunas) quebrava o texto de quase toda célula em 2-3
+    // linhas e o conteúdo saía desalinhado
+    styles: { fontSize: 7.5, cellPadding: 4, valign: 'middle', overflow: 'linebreak',
+              textColor: PDF_CORES.texto, lineColor: PDF_CORES.linha, lineWidth: 0.4 },
+    columnStyles: colStyles || {},
+    // top: espaço da faixa de continuação nas páginas seguintes
+    margin: { left: PDF_MARGEM, right: PDF_MARGEM, top: 46, bottom: 52 },
+  };
+}
 // Desenha um gráfico de barras horizontais nativo no PDF (retângulos + texto,
 // sem lib de gráfico — mesma filosofia do resto do sistema). Devolve o novo Y.
 function drawBarChartPDF(doc, sec, y) {
   const items = (sec.items || []).slice(0, sec.maxItems || 15);
   if (!items.length) {
-    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(140,140,140);
-    doc.text('Sem dados para este gráfico.', 40, y);
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_CORES.muted);
+    doc.text('Sem dados para este gráfico.', PDF_MARGEM, y);
     return y + 20;
   }
-  const barHeight = 13, gap = 7, labelWidth = 150, chartWidth = 300, startX = 40 + labelWidth + 6;
+  const alturaPagina = doc.internal.pageSize.getHeight();
+  const barHeight = 12, gap = 8, labelWidth = 150;
+  const startX = PDF_MARGEM + labelWidth + 8;
+  // reserva à direita medida com a fonte de verdade (getTextWidth) em vez de
+  // estimada por nº de caracteres — com valor em moeda ("2.520  (R$ 269.640,00)")
+  // a reserva fixa deixava o rótulo passar da margem
+  doc.setFontSize(8); doc.setFont(undefined, 'bold');
+  const larguraRotulo = Math.max(...items.map(i => doc.getTextWidth(String(i.display !== undefined ? i.display : i.value))));
+  const reservaDireita = Math.min(190, Math.max(46, larguraRotulo + 12));
+  const chartWidth = doc.internal.pageSize.getWidth() - startX - PDF_MARGEM - reservaDireita;
   const maxValue = Math.max(...items.map(i => Math.abs(i.value) || 0), 1);
-  items.forEach((it, idx) => {
-    if (y > 760) { doc.addPage(); y = 50; }
-    const rowY = y + idx * (barHeight + gap);
-    doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(60,60,60);
-    doc.text(String(it.label == null ? '-' : it.label).slice(0, 34), 40, rowY + barHeight - 3, { maxWidth: labelWidth });
+  let linhaY = y;
+  items.forEach(it => {
+    if (linhaY > alturaPagina - 70) { doc.addPage(); linhaY = 56; }
+    doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_CORES.texto);
+    doc.text(String(it.label == null ? '-' : it.label).slice(0, 34), PDF_MARGEM, linhaY + barHeight - 3, { maxWidth: labelWidth });
+    // trilho de fundo: dá a noção de "quanto falta pro maior", igual na tela
+    doc.setFillColor(...PDF_CORES.trilho);
+    doc.rect(startX, linhaY, chartWidth, barHeight, 'F');
     const w = Math.max((Math.abs(it.value || 0) / maxValue) * chartWidth, 2);
-    const [r,g,b] = hexToRgb(it.color || sec.cor);
-    doc.setFillColor(r,g,b);
-    doc.rect(startX, rowY, w, barHeight, 'F');
-    doc.setFontSize(8); doc.setTextColor(40,40,40);
-    doc.text(String(it.display !== undefined ? it.display : it.value), startX + w + 5, rowY + barHeight - 3);
+    doc.setFillColor(...hexToRgb(it.color || sec.cor));
+    doc.rect(startX, linhaY, w, barHeight, 'F');
+    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_CORES.texto);
+    doc.text(String(it.display !== undefined ? it.display : it.value), startX + chartWidth + 6, linhaY + barHeight - 3);
+    linhaY += barHeight + gap;
   });
-  return y + items.length * (barHeight + gap) + 16;
+  return linhaY + 12;
 }
 // Painel de checkboxes + botão, colocado no rodapé de cada página.
 // sections: [{id, label}] — o que aparece marcável.
@@ -1913,25 +1990,15 @@ function wirePdfExportPanel(titulo, getSecaoFns) {
 function gerarPDFMultiSecoes(titulo, secoes, opts = {}) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  doc.setFontSize(16); doc.setFont(undefined, 'bold');
-  doc.text(titulo, 40, 50);
-  let metaY = 66;
-  if (opts.subtitulo) {
-    doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(90,90,90);
-    doc.text(opts.subtitulo, 40, metaY);
-    metaY += 14;
-  }
-  doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(150,150,150);
-  doc.text('Gerado pelo JH TELECOM · Nexus System em ' + new Date().toLocaleString('pt-BR'), 40, metaY);
-  doc.setTextColor(0,0,0);
-  let y = metaY + 24;
-  secoes.forEach(sec => {
-    if (y > 700) { doc.addPage(); y = 50; }
-    doc.setFontSize(12); doc.setFont(undefined, 'bold'); doc.setTextColor(0,0,0);
-    doc.text(sec.titulo, 40, y);
-    y += 10;
+  const alturaPagina = doc.internal.pageSize.getHeight();
+  let y = pdfCabecalho(doc, titulo, opts.subtitulo);
+  secoes.forEach((sec, idx) => {
+    // não deixa o título da seção órfão no pé da página
+    if (y > alturaPagina - 150) { doc.addPage(); y = 56; }
+    else if (idx > 0) y += 6;
+    y = pdfTituloSecao(doc, sec.titulo, y);
     if (sec.tipo === 'bars') {
-      y = drawBarChartPDF(doc, sec, y + 14);
+      y = drawBarChartPDF(doc, sec, y + 16);
       return;
     }
     const colStyles = {};
@@ -1939,21 +2006,12 @@ function gerarPDFMultiSecoes(titulo, secoes, opts = {}) {
     // alinhamento explícito da seção vence o padrão acima
     (sec.align || []).forEach((a,i) => { if (a) colStyles[i] = { ...(colStyles[i]||{}), halign: a }; });
     doc.autoTable({
-      startY: y + 8, head: [sec.headers], body: sec.rows, foot: sec.totalRows || undefined,
-      theme: 'grid',
-      headStyles: { fillColor: [15,31,61], textColor: 255, fontStyle: 'bold', fontSize: 7.5, halign: 'center' },
-      footStyles: { fillColor: [232,236,243], textColor: 0, fontStyle: 'bold', fontSize: 7.5 },
-      alternateRowStyles: { fillColor: [242,244,248] },
-      // fonte menor e padding mais justo: tabela larga (ex.: Detalhamento dos
-      // Serviços, com 8 colunas) quebrava o texto de quase toda célula em 2-3
-      // linhas e o conteúdo saía desalinhado
-      styles: { fontSize: 7.5, cellPadding: 3.5, valign: 'middle', overflow: 'linebreak' },
-      columnStyles: colStyles,
-      margin: { left: 40, right: 40 },
-      didDrawPage: () => {},
+      startY: y + 10, head: [sec.headers], body: sec.rows, foot: sec.totalRows || undefined,
+      ...pdfEstiloTabela(colStyles),
     });
-    y = doc.lastAutoTable.finalY + 28;
+    y = doc.lastAutoTable.finalY + 26;
   });
+  pdfFinalizar(doc, titulo);
   doc.save((opts.arquivo || 'relatorio_' + titulo.toLowerCase().replace(/[^a-z0-9]+/g,'_')) + '.pdf');
 }
 function formatDate(v) {
