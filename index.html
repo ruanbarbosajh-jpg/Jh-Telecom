@@ -8599,16 +8599,21 @@ function renderPainelBI() {
     // cai pra mostrar os últimos 6 mesmo assim, pra tela não ficar vazia à toa
     const ciclosEvo = (ciclosNoFiltro.length ? ciclosNoFiltro : ciclosDoFechamento().lista.slice(0, 6))
       .sort((a, b) => String(a.end).localeCompare(String(b.end)));
-    const evoGiga = ciclosEvo.map(c => {
+    // As 3 séries (GIGA, Despesas e Lucro) vêm da MESMA fonte: a aba RELATORIO
+    // do Relatório Geral (DB.fechamento), somando os técnicos de cada ciclo.
+    // Só o Lucro tem fallback: se a coluna LUCROS vier vazia na planilha,
+    // calcula GIGA − Despesas (é a conta que a própria coluna faz).
+    const evoPorCiclo = ciclosEvo.map(c => {
       const fs = DB.fechamento.filter(f => f.inicio === c.start && f.ate_o_dia === c.end);
-      return { label: formatDate(c.end), value: fs.reduce((a, f) => a + (f.valor_pago_giga || 0), 0) };
+      const soma = k => fs.reduce((a, f) => a + (f[k] || 0), 0);
+      const giga = soma('valor_pago_giga'), despesas = soma('despesas');
+      return {
+        label: formatDate(c.end), inicio: c.start, fim: c.end, tecnicos: fs.length,
+        giga, despesas, lucro: soma('lucros') || (giga - despesas),
+      };
     });
-    const evoLucro = ciclosEvo.map(c => {
-      const fs = DB.fechamento.filter(f => f.inicio === c.start && f.ate_o_dia === c.end);
-      const soma = fs.reduce((a, f) => a + (f.lucros || 0), 0);
-      const valor = soma || (fs.reduce((a, f) => a + (f.valor_pago_giga || 0), 0) - fs.reduce((a, f) => a + (f.despesas || 0), 0));
-      return { label: formatDate(c.end), value: valor };
-    });
+    const serieEvo = (chave) => evoPorCiclo.map(c => ({ label: c.label, value: c[chave], display: formatCurrency(c[chave]) }));
+    const evoGiga = serieEvo('giga'), evoDespesas = serieEvo('despesas'), evoLucro = serieEvo('lucro');
 
     // ---------- Produção por cidade — ativação × reparo (barras agrupadas) ----------
     const cidadesComOrdens = ranking.filter(r => r.ordens > 0).slice(0, 8);
@@ -8635,7 +8640,33 @@ function renderPainelBI() {
       </div>
 
       <div class="section-heading">Evolução — ciclos de fechamento no período selecionado</div>
-      <div class="panel" style="margin-bottom:1.5rem"><h3>Faturamento GIGA × Lucro por ciclo</h3><div id="bi-evolucao"></div></div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Faturamento GIGA × Despesas × Lucro por ciclo</h3>
+        <p style="font-size:12px;color:var(--text-muted);margin:-8px 0 12px">
+          Os três valores vêm da aba RELATORIO (Relatório Geral), somando todos os técnicos de cada ciclo.
+        </p>
+        <div id="bi-evolucao"></div>
+        <div class="table-wrap" style="margin-top:14px"><table class="data-table"><thead><tr>
+          <th>Ciclo</th><th>Técnicos</th><th>Pago pela GIGA</th><th>Despesas</th><th>Lucro</th><th>Margem</th>
+        </tr></thead><tbody>
+          ${evoPorCiclo.map(c => `<tr>
+            <td class="cat-cell">${formatDate(c.inicio)} a ${formatDate(c.fim)}</td>
+            <td>${c.tecnicos}</td>
+            <td style="color:var(--accent);font-weight:600">${formatCurrency(c.giga)}</td>
+            <td style="color:var(--danger);font-weight:600">${formatCurrency(c.despesas)}</td>
+            <td style="color:${c.lucro < 0 ? 'var(--danger)' : 'var(--success)'};font-weight:700">${formatCurrency(c.lucro)}</td>
+            <td>${c.giga ? ((c.lucro / c.giga) * 100).toFixed(1) + '%' : '-'}</td>
+          </tr>`).join('')}
+          <tr class="total-row">
+            <td class="cat-cell" style="color:var(--accent)">TOTAL</td>
+            <td style="color:var(--accent)">-</td>
+            <td style="color:var(--accent)">${formatCurrency(evoPorCiclo.reduce((a,c)=>a+c.giga,0))}</td>
+            <td style="color:var(--accent)">${formatCurrency(evoPorCiclo.reduce((a,c)=>a+c.despesas,0))}</td>
+            <td style="color:var(--accent)">${formatCurrency(evoPorCiclo.reduce((a,c)=>a+c.lucro,0))}</td>
+            <td style="color:var(--accent)">-</td>
+          </tr>
+        </tbody></table></div>
+      </div>
 
       <div class="panels-grid">
         <div class="panel" style="display:flex;flex-direction:column"><h3>Produção por Tipo de Serviço</h3><div id="bi-tipo" style="flex:1;display:flex;flex-direction:column"></div></div>
@@ -8680,8 +8711,9 @@ function renderPainelBI() {
     donutChart('bi-frota', Object.entries(locadoraMap).map(([label, value], i) => ({ label, value, color: PALETTE[i % PALETTE.length] })), { centroLabel: 'Veículos' });
     barsChart('bi-pedagio', byPlaca, { color: '#fb923c' });
     trendChart('bi-evolucao', [
-      { name: 'Faturamento GIGA', color: 'var(--accent)', points: evoGiga.map(x => ({ ...x, display: formatCurrency(x.value) })) },
-      { name: 'Lucro', color: 'var(--success)', points: evoLucro.map(x => ({ ...x, display: formatCurrency(x.value) })) },
+      { name: 'Faturamento GIGA', color: 'var(--accent)', points: evoGiga },
+      { name: 'Despesas', color: 'var(--danger)', points: evoDespesas },
+      { name: 'Lucro', color: 'var(--success)', points: evoLucro },
     ]);
     groupedBarsChart('bi-cidade-tipo', cidadesComOrdens.map(r => r.cidade), [
       { name: 'Ativação', color: PALETTE[0], values: cidadesComOrdens.map(r => r.ativacao) },
