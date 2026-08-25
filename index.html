@@ -1783,32 +1783,40 @@ function gerarRelatorioPDF(opts) {
   const totalQtd = items.reduce((a,i)=>a+i.qtd, 0);
   const totalValor = items.reduce((a,i)=>a+(i.valor||0), 0);
 
-  let y = pdfCabecalho(doc, titulo, subtitulo);
-
   const head = temValor ? [['Item', 'Contagem', 'Valor']] : [['Item', 'Contagem']];
   const body = items.map(i => temValor ? [i.label, i.qtd.toLocaleString('pt-BR'), formatCurrency(i.valor)] : [i.label, i.qtd.toLocaleString('pt-BR')]);
   const foot = temValor ? [[totalLabel, totalQtd.toLocaleString('pt-BR'), formatCurrency(totalValor)]] : [[totalLabel, totalQtd.toLocaleString('pt-BR')]];
 
-  const estilo = pdfEstiloTabela(temValor ? { 1: {halign:'right'}, 2: {halign:'right'} } : { 1: {halign:'right'} });
+  const ctx = {
+    titulo, subtitulo, geradoEm: new Date().toLocaleString('pt-BR'),
+    secaoNome: 'Resumo por item', heroNum: totalQtd.toLocaleString('pt-BR'),
+    heroLabel: temValor ? `em ${formatCurrency(totalValor)}` : 'no total',
+  };
+  pdfDesenhaTopo(doc, ctx);
+  let y = pdfCartoesKpi(doc, items.slice(0, 4).map((i, idx) => ({
+    valor: i.qtd.toLocaleString('pt-BR'), rotulo: i.label, destaque: idx === 0,
+  })), PDF_TOPO_ALTURA - 6);
+
+  const estilo = pdfEstiloTabela(temValor ? { 1: {halign:'right'}, 2: {halign:'right'} } : { 1: {halign:'right'} }, head[0]);
   doc.autoTable({
-    startY: y + 4, head, body, foot,
+    startY: y, head: [head[0].map(h => h.toUpperCase())], body, foot,
     ...estilo,
     // essa tabela é curta (poucos tipos de serviço), então cabe corpo maior
-    styles: { ...estilo.styles, fontSize: 9.5, cellPadding: 6 },
-    headStyles: { ...estilo.headStyles, fontSize: 9 },
-    footStyles: { ...estilo.footStyles, fontSize: 9 },
+    styles: { ...estilo.styles, fontSize: 9, cellPadding: 6 },
+    headStyles: { ...estilo.headStyles, fontSize: 8 },
+    footStyles: { ...estilo.footStyles, fontSize: 8.5 },
+    didDrawPage: (d) => { if (d.pageNumber > 1) pdfDesenhaTopo(doc, { ...ctx, secaoNome: ctx.secaoNome + ' — Continuação' }); },
   });
 
-  y = pdfTituloSecao(doc, 'Distribuição (barra proporcional à contagem)', doc.lastAutoTable.finalY + 34);
   drawBarChartPDF(doc, {
     items: items.map(i => ({
       label: i.label, value: i.qtd,
       display: temValor ? `${i.qtd.toLocaleString('pt-BR')}  (${formatCurrency(i.valor)})` : i.qtd.toLocaleString('pt-BR'),
     })),
-    cor: '#4f7fff', maxItems: items.length,
-  }, y + 14);
+    cor: '#1769e0', maxItems: items.length,
+  }, doc.lastAutoTable.finalY + 34);
 
-  pdfFinalizar(doc, titulo);
+  pdfNumerarPaginas(doc);
   doc.save(opts.arquivo || 'relatorio.pdf');
 }
 
@@ -1846,83 +1854,147 @@ function hexToRgb(hex) {
 }
 
 // ---------- Identidade visual dos PDFs ----------
-// Mesma paleta do sistema (navy + azul de destaque), pra o relatório impresso
-// parecer com a tela de onde saiu.
+// Paleta e layout do modelo aprovado pelo cliente (relatório em paisagem, com
+// faixa de marca, bloco de destaque e cartões de indicador no topo).
 const PDF_CORES = {
-  navy: [15, 31, 61], accent: [79, 127, 255], texto: [28, 35, 51],
-  muted: [122, 132, 152], linha: [214, 222, 236], zebra: [246, 248, 252],
-  totalBg: [226, 233, 246], trilho: [232, 236, 244],
+  navy: [16, 42, 67],       // faixa do topo e cabeçalho de tabela
+  texto: [36, 59, 83],      // texto principal
+  muted: [98, 125, 152],    // texto secundário
+  accent: [23, 105, 224],   // azul de destaque
+  accentClaro: [217, 231, 245],
+  zebra: [244, 247, 251],
+  linha: [214, 222, 236],
+  trilho: [232, 236, 244],
+  okBg: [231, 246, 236], okTexto: [31, 122, 69],
+  ruimBg: [253, 236, 236], ruimTexto: [180, 35, 24],
 };
 const PDF_MARGEM = 40;
-// Faixa de marca no topo da primeira página + título e subtítulo. Devolve o Y
-// onde o conteúdo pode começar.
-function pdfCabecalho(doc, titulo, subtitulo) {
+const PDF_TOPO_ALTURA = 158;   // onde a tabela pode começar nas páginas seguintes
+
+// Tabela com muitas colunas fica espremida em retrato — o modelo do cliente é
+// em paisagem, e é isso que deixa o Detalhamento dos Serviços legível.
+function pdfOrientacao(secoes) {
+  const maxCols = Math.max(0, ...secoes.map(s => (s.headers || []).length));
+  return maxCols >= 6 ? 'landscape' : 'portrait';
+}
+// Bloco do topo repetido em TODAS as páginas: faixa de marca + paginação,
+// título do relatório, nome da seção, número de destaque e "gerado em".
+function pdfDesenhaTopo(doc, ctx) {
   const W = doc.internal.pageSize.getWidth();
   doc.setFillColor(...PDF_CORES.navy);
-  doc.rect(0, 0, W, 58, 'F');
-  doc.setFont(undefined, 'bold'); doc.setFontSize(12); doc.setTextColor(255, 255, 255);
-  doc.text('JH TELECOM', PDF_MARGEM, 28);
-  doc.setFont(undefined, 'normal'); doc.setFontSize(8.5); doc.setTextColor(...PDF_CORES.accent);
-  doc.text('Nexus System', PDF_MARGEM, 42);
-  doc.setFontSize(8); doc.setTextColor(198, 208, 228);
-  doc.text(new Date().toLocaleString('pt-BR'), W - PDF_MARGEM, 35, { align: 'right' });
+  doc.rect(0, 0, W, 51, 'F');
+  doc.setFont(undefined, 'bold'); doc.setFontSize(10.5); doc.setTextColor(255, 255, 255);
+  doc.text('JH TELECOM', PDF_MARGEM, 30);
+  doc.setFont(undefined, 'normal'); doc.setFontSize(8.5); doc.setTextColor(...PDF_CORES.accentClaro);
+  doc.text('· Nexus System', PDF_MARGEM + 72, 30);
+  doc.setFontSize(8.5); doc.setTextColor(...PDF_CORES.accentClaro);
+  if (ctx.paginaTexto) doc.text(ctx.paginaTexto, W - PDF_MARGEM, 30, { align: 'right' });
 
-  doc.setFont(undefined, 'bold'); doc.setFontSize(15); doc.setTextColor(...PDF_CORES.texto);
-  doc.text(titulo, PDF_MARGEM, 92);
-  doc.setFillColor(...PDF_CORES.accent);
-  doc.rect(PDF_MARGEM, 100, 34, 3, 'F');
-  let y = 122;
-  if (subtitulo) {
-    doc.setFont(undefined, 'normal'); doc.setFontSize(9.5); doc.setTextColor(...PDF_CORES.muted);
-    doc.text(subtitulo, PDF_MARGEM, y);
-    y += 16;
+  doc.setFont(undefined, 'bold'); doc.setFontSize(19); doc.setTextColor(...PDF_CORES.navy);
+  doc.text(String(ctx.titulo || '').toUpperCase(), PDF_MARGEM, 82);
+  if (ctx.subtitulo) {
+    doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_CORES.muted);
+    doc.text(ctx.subtitulo, PDF_MARGEM, 98);
   }
-  return y;
+  // nome da seção + número de destaque ("65 DE 3.922 ORDENS")
+  doc.setFont(undefined, 'bold'); doc.setFontSize(10.5); doc.setTextColor(...PDF_CORES.texto);
+  doc.text(ctx.secaoNome || '', PDF_MARGEM, 122);
+  if (ctx.heroNum) {
+    doc.setFont(undefined, 'bold'); doc.setFontSize(19); doc.setTextColor(...PDF_CORES.accent);
+    doc.text(String(ctx.heroNum), PDF_MARGEM, 146);
+    if (ctx.heroLabel) {
+      const larg = doc.getTextWidth(String(ctx.heroNum));
+      doc.setFont(undefined, 'bold'); doc.setFontSize(7.2); doc.setTextColor(...PDF_CORES.muted);
+      doc.text(String(ctx.heroLabel).toUpperCase(), PDF_MARGEM + larg + 10, 146);
+    }
+  }
+  doc.setFont(undefined, 'bold'); doc.setFontSize(7.2); doc.setTextColor(...PDF_CORES.muted);
+  doc.text('GERADO EM', W - PDF_MARGEM, 130, { align: 'right' });
+  doc.setFont(undefined, 'normal'); doc.setFontSize(8.5); doc.setTextColor(...PDF_CORES.texto);
+  doc.text(ctx.geradoEm || '', W - PDF_MARGEM, 144, { align: 'right' });
 }
-// Título de seção com barrinha de destaque à esquerda. Devolve o novo Y.
-function pdfTituloSecao(doc, texto, y) {
-  doc.setFillColor(...PDF_CORES.accent);
-  doc.rect(PDF_MARGEM, y - 9, 3, 13, 'F');
-  doc.setFont(undefined, 'bold'); doc.setFontSize(11); doc.setTextColor(...PDF_CORES.texto);
-  doc.text(texto, PDF_MARGEM + 10, y + 1);
-  return y + 12;
+// Cartões de indicador (até 4 por linha), como no modelo. Devolve o novo Y.
+function pdfCartoesKpi(doc, kpis, y) {
+  if (!kpis || !kpis.length) return y;
+  const W = doc.internal.pageSize.getWidth();
+  const larguraTotal = W - PDF_MARGEM * 2, gap = 10;
+  const cols = Math.min(4, kpis.length);
+  const larg = (larguraTotal - gap * (cols - 1)) / cols;
+  kpis.slice(0, 4).forEach((k, i) => {
+    const x = PDF_MARGEM + i * (larg + gap);
+    doc.setFillColor(...(k.destaque ? PDF_CORES.accentClaro : PDF_CORES.zebra));
+    doc.rect(x, y, larg, 38, 'F');
+    doc.setFillColor(...PDF_CORES.accent);
+    doc.rect(x, y, 2.5, 38, 'F');
+    doc.setFont(undefined, 'bold'); doc.setFontSize(14); doc.setTextColor(...PDF_CORES.navy);
+    doc.text(String(k.valor), x + 12, y + 21);
+    doc.setFont(undefined, 'bold'); doc.setFontSize(6.8); doc.setTextColor(...PDF_CORES.muted);
+    doc.text(String(k.rotulo).toUpperCase().slice(0, 32), x + 12, y + 32);
+  });
+  return y + 38 + 14;
 }
-// Passada final: faixa fina de continuação nas páginas 2+ e rodapé com
-// paginação em todas. Só dá pra numerar depois que o documento inteiro existe.
-function pdfFinalizar(doc, titulo) {
-  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+// Indicadores automáticos de uma seção: total de linhas + os valores mais
+// frequentes das colunas categóricas (Status, Motivo...). É o que o modelo do
+// cliente mostra no topo, sem precisar configurar seção por seção.
+function pdfKpisDaSecao(sec) {
+  const kpis = [{ valor: (sec.rows || []).length.toLocaleString('pt-BR'), rotulo: 'Registros', destaque: true }];
+  const headers = sec.headers || [];
+  // só colunas categóricas viram indicador — Status e Motivo primeiro, que é o
+  // que interessa num relatório operacional
+  const candidatas = headers.map((h, i) => ({ i, h: normalizeHeader(h) }))
+    .filter(c => /status|motivo|tipo|situacao/.test(c.h))
+    .sort((a, b) => (/status|motivo/.test(b.h) ? 1 : 0) - (/status|motivo/.test(a.h) ? 1 : 0));
+  for (const col of candidatas) {
+    if (kpis.length >= 4) break;
+    const cont = {};
+    (sec.rows || []).forEach(r => { const v = String(r[col.i] == null ? '' : r[col.i]).trim(); if (v && v !== '-') cont[v] = (cont[v] || 0) + 1; });
+    const top = Object.entries(cont).sort((a, b) => b[1] - a[1]);
+    // coluna com valores demais (ex.: nome de cliente) não vira indicador
+    if (!top.length || top.length > 12) continue;
+    for (const [rotulo, valor] of top) {
+      if (kpis.length >= 4) break;
+      kpis.push({ valor: valor.toLocaleString('pt-BR'), rotulo });
+    }
+  }
+  return kpis;
+}
+// "Página X de Y" no canto direito da faixa do topo. Só dá pra escrever depois
+// que o documento inteiro existe (antes disso não se sabe o total), então é uma
+// passada final por cima da faixa que já foi desenhada.
+function pdfNumerarPaginas(doc) {
+  const W = doc.internal.pageSize.getWidth();
   const total = doc.internal.getNumberOfPages();
   for (let p = 1; p <= total; p++) {
     doc.setPage(p);
-    if (p > 1) {
-      doc.setFillColor(...PDF_CORES.navy);
-      doc.rect(0, 0, W, 28, 'F');
-      doc.setFont(undefined, 'bold'); doc.setFontSize(8.5); doc.setTextColor(255, 255, 255);
-      doc.text('JH TELECOM · ' + titulo, PDF_MARGEM, 18);
-    }
-    doc.setDrawColor(...PDF_CORES.linha); doc.setLineWidth(0.6);
-    doc.line(PDF_MARGEM, H - 40, W - PDF_MARGEM, H - 40);
-    doc.setFont(undefined, 'normal'); doc.setFontSize(7.5); doc.setTextColor(...PDF_CORES.muted);
-    doc.text('Gerado pelo JH TELECOM · Nexus System', PDF_MARGEM, H - 26);
-    doc.text(`Página ${p} de ${total}`, W - PDF_MARGEM, H - 26, { align: 'right' });
+    doc.setFont(undefined, 'normal'); doc.setFontSize(8.5); doc.setTextColor(...PDF_CORES.accentClaro);
+    doc.text(`Página ${p} de ${total}`, W - PDF_MARGEM, 30, { align: 'right' });
   }
 }
-// Estilo padrão das tabelas — bordas leves, zebra suave e linha de total
-// destacada, em vez do "grid" pesado de antes.
-function pdfEstiloTabela(colStyles) {
+// Estilo da tabela + pílula colorida na coluna de status (verde pra concluído,
+// vermelho pra cancelado/não concluído), como no modelo.
+function pdfEstiloTabela(colStyles, headers) {
+  const idxStatus = (headers || []).findIndex(h => /status/.test(normalizeHeader(h)));
   return {
     theme: 'grid',
-    headStyles: { fillColor: PDF_CORES.navy, textColor: 255, fontStyle: 'bold', fontSize: 7.5, halign: 'center', cellPadding: 5, lineWidth: 0 },
-    footStyles: { fillColor: PDF_CORES.totalBg, textColor: PDF_CORES.texto, fontStyle: 'bold', fontSize: 7.5, lineWidth: 0.4, lineColor: PDF_CORES.linha },
+    headStyles: { fillColor: PDF_CORES.navy, textColor: 255, fontStyle: 'bold', fontSize: 7, halign: 'center', cellPadding: 6, lineWidth: 0 },
+    footStyles: { fillColor: PDF_CORES.accentClaro, textColor: PDF_CORES.navy, fontStyle: 'bold', fontSize: 7.2, lineWidth: 0.4, lineColor: PDF_CORES.linha },
     alternateRowStyles: { fillColor: PDF_CORES.zebra },
-    // fonte menor e padding justo: tabela larga (ex.: Detalhamento dos
-    // Serviços, com 8 colunas) quebrava o texto de quase toda célula em 2-3
-    // linhas e o conteúdo saía desalinhado
-    styles: { fontSize: 7.5, cellPadding: 4, valign: 'middle', overflow: 'linebreak',
-              textColor: PDF_CORES.texto, lineColor: PDF_CORES.linha, lineWidth: 0.4 },
+    styles: { fontSize: 7.1, cellPadding: 5, valign: 'middle', overflow: 'linebreak',
+              textColor: PDF_CORES.texto, lineColor: PDF_CORES.linha, lineWidth: 0.3 },
     columnStyles: colStyles || {},
-    // top: espaço da faixa de continuação nas páginas seguintes
-    margin: { left: PDF_MARGEM, right: PDF_MARGEM, top: 46, bottom: 52 },
+    margin: { left: PDF_MARGEM, right: PDF_MARGEM, top: PDF_TOPO_ALTURA, bottom: 46 },
+    didParseCell: (data) => {
+      if (data.section !== 'body' || idxStatus === -1 || data.column.index !== idxStatus) return;
+      const t = normalizeHeader((data.cell.text || []).join(' '));
+      if (!t) return;
+      const bom = t.includes('conclu') && !t.includes('nao');
+      const ruim = t.includes('cancel') || t.includes('nao conclu');
+      if (!bom && !ruim) return;
+      data.cell.styles.fillColor = bom ? PDF_CORES.okBg : PDF_CORES.ruimBg;
+      data.cell.styles.textColor = bom ? PDF_CORES.okTexto : PDF_CORES.ruimTexto;
+      data.cell.styles.fontStyle = 'bold';
+      data.cell.styles.halign = 'center';
+    },
   };
 }
 // Desenha um gráfico de barras horizontais nativo no PDF (retângulos + texto,
@@ -1989,29 +2061,54 @@ function wirePdfExportPanel(titulo, getSecaoFns) {
 }
 function gerarPDFMultiSecoes(titulo, secoes, opts = {}) {
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: pdfOrientacao(secoes) });
   const alturaPagina = doc.internal.pageSize.getHeight();
-  let y = pdfCabecalho(doc, titulo, opts.subtitulo);
+  const geradoEm = new Date().toLocaleString('pt-BR');
+  // O topo (faixa + título + destaque da seção) é redesenhado em toda página,
+  // por isso ele precisa saber QUAL seção está sendo impressa naquela folha.
+  let ctx = { titulo, subtitulo: opts.subtitulo, geradoEm, secaoNome: '', heroNum: '', heroLabel: '' };
+  const desenhaTopo = () => pdfDesenhaTopo(doc, ctx);
+
   secoes.forEach((sec, idx) => {
-    // não deixa o título da seção órfão no pé da página
-    if (y > alturaPagina - 150) { doc.addPage(); y = 56; }
-    else if (idx > 0) y += 6;
-    y = pdfTituloSecao(doc, sec.titulo, y);
+    // o número de destaque é a própria contagem da seção; se o título trouxer
+    // "(X de Y ...)" — como no Detalhamento dos Serviços — usa o Y como base
+    const m = /\((\d[\d.]*)\s+de\s+([\d.]+)\s*([^)]*)\)/i.exec(sec.titulo || '');
+    ctx = {
+      titulo, subtitulo: opts.subtitulo, geradoEm,
+      secaoNome: String(sec.titulo || '').replace(/\s*\([^)]*\)\s*$/, ''),
+      heroNum: m ? m[1] : (sec.rows ? sec.rows.length.toLocaleString('pt-BR') : ''),
+      heroLabel: m ? `de ${m[2]} ${m[3] || 'registros'}`.trim() : 'registros',
+    };
+    if (idx === 0) desenhaTopo();
+    else { doc.addPage(); desenhaTopo(); }
+
+    let y = PDF_TOPO_ALTURA - 6;
     if (sec.tipo === 'bars') {
-      y = drawBarChartPDF(doc, sec, y + 16);
+      drawBarChartPDF(doc, sec, y + 10);
       return;
     }
+    // cartões de indicador só na primeira folha da seção
+    y = pdfCartoesKpi(doc, pdfKpisDaSecao(sec), y);
+
     const colStyles = {};
     sec.alignRight.forEach((r,i) => { if (r) colStyles[i] = { halign: 'right' }; });
     // alinhamento explícito da seção vence o padrão acima
     (sec.align || []).forEach((a,i) => { if (a) colStyles[i] = { ...(colStyles[i]||{}), halign: a }; });
+    let primeira = true;
     doc.autoTable({
-      startY: y + 10, head: [sec.headers], body: sec.rows, foot: sec.totalRows || undefined,
-      ...pdfEstiloTabela(colStyles),
+      startY: y,
+      head: [(sec.headers || []).map(h => String(h).toUpperCase())],
+      body: sec.rows, foot: sec.totalRows || undefined,
+      ...pdfEstiloTabela(colStyles, sec.headers),
+      // redesenha o topo nas folhas seguintes da MESMA seção, marcando
+      // "Continuação" (o modelo do cliente repete o cabeçalho em toda página)
+      didDrawPage: () => {
+        if (primeira) { primeira = false; return; }
+        pdfDesenhaTopo(doc, { ...ctx, secaoNome: ctx.secaoNome + ' — Continuação' });
+      },
     });
-    y = doc.lastAutoTable.finalY + 26;
   });
-  pdfFinalizar(doc, titulo);
+  pdfNumerarPaginas(doc);
   doc.save((opts.arquivo || 'relatorio_' + titulo.toLowerCase().replace(/[^a-z0-9]+/g,'_')) + '.pdf');
 }
 function formatDate(v) {
