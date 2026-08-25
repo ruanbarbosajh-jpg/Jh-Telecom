@@ -278,8 +278,11 @@
   .metric-card .value { font-size: clamp(16px, 1.7vw, 22px); font-weight: 700; color: var(--accent); line-height: 1.25; overflow-wrap: anywhere; word-break: break-word; }
   .metric-card .value.negative { color: var(--danger); }
   .metric-card .value.positive { color: var(--success); }
-  /* destaque maior — usado em telas onde o número é o dado principal (ex.: Ofensor) */
+  /* destaque maior — usado em telas onde o número é o dado principal (ex.: Ofensor).
+     Texto longo (nome de técnico/cidade) cai pro tamanho médio, senão o card
+     estoura de altura e fica desproporcional ao lado dos que têm só número. */
   .metric-card .value.big-value { font-size: clamp(22px, 2.6vw, 32px); }
+  .metric-card .value.med-value { font-size: clamp(15px, 1.5vw, 19px); line-height: 1.3; }
   .metric-card .sub { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; }
 
   .panels-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 1.5rem; }
@@ -2474,34 +2477,27 @@ function donutChart(elId, items, opts = {}) {
   const total = items.reduce((a,i) => a+i.value, 0);
   if (!total) { el.innerHTML = '<div class="empty">Sem dados.</div>'; return; }
   let acc = 0;
-  const stops = [], labels = [];
+  const stops = [];
   items.forEach((i, idx) => {
     const color = i.color || PALETTE[idx % PALETTE.length];
-    const start = acc, end = acc + i.value;
-    stops.push(`${color} ${(start/total)*360}deg ${(end/total)*360}deg`);
-    const pct = (i.value/total)*100;
-    // rótulo interno: só cabe em fatias de 5%+ — abaixo disso vira poluição visual
-    if (pct >= 5) {
-      const midAng = ((start + i.value/2)/total) * 2*Math.PI - Math.PI/2; // 0° no topo
-      // o miolo do anel é vazado até 62% do raio (ver .donut no CSS), então o
-      // rótulo precisa ficar no MEIO da faixa colorida (~81%), senão cai no
-      // buraco do meio e fica ilegível
-      const r = 40.5;
-      labels.push({
-        left: 50 + r*Math.cos(midAng), top: 50 + r*Math.sin(midAng),
-        text: pct.toFixed(1)+'%', cor: corTextoContraste(color) || '#ffffff',
-      });
-    }
-    acc = end;
+    stops.push(`${color} ${(acc/total)*360}deg ${((acc + i.value)/total)*360}deg`);
+    acc += i.value;
   });
+  // A % de cada fatia já aparece na legenda ao lado — repetir dentro do anel
+  // só polui (e ainda exigia calcular contraste fatia a fatia). O miolo fica
+  // só com o total.
+  const textoCentro = opts.centroValor !== undefined ? String(opts.centroValor) : total.toLocaleString('pt-BR');
+  // valor longo (moeda com milhar) não cabe no miolo no mesmo corpo de um
+  // número curto — quebrava linha no meio ("R$ 424.739,3 / 3")
+  const corpoCentro = textoCentro.length <= 7 ? 'clamp(18px, 2.6vw, 26px)'
+    : textoCentro.length <= 11 ? 'clamp(14px, 1.9vw, 19px)' : 'clamp(11px, 1.5vw, 15px)';
   const centro = opts.semCentro ? '' : `<div class="donut-centro">
-    <div class="donut-centro-valor">${opts.centroValor !== undefined ? opts.centroValor : total.toLocaleString('pt-BR')}</div>
+    <div class="donut-centro-valor" style="font-size:${corpoCentro}">${textoCentro}</div>
     <div class="donut-centro-label">${opts.centroLabel || 'Total'}</div>
   </div>`;
   el.innerHTML = `<div class="donut-wrap">
     <div class="donut-holder">
       <div class="donut" style="background:conic-gradient(${stops.join(', ')})"></div>
-      ${labels.map(l=>`<span class="donut-slice-label" style="left:${l.left}%;top:${l.top}%;color:${l.cor}">${l.text}</span>`).join('')}
       ${centro}
     </div>
     <div class="donut-legend">${items.map((i,idx) => {
@@ -3002,8 +2998,74 @@ function tryParsePivotFinanceiro(rows) {
   return { periodos: periodCols.map(p=>p.periodo), porCategoria, totalDespesas, receitaOrdens, lucro };
 }
 
+// ---------- Parser dedicado da aba "VALORES ORDENS" ----------
+// Essa aba não segue o formato "1 linha de cabeçalho + dados" que o importador
+// genérico espera. O arquivo real (FOLHA DE PAGAMENTO JH LT 2026) tem:
+//   - 3 colunas VAZIAS antes da primeira coluna com conteúdo;
+//   - DUAS tabelas empilhadas na mesma aba, separadas por linhas em branco —
+//     uma antiga (só "NORMAL" e "26 DIAS", sem o valor da GIGA) e a atual;
+//   - cabeçalho da tabela atual em DUAS linhas, com "GIGA->JH" numa e
+//     "TIPO DE ORDEM / NORMAL / 26 DIAS" na outra.
+// O importador genérico escolhia a tabela errada (ou a linha errada), então o
+// "Valor pago pela GIGA" saía R$ 0,00 e o valor do técnico vinha na coluna
+// trocada. Aqui a gente procura explicitamente a tabela que TEM a coluna da
+// GIGA e lê as colunas por "contém" (normalizeHeader não tira "/" nem ">",
+// então "GIGA->JH" e "26 DIAS/ IND." nunca batiam por igualdade exata).
+function parseValoresOrdens(rows) {
+  const norm = v => normalizeHeader(v).replace(/[\/>]/g, ' ').replace(/\s+/g, ' ').trim();
+  const acharCol = (linha, teste) => linha.findIndex(c => teste(norm(c)));
+  const ehTextoDeCabecalho = t => !t || ['ordens','tipo de ordem','antes','c'].includes(t)
+    || t.includes('giga') || t.includes('tecnico') || t.includes('normal') || t.includes('26 dias');
+
+  let melhor = null;
+  for (let i = 0; i < rows.length; i++) {
+    // combina a linha com a de cima, herdando só onde a de baixo está vazia —
+    // é assim que "GIGA->JH" (que só existe na linha de cima) entra na mesma
+    // linha "virtual" que "TIPO DE ORDEM" e "NORMAL"
+    const linha = rows[i].map((c, col) => (norm(c) ? c : (i > 0 ? rows[i - 1][col] : c)));
+    const idxTipo = acharCol(linha, t => t === 'tipo de ordem' || t === 'ordens');
+    if (idxTipo === -1) continue;
+    const idxGiga = acharCol(linha, t => t.includes('giga'));
+    const idxNormal = acharCol(linha, t => t === 'normal');
+    const idx26 = acharCol(linha, t => t.includes('26 dias'));
+    const pontos = (idxGiga !== -1 ? 4 : 0) + (idxNormal !== -1 ? 1 : 0) + (idx26 !== -1 ? 1 : 0);
+    // a tabela que traz o valor da GIGA sempre vence a legada que não traz
+    if (!melhor || pontos > melhor.pontos) melhor = { linhaIdx: i, idxTipo, idxGiga, idxNormal, idx26, pontos };
+  }
+  if (!melhor || melhor.pontos === 0) return null;
+
+  const itens = [];
+  for (let i = melhor.linhaIdx + 1; i < rows.length; i++) {
+    const tipoBruto = rows[i][melhor.idxTipo];
+    const t = norm(tipoBruto);
+    if (ehTextoDeCabecalho(t)) continue; // linha em branco, título ou o cabeçalho da outra tabela
+    const val = idx => idx === -1 ? 0 : parseMoney(rows[i][idx]);
+    itens.push({
+      tipo_ordem: t,
+      valor_giga: val(melhor.idxGiga),
+      valor_normal: val(melhor.idxNormal),
+      valor_26dias: val(melhor.idx26),
+    });
+  }
+  return itens.length ? itens : null;
+}
+
 function importSheet(sheetName, rows) {
   if (!rows || rows.length < 2) return { target: null, inserted: 0, headersSeen: [] };
+
+  // VALORES ORDENS tem formato próprio (2 tabelas empilhadas, cabeçalho em 2
+  // linhas) — resolve antes de cair no importador genérico.
+  if (normalizeHeader(sheetName).includes('valores ordens')) {
+    const itens = parseValoresOrdens(rows);
+    if (itens) {
+      const inseridos = itens.map(o => upsertRow(DB.valoresOrdens, DB_INDEX.valoresOrdens, o.tipo_ordem || null, o));
+      const logEntry = { sheet_name: sheetName, target_table: 'valoresOrdens', row_count: inseridos.length, imported_at: new Date().toLocaleString('pt-BR') };
+      DB.importsLog.unshift(logEntry);
+      const syncPromise = syncBatchToSupabase('valoresOrdens', inseridos);
+      logImportToSupabase({ ...logEntry, imported_by: currentUser ? (currentUser.nome || currentUser.login) : null });
+      return { target: 'valoresOrdens', inserted: inseridos.length, errors: 0, syncPromise };
+    }
+  }
 
   const pivot = tryParsePivotFinanceiro(rows);
   if (pivot) {
@@ -3039,42 +3101,7 @@ function importSheet(sheetName, rows) {
     ? 'frotaRevisao'
     : pickBestTarget(best.maps, best.scores);
   if (!target) return { target: null, inserted: 0, headersSeen: rows[headerRowIdx] || [] };
-  let map = best.maps[target];
-  // "VALORES ORDENS" tem cabeçalho em 2 linhas: "ORDENS"/"GIGA->JH"/
-  // "JH->TÉCNICO" numa linha (mesclada, "GIGA->JH" é 1 coluna só) e
-  // "TIPO DE ORDEM"/"NORMAL"/"26 DIAS/IND" na linha de baixo. O jeito genérico
-  // de achar cabeçalho (1 linha só, a que bate mais apelidos) nunca vê as duas
-  // juntas — ou pega a linha de cima e perde tipo_ordem/normal/26dias, ou pega
-  // a de baixo e perde valor_giga (sempre R$ 0,00), ou, se tiver título/linha
-  // em branco antes das duas, pode nem achar nenhuma das duas e importar o
-  // próprio texto do cabeçalho como se fosse linha de dado.
-  // Resolve combinando cada linha candidata com a linha ANTERIOR (herda a
-  // célula de cima só onde a de baixo está em branco) antes de pontuar —
-  // assim a coluna "GIGA->JH" (em branco na linha de baixo) aparece combinada
-  // com "TIPO DE ORDEM"/"NORMAL"/"26 DIAS" na mesma linha "virtual".
-  if (target === 'valoresOrdens') {
-    let melhorIdx = -1, melhorScore = -1, melhorMap = null;
-    const limite = Math.min(15, rows.length);
-    for (let i = 0; i < limite; i++) {
-      const combinada = rows[i].map((c, col) => (normalizeHeader(c) ? c : (i > 0 ? rows[i - 1][col] : c)));
-      const { scores, maps } = buildColumnMap(combinada);
-      if ((scores.valoresOrdens || 0) > melhorScore) { melhorScore = scores.valoresOrdens; melhorIdx = i; melhorMap = maps.valoresOrdens; }
-    }
-    if (melhorIdx !== -1 && melhorMap && Object.keys(melhorMap).length >= 2) {
-      headerRowIdx = melhorIdx;
-      map = melhorMap;
-      // "GIGA->JH" normaliza pra "giga >jh" (normalizeHeader não tira o ">"),
-      // que não bate igual com nenhum apelido da lista (a comparação de
-      // apelido é por igualdade exata). Aqui, se ainda não achou, procura
-      // "contém giga" na linha combinada — mais tolerante a como o "->" vira
-      // espaço/símbolo depois de normalizar.
-      if (map.valor_giga === undefined) {
-        const combinadaFinal = rows[melhorIdx].map((c, col) => (normalizeHeader(c) ? c : (melhorIdx > 0 ? rows[melhorIdx - 1][col] : c)));
-        const idxGiga = combinadaFinal.findIndex(c => normalizeHeader(c).includes('giga'));
-        if (idxGiga !== -1) map.valor_giga = idxGiga;
-      }
-    }
-  }
+  const map = best.maps[target];
   // só entram linhas que tenham ALGUM identificador (O.S, cidade, data, técnico).
   // Sem isso, sobra de formatação da planilha — a aba "PRAZO REPARO DO DIA" tem
   // ~400 linhas em branco com "0" e "-" em colunas auxiliares — entrava como
@@ -3085,17 +3112,7 @@ function importSheet(sheetName, rows) {
     const c = r[i];
     return c !== null && c !== undefined && String(c).trim() !== '';
   });
-  let dataRows = rows.slice(headerRowIdx + 1).filter(r => r.some(c => c !== null && c !== undefined && c !== '') && temConteudo(r));
-  // trava extra pra "VALORES ORDENS": se o cabeçalho ficou 1 linha errado (ex.:
-  // por causa de título/linha em branco antes dele), o próprio texto do
-  // cabeçalho ("ORDENS", "TIPO DE ORDEM"...) vira "linha de dado" — barra
-  // qualquer linha cujo tipo_ordem seja vazio ou pareça texto de cabeçalho.
-  if (target === 'valoresOrdens' && map.tipo_ordem !== undefined) {
-    dataRows = dataRows.filter(r => {
-      const t = normalizeHeader(cell(r, map.tipo_ordem));
-      return t && t !== 'ordens' && t !== 'tipo de ordem' && !t.includes('giga') && !t.includes('tecnico');
-    });
-  }
+  const dataRows = rows.slice(headerRowIdx + 1).filter(r => r.some(c => c !== null && c !== undefined && c !== '') && temConteudo(r));
   // a Folha de Pagamento nem sempre traz uma coluna de período — como pode vir
   // mais de um mês ao longo do tempo, primeiro tenta ler o ciclo do NOME DA
   // ABA (ex.: "FOLHA 21.07 a 20.08") e só pergunta na mão se isso falhar.
@@ -3389,7 +3406,13 @@ function ativarFiltrosDeColuna(raiz) {
 function metricCard(label, value, negative, opts = {}) {
   const icon = opts.icon ? `<span>${opts.icon}</span>` : '';
   const sub = opts.sub ? `<div class="sub">${opts.sub}</div>` : '';
-  const classe = (opts.positive ? ' positive' : (negative ? ' negative' : '')) + (opts.big ? ' big-value' : '');
+  // O tamanho do número acompanha o TAMANHO DO TEXTO: "10" pode ser enorme,
+  // mas "GABRIEL MESSIAS DE OLIVEIRA" no mesmo corpo estoura o card e fica
+  // desproporcional ao lado dos outros. Só encolhe o texto longo — os números
+  // continuam grandes.
+  const comprimento = String(value ?? '').length;
+  const escala = !opts.big ? '' : comprimento <= 8 ? ' big-value' : comprimento <= 18 ? ' med-value' : '';
+  const classe = (opts.positive ? ' positive' : (negative ? ' negative' : '')) + escala;
   return `<div class="metric-card${opts.accent?' accent':''}"><div class="label">${icon}${label}</div><div class="value${classe}">${value}</div>${sub}</div>`;
 }
 // Medidor em arco no estilo do Power BI: escala de 0 até `max`, com um traço
@@ -7692,8 +7715,6 @@ function renderFinance() {
   document.getElementById('content').innerHTML = `<div class="toolbar">
     <div class="field"><label>Período</label><select id="f-periodo"><option value="">Todos</option>${periodos.map(p=>`<option>${p}</option>`).join('')}</select></div>
     <div class="field"><label>Categoria</label><input type="text" id="f-cat" placeholder="Categoria"></div>
-    <div class="field"><label>Valor das Ordens — De</label><input type="date" id="vo-start" value="${start}"></div>
-    <div class="field"><label>até</label><input type="date" id="vo-end" value="${end}"></div>
     <button class="btn" id="f-apply">Filtrar</button>
   </div><div id="fin-body"></div>`;
   document.getElementById('f-apply').addEventListener('click', load);
@@ -7704,20 +7725,62 @@ function renderFinance() {
     const rows = DB.financeiro.filter(r => (!periodo || r.periodo===periodo) && (!cat || (r.categoria||'').toLowerCase().includes(cat)));
     const body = document.getElementById('fin-body');
 
-    // ---- Valor das Ordens — pago pela GIGA (independente do filtro acima:
-    // usa data real das ordens, não o texto livre de "Período" do financeiro) ----
-    const voS = document.getElementById('vo-start').value, voE = document.getElementById('vo-end').value;
-    const prodConcluida = DB.producao.filter(p => inRange(p.data, voS, voE) && isConcluido(p.status));
-    const contaTipo = re => prodConcluida.filter(p => re.test(p.tipo_atividade || '')).length;
-    const itensGiga = [
-      { label: 'Ativação', qtd: contaTipo(/ativa[cç][aã]o/i) }, { label: 'Mudança de Cômodo', qtd: contaTipo(/mudan[cç]a de c[oô]modo/i) },
-      { label: 'Mudança de Endereço', qtd: contaTipo(/mudan[cç]a de endere[cç]o/i) }, { label: 'Reparos', qtd: contaTipo(/reparo/i) },
-      { label: 'Upgrade', qtd: contaTipo(/upgrade|downgrade/i) },
-    ].map(i => { const preco = precoGigaPorTipo(i.label); return preco !== null ? { ...i, preco, valor: i.qtd * preco } : { ...i, preco: null, valor: null }; });
-    const totalQtdGiga = itensGiga.reduce((a,i)=>a+i.qtd,0), totalValorGiga = itensGiga.reduce((a,i)=>a+(i.valor||0),0);
-    const valorGigaHtml = painelValorGiga(itensGiga);
+    // ---- Tabela de preços por serviço (aba VALORES ORDENS) ----
+    // No Financeiro o que interessa não é a CONTAGEM de ordens (isso já está no
+    // Relatório de Eficiência e no Resumo Geral), e sim a tabela de preços:
+    // quanto a GIGA paga a JH por serviço e quanto a JH paga o técnico nas duas
+    // faixas (normal e 26 dias ou mais trabalhados).
+    const TIPOS_PRECO = [
+      ['Ativação', /ativa/], ['Reparo', /reparo/], ['Mudança de Endereço', /mudan.*endereco/],
+      ['Mudança de Cômodo', /mudan.*comodo/], ['Upgrade/Downgrade', /upgrade|downgrade/],
+    ];
+    const linhaPreco = re => DB.valoresOrdens.find(v => re.test(normalizeHeader(v.tipo_ordem)));
+    const precos = TIPOS_PRECO.map(([label, re]) => {
+      const l = linhaPreco(re);
+      return { label, giga: l ? l.valor_giga : null, normal: l ? l.valor_normal : null, d26: l ? l.valor_26dias : null };
+    });
+    // descontos (IFI/IRR) vêm na mesma aba, mas são cobrança e não pagamento —
+    // ficam numa tabelinha separada logo abaixo
+    const descontos = [['Desconto IFI', /desconto ifi/], ['Desconto IRR', /desconto irr/]].map(([label, re]) => {
+      const l = linhaPreco(re);
+      return { label, giga: l ? l.valor_giga : null, normal: l ? l.valor_normal : null };
+    }).filter(d => d.giga !== null || d.normal !== null);
+    const cel = v => v ? formatCurrency(v) : '-';
+    // margem por serviço = o que sobra pra JH depois de pagar o técnico
+    const margem = (giga, tec) => (giga && tec) ? formatCurrency(giga - tec) : '-';
+    const precosHtml = !DB.valoresOrdens.length
+      ? `<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Tabela de valores não importada — importe a aba "VALORES ORDENS" de FOLHA_DE_PAGAMENTO...xlsx em "Importar Excel".</div></div>`
+      : `<div class="panel" style="margin-bottom:1.5rem">
+        <h3>Valores por Serviço</h3>
+        <p style="font-size:12px;color:var(--text-muted);margin:-8px 0 12px">
+          Vem da aba "VALORES ORDENS". "Normal" e "26 dias" são as duas faixas de pagamento ao técnico (26 dias ou mais trabalhados no ciclo).
+        </p>
+        <div class="table-wrap"><table class="data-table"><thead><tr>
+          <th rowspan="2">Serviço</th><th rowspan="2">GIGA paga a JH</th><th colspan="2" style="text-align:center">JH paga o técnico</th><th colspan="2" style="text-align:center">Margem JH</th>
+        </tr><tr>
+          <th>Normal</th><th>26 dias+</th><th>Normal</th><th>26 dias+</th>
+        </tr></thead><tbody>
+          ${precos.map(p=>`<tr>
+            <td class="cat-cell">${p.label}</td>
+            <td style="color:var(--accent);font-weight:700">${cel(p.giga)}</td>
+            <td>${cel(p.normal)}</td>
+            <td>${cel(p.d26)}</td>
+            <td style="color:var(--success);font-weight:600">${margem(p.giga, p.normal)}</td>
+            <td style="color:var(--success);font-weight:600">${margem(p.giga, p.d26)}</td>
+          </tr>`).join('')}
+        </tbody></table></div>
+        ${descontos.length ? `
+        <h3 style="margin-top:18px">Descontos por Retorno</h3>
+        <div class="table-wrap"><table class="data-table"><thead><tr>
+          <th>Tipo</th><th>GIGA desconta da JH</th><th>JH desconta do técnico</th>
+        </tr></thead><tbody>
+          ${descontos.map(d=>`<tr><td class="cat-cell">${d.label}</td>
+            <td style="color:var(--danger);font-weight:700">${cel(d.giga)}</td>
+            <td style="color:var(--danger);font-weight:600">${cel(d.normal)}</td></tr>`).join('')}
+        </tbody></table></div>` : ''}
+      </div>`;
 
-    if (!rows.length) { body.innerHTML = valorGigaHtml + '<div class="panel"><div class="empty">Nenhum lançamento encontrado. Importe a aba "BASE" de base_dados_financeiro.xlsx.</div></div>'; return; }
+    if (!rows.length) { body.innerHTML = precosHtml + '<div class="panel"><div class="empty">Nenhum lançamento encontrado. Importe a aba "BASE" de base_dados_financeiro.xlsx.</div></div>'; return; }
     const receita = rows.filter(r=>/receita/i.test(r.tipo)).reduce((a,r)=>a+r.valor,0);
     const despesa = rows.filter(r=>/despesa/i.test(r.tipo)).reduce((a,r)=>a+r.valor,0);
     const byCategory = {};
@@ -7725,7 +7788,7 @@ function renderFinance() {
     const despesaCats = Object.values(byCategory).filter(c=>/despesa/i.test(c.tipo)).sort((a,b)=>b.total-a.total).map(c=>({label:c.categoria,value:c.total,display:formatCurrency(c.total)}));
     body.innerHTML = `
       <div class="cards-grid">${metricCard('Receita', formatCurrency(receita))}${metricCard('Despesa', formatCurrency(despesa))}${metricCard('Saldo', formatCurrency(receita-despesa), (receita-despesa)<0)}</div>
-      ${valorGigaHtml}
+      ${precosHtml}
       <div class="panel" style="margin-bottom:1.5rem"><h3>Despesas por categoria</h3><div id="c-cat"></div></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr><th>Categoria</th><th>Tipo</th><th>Total</th></tr></thead><tbody>
         ${Object.values(byCategory).sort((a,b)=>b.total-a.total).map(r=>`<tr><td>${r.categoria}</td><td>${r.tipo}</td><td>${formatCurrency(r.total)}</td></tr>`).join('')}
@@ -7735,17 +7798,18 @@ function renderFinance() {
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'resumo', label: 'Resumo (Receita/Despesa/Saldo)' },
-      { id: 'ordens', label: 'Valor das Ordens (pago pela GIGA)' },
+      { id: 'precos', label: 'Valores por serviço (GIGA e técnico)' },
       { id: 'categorias', label: 'Detalhamento por categoria' },
     ]);
     wirePdfExportPanel('Financeiro', {
       resumo: () => secaoTabela('Resumo Financeiro', [
         {l:'Receita', v:formatCurrency(receita)}, {l:'Despesa', v:formatCurrency(despesa)}, {l:'Saldo', v:formatCurrency(receita-despesa)},
       ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
-      ordens: () => secaoTabela('Valor das Ordens — Pago pela GIGA', itensGiga, [
-        {header:'Tipo', get:r=>r.label}, {header:'Contagem', get:r=>r.qtd.toLocaleString('pt-BR')},
-        {header:'Valor GIGA', get:r=>r.valor!==null?formatCurrency(r.valor):'-'},
-      ], { totalRow: ['Total Geral', totalQtdGiga.toLocaleString('pt-BR'), formatCurrency(totalValorGiga)] }),
+      precos: () => secaoTabela('Valores por Serviço', precos, [
+        {header:'Serviço', get:r=>r.label}, {header:'GIGA paga a JH', get:r=>cel(r.giga)},
+        {header:'Técnico normal', get:r=>cel(r.normal)}, {header:'Técnico 26 dias+', get:r=>cel(r.d26)},
+        {header:'Margem normal', get:r=>margem(r.giga, r.normal)}, {header:'Margem 26 dias+', get:r=>margem(r.giga, r.d26)},
+      ]),
       categorias: () => secaoTabela('Despesas / Receitas — Detalhamento', Object.values(byCategory).sort((a,b)=>b.total-a.total), [
         {header:'Categoria', get:r=>r.categoria}, {header:'Tipo', get:r=>r.tipo}, {header:'Total', get:r=>formatCurrency(r.total)},
       ], { totalRow: ['TOTAL DESPESAS', '', formatCurrency(despesa)] }),
@@ -8707,7 +8771,14 @@ function renderPainelBI() {
       { label: 'Mudança de Endereço', value: qtdME }, { label: 'Mudança de Cômodo', value: qtdMC },
       { label: 'Upgrade/Downgrade', value: qtdUpgrade },
     ], { fill: true });
-    donutChart('bi-despesas', despesaCats, { centroValor: formatCurrency(despesaCats.reduce((a,c)=>a+c.value,0)), centroLabel: 'Despesas' });
+    // 8+ categorias viram um anel cheio de fatias finas e uma legenda enorme —
+    // mostra as 5 maiores e junta o resto em "Outros", que é o suficiente pra
+    // entender onde o dinheiro está indo.
+    const totalDespCats = despesaCats.reduce((a,c)=>a+c.value,0);
+    const despesaTop = despesaCats.slice(0, 5);
+    const restoDesp = despesaCats.slice(5).reduce((a,c)=>a+c.value,0);
+    if (restoDesp > 0) despesaTop.push({ label: `Outros (${despesaCats.length - 5})`, value: restoDesp, display: formatCurrency(restoDesp), color: '#94a3c4' });
+    donutChart('bi-despesas', despesaTop, { centroValor: formatCurrency(totalDespCats), centroLabel: 'Despesas' });
     donutChart('bi-frota', Object.entries(locadoraMap).map(([label, value], i) => ({ label, value, color: PALETTE[i % PALETTE.length] })), { centroLabel: 'Veículos' });
     barsChart('bi-pedagio', byPlaca, { color: '#fb923c' });
     trendChart('bi-evolucao', [
