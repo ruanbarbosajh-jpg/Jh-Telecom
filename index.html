@@ -1742,10 +1742,11 @@ function precoGigaPorTipo(tipoAtividade) {
 // Financeiro mostravam a mesma tabela (3 cópias) — centralizado aqui. Mostra
 // a conta por extenso (contagem × valor unitário = valor GIGA) e destaca o
 // total numa cor diferente do resto da tabela.
-function painelValorGiga(itensGiga) {
+function painelValorGiga(itensGiga, opts = {}) {
   const totalQtd = itensGiga.reduce((a,i)=>a+i.qtd,0), totalValor = itensGiga.reduce((a,i)=>a+(i.valor||0),0);
   return `<div class="panel" style="margin-bottom:1.5rem">
     <h3>Valor das Ordens — pago pela GIGA</h3>
+    ${opts.nota ? `<p style="font-size:12px;color:var(--text-muted);margin:-8px 0 12px">${opts.nota}</p>` : ''}
     <div class="table-wrap"><table class="data-table"><thead><tr>
       <th>Tipo</th><th>Contagem</th><th>Valor Unitário</th><th>Valor GIGA</th>
     </tr></thead><tbody>
@@ -3568,7 +3569,7 @@ function renderDashboard() {
         ${metricCard('Upgrade', upgrade)}
         ${metricCard('Técnicos', technicians)}
       </div>
-      ${painelValorGiga(itensGiga)}
+      ${painelValorGiga(itensGiga, { nota: 'Contagem da aba RELATORIO (fechamento do ciclo) × valor de contrato por serviço.' })}
       <div class="section-heading">Indicadores IFI / IRR</div>
       <div class="panels-grid thirds">
         ${gaugePanel('% IFI médio', ifi, 2.50, {lowerIsBetter:true, decimals:2})}
@@ -8537,12 +8538,26 @@ function renderPainelBI() {
           qtdME = contaTipo(/mudan[cç]a de endere[cç]o/i), qtdMC = contaTipo(/mudan[cç]a de c[oô]modo/i),
           qtdUpgrade = contaTipo(/upgrade|downgrade/i);
 
-    // Valor pago pela GIGA por tipo de serviço (preço fixo × contagem) —
-    // VALORES_ORDENS_FIXOS, não o "Valor Ordens" interno da Folha.
+    // Valor pago pela GIGA por tipo de serviço (preço fixo × contagem) — o preço
+    // vem de VALORES_ORDENS_FIXOS e a CONTAGEM vem da aba RELATORIO
+    // (DB.fechamento), a mesma do Relatório de Eficiência.
+    //
+    // Antes essa contagem saía da base de produção filtrada por cidade, e as
+    // duas telas mostravam valores diferentes pro mesmo painel: 3.830 ordens /
+    // R$ 500.817,23 aqui contra 3.705 / R$ 484.863,90 no Relatório. Conferido
+    // em 25/08/2026, a diferença de 125 ordens era: 127 ordens de técnicos que
+    // não constam na aba RELATORIO do ciclo (Guilherme Messias de Oliveira e
+    // Guilherme Ferreira da Silva) e 110 de cidades fora do contrato (Ribeirão
+    // Pires, Mauá, São Paulo, Peruíbe, Suzano, Itariri, Itanhaém).
+    // Decisão do cliente: o valor da GIGA é o do fechamento oficial, então as
+    // duas telas passam a bater 1:1. Como o fechamento é fechado por ciclo, ESTE
+    // painel não acompanha o filtro de cidade (o resto da tela continua
+    // acompanhando) — por isso o aviso no rodapé do painel.
+    const somaFech = k => fech.reduce((a, f) => a + (f[k] || 0), 0);
     const itensGiga = [
-      { label: 'Ativação', qtd: qtdAtivacao }, { label: 'Reparos', qtd: qtdReparo },
-      { label: 'Mudança de Endereço', qtd: qtdME }, { label: 'Mudança de Cômodo', qtd: qtdMC },
-      { label: 'Upgrade/Downgrade', qtd: qtdUpgrade },
+      { label: 'Ativação', qtd: somaFech('ativacao') }, { label: 'Reparos', qtd: somaFech('reparos') },
+      { label: 'Mudança de Endereço', qtd: somaFech('me') }, { label: 'Mudança de Cômodo', qtd: somaFech('mc') },
+      { label: 'Upgrade/Downgrade', qtd: somaFech('upgrade') },
     ].map(i => { const preco = precoGigaPorTipo(i.label); return preco !== null ? { ...i, preco, valor: i.qtd * preco } : { ...i, preco: null, valor: null }; });
     const totalQtdGiga = itensGiga.reduce((a,i)=>a+i.qtd,0), totalValorGiga = itensGiga.reduce((a,i)=>a+(i.valor||0),0);
 
@@ -8695,7 +8710,7 @@ function renderPainelBI() {
         <div class="panel"><h3>Despesas por Categoria (histórico importado)</h3><div id="bi-despesas"></div></div>
       </div>
 
-      ${painelValorGiga(itensGiga)}
+      ${painelValorGiga(itensGiga, { nota: 'Contagem da aba RELATORIO (fechamento do ciclo) × valor de contrato por serviço — mesmo número do Relatório de Eficiência. Este painel não acompanha o filtro de cidade, porque o fechamento é fechado por ciclo.' })}
 
       <div class="panel" style="margin-bottom:1.5rem"><h3>Produção por Cidade — Ativação × Reparo</h3><div id="bi-cidade-tipo"></div></div>
 
