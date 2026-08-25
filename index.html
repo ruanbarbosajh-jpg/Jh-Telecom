@@ -2961,6 +2961,16 @@ function importSheet(sheetName, rows) {
     : pickBestTarget(best.maps, best.scores);
   if (!target) return { target: null, inserted: 0, headersSeen: rows[headerRowIdx] || [] };
   const map = best.maps[target];
+  // "VALORES ORDENS" tem cabeçalho em 2 linhas: "GIGA->JH" fica só na linha de
+  // cima (mesclada com "ORDENS"/"JH->TÉCNICO"), e a linha escolhida acima como
+  // cabeçalho (a que bate "TIPO DE ORDEM"/"NORMAL"/"26 DIAS") nunca tem essa
+  // coluna. Sem isso, valor_giga nunca era encontrado e o "Valor pago pela
+  // GIGA" saía sempre R$ 0,00 mesmo com a coluna preenchida na planilha.
+  if (target === 'valoresOrdens' && map.valor_giga === undefined && headerRowIdx > 0) {
+    const linhaAcima = rows[headerRowIdx - 1] || [];
+    const idxGiga = linhaAcima.findIndex(c => normalizeHeader(c).includes('giga'));
+    if (idxGiga !== -1) map.valor_giga = idxGiga;
+  }
   // só entram linhas que tenham ALGUM identificador (O.S, cidade, data, técnico).
   // Sem isso, sobra de formatação da planilha — a aba "PRAZO REPARO DO DIA" tem
   // ~400 linhas em branco com "0" e "-" em colunas auxiliares — entrava como
