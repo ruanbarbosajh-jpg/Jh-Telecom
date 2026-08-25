@@ -703,9 +703,44 @@ function hidratarLinhaPCR(r) {
   const dt = v => (v === null || v === undefined || v === '') ? null : (v instanceof Date ? v : new Date(v));
   return { ...r, abertura: dt(r.abertura), limite: dt(r.limite), encerramento: dt(r.encerramento), inicio: dt(r.inicio) };
 }
+// A maioria das planilhas de Folha de Pagamento não traz coluna de período,
+// mas o cliente nomeia a PRÓPRIA ABA com o ciclo (ex.: "FOLHA 21.07 a 20.08")
+// — em vez de perguntar toda vez, tenta ler o período direto do nome da aba
+// primeiro. Aceita "." ou "/" como separador e funciona com ou sem ano.
+function resolverPeriodoPorNomeDaAba(sheetName) {
+  const re = /(\d{1,2})[.\/](\d{1,2})(?:[.\/](\d{2,4}))?/g;
+  const tokens = [...String(sheetName || '').matchAll(re)];
+  if (tokens.length < 2) return null;
+  const de = tokens[0], ate = tokens[tokens.length - 1];
+  const diaDe = +de[1], mesDe = +de[2], diaAte = +ate[1], mesAte = +ate[2];
+  if (!diaDe || !mesDe || !diaAte || !mesAte || mesDe > 12 || mesAte > 12 || diaDe > 31 || diaAte > 31) return null;
+  const pad = n => String(n).padStart(2, '0');
+  const anoDoToken = t => t[3] ? (t[3].length === 2 ? '20' + t[3] : t[3]) : null;
+  let anoDe = anoDoToken(de), anoAte = anoDoToken(ate);
+  if (anoDe || anoAte) {
+    anoDe = anoDe || anoAte;
+    anoAte = anoAte || anoDe;
+  } else {
+    // sem ano no nome da aba (o caso comum): escolhe o ano cujo FIM do ciclo
+    // fica mais perto de hoje sem ficar no futuro — a folha é sempre
+    // importada logo depois que o ciclo fecha, nunca antes.
+    const hoje = hojeISOLocal();
+    const anoAtual = +hoje.slice(0, 4);
+    let melhorAno = anoAtual, melhorDist = Infinity;
+    [anoAtual, anoAtual - 1].forEach(anoCand => {
+      const anoFimCand = mesAte < mesDe ? anoCand + 1 : anoCand; // ciclo vira o ano (ex.: dez->jan)
+      const fimISO = `${anoFimCand}-${pad(mesAte)}-${pad(diaAte)}`;
+      const dist = new Date(hoje) - new Date(fimISO);
+      if (dist >= 0 && dist < melhorDist) { melhorDist = dist; melhorAno = anoCand; }
+    });
+    anoDe = String(melhorAno);
+    anoAte = String(mesAte < mesDe ? melhorAno + 1 : melhorAno);
+  }
+  return `${pad(diaDe)}/${pad(mesDe)}/${anoDe} a ${pad(diaAte)}/${pad(mesAte)}/${anoAte}`;
+}
 // Texto usado como período quando a planilha da Folha de Pagamento não traz
-// coluna de período (a maioria dos casos) e o prompt de importação não é
-// respondido com nada. NUNCA usar '' nem deixar undefined aqui: o Postgres
+// coluna de período nem dá pra extrair do nome da aba, e o prompt de
+// importação não é respondido com nada. NUNCA usar '' nem deixar undefined aqui: o Postgres
 // trata NULL <> NULL, então duas linhas "sem período" nunca colidem no ON
 // CONFLICT (tecnico,periodo) — cada reimportação virava linha nova em vez de
 // atualizar a existente (é a causa das duplicatas que deduplicarFolhaPagamento
@@ -2928,12 +2963,17 @@ function importSheet(sheetName, rows) {
   });
   const dataRows = rows.slice(headerRowIdx + 1).filter(r => r.some(c => c !== null && c !== undefined && c !== '') && temConteudo(r));
   // a Folha de Pagamento nem sempre traz uma coluna de período — como pode vir
-  // mais de um mês ao longo do tempo, perguntamos uma vez (não por linha) qual
-  // ciclo é esse arquivo, só quando a planilha realmente não informa isso.
+  // mais de um mês ao longo do tempo, primeiro tenta ler o ciclo do NOME DA
+  // ABA (ex.: "FOLHA 21.07 a 20.08") e só pergunta na mão se isso falhar.
   let extra;
   if (target === 'folhaPagamento' && map.periodo === undefined) {
-    const resposta = window.prompt('Essa planilha de Folha de Pagamento não trouxe uma coluna de período.\nQual o período (ciclo 21 a 20) dela? Ex.: 21/07/2026 a 20/08/2026', '');
-    extra = { periodo: (resposta || '').trim() };
+    const periodoDaAba = resolverPeriodoPorNomeDaAba(sheetName);
+    if (periodoDaAba) {
+      extra = { periodo: periodoDaAba };
+    } else {
+      const resposta = window.prompt('Essa planilha de Folha de Pagamento não trouxe uma coluna de período nem deu pra identificar pelo nome da aba.\nQual o período (ciclo 21 a 20) dela? Ex.: 21/07/2026 a 20/08/2026', '');
+      extra = { periodo: (resposta || '').trim() };
+    }
   }
   let inserted = 0, errors = 0;
   const insertedObjs = [];
