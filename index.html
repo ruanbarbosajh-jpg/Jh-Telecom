@@ -18,6 +18,8 @@
     --track-bg: #1c2540;
     --brand-1: #4f7fff; --brand-2: #22c55e;
     --row-hover: #16203a; --gauge-track: rgba(255,255,255,0.12); --nav-inactive: #b7c0d8; --nav-hover-bg: rgba(255,255,255,0.05);
+    /* coluna de sábado/domingo nas tabelas de presença */
+    --fds-bg: rgba(79,127,255,0.12); --fds-borda: rgba(79,127,255,0.45);
   }
   /* Tema claro — só troca os tokens de cor, todo o resto do CSS continua igual.
      A escolha fica no atributo data-theme do <html>, ligado pelo botão do topo. */
@@ -28,6 +30,7 @@
     --track-bg: #e6ebf5;
     --row-hover: #e9edf7; --gauge-track: rgba(20,32,64,0.14); --nav-inactive: #5b6684; --nav-hover-bg: rgba(20,32,64,0.06);
     --total-bg: #e4eaf6;
+    --fds-bg: rgba(79,127,255,0.10); --fds-borda: rgba(79,127,255,0.40);
   }
   :root[data-theme="light"] .login-brand h1 { color: var(--text-primary); }
   :root[data-theme="light"] .login-card { box-shadow: 0 20px 60px rgba(20,32,64,0.14); }
@@ -299,6 +302,12 @@
   table.data-table th { text-align: left; padding: 10px 12px; background: #101a30; color: #c7d0e8; font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap; }
   table.data-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   table.data-table tr:hover td { background: var(--row-hover); }
+  /* sábado/domingo nas tabelas de presença — fundo e bordas laterais pra dar
+     pra bater o olho e achar o fim de semana no meio da semana toda */
+  table.data-table th.col-fds, table.data-table td.col-fds { background: var(--fds-bg); }
+  table.data-table th.col-fds-ini, table.data-table td.col-fds-ini { border-left: 2px solid var(--fds-borda); }
+  table.data-table th.col-fds-fim, table.data-table td.col-fds-fim { border-right: 2px solid var(--fds-borda); }
+  table.data-table tr:hover td.col-fds { background: var(--fds-bg); }
   .table-wrap { overflow-x: auto; background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); }
   .badge { padding: 3px 9px; border-radius: 20px; font-size: 12px; font-weight: 600; }
   .badge.ok { background: rgba(34,197,94,0.15); color: var(--success); }
@@ -321,6 +330,9 @@
   .bar-track { flex: 1 1 auto; min-width: 20px; background: var(--track-bg); border-radius: 7px; height: 18px; overflow: hidden; }
   .bar-fill { height: 100%; border-radius: 6px; transition: width .3s; }
   .bar-value { flex: 0 0 auto; text-align: right; font-weight: 700; color: var(--text-primary); white-space: nowrap; font-size: 12px; }
+  .bar-row-clicavel { cursor: pointer; border-radius: 7px; padding: 3px 6px; margin: -3px -6px; transition: background .15s ease; }
+  .bar-row-clicavel:hover { background: var(--row-hover); }
+  .bar-row-clicavel .bar-label { color: var(--accent); text-decoration: underline dotted; text-underline-offset: 3px; }
 
   .donut-wrap { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; justify-content: center; max-width: 100%; }
   /* responsivo: encolhe em painel/tela estreita, mas não passa de 260px */
@@ -330,7 +342,13 @@
   .donut { width: 100%; height: 100%; border-radius: 50%;
     -webkit-mask-image: radial-gradient(closest-side, transparent 62%, #000 63%);
     mask-image: radial-gradient(closest-side, transparent 62%, #000 63%); }
-  .donut-slice-label { position: absolute; transform: translate(-50%,-50%); font-size: 11.5px; font-weight: 700; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.8); pointer-events: none; white-space: nowrap; }
+  /* a cor vem inline (calculada pelo contraste com a fatia — ver
+     corTextoContraste): #fff fixo sumia em fatia clara, nos DOIS temas */
+  .donut-slice-label { position: absolute; transform: translate(-50%,-50%); font-size: 11.5px; font-weight: 700; pointer-events: none; white-space: nowrap; }
+  /* miolo do anel: total no centro */
+  .donut-centro { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); text-align: center; pointer-events: none; width: 55%; }
+  .donut-centro-valor { font-size: clamp(15px, 2.4vw, 22px); font-weight: 800; color: var(--text-primary); line-height: 1.15; overflow-wrap: anywhere; }
+  .donut-centro-label { font-size: 11px; color: var(--text-muted); margin-top: 2px; text-transform: uppercase; letter-spacing: .4px; }
   .donut-legend { font-size: 13.5px; display: flex; flex-direction: column; gap: 9px; }
   .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; flex-shrink: 0; }
   .legend-item { display: flex; align-items: center; color: var(--text-secondary); }
@@ -2424,14 +2442,33 @@ function barsChart(elId, items, opts = {}) {
   // card, em vez de empilhar no topo e deixar um espaço grande sobrando
   // embaixo (acontece quando o card estica pra acompanhar a altura do painel
   // vizinho, ex.: ao lado de um medidor/gauge mais alto).
+  // opts.clicavel: marca as linhas como clicáveis (data-label) — quem chamou
+  // escuta o clique no próprio container e decide o que fazer (ex.: abrir o
+  // detalhe das cidades de um técnico no gráfico de deslocamento).
   el.innerHTML = `<div class="bars-chart${opts.fill?' fill':''}">${items.map(i => `
-    <div class="bar-row">
-      <div class="bar-label" title="${i.label}">${i.label}</div>
+    <div class="bar-row${opts.clicavel?' bar-row-clicavel':''}"${opts.clicavel?` data-label="${esc(i.label)}" title="Clique para ver o detalhe"`:''}>
+      <div class="bar-label"${opts.clicavel?'':` title="${i.label}"`}>${i.label}</div>
       <div class="bar-track"><div class="bar-fill" style="width:${Math.max((i.value/max)*100,2)}%;background:${i.color||color}"></div></div>
       <div class="bar-value">${i.display !== undefined ? i.display : i.value}</div>
     </div>`).join('')}</div>`;
 }
-function donutChart(elId, items) {
+// Cor de texto que contrasta com o fundo da fatia. O rótulo fica DENTRO da
+// fatia colorida, então a cor certa depende da fatia, não do tema — branco em
+// cima de verde-claro (#86efac, que está na PALETTE) some no tema claro e no
+// escuro do mesmo jeito. Calcula a luminância do hex e escolhe preto ou branco.
+function corTextoContraste(cor) {
+  const m = String(cor || '').trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!m) return null; // var(--...) e afins: quem chamou decide o fallback
+  let h = m[1];
+  if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  const r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
+  // luminância relativa aproximada (ITU-R BT.601) — suficiente pra decidir
+  const lum = (0.299*r + 0.587*g + 0.114*b) / 255;
+  return lum > 0.6 ? '#111827' : '#ffffff';
+}
+// opts.centroValor / opts.centroLabel: texto grande no miolo do anel (por
+// padrão, o total somado). opts.semCentro desliga.
+function donutChart(elId, items, opts = {}) {
   const el = document.getElementById(elId);
   if (!el) return;
   const total = items.reduce((a,i) => a+i.value, 0);
@@ -2446,15 +2483,26 @@ function donutChart(elId, items) {
     // rótulo interno: só cabe em fatias de 5%+ — abaixo disso vira poluição visual
     if (pct >= 5) {
       const midAng = ((start + i.value/2)/total) * 2*Math.PI - Math.PI/2; // 0° no topo
-      const r = 32; // % do raio, para o rótulo ficar dentro da fatia
-      labels.push({ left: 50 + r*Math.cos(midAng), top: 50 + r*Math.sin(midAng), text: pct.toFixed(1)+'%' });
+      // o miolo do anel é vazado até 62% do raio (ver .donut no CSS), então o
+      // rótulo precisa ficar no MEIO da faixa colorida (~81%), senão cai no
+      // buraco do meio e fica ilegível
+      const r = 40.5;
+      labels.push({
+        left: 50 + r*Math.cos(midAng), top: 50 + r*Math.sin(midAng),
+        text: pct.toFixed(1)+'%', cor: corTextoContraste(color) || '#ffffff',
+      });
     }
     acc = end;
   });
+  const centro = opts.semCentro ? '' : `<div class="donut-centro">
+    <div class="donut-centro-valor">${opts.centroValor !== undefined ? opts.centroValor : total.toLocaleString('pt-BR')}</div>
+    <div class="donut-centro-label">${opts.centroLabel || 'Total'}</div>
+  </div>`;
   el.innerHTML = `<div class="donut-wrap">
     <div class="donut-holder">
       <div class="donut" style="background:conic-gradient(${stops.join(', ')})"></div>
-      ${labels.map(l=>`<span class="donut-slice-label" style="left:${l.left}%;top:${l.top}%">${l.text}</span>`).join('')}
+      ${labels.map(l=>`<span class="donut-slice-label" style="left:${l.left}%;top:${l.top}%;color:${l.cor}">${l.text}</span>`).join('')}
+      ${centro}
     </div>
     <div class="donut-legend">${items.map((i,idx) => {
       const pct = ((i.value/total)*100);
@@ -2471,11 +2519,14 @@ function barsChartTopN(elId, items, opts = {}) {
   const defaultN = opts.defaultN || 10;
   const selId = elId + '-topn-sel';
   const chartId = elId + '-chart';
+  // com opts.fill o container precisa virar coluna flex, senão o height:100%
+  // do .bars-chart.fill não tem contra o que resolver (fica com altura 0)
+  if (opts.fill) { el.style.display = 'flex'; el.style.flexDirection = 'column'; }
   el.innerHTML = `<div style="text-align:right;margin-bottom:8px">
     <select class="topn-select" id="${selId}">
       ${options.map(o => `<option value="${o}" ${String(o)===String(defaultN)?'selected':''}>${o==='Todos'?'Mostrar todos':'Top '+o}</option>`).join('')}
     </select>
-  </div><div id="${chartId}"></div>`;
+  </div><div id="${chartId}"${opts.fill?' style="flex:1;display:flex;flex-direction:column"':''}></div>`;
   function draw() {
     const val = document.getElementById(selId).value;
     const sliced = val === 'Todos' ? items : items.slice(0, parseInt(val));
@@ -3639,6 +3690,16 @@ function renderRelatorioGeralCompleto(fech) {
   const statusCell = r => `<span style="color:${/apto/i.test(r.status)&&!/inapto/i.test(r.status)?'var(--success)':'var(--danger)'};font-weight:700">${r.status||'-'}</span>`;
   // eficiência abaixo de 70% fica vermelha, senão verde
   const eficienciaCell = r => { const v = toPct(r.eficiencia); return `<span style="color:${v<70?'var(--danger)':'var(--success)'};font-weight:700">${v.toFixed(2)}%</span>`; };
+  // Lucro: quem está ABAIXO DA MÉDIA da equipe no ciclo fica vermelho, quem
+  // está na média ou acima fica verde — dá pra bater o olho e ver quem está
+  // puxando o resultado pra baixo sem precisar comparar linha a linha.
+  const mediaLucro = fech.reduce((a,r)=>a+(r.lucros||0), 0) / fech.length;
+  const lucroCell = r => {
+    const v = r.lucros || 0;
+    const abaixo = v < mediaLucro;
+    return `<span style="color:${abaixo?'var(--danger)':'var(--success)'};font-weight:700"
+      title="Média da equipe no ciclo: ${formatCurrency(mediaLucro)}">${formatCurrency(v)}</span>`;
+  };
   const cols = [
     ['Técnico', r=>r.tecnico], ['Início', r=>formatDate(r.inicio)], ['Até o dia', r=>formatDate(r.ate_o_dia)],
     ['Ativação', r=>r.ativacao], ['M.Cômodo', r=>r.mc], ['M.Endereço', r=>r.me], ['Reparos', r=>r.reparos], ['Upgrade', r=>r.upgrade],
@@ -3647,7 +3708,7 @@ function renderRelatorioGeralCompleto(fech) {
     ['Qtd IFI', r=>r.qtd_ifi], ['Ind. IFI', r=>toPct(r.ind_ifi).toFixed(2)+'%'], ['Desc. IFI', r=>formatCurrency(r.desc_ifi)],
     ['Status', statusCell], ['Gasolina', r=>formatCurrency(r.gasolina)], ['Aluguel Carro', r=>formatCurrency(r.aluguel_carro)],
     ['Total Líquido', r=>formatCurrency(r.total_liquido)], ['Despesas', r=>formatCurrency(r.despesas)],
-    ['Lucros', r=>formatCurrency(r.lucros)], ['Eficiência', eficienciaCell],
+    ['Lucros', lucroCell], ['Eficiência', eficienciaCell],
   ];
   return `<div class="table-wrap"><table class="data-table"><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>
     ${fech.map(r=>`<tr>${cols.map(c=>`<td>${c[1](r) ?? ''}</td>`).join('')}</tr>`).join('')}
@@ -3844,7 +3905,15 @@ function renderProduction() {
     // NOME DE CIDADE (MONGAGUA, SANTOS...), que aparecia no ranking como se
     // fosse um técnico — ver ehRecursoTecnico
     const techCities = {};
-    baseRows.forEach(r => { if(!ehRecursoTecnico(r.recurso)) return; const t=r.recurso; if(!techCities[t]) techCities[t]=new Set(); if(r.cidade) techCities[t].add(r.cidade); });
+    // quantas ordens o técnico fez em CADA cidade — alimenta o card de detalhe
+    // que abre ao clicar no nome dele no gráfico de deslocamento
+    const techCityCount = {};
+    baseRows.forEach(r => {
+      if(!ehRecursoTecnico(r.recurso)) return;
+      const t=r.recurso;
+      if(!techCities[t]) { techCities[t]=new Set(); techCityCount[t]={}; }
+      if(r.cidade) { techCities[t].add(r.cidade); techCityCount[t][r.cidade] = (techCityCount[t][r.cidade]||0)+1; }
+    });
     const deslocList = Object.entries(techCities).map(([label,set])=>({label,value:set.size})).sort((a,b)=>b.value-a.value);
     const bottomDeslocList = [...deslocList].sort((a,b)=>a.value-b.value);
 
@@ -3858,7 +3927,7 @@ function renderProduction() {
       </div>
       <div class="panels-grid">
         <div class="panel"><h3>Ordens por Status</h3><div id="c-status"></div></div>
-        <div class="panel"><h3>Ordens por Tipo de Atividade${statusFilter?' (filtro aplicado)':''}</h3><div id="c-tipo"></div></div>
+        <div class="panel" style="display:flex;flex-direction:column"><h3>Ordens por Tipo de Atividade${statusFilter?' (filtro aplicado)':''}</h3><div id="c-tipo" style="flex:1;display:flex;flex-direction:column"></div></div>
       </div>
       <div class="panel" style="margin-bottom:1.5rem"><h3>Produção por Cidade (concluído)</h3><div id="c-city-rank"></div></div>
       <div class="panels-grid">
@@ -3869,6 +3938,7 @@ function renderProduction() {
         <div class="panel"><h3>Técnicos que mais se deslocam (nº de cidades atendidas)</h3><div id="c-desloc-mais"></div></div>
         <div class="panel"><h3>Técnicos que menos se deslocam (nº de cidades atendidas)</h3><div id="c-desloc-menos"></div></div>
       </div>
+      <div id="desloc-detalhe"></div>
       <div class="section-heading">Tabela de Bônus</div>
       <div class="panel" style="margin-bottom:1.5rem">
         <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">
@@ -3913,13 +3983,58 @@ function renderProduction() {
       {label:'Concluídas', value:concluidos.length, color:'#22c55e'},
       {label:'Não concluídas', value:naoConcluidos.length, color:'#93a0bd'},
       {label:'Canceladas', value:cancelados.length, color:'#ef4444'},
-    ]);
-    barsChart('c-tipo', byTipo);
+    ], { centroLabel: 'Ordens' });
+    barsChart('c-tipo', byTipo, { fill: true });
     barsChart('c-city-rank', cityRankColored);
     barsChartTopN('c-tech-top', techList, {color:'#22c55e', defaultN:5});
     barsChartTopN('c-tech-bottom', bottomTechList, {color:'#ef4444', defaultN:5});
-    barsChartTopN('c-desloc-mais', deslocList, {color:'#38bdf8', defaultN:5});
-    barsChartTopN('c-desloc-menos', bottomDeslocList, {color:'#94a3c4', defaultN:5});
+    barsChartTopN('c-desloc-mais', deslocList, {color:'#38bdf8', defaultN:5, clicavel:true});
+    barsChartTopN('c-desloc-menos', bottomDeslocList, {color:'#94a3c4', defaultN:5, clicavel:true});
+    wireDeslocDetalhe();
+
+    // Clicar no nome do técnico abre um card com as cidades que ele atendeu no
+    // período (e quantas ordens em cada uma). O listener vai nos containers dos
+    // dois gráficos, que são recriados a cada load() — então não acumula.
+    function wireDeslocDetalhe() {
+      const alvo = document.getElementById('desloc-detalhe');
+      if (!alvo) return;
+      ['c-desloc-mais','c-desloc-menos'].forEach(id => {
+        const cont = document.getElementById(id);
+        if (!cont) return;
+        cont.addEventListener('click', ev => {
+          const linha = ev.target.closest('.bar-row-clicavel');
+          if (!linha) return;
+          mostrarDetalheDesloc(linha.dataset.label);
+        });
+      });
+      function mostrarDetalheDesloc(tecnico) {
+        const porCidade = techCityCount[tecnico] || {};
+        const lista = Object.entries(porCidade).map(([cidade, qtd]) => ({cidade, qtd})).sort((a,b)=>b.qtd-a.qtd);
+        const totalOs = lista.reduce((a,c)=>a+c.qtd,0);
+        if (!lista.length) { alvo.innerHTML = `<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Sem cidades registradas para ${esc(tecnico)} nesse período.</div></div>`; return; }
+        alvo.innerHTML = `
+          <div class="panel" style="margin-bottom:1.5rem;border-color:var(--accent)">
+            <h3 style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+              <span>Cidades atendidas — ${esc(tecnico)}</span>
+              <button type="button" class="btn-secundario" id="desloc-fechar" style="padding:6px 12px;font-size:12px">Fechar</button>
+            </h3>
+            <div class="cards-grid">
+              ${metricCard('Cidades diferentes', lista.length)}
+              ${metricCard('Total de ordens', totalOs)}
+            </div>
+            <div class="table-wrap"><table class="data-table"><thead><tr>
+              <th>Cidade</th><th>Ordens</th><th>% do total</th>
+            </tr></thead><tbody>
+              ${lista.map(c=>`<tr><td class="cat-cell">${esc(c.cidade)}</td><td>${c.qtd}</td><td>${((c.qtd/totalOs)*100).toFixed(1)}%</td></tr>`).join('')}
+              <tr class="total-row"><td class="cat-cell" style="color:var(--accent)">TOTAL</td><td style="color:var(--accent)">${totalOs}</td><td style="color:var(--accent)">100%</td></tr>
+            </tbody></table></div>
+          </div>`;
+        const fechar = document.getElementById('desloc-fechar');
+        if (fechar) fechar.addEventListener('click', () => { alvo.innerHTML = ''; });
+        ativarFiltrosDeColuna(alvo);
+        alvo.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'status', label: 'Ordens por status' },
@@ -4005,6 +4120,24 @@ function renderAcomTec() {
       {label:'Mudança de Cômodo', value:mudancaComodo}, {label:'Upgrade/Downgrade', value:upgrade},
     ].filter(s=>s.value>0).sort((a,b)=>b.value-a.value);
 
+    // ---- Ranking de motivos da baixa (coluna "Motivo de Encerramento") ----
+    // O gráfico só mostra o total por técnico/cidade; aqui é o PORQUÊ das
+    // baixas, que é o que a operação usa pra atacar causa raiz (troca de ONU,
+    // drop refeito, etc.). Cada motivo mostra também os 3 técnicos que mais
+    // baixaram com ele.
+    const motivoMap = {};
+    rows.forEach(r => {
+      const m = (r.motivo || '').trim() || 'Não informado';
+      if (!motivoMap[m]) motivoMap[m] = { motivo: m, total: 0, porTecnico: {}, porTipo: {} };
+      motivoMap[m].total++;
+      const t = r.recurso || 'Não informado';
+      motivoMap[m].porTecnico[t] = (motivoMap[m].porTecnico[t] || 0) + 1;
+      const tp = r.tipo_atividade || 'Não informado';
+      motivoMap[m].porTipo[tp] = (motivoMap[m].porTipo[tp] || 0) + 1;
+    });
+    const topDe = obj => Object.entries(obj).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([k,v])=>`${k} (${v})`).join(', ');
+    const motivosRank = Object.values(motivoMap).sort((a,b)=>b.total-a.total);
+
     body.innerHTML = `
       <div class="cards-grid wide">
         ${metricCard('◆ Total de Serviços', total, false, {accent:true})}
@@ -4015,10 +4148,29 @@ function renderAcomTec() {
         ${metricCard('⇅ Upgrade/Downgrade', upgrade, false, {sub: total?((upgrade/total)*100).toFixed(1)+'% do total':''})}
       </div>
       <div class="panels-grid">
-        <div class="panel"><h3>Serviço por Técnico</h3><div id="c-tech"></div></div>
+        <div class="panel" style="display:flex;flex-direction:column"><h3>Serviço por Técnico</h3><div id="c-tech" style="flex:1;display:flex;flex-direction:column"></div></div>
         <div class="panel"><h3>Total de Serviço por Cidade</h3><div id="c-city"></div></div>
       </div>
       <div class="panel" style="margin-bottom:1.5rem"><h3>Total de O.S por Serviço</h3><div id="c-servico"></div></div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Ranking de Motivos da Baixa <span style="font-weight:400;color:var(--text-muted);font-size:13px">(${motivosRank.length} motivo(s))</span></h3>
+        <p style="font-size:12px;color:var(--text-muted);margin:-8px 0 10px">
+          Vem da coluna "Motivo de Encerramento das atividades" da base de produção, no mesmo filtro de período/técnico/cidade/status da tela.
+        </p>
+        <div class="table-wrap"><table class="data-table"><thead><tr>
+          <th>#</th><th>Motivo da Baixa</th><th>Ordens</th><th>% do total</th><th>Tipos de serviço (top 3)</th><th>Técnicos que mais baixaram (top 3)</th>
+        </tr></thead><tbody>
+          ${motivosRank.map((m,i)=>`<tr>
+            <td style="color:var(--text-muted)">${i+1}</td>
+            <td class="cat-cell">${esc(m.motivo)}</td>
+            <td style="font-weight:700">${m.total}</td>
+            <td>${((m.total/total)*100).toFixed(1)}%</td>
+            <td style="white-space:normal;font-size:12px;color:var(--text-secondary)">${esc(topDe(m.porTipo))}</td>
+            <td style="white-space:normal;font-size:12px;color:var(--text-secondary)">${esc(topDe(m.porTecnico))}</td>
+          </tr>`).join('')}
+          <tr class="total-row"><td></td><td class="cat-cell" style="color:var(--accent)">TOTAL</td><td style="color:var(--accent)">${total}</td><td style="color:var(--accent)">100%</td><td></td><td></td></tr>
+        </tbody></table></div>
+      </div>
       <div class="panel" style="margin-bottom:1.5rem">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
           <h3 style="margin:0">Detalhamento dos Serviços <span style="font-weight:400;color:var(--text-muted);font-size:13px">(${total} ordens)</span></h3>
@@ -4066,8 +4218,8 @@ function renderAcomTec() {
     document.getElementById('det-limite').addEventListener('change', desenhaDetalhe);
     desenhaDetalhe();
 
-    barsChartTopN('c-tech', byTechnician);
-    donutChart('c-city', byCity.map((c,i)=>({label:c.label, value:c.value, color:PALETTE[i%PALETTE.length]})));
+    barsChartTopN('c-tech', byTechnician, { fill: true });
+    donutChart('c-city', byCity.map((c,i)=>({label:c.label, value:c.value, color:PALETTE[i%PALETTE.length]})), { centroLabel: 'Serviços' });
     barsChart('c-servico', byServico.map((s,i)=>({label:s.label, value:s.value, color:PALETTE[i%PALETTE.length]})));
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
@@ -4179,9 +4331,11 @@ function renderOfensor() {
       </div>
       <div id="pdf-export-area"></div>
     `;
-    donutChart('c-donut', [{label:'IRR', value:qtdIrr, color:'#4f7fff'}, {label:'IFI', value:qtdIfi, color:'#ef4444'}]);
+    donutChart('c-donut', [{label:'IRR', value:qtdIrr, color:'#4f7fff'}, {label:'IFI', value:qtdIfi, color:'#ef4444'}], { centroLabel: 'Retornos' });
     barsChartTopN('c-ofensor', byOfensor);
-    barsChartTopN('c-city', byCity, {color:'#38bdf8'});
+    // sem "Top N": as cidades atendidas são poucas (as 6 do contrato mais as
+    // eventuais de fora), então cortar em 10 só escondia informação
+    barsChart('c-city', byCity.map(c=>({ ...c, color:'#38bdf8' })), { fill: true });
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'resumo', label: 'Resumo IFI/IRR' },
@@ -5809,11 +5963,16 @@ function renderParcialDoDia() {
   load();
   function load() {
     const data = document.getElementById('f-data').value;
-    // Fonte do dia: a BASE DO DIA quando existir; senão, o CSV de atividades
+    // Fonte do dia: o CSV de atividades (PCR) tem PRIORIDADE sobre a BASE DO
+    // DIA. A "BASE DO DIA" da planilha é a foto da MANHÃ (o que foi escalado),
+    // então vem só com pendente/em rota; o CSV é o estado real e vai sendo
+    // atualizado ao longo do dia. Achado real em 24/08/2026: a BASE DO DIA
+    // tinha 100 linhas (96 pendente + 4 em rota) e o CSV do mesmo dia tinha
+    // 199 O.S com 65 concluídas — como a base vencia, "Concluído" e
+    // "Efetividade" ficavam zerados mesmo depois de importar o CSV na PCR.
     // (uma linha por O.S — o CSV repete a mesma ordem quando ela é remanejada).
     const doCsv = linhasDoCsvPorDia(data);
-    const temBase = DB.baseDoDia.some(r => r.data === data);
-    const universo = temBase ? DB.baseDoDia.filter(r => r.data === data) : doCsv;
+    const universo = doCsv.length ? doCsv : DB.baseDoDia.filter(r => r.data === data);
     refreshCityField('pd-cidades', [...universo, ...DB.prazoReparoDia.filter(r=>diaDoRelatorioReparo(r)===data)], { label: 'Cidades' });
     const cidades = getSelectedCities('pd-cidades');
     const rows = universo.filter(r => cidades.includes(r.cidade));
@@ -6136,6 +6295,18 @@ function isoAddDias(iso, n) {
 }
 function diaSemanaCurto(iso) { return ['dom','seg','ter','qua','qui','sex','sáb'][new Date(iso + 'T00:00:00').getDay()]; }
 function diaSemanaCompleto(iso) { return ['Domingo','Segunda-Feira','Terça-Feira','Quarta-Feira','Quinta-Feira','Sexta-Feira','Sábado'][new Date(iso + 'T00:00:00').getDay()]; }
+// Classe CSS da coluna de sábado/domingo nos quadros de presença. Além do
+// fundo, marca só a PRIMEIRA e a ÚLTIMA coluna do fim de semana com a borda
+// lateral, pra o bloco sáb+dom aparecer como um grupo só (e não com uma linha
+// no meio deles).
+function classeFimDeSemana(dia, dias) {
+  if (!ehFimDeSemana(dia)) return '';
+  const i = dias.indexOf(dia);
+  const classes = ['col-fds'];
+  if (i <= 0 || !ehFimDeSemana(dias[i - 1])) classes.push('col-fds-ini');
+  if (i === dias.length - 1 || !ehFimDeSemana(dias[i + 1])) classes.push('col-fds-fim');
+  return classes.join(' ');
+}
 // Salva 1 célula do quadro (1 técnico, 1 dia) e registra no log quem mudou o
 // quê. Ao contrário do salvarMoManual (que engole erro de propósito — CLAUDE.md
 // pendência #6), aqui o erro de gravação VOLTA pra tela: presença é dado que
@@ -6330,7 +6501,7 @@ function renderGestaoPresenca() {
         </div>
         <div class="table-wrap"><table class="data-table">
           <thead><tr><th>Técnico</th><th>Cidade</th><th>Supervisor</th>
-            ${dias.map(d => `<th style="text-align:center">${diaSemanaCurto(d)}<br>${formatDate(d).slice(0, 5)}</th>`).join('')}
+            ${dias.map(d => `<th style="text-align:center" class="${classeFimDeSemana(d, dias)}">${diaSemanaCurto(d)}<br>${formatDate(d).slice(0, 5)}</th>`).join('')}
             ${podeEditarPresenca() ? '<th></th>' : ''}
           </tr></thead>
           <tbody>${roster.map(t => `<tr>
@@ -6341,7 +6512,7 @@ function renderGestaoPresenca() {
               // bagunçaria bônus/folha já fechados em cima daquele dia. Só hoje
               // e os dias futuros continuam editáveis.
               const editavel = podeEditarPresenca() && d >= hoje;
-              return `<td style="text-align:center">${editavel
+              return `<td style="text-align:center" class="${classeFimDeSemana(d, dias)}">${editavel
                 ? `<select data-tecnico="${esc(t.tecnico)}" data-data="${d}" class="pres-select" style="background:${atual ? STATUS_PRESENCA[atual].cor : 'var(--bg-page)'};color:${atual ? '#fff' : 'var(--text-secondary)'};border:1px solid var(--border);border-radius:6px;padding:5px 4px;font-weight:600;font-size:12px">
                     <option value=""${!atual ? ' selected' : ''}>—</option>
                     ${statusKeys.map(k => `<option value="${k}"${atual === k ? ' selected' : ''}>${k}</option>`).join('')}
@@ -6725,9 +6896,16 @@ function renderGestaoPresencaEscritorio() {
     // sub-coluna Horário; a Gestão usa colspan=2 nela também (ver célula).
     const cabDia1 = dias.map(d => {
       const rotulo = `${diaSemanaCurto(d)}<br>${formatDate(d).slice(0, 5)}`;
-      return ehFimDeSemana(d) ? `<th colspan="2" style="text-align:center">${rotulo}</th>` : `<th rowspan="2" style="text-align:center">${rotulo}</th>`;
+      const cls = classeFimDeSemana(d, dias);
+      return ehFimDeSemana(d) ? `<th colspan="2" style="text-align:center" class="${cls}">${rotulo}</th>` : `<th rowspan="2" style="text-align:center">${rotulo}</th>`;
     }).join('');
-    const cabDia2 = dias.filter(ehFimDeSemana).map(() => `<th style="text-align:center;font-size:11px">Horário</th><th style="text-align:center;font-size:11px">Status</th>`).join('');
+    // as 2 sub-colunas do fim de semana herdam o realce: a de Horário abre o
+    // bloco e a de Status fecha (a borda lateral fica só nas pontas)
+    const cabDia2 = dias.filter(ehFimDeSemana).map(d => {
+      const cls = classeFimDeSemana(d, dias);
+      const ini = cls.replace(' col-fds-fim', ''), fim = cls.replace(' col-fds-ini', '');
+      return `<th style="text-align:center;font-size:11px" class="${ini}">Horário</th><th style="text-align:center;font-size:11px" class="${fim}">Status</th>`;
+    }).join('');
     // 1 ou 2 <td> pra esse dia: dia de semana é só status; fim de semana só
     // abre a coluna Horário pra quem é Atendente (Gestão usa colspan=2 e
     // continua só com status, o turno dela não muda no fim de semana).
@@ -6741,8 +6919,9 @@ function renderGestaoPresencaEscritorio() {
             ${opcoes.map(o => `<option value="${esc(o)}"${statusAtual === o ? ' selected' : ''}>${esc(labelStatusEscritorio(o))}</option>`).join('')}
           </select>`
         : (statusAtual ? `<span style="background:${corStatusEscritorio(statusAtual)};color:#fff;border-radius:6px;padding:4px 6px;font-weight:600;font-size:11px" title="${d < hoje ? 'Dia passado — não dá mais pra alterar' : ''}">${esc(labelStatusEscritorio(statusAtual))}</span>` : `<span style="color:var(--text-muted)" title="${d < hoje ? 'Dia passado — não dá mais pra alterar' : ''}">—</span>`);
+      const clsFds = classeFimDeSemana(d, dias);
       if (!ehFimDeSemana(d)) return `<td style="text-align:center">${selectStatus}</td>`;
-      if (p.cargo !== 'Atendente') return `<td colspan="2" style="text-align:center">${selectStatus}</td>`;
+      if (p.cargo !== 'Atendente') return `<td colspan="2" style="text-align:center" class="${clsFds}">${selectStatus}</td>`;
       const turnoAtual = statusDe(p.pessoa, d, 'turno');
       const selectTurno = editavel
         ? `<select data-pessoa="${esc(p.pessoa)}" data-data="${d}" data-campo="turno" class="pres-esc-select" style="background:${turnoAtual ? '#64748b' : 'var(--bg-page)'};color:${turnoAtual ? '#fff' : 'var(--text-secondary)'};border:1px solid var(--border);border-radius:6px;padding:5px 4px;font-weight:600;font-size:10px;max-width:90px">
@@ -6750,7 +6929,7 @@ function renderGestaoPresencaEscritorio() {
             ${TURNOS_FDS_ATENDENTE.map(o => `<option value="${esc(o)}"${turnoAtual === o ? ' selected' : ''}>${esc(o)}</option>`).join('')}
           </select>`
         : (turnoAtual ? `<span style="font-size:11px" title="${d < hoje ? 'Dia passado — não dá mais pra alterar' : ''}">${esc(turnoAtual)}</span>` : `<span style="color:var(--text-muted)" title="${d < hoje ? 'Dia passado — não dá mais pra alterar' : ''}">—</span>`);
-      return `<td style="text-align:center">${selectTurno}</td><td style="text-align:center">${selectStatus}</td>`;
+      return `<td style="text-align:center" class="${clsFds.replace(' col-fds-fim','')}">${selectTurno}</td><td style="text-align:center" class="${clsFds.replace(' col-fds-ini','')}">${selectStatus}</td>`;
     }
     body.innerHTML = `
       <div id="ge-metrics" style="margin-bottom:1.5rem"></div>
@@ -7220,7 +7399,7 @@ function renderOfensoresPrazo() {
     barsChartTopN('c-dentro', listDentro, {color:'#22c55e', defaultN:10});
     barsChartTopN('c-fora', listFora, {color:'#ef4444', defaultN:10});
     barsChartTopN('c-cidade', listCityFora, {color:'#ef4444', defaultN:10});
-    donutChart('c-pct', [{label:'Fora do prazo', value:foraPrazo.length, color:'#ef4444'}, {label:'Até 24h', value:dentro24.length, color:'#22c55e'}]);
+    donutChart('c-pct', [{label:'Fora do prazo', value:foraPrazo.length, color:'#ef4444'}, {label:'Até 24h', value:dentro24.length, color:'#22c55e'}], { centroLabel: 'Ordens' });
     const periodoTecTopnSel = document.getElementById('periodo-tec-topn');
     if (periodoTecTopnSel) periodoTecTopnSel.addEventListener('change', () => {
       document.getElementById('periodo-tec-tbody').innerHTML = tecPeriodoRowsHtml(periodoTecTopnSel.value);
@@ -7331,7 +7510,7 @@ function renderFleet() {
       <div id="pdf-export-area"></div>`;
 
     const locadoraMap = {}; links.forEach(r => { const l=r.locadora||'Não informado'; locadoraMap[l]=(locadoraMap[l]||0)+1; });
-    donutChart('fleet-locadora', Object.entries(locadoraMap).map(([label,value],i)=>({label,value,color:PALETTE[i%PALETTE.length]})));
+    donutChart('fleet-locadora', Object.entries(locadoraMap).map(([label,value],i)=>({label,value,color:PALETTE[i%PALETTE.length]})), { centroLabel: 'Veículos' });
     const cidadeMap = {}; links.forEach(r => { const c=r.cidade||'Não informado'; cidadeMap[c]=(cidadeMap[c]||0)+1; });
     barsChartTopN('fleet-cidade', Object.entries(cidadeMap).map(([label,value])=>({label,value})).sort((a,b)=>b.value-a.value));
 
@@ -8359,11 +8538,15 @@ function renderPainelBI() {
     const pctIfi = pctIndicador(qtdIfi, bases.ativacoes), pctIrr = pctIndicador(qtdIrr, bases.reparos);
 
     // ---------- Prazo — mesma regra das telas de Prazo Reparo/Ativação ----------
-    const prazoReparo = DB.prazo.filter(p => inRange(p.data, s, e) && isConcluido(p.status) && cidades.includes(p.cidade)
+    // Só as 6 cidades do contrato entram no prazo (CIDADES_COBRADAS_PRAZO) —
+    // sem essa trava, cidade de fora da área inflava o total e derrubava a %,
+    // exatamente o bug já corrigido no Comparativo de Prazo.
+    const cidadesPrazo = cidades.filter(c => CIDADES_COBRADAS_PRAZO.map(x=>x.toUpperCase()).includes(String(c||'').toUpperCase()));
+    const prazoReparo = DB.prazo.filter(p => inRange(p.data, s, e) && isConcluido(p.status) && cidadesPrazo.includes(p.cidade)
       && ehPrazoDeReparo(p) && classifyBucket(p.status_prazo) !== 'outro');
     const dentro24 = prazoReparo.filter(r => classifyBucket(r.status_prazo) === 'ate24').length;
     const pctPrazoReparo = prazoReparo.length ? (dentro24 / prazoReparo.length) * 100 : 0;
-    const prazoAtiv = DB.prazo.filter(p => inRange(p.data, s, e) && cidades.includes(p.cidade)
+    const prazoAtiv = DB.prazo.filter(p => inRange(p.data, s, e) && cidadesPrazo.includes(p.cidade)
       && ehPrazoDeAtivacao(p, true) && classifyBucketAtivacao(p.status_prazo, p.aging) !== 'outro');
     const dentro36 = prazoAtiv.filter(r => classifyBucketAtivacao(r.status_prazo, r.aging) === 'ate36').length;
     const pctPrazoAtiv = prazoAtiv.length ? (dentro36 / prazoAtiv.length) * 100 : 0;
@@ -8389,15 +8572,24 @@ function renderPainelBI() {
     const byPlaca = Object.entries(byPlacaMap).map(([label, value]) => ({ label, value, display: formatCurrency(value) })).sort((a, b) => b.value - a.value).slice(0, 10);
 
     // ---------- Ranking por cidade ----------
+    // Prazo (reparo 24h e ativação 36h) só é cobrado nas 6 cidades do contrato
+    // — cidade de fora da área (Mauá, Ribeirão Pires, São Paulo, Suzano,
+    // Peruíbe, Mongaguá...) aparece com "-" na coluna de prazo em vez de um
+    // percentual que ninguém cobra. Produção continua contando todas.
+    const cidadesSLA = CIDADES_COBRADAS_PRAZO.map(x => x.toUpperCase());
+    const ehCidadeSLA = c => cidadesSLA.includes(String(c || '').toUpperCase());
     const ranking = cidades.map(c => {
       const p = prodConcluida.filter(x => x.cidade === c);
       const pr = prazoReparo.filter(x => x.cidade === c);
-      const pct = pr.length ? (pr.filter(r => classifyBucket(r.status_prazo) === 'ate24').length / pr.length) * 100 : null;
+      const pa = prazoAtiv.filter(x => x.cidade === c);
+      const naSLA = ehCidadeSLA(c);
+      const pct = (naSLA && pr.length) ? (pr.filter(r => classifyBucket(r.status_prazo) === 'ate24').length / pr.length) * 100 : null;
+      const pctAtiv = (naSLA && pa.length) ? (pa.filter(r => classifyBucketAtivacao(r.status_prazo, r.aging) === 'ate36').length / pa.length) * 100 : null;
       return {
         cidade: c, ordens: p.length,
         ativacao: p.filter(x => /ativa[cç][aã]o/i.test(x.tipo_atividade || '')).length,
         reparo: p.filter(x => /reparo/i.test(x.tipo_atividade || '')).length,
-        pctPrazo: pct,
+        pctPrazo: pct, pctPrazoAtiv: pctAtiv, naSLA,
       };
     }).sort((a, b) => b.ordens - a.ordens);
 
@@ -8446,7 +8638,7 @@ function renderPainelBI() {
       <div class="panel" style="margin-bottom:1.5rem"><h3>Faturamento GIGA × Lucro por ciclo</h3><div id="bi-evolucao"></div></div>
 
       <div class="panels-grid">
-        <div class="panel"><h3>Produção por Tipo de Serviço</h3><div id="bi-tipo"></div></div>
+        <div class="panel" style="display:flex;flex-direction:column"><h3>Produção por Tipo de Serviço</h3><div id="bi-tipo" style="flex:1;display:flex;flex-direction:column"></div></div>
         <div class="panel"><h3>Despesas por Categoria (histórico importado)</h3><div id="bi-despesas"></div></div>
       </div>
 
@@ -8467,11 +8659,15 @@ function renderPainelBI() {
       </div>
 
       <div class="section-heading">Ranking por Cidade</div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
+        Prazo é cobrado só nas cidades do contrato (${CIDADES_COBRADAS_PRAZO.join(', ')}) — as demais aparecem com "-" nas colunas de prazo.
+      </p>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
-        <th>Cidade</th><th>Ordens Concluídas</th><th>Ativação</th><th>Reparo</th><th>% Prazo Reparo</th>
+        <th>Cidade</th><th>Ordens Concluídas</th><th>Ativação</th><th>Reparo</th><th>% Prazo Reparo (24h)</th><th>% Prazo Ativação (36h)</th>
       </tr></thead><tbody>
         ${ranking.map(r => `<tr><td class="cat-cell">${r.cidade}</td><td>${r.ordens}</td><td>${r.ativacao}</td><td>${r.reparo}</td>
-          <td>${r.pctPrazo === null ? '-' : `<span class="badge ${r.pctPrazo >= PRAZO_META ? 'ok' : 'warn'}">${r.pctPrazo.toFixed(1)}%</span>`}</td></tr>`).join('')}
+          <td>${r.pctPrazo === null ? '-' : `<span class="badge ${r.pctPrazo >= PRAZO_META ? 'ok' : 'warn'}">${r.pctPrazo.toFixed(1)}%</span>`}</td>
+          <td>${r.pctPrazoAtiv === null ? '-' : `<span class="badge ${r.pctPrazoAtiv >= PRAZO_ATIVACAO_META ? 'ok' : 'warn'}">${r.pctPrazoAtiv.toFixed(1)}%</span>`}</td></tr>`).join('')}
       </tbody></table></div>
     `;
 
@@ -8479,9 +8675,9 @@ function renderPainelBI() {
       { label: 'Ativação', value: qtdAtivacao }, { label: 'Reparo', value: qtdReparo },
       { label: 'Mudança de Endereço', value: qtdME }, { label: 'Mudança de Cômodo', value: qtdMC },
       { label: 'Upgrade/Downgrade', value: qtdUpgrade },
-    ]);
-    donutChart('bi-despesas', despesaCats);
-    donutChart('bi-frota', Object.entries(locadoraMap).map(([label, value], i) => ({ label, value, color: PALETTE[i % PALETTE.length] })));
+    ], { fill: true });
+    donutChart('bi-despesas', despesaCats, { centroValor: formatCurrency(despesaCats.reduce((a,c)=>a+c.value,0)), centroLabel: 'Despesas' });
+    donutChart('bi-frota', Object.entries(locadoraMap).map(([label, value], i) => ({ label, value, color: PALETTE[i % PALETTE.length] })), { centroLabel: 'Veículos' });
     barsChart('bi-pedagio', byPlaca, { color: '#fb923c' });
     trendChart('bi-evolucao', [
       { name: 'Faturamento GIGA', color: 'var(--accent)', points: evoGiga.map(x => ({ ...x, display: formatCurrency(x.value) })) },
