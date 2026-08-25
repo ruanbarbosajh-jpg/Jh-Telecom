@@ -7454,9 +7454,12 @@ function renderToll() {
 // ===================== FINANCEIRO =====================
 function renderFinance() {
   const periodos = [...new Set(DB.financeiro.map(r=>r.periodo))];
+  const { start, end } = defaultPeriod();
   document.getElementById('content').innerHTML = `<div class="toolbar">
     <div class="field"><label>Período</label><select id="f-periodo"><option value="">Todos</option>${periodos.map(p=>`<option>${p}</option>`).join('')}</select></div>
     <div class="field"><label>Categoria</label><input type="text" id="f-cat" placeholder="Categoria"></div>
+    <div class="field"><label>Valor das Ordens — De</label><input type="date" id="vo-start" value="${start}"></div>
+    <div class="field"><label>até</label><input type="date" id="vo-end" value="${end}"></div>
     <button class="btn" id="f-apply">Filtrar</button>
   </div><div id="fin-body"></div>`;
   document.getElementById('f-apply').addEventListener('click', load);
@@ -7466,7 +7469,30 @@ function renderFinance() {
     const cat = document.getElementById('f-cat').value.toLowerCase();
     const rows = DB.financeiro.filter(r => (!periodo || r.periodo===periodo) && (!cat || (r.categoria||'').toLowerCase().includes(cat)));
     const body = document.getElementById('fin-body');
-    if (!rows.length) { body.innerHTML = '<div class="panel"><div class="empty">Nenhum lançamento encontrado. Importe a aba "BASE" de base_dados_financeiro.xlsx.</div></div>'; return; }
+
+    // ---- Valor das Ordens — pago pela GIGA (independente do filtro acima:
+    // usa data real das ordens, não o texto livre de "Período" do financeiro) ----
+    const voS = document.getElementById('vo-start').value, voE = document.getElementById('vo-end').value;
+    const prodConcluida = DB.producao.filter(p => inRange(p.data, voS, voE) && isConcluido(p.status));
+    const contaTipo = re => prodConcluida.filter(p => re.test(p.tipo_atividade || '')).length;
+    const itensGiga = [
+      { label: 'Ativação', qtd: contaTipo(/ativa[cç][aã]o/i) }, { label: 'Mudança de Cômodo', qtd: contaTipo(/mudan[cç]a de c[oô]modo/i) },
+      { label: 'Mudança de Endereço', qtd: contaTipo(/mudan[cç]a de endere[cç]o/i) }, { label: 'Reparos', qtd: contaTipo(/reparo/i) },
+      { label: 'Upgrade', qtd: contaTipo(/upgrade|downgrade/i) },
+    ].map(i => { const preco = precoGigaPorTipo(i.label); return preco !== null ? { ...i, valor: i.qtd * preco } : { ...i, valor: null }; });
+    const totalQtdGiga = itensGiga.reduce((a,i)=>a+i.qtd,0), totalValorGiga = itensGiga.reduce((a,i)=>a+(i.valor||0),0);
+    const valorGigaHtml = `
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Valor das Ordens — pago pela GIGA</h3>
+        <div class="table-wrap"><table class="data-table"><thead><tr>
+          <th>Tipo</th><th>Contagem</th><th>Valor GIGA</th>
+        </tr></thead><tbody>
+          ${itensGiga.map(i=>`<tr><td class="cat-cell">${i.label}</td><td>${i.qtd.toLocaleString('pt-BR')}</td><td>${i.valor!==null?formatCurrency(i.valor):'-'}</td></tr>`).join('')}
+          <tr class="total-row"><td class="cat-cell">Total Geral</td><td>${totalQtdGiga.toLocaleString('pt-BR')}</td><td>${formatCurrency(totalValorGiga)}</td></tr>
+        </tbody></table></div>
+      </div>`;
+
+    if (!rows.length) { body.innerHTML = valorGigaHtml + '<div class="panel"><div class="empty">Nenhum lançamento encontrado. Importe a aba "BASE" de base_dados_financeiro.xlsx.</div></div>'; return; }
     const receita = rows.filter(r=>/receita/i.test(r.tipo)).reduce((a,r)=>a+r.valor,0);
     const despesa = rows.filter(r=>/despesa/i.test(r.tipo)).reduce((a,r)=>a+r.valor,0);
     const byCategory = {};
@@ -7474,6 +7500,7 @@ function renderFinance() {
     const despesaCats = Object.values(byCategory).filter(c=>/despesa/i.test(c.tipo)).sort((a,b)=>b.total-a.total).map(c=>({label:c.categoria,value:c.total,display:formatCurrency(c.total)}));
     body.innerHTML = `
       <div class="cards-grid">${metricCard('Receita', formatCurrency(receita))}${metricCard('Despesa', formatCurrency(despesa))}${metricCard('Saldo', formatCurrency(receita-despesa), (receita-despesa)<0)}</div>
+      ${valorGigaHtml}
       <div class="panel" style="margin-bottom:1.5rem"><h3>Despesas por categoria</h3><div id="c-cat"></div></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr><th>Categoria</th><th>Tipo</th><th>Total</th></tr></thead><tbody>
         ${Object.values(byCategory).sort((a,b)=>b.total-a.total).map(r=>`<tr><td>${r.categoria}</td><td>${r.tipo}</td><td>${formatCurrency(r.total)}</td></tr>`).join('')}
@@ -7483,12 +7510,17 @@ function renderFinance() {
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'resumo', label: 'Resumo (Receita/Despesa/Saldo)' },
+      { id: 'ordens', label: 'Valor das Ordens (pago pela GIGA)' },
       { id: 'categorias', label: 'Detalhamento por categoria' },
     ]);
     wirePdfExportPanel('Financeiro', {
       resumo: () => secaoTabela('Resumo Financeiro', [
         {l:'Receita', v:formatCurrency(receita)}, {l:'Despesa', v:formatCurrency(despesa)}, {l:'Saldo', v:formatCurrency(receita-despesa)},
       ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
+      ordens: () => secaoTabela('Valor das Ordens — Pago pela GIGA', itensGiga, [
+        {header:'Tipo', get:r=>r.label}, {header:'Contagem', get:r=>r.qtd.toLocaleString('pt-BR')},
+        {header:'Valor GIGA', get:r=>r.valor!==null?formatCurrency(r.valor):'-'},
+      ], { totalRow: ['Total Geral', totalQtdGiga.toLocaleString('pt-BR'), formatCurrency(totalValorGiga)] }),
       categorias: () => secaoTabela('Despesas / Receitas — Detalhamento', Object.values(byCategory).sort((a,b)=>b.total-a.total), [
         {header:'Categoria', get:r=>r.categoria}, {header:'Tipo', get:r=>r.tipo}, {header:'Total', get:r=>formatCurrency(r.total)},
       ], { totalRow: ['TOTAL DESPESAS', '', formatCurrency(despesa)] }),
