@@ -1332,7 +1332,22 @@ function ehLimpezaCanceladaAposConcluido(existente, novo) {
   // em que as planilhas fossem importadas.
   const st = (novo.status || '').trim();
   if (!st) return false;
-  return isConcluido(existente.status) && !isConcluido(st);
+  if (isConcluido(existente.status) && !isConcluido(st)) return true;
+  // Mesma limpeza de rota, agora pegando também o atendimento IMPRODUTIVO.
+  // A regra acima só protegia ordem CONCLUÍDA; a que o técnico foi e não
+  // conseguiu concluir ficava desprotegida e era apagada pela linha de
+  // limpeza do dia seguinte.
+  // Caso real (contrato 6904492 / O.S 12367844, conferido em 25/08/2026):
+  //   21/08  "não concluído"  Ricardo taconi Dantas  "Problema de infraestrutura"  <- visita real
+  //   22/08  "cancelado"      recurso "SANTOS"                                     <- limpeza de rota
+  // Sobrava só o cancelado, e o trabalho improdutivo do técnico sumia do
+  // Detalhamento de Serviços. A assinatura da linha de limpeza é o RECURSO:
+  // vem com nome de CIDADE ou "JH TELECOM ..." no lugar do técnico
+  // (ver ehRecursoTecnico). Então: linha sem técnico de verdade não
+  // sobrescreve linha que TEM técnico de verdade — reabertura legítima nunca
+  // cai aqui, porque nela o recurso é sempre uma pessoa.
+  if (ehRecursoTecnico(existente.recurso) && novo.recurso && !ehRecursoTecnico(novo.recurso)) return true;
+  return false;
 }
 
 // ===================== LOGIN =====================
