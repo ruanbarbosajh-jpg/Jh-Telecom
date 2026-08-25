@@ -1692,8 +1692,15 @@ function formatCurrency(v) { return (v || 0).toLocaleString('pt-BR', { style: 'c
 function precoGigaPorTipo(tipoAtividade) {
   if (!DB.valoresOrdens.length) return null;
   const t = normalizeHeader(tipoAtividade);
-  const linha = DB.valoresOrdens.find(v => t.includes(normalizeHeader(v.tipo_ordem)) || normalizeHeader(v.tipo_ordem).includes(t));
-  return linha ? linha.valor_giga : null;
+  const candidatos = DB.valoresOrdens.filter(v => t.includes(normalizeHeader(v.tipo_ordem)) || normalizeHeader(v.tipo_ordem).includes(t));
+  if (!candidatos.length) return null;
+  // pode haver mais de uma linha pro mesmo tipo (reimportações antigas com
+  // caixa diferente do texto, de antes do tipo_ordem virar chave normalizada
+  // — ver case 'valoresOrdens' em insertRow) — prefere a que já tem valor da
+  // GIGA preenchido, em vez de pegar sempre a primeira (podia ser uma linha
+  // velha zerada e nunca deixar o valor novo aparecer, mesmo reimportando).
+  const comValor = candidatos.find(v => v.valor_giga);
+  return (comValor || candidatos[0]).valor_giga;
 }
 // Painel "Valor das Ordens — pago pela GIGA": Dashboard, Resumo Geral e
 // Financeiro mostravam a mesma tabela (3 cópias) — centralizado aqui. Mostra
@@ -2804,7 +2811,12 @@ function insertRow(target, map, row, extra) {
       break;
     }
     case 'valoresOrdens': {
-      const tipo = s('tipo_ordem');
+      // chave normalizada (maiúsc/minúsc e acento não importam) — sem isso,
+      // reimportar a mesma planilha com "Ativação" numa vez e "ATIVAÇÃO" na
+      // outra criava uma linha NOVA em vez de atualizar a existente, e a
+      // busca por precoGigaPorTipo podia pegar a linha velha (às vezes
+      // zerada) em vez da recém-importada.
+      const tipo = normalizeHeader(s('tipo_ordem'));
       const obj = { tipo_ordem: tipo, valor_giga: money('valor_giga'), valor_normal: money('valor_normal'), valor_26dias: money('valor_26dias') };
       return upsertRow(DB.valoresOrdens, DB_INDEX.valoresOrdens, tipo || null, obj);
       break;
