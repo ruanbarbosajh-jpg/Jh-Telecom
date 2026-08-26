@@ -427,11 +427,6 @@
   /* Sidebar recolhida some POR COMPLETO e libera a largura toda (pedido do
      cliente). O rail de icones foi testado e descartado. */
   /* alvo de toque no celular (medido: 23 links abaixo de 44px) */
-  @media (max-width: 900px) {
-    .sidebar-nav a { min-height: 44px; }
-    .toolbar input, .toolbar select, .btn, .icon-btn,
-    .multiselect-toggle, .btn-export-xls, .btn-export-img { min-height: 44px; }
-  }
 
   /* ---------- Faixa de alertas (abaixo do título) ---------- */
   .faixa-alertas { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
@@ -619,20 +614,146 @@
   .menu-toggle { display: inline-block; background: transparent; border: 1px solid var(--border); color: var(--text-primary); border-radius: 7px; padding: 6px 10px; font-size: 16px; cursor: pointer; }
   .menu-toggle:hover { border-color: var(--accent); }
   .sidebar-backdrop { display: none; }
+  /* ============================================================
+     RESPONSIVIDADE — TABLET E CELULAR
+     Estratégia por faixa (o desktop, acima de 900px, não é tocado):
+        <= 900px  tablet / celular deitado -> sidebar vira gaveta
+        <= 640px  celular                  -> 1 coluna nos filtros
+        <= 400px  celular pequeno          -> densidade máxima
+     A CAUSA RAIZ do scroll lateral era a TOPBAR: os dois botões com
+     texto + nome do usuário somavam 550px numa tela de 375px e
+     empurravam a página inteira. As tabelas nunca foram o problema —
+     elas já rolavam dentro do .table-wrap.
+     ============================================================ */
+
+  /* ---------- <= 900px: gaveta + topbar enxuta ---------- */
   @media (max-width: 900px) {
-    .sidebar { transform: translateX(-100%); transition: transform .2s ease; }
+    .sidebar { transform: translateX(-100%); transition: transform .2s ease;
+      width: min(280px, 82vw); box-shadow: var(--sombra-flutuante); }
     .sidebar.open { transform: translateX(0); }
-    .main { margin-left: 0; }
-    .menu-toggle { display: inline-block; }
+    .main { margin-left: 0; min-width: 0; }
+    .menu-toggle { display: inline-flex; }
     .sidebar-backdrop.open { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 15; }
+
+    /* a topbar precisa poder encolher: sem min-width:0 o flex se recusa a
+       comprimir os filhos e o excesso vira scroll da PÁGINA */
+    .topbar { padding: 10px 14px; gap: 10px; min-width: 0; }
+    .topbar > div { min-width: 0; }
+    .topbar h2 { font-size: var(--fs-lg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .topbar-actions { gap: 6px; flex-shrink: 0; }
+    /* botões viram só ícone — o rótulo é redundante com o ícone */
+    #btn-tema-texto { display: none; }
+    #btn-trocar-usuario { font-size: 0; }          /* esconde o texto... */
+    #btn-trocar-usuario::before { content: '⇄'; font-size: 15px; }  /* ...e mantém o ícone */
+    .icon-btn { padding: 8px 10px; }
+    .topbar-user { display: none; }                /* o perfil já aparece na gaveta */
+
+    .sidebar-nav a { min-height: 44px; }
+    .toolbar input, .toolbar select, .btn, .icon-btn,
+    .multiselect-toggle, .btn-export-xls, .btn-export-img { min-height: 44px; }
+
+    /* cards: 2 por linha no tablet */
+    .cards-grid, .cards-grid.wide { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+    /* modal não pode ser mais largo que a tela */
+    .modal-card { width: min(340px, calc(100vw - 28px)); }
+    .modal-largo { width: calc(100vw - 20px); max-height: 92vh; }
+    /* menu de filtro de coluna cabendo na tela */
+    .filtro-menu { width: min(248px, calc(100vw - 24px)); }
+    .multiselect-panel { max-width: calc(100vw - 32px); }
   }
-  @media (max-width: 520px) {
-    .content { padding: 1rem 0.85rem; }
-    .cards-grid, .cards-grid.wide { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
-    .metric-card { padding: 12px; }
-    .toolbar { padding: 12px; }
-    .toolbar .field { flex: 1 1 45%; min-width: 120px; }
-    table.data-table th, table.data-table td { padding: 8px 9px; font-size: 12.5px; }
+
+  /* ---------- <= 640px: celular ---------- */
+  @media (max-width: 640px) {
+    .content { padding: var(--sp-3) var(--sp-3); }
+
+    /* FILTROS: um por linha, do jeito que o cliente pediu. O gap e o rótulo
+       ficam menores porque 5 campos empilhados chegavam a comer metade da
+       tela antes de aparecer qualquer dado. */
+    .toolbar { padding: var(--sp-3); gap: 10px; display: grid; grid-template-columns: 1fr 1fr; align-items: end; }
+    /* por padrão cada filtro ocupa a linha inteira... */
+    .toolbar .field, .toolbar .btn, .toolbar > * { grid-column: 1 / -1; min-width: 0; width: 100%; }
+    .toolbar .field { gap: 2px; }
+    /* ...menos "De" e "Até", que são curtos e andam em par: ficam lado a lado.
+       Com os 5 filtros empilhados a barra chegava a 425px — mais da metade de
+       uma tela de celular antes de aparecer qualquer dado. */
+    .toolbar .field:has(input[type="date"]) { grid-column: span 1; }
+    .toolbar label { font-size: var(--fs-xs); }
+    .toolbar input, .toolbar select { width: 100%; }
+    .toolbar .btn { margin-top: 2px; }
+    /* o campo de cidades também ocupa a linha toda */
+    .toolbar .multiselect, .toolbar .multiselect-toggle { width: 100%; }
+    .multiselect-panel { left: 0; right: 0; width: auto; }
+
+    /* CARDS: 2 por linha, mas o herói sozinho */
+    .cards-grid, .cards-grid.wide { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); }
+    .metric-card { padding: var(--sp-3); }
+    .metric-card.nivel-heroi { grid-column: 1 / -1; padding: var(--sp-4); }
+    .metric-card.nivel-compacto { grid-column: 1 / -1; }
+    .cards-stack { gap: var(--sp-2); }
+
+    /* GRÁFICOS: mais baixos e empilhados, sem esmagar */
+    .panels-grid, .panels-grid.thirds { grid-template-columns: 1fr; gap: var(--sp-3); }
+    .panel { padding: var(--sp-3); }
+    .trend-chart-svg, .grouped-bars-svg { height: 190px; }
+    .gauge-arc { max-width: 210px; }
+    /* anel: empilha e a legenda ocupa a largura toda, em 2 colunas */
+    .donut-wrap { flex-direction: column; gap: var(--sp-3); }
+    .donut-holder { width: min(200px, 62vw); height: min(200px, 62vw); }
+    .donut-legend { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; font-size: var(--fs-sm); }
+    .legend-item { min-width: 0; }
+    .legend-item b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bar-label { width: 40%; max-width: none; }
+
+    /* TÍTULOS e SEÇÕES mais próximos — o desktop deixa espaço demais aqui */
+    .section-heading { margin: var(--sp-2) 0 var(--sp-2); }
+    .faixa-secao { margin: var(--sp-4) 0 var(--sp-3); padding: 10px 14px; }
+    .faixa-secao .fs-titulo { font-size: var(--fs-md); }
+    .destaque-prazo { padding: var(--sp-3) var(--sp-4); gap: var(--sp-3); }
+    .destaque-prazo .dp-num { font-size: var(--fs-2xl); }
+    .panel h3 { font-size: var(--fs-md); }
+
+    /* BOTÕES em linha: viram grade, sem toque acidental */
+    .pdf-export-options { grid-template-columns: 1fr; gap: var(--sp-2); }
+    .modal-acoes { flex-direction: column; }
+    .fa-item { flex: 1 1 100%; text-align: left; }
+    .report-section-row { gap: var(--sp-2); }
+
+    table.data-table th, table.data-table td { padding: 8px 10px; font-size: var(--fs-sm); }
+    /* borda de dica: mostra que a tabela rola pro lado */
+    .table-wrap { border-radius: var(--r-sm); }
+
+    /* Busca + "N linhas" do Detalhamento dos Serviços: o input tem
+       min-width:220px no atributo style, que somado ao select estourava a
+       largura em telas estreitas. Aqui os dois passam a ocupar a linha. */
+    #det-busca { min-width: 0 !important; width: 100%; }
+    #det-limite { width: 100%; }
+    /* o container do input+select é NETO do painel, não filho — por isso o
+       seletor não pode começar com `.panel >` */
+    div:has(> #det-busca) { flex-direction: column; align-items: stretch; width: 100%; }
+    /* mesma ideia para o seletor "Top N" que aparece acima de vários gráficos */
+    .topn-select { max-width: 100%; }
+  }
+
+  /* ---------- <= 400px: celular pequeno ---------- */
+  @media (max-width: 400px) {
+    .content { padding: 10px; }
+    .topbar { padding: 9px 10px; }
+    .topbar h2 { font-size: var(--fs-md); }
+    /* aqui 2 colunas já espremem demais o valor — 1 card por linha */
+    .cards-grid, .cards-grid.wide { grid-template-columns: 1fr; }
+    .metric-card.nivel-compacto { padding: 9px 12px; }
+    .donut-holder { width: min(180px, 68vw); height: min(180px, 68vw); }
+    .donut-legend { grid-template-columns: 1fr; }
+    .trend-chart-svg, .grouped-bars-svg { height: 170px; }
+    .sidebar { width: min(272px, 88vw); }
+  }
+
+  /* Rede de segurança: nada pode criar rolagem lateral na PÁGINA.
+     As tabelas continuam rolando normalmente dentro do .table-wrap. */
+  @media (max-width: 900px) {
+    html, body { max-width: 100%; overflow-x: hidden; }
+    .content { overflow-x: visible; }
+    .table-wrap { max-width: 100%; }
   }
 </style>
 </head>
