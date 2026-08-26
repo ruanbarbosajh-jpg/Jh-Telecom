@@ -9,28 +9,82 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
+  /* ============================================================
+     DESIGN TOKENS
+     Regra: COR É SINAL, NÃO DECORAÇÃO.
+       --accent        -> azul de TEXTO/borda (links, destaques)
+       --accent-solid  -> azul de FUNDO (botão primário, item ativo)
+     Os dois existem porque a mesma cor não passa em contraste nos dois
+     papéis: #4f7fff dá 4.7:1 como texto no escuro (ok), mas branco em
+     cima dele dá só 3.61:1 (reprova AA). Idem verde/vermelho no tema
+     claro — #22c55e sobre branco dava 2.28:1, praticamente ilegível.
+     Todos os valores abaixo foram medidos: mínimo 4.5:1 (WCAG AA).
+     ============================================================ */
   :root {
     --navy: #070d1c; --sidebar-bg: #0a1326; --card-bg: #131c30; --bg-page: #0b1220;
-    --accent: #4f7fff; --accent-dark: #3d63d1;
-    --border: #223054; --text-primary: #e8ecf7; --text-secondary: #93a0bd; --text-muted: #6b7593;
-    --danger: #ef4444; --success: #22c55e; --warn-bg: #3a2a10; --warn-text: #f2c14e; --radius: 10px;
+    --accent: #4f7fff;            /* texto/borda — 4.7:1 sobre o card */
+    --accent-solid: #3b5fd0;      /* fundo de botão — branco em cima = 5.62:1 */
+    --accent-dark: #3d63d1;
+    --border: #223054; --text-primary: #e8ecf7; --text-secondary: #93a0bd;
+    --text-muted: #8892ad;        /* era #6b7593 (3.71:1) — agora 5.47:1 */
+    --danger: #ef4444; --success: #22c55e;
+    --danger-bg: rgba(239,68,68,0.15); --success-bg: rgba(34,197,94,0.15);
+    --accent-bg: rgba(79,127,255,0.14);
+    --warn-bg: #3a2a10; --warn-text: #f2c14e; --warn-borda: #6b551c;
+    --nav-group: #7581a6;         /* era #5c6790 (3.35:1) — agora 4.8:1 */
     --total-bg: #101a30;
     --track-bg: #1c2540;
     --brand-1: #4f7fff; --brand-2: #22c55e;
     --row-hover: #16203a; --gauge-track: rgba(255,255,255,0.12); --nav-inactive: #b7c0d8; --nav-hover-bg: rgba(255,255,255,0.05);
     /* coluna de sábado/domingo nas tabelas de presença */
     --fds-bg: rgba(79,127,255,0.12); --fds-borda: rgba(79,127,255,0.45);
+
+    /* --- escala tipográfica: 7 degraus (antes eram 17 tamanhos soltos) --- */
+    --fs-xs: 11px; --fs-sm: 12px; --fs-md: 14px; --fs-lg: 16px;
+    --fs-xl: 20px; --fs-2xl: 28px; --fs-3xl: 40px;
+    /* --- espaçamento: escala de 4 --- */
+    --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px; --sp-7: 40px;
+    /* --- raios: 3 (antes eram 13 valores diferentes) --- */
+    --r-sm: 6px;   /* controles */
+    --r-md: 10px;  /* cards e painéis */
+    --r-pill: 999px;
+    --radius: var(--r-md);
+    /* --- elevação: sombra só em coisa flutuante --- */
+    --sombra-flutuante: 0 12px 32px rgba(0,0,0,.42);
+    --transicao: 140ms ease-out;
   }
   /* Tema claro — só troca os tokens de cor, todo o resto do CSS continua igual.
      A escolha fica no atributo data-theme do <html>, ligado pelo botão do topo. */
   :root[data-theme="light"] {
     --navy: #eef2fa; --sidebar-bg: #ffffff; --card-bg: #ffffff; --bg-page: #f4f6fb;
-    --border: #d5ddec; --text-primary: #16203a; --text-secondary: #4a5878; --text-muted: #6b7593;
-    --warn-bg: #fdf3d8; --warn-text: #8a6410;
+    --border: #d5ddec; --text-primary: #16203a; --text-secondary: #4a5878;
+    --text-muted: #5b6684;        /* 5.71:1 sobre branco */
+    --accent: #1d4ed8;            /* texto — era #4f7fff (3.61:1), agora 6.7:1 */
+    --accent-solid: #2456c9;      /* fundo — branco em cima = 6.46:1 */
+    --accent-dark: #1a3fa8;
+    --success: #15803d;           /* era #22c55e (2.28:1!) — agora 5.02:1 */
+    --danger: #c81e1e;            /* era #ef4444 (3.76:1) — agora 5.74:1 */
+    --success-bg: #dcfce7; --danger-bg: #fee2e2; --accent-bg: #e0e9fd;
+    --warn-bg: #fdf3d8; --warn-text: #8a6410; --warn-borda: #e3cd94;
+    --nav-group: #6b7593;
     --track-bg: #e6ebf5;
     --row-hover: #e9edf7; --gauge-track: rgba(20,32,64,0.14); --nav-inactive: #5b6684; --nav-hover-bg: rgba(20,32,64,0.06);
     --total-bg: #e4eaf6;
-    --fds-bg: rgba(79,127,255,0.10); --fds-borda: rgba(79,127,255,0.40);
+    --fds-bg: rgba(36,86,201,0.10); --fds-borda: rgba(36,86,201,0.40);
+    --sombra-flutuante: 0 12px 32px rgba(20,32,64,.16);
+  }
+  /* Números de tabela e indicador em largura fixa — sem isso as colunas de
+     R$ não alinham dígito a dígito e a tabela financeira fica torta. */
+  table.data-table td, table.data-table th,
+  .metric-card .value, .bar-value, .donut-centro-valor, .dp-num,
+  .ring-stat-value, .legend-item b { font-variant-numeric: tabular-nums; }
+  /* Foco visível pra quem navega por teclado (antes não existia nenhum) */
+  a:focus-visible, button:focus-visible, input:focus-visible,
+  select:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   }
   :root[data-theme="light"] .login-brand h1 { color: var(--text-primary); }
   :root[data-theme="light"] .login-card { box-shadow: 0 20px 60px rgba(20,32,64,0.14); }
@@ -40,13 +94,13 @@
   body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: var(--bg-page); color: var(--text-primary); }
 
   .login-body { height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--navy); }
-  .login-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 14px; padding: 2.5rem 2.5rem 2rem; width: 320px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .login-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--r-md); padding: 2.5rem 2.5rem 2rem; width: 320px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
   .login-brand h1 { margin: 0; font-size: 22px; color: #fff; }
   .login-brand p { margin: 2px 0 1.75rem; font-size: 13px; color: var(--text-secondary); }
   #login-form label { display: block; font-size: 13px; color: var(--text-secondary); margin: 14px 0 6px; }
-  #login-form input, #login-form select { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; outline: none; background: var(--bg-page); color: var(--text-primary); }
+  #login-form input, #login-form select { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 14px; outline: none; background: var(--bg-page); color: var(--text-primary); }
   #login-form input:focus, #login-form select:focus { border-color: var(--accent); }
-  #login-btn { width: 100%; margin-top: 20px; padding: 11px; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+  #login-btn { width: 100%; margin-top: 20px; padding: 11px; border: none; border-radius: var(--r-sm); background: var(--accent-solid); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
   #login-btn:hover { background: var(--accent-dark); }
   .hint { font-size: 12px; color: var(--text-muted); margin-top: 14px; text-align: center; }
   .error-msg { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 16px; }
@@ -118,6 +172,28 @@
   .splash-pct { font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 
   /* ---------- Botões do topo (tema / trocar usuário) ---------- */
+
+  /* ============================================================
+     BOTÕES — base única + 3 variantes (primário, contorno, fantasma).
+     Antes eram 11 classes independentes, cada uma com o seu raio,
+     padding e transição. As classes continuam existindo (nada no HTML
+     nem nos listeners muda), mas agora herdam a MESMA base.
+     ============================================================ */
+  .btn, .icon-btn, .btn-mini, .btn-export-xls, .btn-export-img,
+  .btn-primario, .btn-secundario, .logout-btn, .secao-toggle, .menu-toggle, .btn-icon {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    font-family: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;
+    border-radius: var(--r-sm); border: 1px solid transparent;
+    transition: background var(--transicao), color var(--transicao), border-color var(--transicao), transform .1s ease;
+  }
+  .btn, .icon-btn, .btn-export-xls, .btn-export-img, .btn-primario,
+  .btn-secundario, .logout-btn, .menu-toggle { min-height: 36px; }
+  .btn-mini, .secao-toggle { min-height: 28px; }
+  .btn:active, .icon-btn:active, .btn-mini:active, .btn-export-xls:active,
+  .btn-export-img:active, .logout-btn:active, .btn-primario:active,
+  .btn-secundario:active, .secao-toggle:active, .btn-icon:active { transform: scale(.97); }
+  .btn:disabled, .icon-btn:disabled, .btn-mini:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+
   .topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
   .icon-btn {
     display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px; cursor: pointer;
@@ -130,15 +206,15 @@
     display: none; align-items: center; justify-content: center; padding: 20px;
   }
   .modal-backdrop.active { display: flex; }
-  .modal-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 14px; padding: 1.6rem; width: 340px; box-shadow: 0 24px 60px rgba(0,0,0,.45); animation: cardIn .28s ease both; }
+  .modal-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--r-md); padding: 1.6rem; width: 340px; box-shadow: 0 24px 60px rgba(0,0,0,.45); animation: cardIn .28s ease both; }
   .modal-card h3 { margin: 0 0 4px; font-size: 16px; }
   .modal-card p { margin: 0 0 16px; font-size: 13px; color: var(--text-secondary); }
   .modal-card label { display: block; font-size: 13px; color: var(--text-secondary); margin: 12px 0 6px; }
-  .modal-card input, .modal-card select { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; outline: none; background: var(--bg-page); color: var(--text-primary); }
+  .modal-card input, .modal-card select { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 14px; outline: none; background: var(--bg-page); color: var(--text-primary); }
   .modal-card input:focus, .modal-card select:focus { border-color: var(--accent); }
   .modal-acoes { display: flex; gap: 8px; margin-top: 18px; }
-  .modal-acoes button { flex: 1; padding: 10px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; border: 1px solid var(--border); }
-  .btn-primario { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .modal-acoes button { flex: 1; padding: 10px; border-radius: var(--r-sm); font-size: 14px; font-weight: 600; cursor: pointer; border: 1px solid var(--border); }
+  .btn-primario { background: var(--accent-solid); color: #fff; border-color: var(--accent-solid); }
   .btn-secundario { background: transparent; color: var(--text-secondary); }
 
   /* filtro por coluna estilo Excel: funil no próprio cabeçalho */
@@ -154,7 +230,7 @@
   th.col-filtrada .filtro-btn { color: var(--accent); border-color: var(--accent); }
   .filtro-menu {
     position: absolute; z-index: 600; width: 248px; background: var(--card-bg);
-    border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 16px 40px rgba(0,0,0,.42);
+    border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--sombra-flutuante);
     padding: 10px; font-weight: 400;
   }
   .fm-topo { font-size: 12px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px; }
@@ -173,7 +249,7 @@
   .fm-rodape { display: flex; gap: 8px; margin-top: 10px; }
   .fm-rodape button { flex: 1; padding: 7px; font-size: 12.5px; font-weight: 600; border-radius: 6px; cursor: pointer;
                       border: 1px solid var(--border); background: transparent; color: var(--text-secondary); }
-  .fm-rodape .fm-ok { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .fm-rodape .fm-ok { background: var(--accent-solid); border-color: var(--accent-solid); color: #fff; }
   .filtro-aviso { font-size: 12px; color: var(--accent); margin: 6px 0 0; }
   .filtro-aviso a { color: var(--accent); }
   .btn-export-xls {
@@ -181,12 +257,12 @@
     background: var(--card-bg); border: 1px solid var(--success); color: var(--success);
     font-size: 13px; font-weight: 600;
   }
-  .btn-export-xls:hover { background: var(--success); color: #fff; }
+  .btn-export-xls:hover { background: var(--success); color: #fff; border-color: var(--success); }
   .btn-export-img {
     display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px; cursor: pointer;
     background: var(--card-bg); border: 1px solid var(--accent); color: var(--accent); font-size: 13px; font-weight: 600;
   }
-  .btn-export-img:hover { background: var(--accent); color: #fff; }
+  .btn-export-img:hover { background: var(--accent-solid); color: #fff; border-color: var(--accent-solid); }
   .link-tec { color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent); cursor: pointer; }
   .link-tec:hover { color: var(--text-primary); border-bottom-color: var(--text-primary); }
   input.mo-edit {
@@ -210,7 +286,7 @@
   /* faixa que separa visualmente o bloco do DIA do bloco do MÊS nas telas de prazo */
   .faixa-secao {
     display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
-    margin: 2rem 0 1rem; padding: 12px 18px; border-radius: 0 10px 10px 0;
+    margin: var(--sp-6) 0 var(--sp-4); padding: 12px 18px; border-radius: 0 var(--r-md) var(--r-md) 0;
     background: var(--card-bg); border: 1px solid var(--border); border-left: 5px solid var(--accent);
   }
   .faixa-secao.mes { border-left-color: #8b5cf6; }
@@ -218,7 +294,7 @@
   .faixa-secao .fs-sub { font-size: 12px; color: var(--text-muted); }
   .destaque-prazo {
     display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
-    background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--r-md);
     padding: 14px 20px; margin-bottom: 14px;
   }
   .destaque-prazo .dp-rotulo { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
@@ -250,9 +326,9 @@
   .sidebar-nav a i.nav-ic { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex-shrink: 0; }
   .sidebar-nav a i.nav-ic svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
   .sidebar-nav a:hover { background: var(--nav-hover-bg); color: #fff; }
-  .sidebar-nav a.active { background: var(--accent); color: #fff; box-shadow: 0 4px 14px rgba(79,127,255,.35); }
+  .sidebar-nav a.active { background: var(--accent-solid); color: #fff; }
   :root[data-theme="light"] .sidebar-nav a.active { box-shadow: 0 4px 14px rgba(79,127,255,.25); }
-  .sidebar-group { padding: 14px 12px 4px; font-size: 10.5px; letter-spacing: .05em; color: #5c6790; text-transform: uppercase; }
+  .sidebar-group { padding: 16px 12px 6px; font-size: var(--fs-xs); font-weight: 700; letter-spacing: .08em; color: var(--nav-group); text-transform: uppercase; }
   .logout-btn { margin: 1rem 1.25rem 0; padding: 9px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); border-radius: 8px; cursor: pointer; font-size: 13px; transition: background .15s ease, color .15s ease; }
   .logout-btn:hover { background: var(--nav-hover-bg); color: var(--text-primary); }
 
@@ -285,6 +361,105 @@
   .metric-card .value.med-value { font-size: clamp(15px, 1.5vw, 19px); line-height: 1.3; }
   .metric-card .sub { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; }
 
+  /* ============================================================
+     HIERARQUIA DE CARDS — 3 níveis
+     Sem isso todos os indicadores têm o mesmo peso e a tela não diz
+     onde olhar primeiro. Herói ocupa 2 colunas e tem o dobro do corpo.
+     ============================================================ */
+  .metric-card.nivel-heroi { grid-column: span 2; padding: 18px 20px; border-left: 3px solid var(--accent); }
+  .metric-card.nivel-heroi .value { font-size: clamp(26px, 3vw, var(--fs-3xl)); letter-spacing: -.5px; }
+  .metric-card.nivel-heroi .label { font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); }
+  .metric-card.nivel-primario .value { font-size: clamp(19px, 2vw, 25px); }
+  /* compacto: linha rótulo-à-esquerda / valor-à-direita, sem virar card gigante */
+  .metric-card.nivel-compacto { display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; padding: 10px 14px; }
+  .metric-card.nivel-compacto .label { margin: 0; font-size: var(--fs-sm); color: var(--text-secondary); }
+  .metric-card.nivel-compacto .value { font-size: var(--fs-md); font-weight: 700; }
+  .metric-card.nivel-compacto:hover { transform: none; box-shadow: none; border-color: var(--border); }
+  .mc-var { font-size: var(--fs-sm); font-weight: 700; margin-top: 6px; display: flex; gap: 6px; align-items: baseline; }
+  .mc-var span { color: var(--text-muted); font-weight: 400; font-size: var(--fs-xs); }
+  @media (max-width: 700px) { .metric-card.nivel-heroi { grid-column: span 2; } }
+
+  /* ---------- Toast (substitui os alert() bloqueantes) ---------- */
+  #toast-area { position: fixed; right: 18px; bottom: 18px; z-index: 900; display: flex;
+    flex-direction: column; gap: 10px; max-width: min(380px, 92vw); }
+  .toast { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px;
+    background: var(--card-bg); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: var(--r-md); box-shadow: var(--sombra-flutuante); font-size: var(--fs-md);
+    color: var(--text-primary); animation: toastIn .18s ease-out both; }
+  .toast.ok { border-left-color: var(--success); }
+  .toast.erro { border-left-color: var(--danger); }
+  .toast.aviso { border-left-color: var(--warn-text); }
+  .toast.saindo { animation: toastOut .18s ease-in both; }
+  .toast-txt { flex: 1; min-width: 0; line-height: 1.45; overflow-wrap: anywhere; }
+  .toast-fechar { background: transparent; border: none; color: var(--text-muted); cursor: pointer;
+    font-size: 15px; line-height: 1; padding: 0 2px; }
+  .toast-fechar:hover { color: var(--text-primary); }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes toastOut { to { opacity: 0; transform: translateY(6px); } }
+
+  /* ---------- Skeleton de carregamento ---------- */
+  .sk { background: linear-gradient(90deg, var(--track-bg) 25%, var(--row-hover) 37%, var(--track-bg) 63%);
+    background-size: 400% 100%; animation: skShimmer 1.3s ease-in-out infinite; border-radius: var(--r-sm); }
+  @keyframes skShimmer { from { background-position: 100% 50%; } to { background-position: 0 50%; } }
+  .sk-card { height: 84px; border-radius: var(--r-md); }
+  .sk-linha { height: 13px; margin: 9px 0; }
+
+  /* ---------- Paleta de comandos (Ctrl+K) ---------- */
+  #cmdk { position: fixed; inset: 0; z-index: 950; display: none; align-items: flex-start;
+    justify-content: center; padding-top: 12vh; background: rgba(3,7,18,.55); }
+  #cmdk.aberto { display: flex; }
+  .cmdk-caixa { width: min(560px, 94vw); background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: var(--r-md); box-shadow: var(--sombra-flutuante); overflow: hidden;
+    animation: cardIn .16s ease-out both; }
+  .cmdk-caixa input { width: 100%; padding: 15px 18px; border: none; border-bottom: 1px solid var(--border);
+    background: transparent; color: var(--text-primary); font-size: var(--fs-lg); outline: none; font-family: inherit; }
+  .cmdk-lista { max-height: 46vh; overflow-y: auto; padding: 6px; }
+  .cmdk-item { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 12px; border-radius: var(--r-sm); cursor: pointer; font-size: var(--fs-md);
+    color: var(--text-secondary); }
+  .cmdk-item .cmdk-grupo { font-size: var(--fs-xs); color: var(--text-muted); }
+  .cmdk-item.sel, .cmdk-item:hover { background: var(--accent-bg); color: var(--text-primary); }
+  .cmdk-vazio { padding: 22px; text-align: center; color: var(--text-muted); font-size: var(--fs-md); }
+  .cmdk-dica { padding: 8px 14px; border-top: 1px solid var(--border); font-size: var(--fs-xs);
+    color: var(--text-muted); display: flex; gap: 12px; }
+
+  /* ---------- Sidebar recolhida vira RAIL de ícones (antes sumia inteira) ---------- */
+  @media (min-width: 901px) {
+    body.sidebar-collapsed .sidebar { transform: none; width: 62px; }
+    body.sidebar-collapsed .main { margin-left: 62px; }
+    body.sidebar-collapsed .sidebar-brand p,
+    body.sidebar-collapsed .sidebar-group,
+    body.sidebar-collapsed .sidebar-nav a span.nav-txt,
+    body.sidebar-collapsed .logout-btn { display: none; }
+    body.sidebar-collapsed .sidebar-brand { padding: 0 0 12px; text-align: center; }
+    body.sidebar-collapsed .sidebar-brand h1 { font-size: var(--fs-md); }
+    body.sidebar-collapsed .sidebar-nav { padding: 0 8px; }
+    body.sidebar-collapsed .sidebar-nav a { justify-content: center; padding: 11px 0; }
+  }
+  /* alvo de toque no celular (medido: 23 links abaixo de 44px) */
+  @media (max-width: 900px) {
+    .sidebar-nav a { min-height: 44px; }
+    .toolbar input, .toolbar select, .btn, .icon-btn,
+    .multiselect-toggle, .btn-export-xls, .btn-export-img { min-height: 44px; }
+  }
+
+  /* ---------- Faixa de alertas (abaixo do título) ---------- */
+  .faixa-alertas { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--r-md);
+    padding: 10px 14px; margin-bottom: var(--sp-5); }
+  .fa-selo { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    padding: 4px 10px; border-radius: var(--r-pill); }
+  .fa-selo.ruim { background: var(--danger-bg); color: var(--danger); }
+  .fa-selo.ok { background: var(--success-bg); color: var(--success); }
+  .fa-item { font-family: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
+    background: transparent; border: 1px solid var(--border); color: var(--text-secondary);
+    padding: 5px 10px; border-radius: var(--r-pill); transition: border-color var(--transicao), color var(--transicao); }
+  .fa-item:hover { color: var(--text-primary); border-color: var(--accent); }
+  .fa-item.ruim { color: var(--danger); border-color: var(--danger-bg); }
+  .fa-item.atencao { color: var(--warn-text); }
+  .fa-item.ok { color: var(--success); border-color: var(--success-bg); }
+
   .panels-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 1.5rem; }
   .panels-grid.thirds { grid-template-columns: 1fr 1fr 1fr; }
   @media (max-width: 1000px) { .panels-grid, .panels-grid.thirds { grid-template-columns: 1fr; } }
@@ -293,16 +468,26 @@
   .panel h3 { margin: 0 0 14px; font-size: 15px; color: var(--text-primary); }
   .panel .empty { color: var(--text-muted); text-align: center; padding: 3rem 0; }
 
-  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 1.5rem; }
+  /* Filtros FIXOS logo abaixo da topbar. Antes eram `static`: numa tela de
+     9.430px (Producao) era preciso rolar tudo de volta pra trocar uma data. */
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; background: var(--card-bg);
+    border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 1.5rem;
+    position: sticky; top: 68px; z-index: 9; box-shadow: 0 6px 18px rgba(0,0,0,.10); }
   .toolbar .field { display: flex; flex-direction: column; gap: 4px; }
   .toolbar label { font-size: 12px; color: var(--text-secondary); }
-  .toolbar input, .toolbar select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; font-size: 13px; background: var(--bg-page); color: var(--text-primary); }
-  .btn { padding: 9px 16px; border: none; border-radius: 7px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .15s ease, transform .1s ease; }
+  .toolbar input, .toolbar select { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 13px; background: var(--bg-page); color: var(--text-primary); }
+  .btn { padding: 9px 16px; border: none; border-radius: var(--r-sm); background: var(--accent-solid); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background var(--transicao), transform .1s ease; }
   .btn:hover { background: var(--accent-dark); }
   .btn:active, .icon-btn:active, .btn-mini:active, .btn-export-xls:active, .btn-export-img:active, .logout-btn:active { transform: scale(.97); }
 
   table.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  table.data-table th { text-align: left; padding: 10px 12px; background: #101a30; color: #c7d0e8; font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  /* cabecalho FIXO: tabela de 200 linhas perdia a referencia da coluna ao rolar.
+     O fundo agora vem de token — o #101a30 fixo ficava escuro no tema claro. */
+  table.data-table th { text-align: left; padding: 10px 12px; background: var(--total-bg); color: var(--text-primary);
+    font-weight: 700; font-size: var(--fs-sm); letter-spacing: .02em; border-bottom: 1px solid var(--border);
+    white-space: nowrap; position: sticky; top: 0; z-index: 2; }
+  /* tabela dentro de area rolavel propria (.table-wrap com max-height) tambem fixa */
+  .table-wrap { position: relative; }
   table.data-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   table.data-table tr:hover td { background: var(--row-hover); }
   /* sábado/domingo nas tabelas de presença — fundo e bordas laterais pra dar
@@ -312,9 +497,10 @@
   table.data-table th.col-fds-fim, table.data-table td.col-fds-fim { border-right: 2px solid var(--fds-borda); }
   table.data-table tr:hover td.col-fds { background: var(--fds-bg); }
   .table-wrap { overflow-x: auto; background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); }
-  .badge { padding: 3px 9px; border-radius: 20px; font-size: 12px; font-weight: 600; }
-  .badge.ok { background: rgba(34,197,94,0.15); color: var(--success); }
-  .badge.warn { background: rgba(239,68,68,0.15); color: var(--danger); }
+  .badge { padding: 3px 9px; border-radius: var(--r-pill); font-size: var(--fs-sm); font-weight: 600; }
+  .badge { display: inline-block; }
+  .badge.ok { background: var(--success-bg); color: var(--success); }
+  .badge.warn { background: var(--danger-bg); color: var(--danger); }
   .badge.neutral { background: rgba(147,160,189,0.15); color: var(--text-secondary); }
   .badge.amber { background: rgba(234,179,8,0.18); color: #eab308; }
 
@@ -382,8 +568,8 @@
   .dropzone.dragover { border-color: var(--accent); background: #101c38; }
   .dropzone p { margin: 6px 0; color: var(--text-secondary); font-size: 14px; }
   .import-result-row { display: flex; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
-  .warning-box { background: var(--warn-bg); border: 1px solid #6b551c; color: var(--warn-text); border-radius: 8px; padding: 10px 14px; margin-top: 12px; font-size: 13px; }
-  .demo-banner { background: var(--warn-bg); border-bottom: 1px solid #6b551c; color: var(--warn-text); font-size: 12px; padding: 6px 16px; text-align: center; }
+  .warning-box { background: var(--warn-bg); border: 1px solid var(--warn-borda); color: var(--warn-text); border-radius: 8px; padding: 10px 14px; margin-top: 12px; font-size: 13px; }
+  .demo-banner { background: var(--warn-bg); border-bottom: 1px solid var(--warn-borda); color: var(--warn-text); font-size: 12px; padding: 6px 16px; text-align: center; }
   .section-heading { font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); margin: 6px 0 10px; padding-left: 2px; }
   .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
   .panel-head h3 { min-width: 0; }
@@ -407,7 +593,7 @@
   .report-section-row select { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; background: var(--card-bg); color: var(--text-primary); }
   .rs-order-btns { display: flex; gap: 4px; }
   .btn-icon { width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 6px; background: var(--card-bg); color: var(--text-secondary); cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center; }
-  .btn-icon:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-icon:hover { background: var(--accent-solid); color: #fff; border-color: var(--accent-solid); }
   .btn-icon:disabled { opacity: .35; cursor: not-allowed; }
   .btn-icon:disabled:hover { background: var(--card-bg); color: var(--text-secondary); border-color: var(--border); }
   .btn.secondary { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
@@ -419,7 +605,7 @@
   .import-file-card:hover { border-color: var(--accent); }
   .import-file-card.dragover { border-color: var(--accent); background: #101c38; }
   .import-file-card.imported { border-color: var(--success); background: rgba(34,197,94,0.07); }
-  .import-badge { display: inline-block; margin-top: 8px; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 20px; background: rgba(34,197,94,0.15); color: var(--success); }
+  .import-badge { display: inline-block; margin-top: 8px; font-size: var(--fs-xs); font-weight: 600; padding: 3px 8px; border-radius: var(--r-pill); background: rgba(34,197,94,0.15); color: var(--success); }
   .import-badge.pending { background: rgba(147,160,189,0.12); color: var(--text-muted); }
   /* linha de total nas tabelas de comparativo */
   /* cor fixa deixava a linha TOTAL azul-marinho no meio de uma tabela clara */
@@ -430,8 +616,8 @@
 
   /* filtro de múltiplas cidades */
   .multiselect { position: relative; }
-  .multiselect-toggle { padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; font-size: 13px; background: var(--bg-page); color: var(--text-primary); cursor: pointer; min-width: 140px; text-align: left; }
-  .multiselect-panel { display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px; min-width: 200px; max-height: 260px; overflow-y: auto; box-shadow: 0 12px 30px rgba(0,0,0,0.4); }
+  .multiselect-toggle { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 13px; background: var(--bg-page); color: var(--text-primary); cursor: pointer; min-width: 140px; text-align: left; }
+  .multiselect-panel { display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--r-md); padding: 8px; min-width: 200px; max-height: 260px; overflow-y: auto; box-shadow: var(--sombra-flutuante); }
   .multiselect-panel.open { display: block; }
   .multiselect-actions { display: flex; gap: 6px; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
   .multiselect-actions button { flex: 1; font-size: 11px; padding: 4px 6px; border: 1px solid var(--border); background: var(--bg-page); color: var(--text-secondary); border-radius: 5px; cursor: pointer; }
@@ -473,6 +659,8 @@
   </defs>
 </svg>
 
+<div id="toast-area"></div>
+<div id="cmdk"><div class="cmdk-caixa"><input id="cmdk-busca" type="text" placeholder="Buscar tela..." autocomplete="off"><div class="cmdk-lista" id="cmdk-lista"></div><div class="cmdk-dica"><span>↑↓ navegar</span><span>Enter abrir</span><span>Esc fechar</span></div></div></div>
 <div id="splash">
   <div class="jh-logo-icon" style="width:84px;height:63px;margin:0 auto 6px">
     <svg viewBox="0 0 64 48" class="jh-logo-svg">
@@ -621,37 +809,37 @@
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand"><h1>JH <span class="brand-gradient-text">TELECOM</span></h1><p>Nexus System</p></div>
     <nav class="sidebar-nav" id="sidebar-nav">
-      <a data-route="dashboard" class="active"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.5" y="1.5" width="6.2" height="6.2" rx="1.2"/><rect x="10.3" y="1.5" width="6.2" height="6.2" rx="1.2"/><rect x="1.5" y="10.3" width="6.2" height="6.2" rx="1.2"/><rect x="10.3" y="10.3" width="6.2" height="6.2" rx="1.2"/></svg></i> Relatório de Eficiência</a>
-      <a data-route="production"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2.5" y="8.5" width="3" height="7" rx="0.8"/><rect x="7.5" y="3.5" width="3" height="12" rx="0.8"/><rect x="12.5" y="10.5" width="3" height="5" rx="0.8"/></svg></i> Produção</a>
-      <a data-route="acomtec"><i class="nav-ic"><svg viewBox="0 0 18 18"><circle cx="7" cy="5.5" r="2.6"/><path d="M2 16c0-3.2 2.1-5.3 5-5.3"/><path d="M11 12.5l2 2 3.5-4"/></svg></i> Acompanhamento Téc.</a>
-      <a data-route="bi"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M2 14.5 6 9l3.2 3.2L16 4.5"/><path d="M11.8 4.5H16v4.2"/></svg></i> Resumo Geral - Operação</a>
+      <a data-route="dashboard" class="active"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.5" y="1.5" width="6.2" height="6.2" rx="1.2"/><rect x="10.3" y="1.5" width="6.2" height="6.2" rx="1.2"/><rect x="1.5" y="10.3" width="6.2" height="6.2" rx="1.2"/><rect x="10.3" y="10.3" width="6.2" height="6.2" rx="1.2"/></svg></i><span class="nav-txt">Relatório de Eficiência</span></a>
+      <a data-route="production"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2.5" y="8.5" width="3" height="7" rx="0.8"/><rect x="7.5" y="3.5" width="3" height="12" rx="0.8"/><rect x="12.5" y="10.5" width="3" height="5" rx="0.8"/></svg></i><span class="nav-txt">Produção</span></a>
+      <a data-route="acomtec"><i class="nav-ic"><svg viewBox="0 0 18 18"><circle cx="7" cy="5.5" r="2.6"/><path d="M2 16c0-3.2 2.1-5.3 5-5.3"/><path d="M11 12.5l2 2 3.5-4"/></svg></i><span class="nav-txt">Acompanhamento Téc.</span></a>
+      <a data-route="bi"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M2 14.5 6 9l3.2 3.2L16 4.5"/><path d="M11.8 4.5H16v4.2"/></svg></i><span class="nav-txt">Resumo Geral - Operação</span></a>
       <div class="sidebar-group">Presença</div>
-      <a data-route="presenca"><i class="nav-ic"><svg viewBox="0 0 18 18"><circle cx="5.5" cy="5" r="2.1"/><circle cx="12.5" cy="5" r="2.1"/><path d="M1.8 15.5c0-2.8 1.8-4.5 3.7-4.5s3.7 1.7 3.7 4.5"/><path d="M9.8 15.5c0-2.5 1.4-4.3 2.7-4.3s2.7 1.8 2.7 4.3"/></svg></i> Presença — Técnicos</a>
-      <a data-route="presencaescritorio"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2" y="6.3" width="14" height="9" rx="1.3"/><path d="M6.3 6.3V4.3a1.5 1.5 0 0 1 1.5-1.5h2.4a1.5 1.5 0 0 1 1.5 1.5v2"/><line x1="2" y1="10.3" x2="16" y2="10.3"/><rect x="7.8" y="9.3" width="2.4" height="2"/></svg></i> Presença — Escritório</a>
+      <a data-route="presenca"><i class="nav-ic"><svg viewBox="0 0 18 18"><circle cx="5.5" cy="5" r="2.1"/><circle cx="12.5" cy="5" r="2.1"/><path d="M1.8 15.5c0-2.8 1.8-4.5 3.7-4.5s3.7 1.7 3.7 4.5"/><path d="M9.8 15.5c0-2.5 1.4-4.3 2.7-4.3s2.7 1.8 2.7 4.3"/></svg></i><span class="nav-txt">Presença — Técnicos</span></a>
+      <a data-route="presencaescritorio"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2" y="6.3" width="14" height="9" rx="1.3"/><path d="M6.3 6.3V4.3a1.5 1.5 0 0 1 1.5-1.5h2.4a1.5 1.5 0 0 1 1.5 1.5v2"/><line x1="2" y1="10.3" x2="16" y2="10.3"/><rect x="7.8" y="9.3" width="2.4" height="2"/></svg></i><span class="nav-txt">Presença — Escritório</span></a>
       <div class="sidebar-group">IFI / IRR</div>
-      <a data-route="ofensor"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M8.3 2.2 1.3 15h14L8.3 2.2Z"/><line x1="8.3" y1="7.5" x2="8.3" y2="11"/><line x1="8.3" y1="13" x2="8.3" y2="13.02"/></svg></i> Ofensor</a>
-      <a data-route="table"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="2.5" y1="4.5" x2="15.5" y2="4.5"/><line x1="2.5" y1="9" x2="15.5" y2="9"/><line x1="2.5" y1="13.5" x2="15.5" y2="13.5"/></svg></i> Detalhe de Retornos</a>
+      <a data-route="ofensor"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M8.3 2.2 1.3 15h14L8.3 2.2Z"/><line x1="8.3" y1="7.5" x2="8.3" y2="11"/><line x1="8.3" y1="13" x2="8.3" y2="13.02"/></svg></i><span class="nav-txt">Ofensor</span></a>
+      <a data-route="table"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="2.5" y1="4.5" x2="15.5" y2="4.5"/><line x1="2.5" y1="9" x2="15.5" y2="9"/><line x1="2.5" y1="13.5" x2="15.5" y2="13.5"/></svg></i><span class="nav-txt">Detalhe de Retornos</span></a>
       <div class="sidebar-group">Prazo</div>
-      <a data-route="prazo"><i class="nav-ic"><svg viewBox="0 0 18 18"><circle cx="9" cy="9.5" r="6.8"/><line x1="9" y1="9.5" x2="9" y2="5.7"/><line x1="9" y1="9.5" x2="11.6" y2="11.3"/></svg></i> Prazo (Reparo 24h)</a>
-      <a data-route="prazoativacao"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="7" y1="1.6" x2="11" y2="1.6"/><line x1="9" y1="1.6" x2="9" y2="3.6"/><circle cx="9" cy="10.6" r="6.3"/><line x1="9" y1="10.6" x2="9" y2="7.3"/><line x1="9" y1="10.6" x2="11.3" y2="12"/></svg></i> Prazo Ativações (36h)</a>
-      <a data-route="parcialdia"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2" y="3.8" width="14" height="12" rx="1.5"/><line x1="2" y1="7.2" x2="16" y2="7.2"/><line x1="5.5" y1="1.8" x2="5.5" y2="4.8"/><line x1="12.5" y1="1.8" x2="12.5" y2="4.8"/><path d="M5.7 11.2 7.4 12.9 11 9"/></svg></i> Parcial do Dia</a>
-      <a data-route="pcr"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M1.5 9.3h3.3l1.5-5 3 10 1.5-5h5.7"/></svg></i> PCR</a>
-      <a data-route="ofensoresprazo"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="4" y1="1.8" x2="4" y2="16.2"/><path d="M4 2.8h10l-2.6 3.5L14 9.8H4"/></svg></i> Ofensores de Prazo</a>
-      <a data-route="relatoriosdia"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M9 2.2v9"/><path d="M5.5 7.7 9 11.2l3.5-3.5"/><line x1="3" y1="15.2" x2="15" y2="15.2"/></svg></i> Relatórios (Excel/Imagem)</a>
+      <a data-route="prazo"><i class="nav-ic"><svg viewBox="0 0 18 18"><circle cx="9" cy="9.5" r="6.8"/><line x1="9" y1="9.5" x2="9" y2="5.7"/><line x1="9" y1="9.5" x2="11.6" y2="11.3"/></svg></i><span class="nav-txt">Prazo (Reparo 24h)</span></a>
+      <a data-route="prazoativacao"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="7" y1="1.6" x2="11" y2="1.6"/><line x1="9" y1="1.6" x2="9" y2="3.6"/><circle cx="9" cy="10.6" r="6.3"/><line x1="9" y1="10.6" x2="9" y2="7.3"/><line x1="9" y1="10.6" x2="11.3" y2="12"/></svg></i><span class="nav-txt">Prazo Ativações (36h)</span></a>
+      <a data-route="parcialdia"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2" y="3.8" width="14" height="12" rx="1.5"/><line x1="2" y1="7.2" x2="16" y2="7.2"/><line x1="5.5" y1="1.8" x2="5.5" y2="4.8"/><line x1="12.5" y1="1.8" x2="12.5" y2="4.8"/><path d="M5.7 11.2 7.4 12.9 11 9"/></svg></i><span class="nav-txt">Parcial do Dia</span></a>
+      <a data-route="pcr"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M1.5 9.3h3.3l1.5-5 3 10 1.5-5h5.7"/></svg></i><span class="nav-txt">PCR</span></a>
+      <a data-route="ofensoresprazo"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="4" y1="1.8" x2="4" y2="16.2"/><path d="M4 2.8h10l-2.6 3.5L14 9.8H4"/></svg></i><span class="nav-txt">Ofensores de Prazo</span></a>
+      <a data-route="relatoriosdia"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M9 2.2v9"/><path d="M5.5 7.7 9 11.2l3.5-3.5"/><line x1="3" y1="15.2" x2="15" y2="15.2"/></svg></i><span class="nav-txt">Relatórios (Excel/Imagem)</span></a>
       <div class="sidebar-group">Frota</div>
-      <a data-route="fleet"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.3" y="5.8" width="9" height="7.2" rx="1"/><path d="M10.3 8.6h3.4l2.4 2.6v1.8h-5.8Z"/><circle cx="4.8" cy="14.6" r="1.4"/><circle cx="13.2" cy="14.6" r="1.4"/></svg></i> Frota</a>
-      <a data-route="toll"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="6.5" y1="1.8" x2="2.8" y2="16.2"/><line x1="11.5" y1="1.8" x2="15.2" y2="16.2"/><line x1="8.9" y1="2.8" x2="8.5" y2="5.1"/><line x1="9.2" y1="7.5" x2="8.8" y2="9.8"/><line x1="8.5" y1="12.2" x2="8.1" y2="14.5"/></svg></i> Pedágio</a>
+      <a data-route="fleet"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.3" y="5.8" width="9" height="7.2" rx="1"/><path d="M10.3 8.6h3.4l2.4 2.6v1.8h-5.8Z"/><circle cx="4.8" cy="14.6" r="1.4"/><circle cx="13.2" cy="14.6" r="1.4"/></svg></i><span class="nav-txt">Frota</span></a>
+      <a data-route="toll"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="6.5" y1="1.8" x2="2.8" y2="16.2"/><line x1="11.5" y1="1.8" x2="15.2" y2="16.2"/><line x1="8.9" y1="2.8" x2="8.5" y2="5.1"/><line x1="9.2" y1="7.5" x2="8.8" y2="9.8"/><line x1="8.5" y1="12.2" x2="8.1" y2="14.5"/></svg></i><span class="nav-txt">Pedágio</span></a>
       <div class="sidebar-group">Financeiro</div>
-      <a data-route="finance"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.8" y="4.8" width="14.4" height="10" rx="1.8"/><path d="M1.8 7.8h14.4"/><line x1="12.5" y1="11.3" x2="12.8" y2="11.3"/></svg></i> Financeiro</a>
-      <a data-route="folha"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.3" y="5.3" width="15.4" height="8.6" rx="1.5"/><circle cx="9" cy="9.6" r="2.2"/><line x1="3.6" y1="7.6" x2="3.8" y2="7.6"/><line x1="14.4" y1="11.6" x2="14.6" y2="11.6"/></svg></i> Folha de Pagamento</a>
+      <a data-route="finance"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.8" y="4.8" width="14.4" height="10" rx="1.8"/><path d="M1.8 7.8h14.4"/><line x1="12.5" y1="11.3" x2="12.8" y2="11.3"/></svg></i><span class="nav-txt">Financeiro</span></a>
+      <a data-route="folha"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.3" y="5.3" width="15.4" height="8.6" rx="1.5"/><circle cx="9" cy="9.6" r="2.2"/><line x1="3.6" y1="7.6" x2="3.8" y2="7.6"/><line x1="14.4" y1="11.6" x2="14.6" y2="11.6"/></svg></i><span class="nav-txt">Folha de Pagamento</span></a>
       <div class="sidebar-group">Comparativos</div>
-      <a data-route="cmpproducao"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M3 6h9.2M11 3.8 13.2 6 11 8.2"/><path d="M15 12H5.8M7 9.8 4.8 12 7 14.2"/></svg></i> Produção</a>
-      <a data-route="cmpifiirr"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M3 6h9.2M11 3.8 13.2 6 11 8.2"/><path d="M15 12H5.8M7 9.8 4.8 12 7 14.2"/></svg></i> IFI / IRR</a>
-      <a data-route="cmpprazo"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M3 6h9.2M11 3.8 13.2 6 11 8.2"/><path d="M15 12H5.8M7 9.8 4.8 12 7 14.2"/></svg></i> Prazo</a>
-      <a data-route="comparisons"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M3 6h9.2M11 3.8 13.2 6 11 8.2"/><path d="M15 12H5.8M7 9.8 4.8 12 7 14.2"/></svg></i> Financeiro</a>
+      <a data-route="cmpproducao"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M3 6h9.2M11 3.8 13.2 6 11 8.2"/><path d="M15 12H5.8M7 9.8 4.8 12 7 14.2"/></svg></i><span class="nav-txt">Produção</span></a>
+      <a data-route="cmpifiirr"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M3 6h9.2M11 3.8 13.2 6 11 8.2"/><path d="M15 12H5.8M7 9.8 4.8 12 7 14.2"/></svg></i><span class="nav-txt">IFI / IRR</span></a>
+      <a data-route="cmpprazo"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M3 6h9.2M11 3.8 13.2 6 11 8.2"/><path d="M15 12H5.8M7 9.8 4.8 12 7 14.2"/></svg></i><span class="nav-txt">Prazo</span></a>
+      <a data-route="comparisons"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M3 6h9.2M11 3.8 13.2 6 11 8.2"/><path d="M15 12H5.8M7 9.8 4.8 12 7 14.2"/></svg></i><span class="nav-txt">Financeiro</span></a>
       <div class="sidebar-group">Relatórios</div>
-      <a data-route="relatorios"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M5.2 1.8h5.2l3.3 3.3v11.1h-8.5Z"/><path d="M10.4 1.8v3.3h3.3"/><line x1="6.8" y1="9.6" x2="12" y2="9.6"/><line x1="6.8" y1="12.4" x2="12" y2="12.4"/></svg></i> Gerar Relatório</a>
-      <a data-route="import"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M9 11.8V2.8"/><path d="M5.3 6.3 9 2.6l3.7 3.7"/><path d="M2.8 13.5v1.4a1.8 1.8 0 0 0 1.8 1.8h8.8a1.8 1.8 0 0 0 1.8-1.8v-1.4"/></svg></i> Importar Excel</a>
+      <a data-route="relatorios"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M5.2 1.8h5.2l3.3 3.3v11.1h-8.5Z"/><path d="M10.4 1.8v3.3h3.3"/><line x1="6.8" y1="9.6" x2="12" y2="9.6"/><line x1="6.8" y1="12.4" x2="12" y2="12.4"/></svg></i><span class="nav-txt">Gerar Relatório</span></a>
+      <a data-route="import"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M9 11.8V2.8"/><path d="M5.3 6.3 9 2.6l3.7 3.7"/><path d="M2.8 13.5v1.4a1.8 1.8 0 0 0 1.8 1.8h8.8a1.8 1.8 0 0 0 1.8-1.8v-1.4"/></svg></i><span class="nav-txt">Importar Excel</span></a>
     </nav>
     <button class="logout-btn" id="logout-btn">Sair</button>
   </aside>
@@ -2071,9 +2259,9 @@ function wirePdfExportPanel(titulo, getSecaoFns) {
   if (!btn) return;
   btn.addEventListener('click', () => {
     const marcados = [...document.querySelectorAll('[data-pdf-section]:checked')].map(c => c.dataset.pdfSection);
-    if (!marcados.length) { alert('Selecione ao menos uma seção pra exportar.'); return; }
+    if (!marcados.length) { toast('Selecione ao menos uma seção pra exportar.', 'aviso'); return; }
     const secoes = marcados.map(id => getSecaoFns[id] && getSecaoFns[id]()).filter(Boolean);
-    if (!secoes.length) { alert('Sem dados pra exportar nessa seleção.'); return; }
+    if (!secoes.length) { toast('Sem dados pra exportar nessa seleção.', 'aviso'); return; }
     gerarPDFMultiSecoes(titulo, secoes);
   });
 }
@@ -3549,6 +3737,90 @@ function ativarFiltrosDeColuna(raiz) {
     aplicar();
   });
 }
+// ============================================================
+// TOAST — substitui os alert() bloqueantes. Mesma mensagem, sem
+// travar a tela e sem o visual de caixa do sistema operacional.
+//   toast('salvo')            -> neutro
+//   toast('deu certo','ok')   -> verde
+//   toast('falhou','erro')    -> vermelho (fica até fechar)
+// ============================================================
+function toast(mensagem, tipo = '', ms) {
+  const area = document.getElementById('toast-area');
+  if (!area) { console.log('[toast]', mensagem); return; }
+  const el = document.createElement('div');
+  el.className = 'toast ' + (tipo || '');
+  el.setAttribute('role', tipo === 'erro' ? 'alert' : 'status');
+  el.innerHTML = `<div class="toast-txt">${esc(mensagem)}</div><button class="toast-fechar" aria-label="Fechar">✕</button>`;
+  const sair = () => { el.classList.add('saindo'); setTimeout(() => el.remove(), 200); };
+  el.querySelector('.toast-fechar').addEventListener('click', sair);
+  area.appendChild(el);
+  // erro não some sozinho: pode ser algo que o usuário precisa ler com calma
+  const tempo = ms !== undefined ? ms : (tipo === 'erro' ? 0 : 4200);
+  if (tempo > 0) setTimeout(sair, tempo);
+}
+// Esqueleto de carregamento — o conteúdo demorava a aparecer sem nenhum aviso
+function skeletonTela(alvo, cards = 4, linhas = 6) {
+  const el = typeof alvo === 'string' ? document.getElementById(alvo) : alvo;
+  if (!el) return;
+  el.innerHTML = `
+    <div class="cards-grid">${Array.from({length: cards}, () => '<div class="sk sk-card"></div>').join('')}</div>
+    <div class="panel">${Array.from({length: linhas}, () => '<div class="sk sk-linha"></div>').join('')}</div>`;
+}
+// ============================================================
+// BUSCA DE TELAS (Ctrl+K) — com 24 rotas, achar a tela pelo nome é
+// mais rápido do que percorrer a barra lateral.
+// ============================================================
+(function paletaDeComandos() {
+  let sel = 0, filtradas = [];
+  const caixa = () => document.getElementById('cmdk');
+  const lista = () => document.getElementById('cmdk-lista');
+  const busca = () => document.getElementById('cmdk-busca');
+  function rotasVisiveis() {
+    // respeita EXATAMENTE as permissões do perfil logado
+    return Object.keys(PAGES)
+      .filter(r => !currentUser || podeAcessar(currentUser.role, r))
+      .map(r => ({ rota: r, titulo: PAGES[r].title }));
+  }
+  function pintar() {
+    const termo = normalizeHeader(busca().value);
+    filtradas = rotasVisiveis().filter(x => !termo || normalizeHeader(x.titulo).includes(termo));
+    if (sel >= filtradas.length) sel = 0;
+    lista().innerHTML = filtradas.length
+      ? filtradas.map((x, i) => `<div class="cmdk-item${i === sel ? ' sel' : ''}" data-i="${i}">
+          <span>${esc(x.titulo)}</span><span class="cmdk-grupo">${esc(x.rota)}</span></div>`).join('')
+      : '<div class="cmdk-vazio">Nenhuma tela com esse nome.</div>';
+    lista().querySelectorAll('.cmdk-item').forEach(it => {
+      it.addEventListener('click', () => abrir(+it.dataset.i));
+    });
+  }
+  function abrir(i) {
+    const alvo = filtradas[i];
+    if (!alvo) return;
+    fechar();
+    navigate(alvo.rota);
+  }
+  function mostrar() {
+    if (!currentUser) return;   // só depois de entrar no sistema
+    caixa().classList.add('aberto');
+    busca().value = ''; sel = 0; pintar(); busca().focus();
+  }
+  function fechar() { caixa().classList.remove('aberto'); }
+  document.addEventListener('keydown', ev => {
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ev.preventDefault(); mostrar(); return; }
+    if (!caixa() || !caixa().classList.contains('aberto')) return;
+    if (ev.key === 'Escape') { ev.preventDefault(); fechar(); }
+    else if (ev.key === 'ArrowDown') { ev.preventDefault(); sel = Math.min(sel + 1, filtradas.length - 1); pintar(); }
+    else if (ev.key === 'ArrowUp') { ev.preventDefault(); sel = Math.max(sel - 1, 0); pintar(); }
+    else if (ev.key === 'Enter') { ev.preventDefault(); abrir(sel); }
+  });
+  document.addEventListener('DOMContentLoaded', () => {
+    const b = busca(); if (b) b.addEventListener('input', () => { sel = 0; pintar(); });
+    const c = caixa(); if (c) c.addEventListener('click', ev => { if (ev.target === c) fechar(); });
+  });
+  // o input já existe quando o script roda (está antes do <script>), então liga direto também
+  if (busca()) busca().addEventListener('input', () => { sel = 0; pintar(); });
+  if (caixa()) caixa().addEventListener('click', ev => { if (ev.target === caixa()) fechar(); });
+})();
 function metricCard(label, value, negative, opts = {}) {
   const icon = opts.icon ? `<span>${opts.icon}</span>` : '';
   const sub = opts.sub ? `<div class="sub">${opts.sub}</div>` : '';
@@ -3559,7 +3831,38 @@ function metricCard(label, value, negative, opts = {}) {
   const comprimento = String(value ?? '').length;
   const escala = !opts.big ? '' : comprimento <= 8 ? ' big-value' : comprimento <= 18 ? ' med-value' : '';
   const classe = (opts.positive ? ' positive' : (negative ? ' negative' : '')) + escala;
-  return `<div class="metric-card${opts.accent?' accent':''}"><div class="label">${icon}${label}</div><div class="value${classe}">${value}</div>${sub}</div>`;
+  // opts.nivel: 'heroi' | 'primario' | 'compacto'. Define o PESO VISUAL do
+  // card. Antes todos tinham o mesmo corpo (21.76px medido), então o
+  // "Valor Pago pela GIGA" competia de igual pra igual com "Aluguel de
+  // carro" — o gestor não tinha como saber onde olhar primeiro.
+  const nivel = opts.nivel ? ` nivel-${opts.nivel}` : '';
+  // opts.variacao: { pct, invertido } — seta de tendência vs. período anterior
+  let variacao = '';
+  if (opts.variacao && isFinite(opts.variacao.pct)) {
+    const p = opts.variacao.pct;
+    const bom = opts.variacao.invertido ? p < 0 : p >= 0;
+    variacao = `<div class="mc-var" style="color:${bom ? 'var(--success)' : 'var(--danger)'}">
+      ${p >= 0 ? '▲' : '▼'} ${Math.abs(p).toFixed(1)}%<span>${opts.variacao.rotulo || 'vs. período anterior'}</span></div>`;
+  }
+  return `<div class="metric-card${opts.accent?' accent':''}${nivel}"><div class="label">${icon}${label}</div><div class="value${classe}">${value}</div>${variacao}${sub}</div>`;
+}
+// Faixa de alertas do topo: transforma em UMA linha o que hoje só dá pra
+// descobrir rolando a tela inteira. Não calcula nada novo — só lê os números
+// que a própria tela já produziu. itens: [{texto, tipo:'ruim'|'atencao'|'ok', rota}]
+function faixaAlertas(itens) {
+  const validos = (itens || []).filter(Boolean);
+  if (!validos.length) return '';
+  const ruins = validos.filter(i => i.tipo === 'ruim').length;
+  return `<div class="faixa-alertas">
+    <span class="fa-selo ${ruins ? 'ruim' : 'ok'}">${ruins ? `${ruins} ponto(s) de atenção` : 'tudo dentro da meta'}</span>
+    ${validos.map(i => `<button type="button" class="fa-item ${i.tipo}"${i.rota ? ` data-alerta-rota="${i.rota}"` : ''}>${i.texto}</button>`).join('')}
+  </div>`;
+}
+// Liga os cliques da faixa (cada item leva pra tela onde o problema está)
+function wireFaixaAlertas(raiz) {
+  (raiz || document).querySelectorAll('[data-alerta-rota]').forEach(b => {
+    b.addEventListener('click', () => navigate(b.dataset.alertaRota));
+  });
 }
 // Medidor em arco no estilo do Power BI: escala de 0 até `max`, com um traço
 // vermelho marcando a meta e o arco preenchido até o valor atual.
@@ -3731,21 +4034,48 @@ function renderDashboard() {
       ? totalLiquido
       : baseFolha.reduce((a,f)=>a+(f.total_receber||0),0);
 
+    // ---- variação vs. ciclo ANTERIOR (só apresentação: usa os mesmos
+    // números do fechamento, nenhum cálculo de negócio novo) ----
+    const listaCiclos = ciclosDoFechamento().lista;
+    const idxAtual = listaCiclos.findIndex(c => c.start === s && c.end === e);
+    const anterior = idxAtual >= 0 ? listaCiclos[idxAtual + 1] : null;
+    const somaCiclo = (ciclo, campo) => !ciclo ? null : DB.fechamento
+      .filter(f => f.inicio === ciclo.start && f.ate_o_dia === ciclo.end && f.total_geral > 0)
+      .reduce((a, f) => a + (f[campo] || 0), 0);
+    const varDe = (atual, campo, invertido) => {
+      const ant = somaCiclo(anterior, campo);
+      if (!ant) return null;
+      return { pct: ((atual - ant) / Math.abs(ant)) * 100, invertido: !!invertido };
+    };
+    const varGiga = varDe(valorPagoGiga, 'valor_pago_giga');
+    const varLucro = varDe(lucroCalc, 'lucros');
+
+    // ---- faixa de alertas: lê indicadores que a tela JÁ calcula ----
+    const alertas = [];
+    if (eficiencia < 70) alertas.push({ tipo:'ruim', texto:`Eficiência média ${eficiencia.toFixed(1)}% (meta 70%)` });
+    if (ifi > 2.50) alertas.push({ tipo:'ruim', texto:`% IFI ${ifi.toFixed(2)}% (meta 2,50%)`, rota:'ofensor' });
+    if (irr > 4.50) alertas.push({ tipo:'ruim', texto:`% IRR ${irr.toFixed(2)}% (meta 4,50%)`, rota:'ofensor' });
+    if (lucroCalc < 0) alertas.push({ tipo:'ruim', texto:'Lucro negativo no ciclo' });
+    const forasBonus = fech.filter(f => f.status && !/^apto/i.test(String(f.status).trim())).length;
+    if (forasBonus) alertas.push({ tipo:'atencao', texto:`${forasBonus} técnico(s) fora do bônus`, rota:'production' });
+    if (!alertas.length) alertas.push({ tipo:'ok', texto:'Nenhum indicador fora da meta neste ciclo' });
+
     body.innerHTML = `
+      ${faixaAlertas(alertas)}
       <div class="section-heading">Faturamento GIGA (fechamento do ciclo)</div>
       <div class="cards-grid wide">
-        ${metricCard('Valor Pago pela GIGA', formatCurrency(valorPagoGiga), false, {accent:true})}
-        ${metricCard('Total pago aos técnicos', formatCurrency(totalPagoTecnicos), false, {sub: DB.folhaPagamento.length ? 'da folha de pagamento' : 'total líquido do fechamento'})}
-        ${metricCard('Despesas totais', formatCurrency(despesas))}
-        ${metricCard('Lucro', formatCurrency(lucroCalc), lucroCalc<0, {sub:'GIGA − despesas'})}
-        ${metricCard('Eficiência média', eficiencia.toFixed(1)+'%')}
+        ${metricCard('Valor Pago pela GIGA', formatCurrency(valorPagoGiga), false, {accent:true, nivel:'heroi', variacao: varGiga})}
+        ${metricCard('Lucro', formatCurrency(lucroCalc), lucroCalc<0, {nivel:'heroi', sub:'GIGA − despesas', variacao: varLucro})}
+        ${metricCard('Total pago aos técnicos', formatCurrency(totalPagoTecnicos), false, {nivel:'primario', sub: DB.folhaPagamento.length ? 'da folha de pagamento' : 'total líquido do fechamento'})}
+        ${metricCard('Despesas totais', formatCurrency(despesas), false, {nivel:'primario'})}
+        ${metricCard('Eficiência média', eficiencia.toFixed(1)+'%', eficiencia<70, {nivel:'primario'})}
       </div>
       <div class="section-heading">Custos operacionais</div>
       <div class="cards-grid">
-        ${metricCard('Gasolina', formatCurrency(gasolina))}
-        ${metricCard('Aluguel de carro', formatCurrency(aluguelCarro))}
-        ${metricCard('Desconto IFI', formatCurrency(descIfi), descIfi>0)}
-        ${metricCard('Desconto IRR', formatCurrency(descIrr), descIrr>0)}
+        ${metricCard('Gasolina', formatCurrency(gasolina), false, {nivel:'compacto'})}
+        ${metricCard('Aluguel de carro', formatCurrency(aluguelCarro), false, {nivel:'compacto'})}
+        ${metricCard('Desconto IFI', formatCurrency(descIfi), descIfi>0, {nivel:'compacto'})}
+        ${metricCard('Desconto IRR', formatCurrency(descIrr), descIrr>0, {nivel:'compacto'})}
       </div>
       <div class="section-heading">Produção do ciclo</div>
       <div class="cards-grid">
@@ -3777,6 +4107,7 @@ function renderDashboard() {
       <div class="panel" style="margin-bottom:1.5rem">${renderRelatorioGeralCompleto(fech)}</div>
       <div id="pdf-export-area"></div>
     `;
+    wireFaixaAlertas(body);
     barsChartTopN('c-receita', topReceita, {defaultN:10});
     barsChartTopN('c-ef-melhor', melhorEf, {defaultN:5});
     barsChartTopN('c-ef-pior', piorEf, {defaultN:5});
@@ -6735,7 +7066,7 @@ function renderGestaoPresenca() {
           sel.style.color = novo ? '#fff' : 'var(--text-secondary)';
           const r = await salvarPresenca(tecnico, data, novo);
           sel.disabled = false;
-          if (!r.ok) alert('Não consegui salvar essa alteração no servidor. Tente de novo — ' + ((r.error && r.error.message) || ''));
+          if (!r.ok) toast('Não consegui salvar essa alteração no servidor. Tente de novo — ' + ((r.error && r.error.message) || ''), 'erro');
           atualizarResumos();
           // reaplica o filtro por coluna na hora (se algum estiver ativo) —
           // senão um técnico filtrado por "FG" continuava aparecendo depois
@@ -6753,7 +7084,7 @@ function renderGestaoPresenca() {
         btn.addEventListener('click', async () => {
           if (!confirm(`Tirar "${btn.dataset.inativar}" do quadro de presença? O histórico dele continua salvo.`)) return;
           const r = await inativarTecnicoRoster(btn.dataset.inativar);
-          if (!r.ok) alert('Não consegui salvar no servidor. Tente de novo — ' + ((r.error && r.error.message) || ''));
+          if (!r.ok) toast('Não consegui salvar no servidor. Tente de novo — ' + ((r.error && r.error.message) || ''), 'erro');
           load();
         });
       });
@@ -6813,13 +7144,13 @@ function renderGestaoPresenca() {
   // gravação mesmo, então aqui só evita a confirmação/o alerta enganosos.
   async function repetirDiaAnterior() {
     const diaAlvo = dias[0];
-    if (diaAlvo < hoje) { alert('Esse dia já passou — não dá mais pra alterar.'); return; }
+    if (diaAlvo < hoje) { toast('Esse dia já passou — não dá mais pra alterar.'); return; }
     const diaAnterior = isoAddDias(diaAlvo, -1);
     const pendentes = roster.filter(t => !statusDe(t.tecnico, diaAlvo) && statusDe(t.tecnico, diaAnterior));
-    if (!pendentes.length) { alert(`Nada pra repetir: ou já está tudo marcado em ${formatDate(diaAlvo)}, ou ninguém tinha status em ${formatDate(diaAnterior)} (nas cidades filtradas).`); return; }
+    if (!pendentes.length) { toast(`Nada pra repetir: ou já está tudo marcado em ${formatDate(diaAlvo)}, ou ninguém tinha status em ${formatDate(diaAnterior)} (nas cidades filtradas).`); return; }
     if (!confirm(`Repetir o status de ${formatDate(diaAnterior)} pra ${formatDate(diaAlvo)} em ${pendentes.length} técnico(s) sem marcação nesse dia?`)) return;
     const r = await salvarPresencaEmLote(pendentes.map(t => ({ tecnico: t.tecnico, data: diaAlvo, status: statusDe(t.tecnico, diaAnterior) })));
-    if (!r.ok) alert(`Não consegui salvar no servidor. Tente de novo — ${(r.error && r.error.message) || ''}`);
+    if (!r.ok) toast(`Não consegui salvar no servidor. Tente de novo — ${(r.error && r.error.message) || ''}`, 'erro');
     load();
   }
   // Marca o dia filtrado como Presente pra todo mundo do recorte atual
@@ -6830,10 +7161,10 @@ function renderGestaoPresenca() {
   async function marcarTodosPresentes() {
     if (!roster.length) return;
     const diaAlvo = dias[0];
-    if (diaAlvo < hoje) { alert('Esse dia já passou — não dá mais pra alterar.'); return; }
+    if (diaAlvo < hoje) { toast('Esse dia já passou — não dá mais pra alterar.'); return; }
     if (!confirm(`Marcar ${formatDate(diaAlvo)} como Presente pra ${roster.length} técnico(s) do filtro atual? Isso sobrescreve o que já estiver marcado.`)) return;
     const r = await salvarPresencaEmLote(roster.map(t => ({ tecnico: t.tecnico, data: diaAlvo, status: 'P' })));
-    if (!r.ok) alert(`Não consegui salvar no servidor. Tente de novo — ${(r.error && r.error.message) || ''}`);
+    if (!r.ok) toast(`Não consegui salvar no servidor. Tente de novo — ${(r.error && r.error.message) || ''}`, 'erro');
     load();
   }
 }
@@ -7155,7 +7486,7 @@ function renderGestaoPresencaEscritorio() {
           sel.style.color = novo ? '#fff' : 'var(--text-secondary)';
           const r = await salvarPresencaEscritorio(pessoa, data, campo, novo);
           sel.disabled = false;
-          if (!r.ok) alert('Não consegui salvar essa alteração no servidor. Tente de novo — ' + ((r.error && r.error.message) || ''));
+          if (!r.ok) toast('Não consegui salvar essa alteração no servidor. Tente de novo — ' + ((r.error && r.error.message) || ''), 'erro');
           atualizarResumosEscritorio();
           const tab = sel.closest('table');
           if (tab && tab.__aplicarFiltros) tab.__aplicarFiltros();
@@ -7165,7 +7496,7 @@ function renderGestaoPresencaEscritorio() {
         btn.addEventListener('click', async () => {
           if (!confirm(`Tirar "${btn.dataset.inativarEsc}" do quadro de presença? O histórico continua salvo.`)) return;
           const r = await inativarPessoaEscritorio(btn.dataset.inativarEsc);
-          if (!r.ok) alert('Não consegui salvar no servidor. Tente de novo — ' + ((r.error && r.error.message) || ''));
+          if (!r.ok) toast('Não consegui salvar no servidor. Tente de novo — ' + ((r.error && r.error.message) || ''), 'erro');
           load();
         });
       });
@@ -7255,9 +7586,9 @@ function renderGestaoPresencaEscritorio() {
         const colaborador = document.getElementById('gf-colaborador').value;
         const motivo = document.getElementById('gf-motivo').value.trim();
         const status = document.getElementById('gf-status').value;
-        if (!data || !colaborador) { alert('Escolha a data e o colaborador.'); return; }
+        if (!data || !colaborador) { toast('Escolha a data e o colaborador.'); return; }
         const r = await salvarFolgaEscritorio(data, colaborador, motivo, status);
-        if (!r.ok) { alert('Não consegui salvar no servidor: ' + ((r.error && r.error.message) || 'tente de novo.')); return; }
+        if (!r.ok) { toast('Não consegui salvar no servidor: ' + ((r.error && r.error.message) || 'tente de novo.'), 'erro'); return; }
         painel.remove(); renderPainelFolgas();
       });
       painel.querySelectorAll('.gf-status-select').forEach(sel => {
@@ -7266,7 +7597,7 @@ function renderGestaoPresencaEscritorio() {
           const id = /^\d+$/.test(idStr) ? Number(idStr) : idStr;
           const r = await atualizarStatusFolga(id, sel.value);
           sel.style.background = sel.value === 'PAGO' ? 'var(--success)' : 'var(--danger)';
-          if (!r.ok) alert('Não consegui salvar no servidor. Tente de novo — ' + ((r.error && r.error.message) || ''));
+          if (!r.ok) toast('Não consegui salvar no servidor. Tente de novo — ' + ((r.error && r.error.message) || ''), 'erro');
         });
       });
       painel.querySelectorAll('[data-excluir-folga]').forEach(btn => {
@@ -7275,7 +7606,7 @@ function renderGestaoPresencaEscritorio() {
           const idStr = btn.dataset.excluirFolga;
           const id = /^\d+$/.test(idStr) ? Number(idStr) : idStr;
           const r = await excluirFolgaEscritorio(id);
-          if (!r.ok) { alert('Não consegui excluir no servidor. Tente de novo — ' + ((r.error && r.error.message) || '')); return; }
+          if (!r.ok) { toast('Não consegui excluir no servidor. Tente de novo — ' + ((r.error && r.error.message) || ''), 'erro'); return; }
           painel.remove(); renderPainelFolgas();
         });
       });
@@ -9841,7 +10172,7 @@ function renderRelatorios() {
   document.getElementById('rel-pdf-btn').addEventListener('click', () => {
     const partes = partesSelecionadas();
     const validas = partes.filter(p => !p.vazio && ((p.tabelas&&p.tabelas.length) || (p.graficos&&p.graficos.length)));
-    if (!validas.length) { alert('Nenhuma seção com dados pra gerar o PDF. Marque ao menos uma seção com dados no período/cidades selecionados.'); return; }
+    if (!validas.length) { toast('Nenhuma seção com dados pra gerar o PDF. Marque ao menos uma seção com dados no período/cidades selecionados.'); return; }
     const secoesPdf = [];
     validas.forEach(p => {
       (p.tabelas||[]).forEach(t => secoesPdf.push(secaoTabela(t.titulo, t.rows, t.columns, { totalRow: t.totalRow })));
