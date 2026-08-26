@@ -838,6 +838,7 @@
         <option value="ANALISTA">Analista</option>
         <option value="GESTAO">Gestão</option>
         <option value="RH">RH</option>
+        <option value="ALMOX">Almoxarifado</option>
         <option value="ESCRITORIO">Escritório</option>
       </select>
     </div>
@@ -928,6 +929,7 @@
           <option value="ANALISTA">Analista</option>
           <option value="GESTAO">Gestão</option>
           <option value="RH">RH</option>
+          <option value="ALMOX">Almoxarifado</option>
           <option value="ESCRITORIO">Escritório</option>
         </select>
       </div>
@@ -1392,6 +1394,11 @@ const USERS = [
   { login: 'ANALISTA', senha: '0525', nome: 'Analista', role: 'analista' },
   { login: 'GESTAO', senha: 'JH26', nome: 'Gestão', role: 'gestao' },
   { login: 'RH', senha: 'RH26', nome: 'RH', role: 'rh' },
+  // Almoxarifado: perfil novo, enxerga Produção, os retornos IFI/IRR e a Folha
+  // de Pagamento. Na Folha ele NÃO mexe em dias/bônus (isso é RH e Analista) —
+  // só nos descontos de material e parcelas. Ver podeEditarFolhaPagamento /
+  // podeEditarFolhaMaterial.
+  { login: 'ALMOX', senha: '202626', nome: 'Almoxarifado', role: 'almox' },
   // Escritório entra sem senha (senha vazia) — é um perfil de consulta, só
   // enxerga Prazo/PCR e IFI-IRR. Como o login é feito PELA SENHA, esse é o
   // único caso em que a escolha do campo "Perfil" precisa ser respeitada.
@@ -1448,23 +1455,32 @@ const ROUTE_PERMISSIONS = {
   // 'bi' bloqueado abaixo.
   // Supervisor/Coordenador: fica de fora do Relatório de Eficiência, Pedágio,
   // de todo o Financeiro (tela + comparativo) e da Folha de Pagamento — pedido do cliente.
-  admin: ['import', 'parcialdia', 'bi', 'dashboard', 'toll', 'finance', 'comparisons', 'folha'],
+  // 'retornosgiga' (conferência da planilha de retornos da GIGA) é EXCLUSIVA do
+  // Analista — está bloqueada em todos os outros perfis, igual à 'import'.
+  admin: ['import', 'parcialdia', 'bi', 'dashboard', 'toll', 'finance', 'comparisons', 'folha', 'retornosgiga'],
   // RH: fica de fora do Relatório de Eficiência e das telas de Prazo (Reparo
   // 24h e Ativações 36h) — pedido do cliente.
-  rh: ['dashboard', 'acomtec', 'parcialdia', 'import', 'bi', 'prazo', 'prazoativacao'],
-  gestao: ['dashboard', 'finance', 'folha', 'toll', 'comparisons', 'import', 'parcialdia', 'bi'],
+  rh: ['dashboard', 'acomtec', 'parcialdia', 'import', 'bi', 'prazo', 'prazoativacao', 'retornosgiga'],
+  gestao: ['dashboard', 'finance', 'folha', 'toll', 'comparisons', 'import', 'parcialdia', 'bi', 'retornosgiga'],
   // Escritório: acompanha PRAZO (reparo 24h, ativações 36h, ofensores de prazo,
   // PCR e Parcial do Dia) e QUALIDADE (IFI/IRR). Fica de fora de produção, frota,
   // pedágio, financeiro, folha, comparativos e do Resumo Geral - Operação.
   escritorio: ['dashboard', 'production', 'acomtec', 'fleet', 'toll',
                'finance', 'folha', 'cmpproducao', 'cmpprazo', 'cmpifiirr', 'comparisons',
-               'relatorios', 'import', 'bi'],
+               'relatorios', 'import', 'bi', 'retornosgiga'],
+  // Almoxarifado: só Produção, os dois retornos (Ofensor e Detalhe) e a Folha
+  // de Pagamento. É lista de BLOQUEIO, então tudo que não está aqui ele vê —
+  // por isso rota nova precisa ser somada aqui também.
+  almox: ['dashboard', 'acomtec', 'bi', 'presenca', 'presencaescritorio',
+          'prazo', 'prazoativacao', 'parcialdia', 'pcr', 'ofensoresprazo',
+          'relatoriosdia', 'fleet', 'toll', 'finance', 'retornosgiga',
+          'cmpproducao', 'cmpifiirr', 'cmpprazo', 'comparisons', 'relatorios', 'import'],
 };
 // Perfis que o sistema conhece. Perfil que não esteja aqui (erro de digitação
 // na tabela "perfis" do Supabase, perfil novo criado sem ajustar o sistema)
 // NÃO ganha acesso total por engano: cai no acesso mínimo, o mesmo do
 // Escritório. Antes, qualquer texto desconhecido liberava todas as telas.
-const PERFIS_CONHECIDOS = ['admin', 'analista', 'gestao', 'rh', 'escritorio'];
+const PERFIS_CONHECIDOS = ['admin', 'analista', 'gestao', 'rh', 'almox', 'escritorio'];
 function perfilValido(role) { return PERFIS_CONHECIDOS.includes(role) ? role : 'escritorio'; }
 // Recados técnicos (tabela faltando no banco, coluna não reconhecida, SQL para
 // rodar) são tarefa do Analista — é ele quem importa planilha e mexe no banco.
@@ -1475,6 +1491,20 @@ function ehAnalista() { return !!currentUser && currentUser.role === 'analista';
 // de consulta. O valor fica salvo no Supabase e vale para todos, então não
 // pode ser mexido por quem só acompanha.
 function podeEditarMO() { return !!currentUser && currentUser.role !== 'escritorio'; }
+// Folha de Pagamento — a edição é dividida em DOIS grupos de campos, com donos
+// diferentes (pedido do cliente). Não dá pra resolver com uma permissão só:
+//
+//  1) PAGAMENTO (dias trabalhados, bônus apto/inapto): só RH e Analista. O
+//     bônus é campo de decisão — um técnico fora do indicador pode voltar a
+//     APTO se a gestão liberar, e quem registra isso é o RH.
+//  2) MATERIAL (descontos de material, parcelas): Almoxarifado, RH e Analista.
+//     O almoxarifado é quem sabe o que o técnico levou e não devolveu.
+function podeEditarFolhaPagamento() {
+  return !!currentUser && ['rh', 'analista'].includes(currentUser.role);
+}
+function podeEditarFolhaMaterial() {
+  return !!currentUser && ['almox', 'rh', 'analista'].includes(currentUser.role);
+}
 // Gestão de Presença: regra mais restrita que o resto do sistema — não é mais
 // "todo mundo menos Escritório" (pedido do cliente revisado). Marcar presença
 // / cadastrar técnico no dia a dia é só Matheus, Sebastião e o Analista; tirar
@@ -1506,6 +1536,10 @@ const DB = {
   frotaLinks: [], frotaTroca: [], frotaManutencao: [], frotaDesvinc: [], frotaMultas: [], frotaRevisao: [],
   pedagio: [], financeiro: [], importsLog: [],
   pcr: [], // linhas do CSV de atividades importado na aba PCR
+  // Retornos IFI/IRR da planilha que a GIGA manda todo fechamento. É a fonte
+  // OFICIAL do desconto: quando existe retorno da GIGA no período, ele manda
+  // sobre o retorno que o próprio sistema calcula (ver retornosDoPeriodo).
+  retornosGiga: [],
   comparativoFinanceiro: null, // tabela dinâmica pronta da aba COMAPARATIVO (quando importada)
   // Ordens da BASE DE DADOS que aparecem em MAIS DE UMA data (2º atendimento da
   // mesma OS). O COUNTIFS da planilha conta cada linha, então soma as duas; aqui
@@ -1791,7 +1825,7 @@ document.getElementById('login-form').addEventListener('submit', e => { e.preven
   if (el) el.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); confirmarTrocaUsuario(); } });
 });
 let currentUser = null;
-const ROLE_LABEL = { admin: 'Administrador', analista: 'Analista', gestao: 'Gestão', rh: 'RH', escritorio: 'Escritório' };
+const ROLE_LABEL = { admin: 'Administrador', analista: 'Analista', gestao: 'Gestão', rh: 'RH', almox: 'Almoxarifado', escritorio: 'Escritório' };
 function getFirstAllowedRoute(role) {
   if (podeAcessar(role, 'dashboard')) return 'dashboard';
   return Object.keys(PAGES).find(r => podeAcessar(role, r)) || 'dashboard';
@@ -1945,6 +1979,7 @@ const CONTAS_POR_PERFIL = {
   ANALISTA:   'analista@jhtelecom.com.br',
   GESTAO:     'gestao@jhtelecom.com.br',
   RH:         'rh@jhtelecom.com.br',
+  ALMOX:      'almox@jhtelecom.com.br',
   ESCRITORIO: 'escritorio@jhtelecom.com.br',
 };
 async function perfilDoUsuario(u) {
