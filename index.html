@@ -4763,8 +4763,22 @@ function gerarPeriodoFolha(inicio, fim) {
     const irrPct = base.reparos ? (ret.irr / base.reparos) * 100 : 0;
     const apto = ifiPct <= BONUS_IFI_MAX && irrPct <= BONUS_IRR_MAX && diasTrab >= BONUS_DIAS_MIN;
     const valorOrdens = valorOrdensDoPeriodo(tecnico, inicio, fim, apto);
+    // Quantas ordens de CADA tipo (mesmas 5 categorias da tabela de preço fixa
+    // — VALORES_ORDENS_FIXOS) — pra a Folha mostrar não só o total, mas quanto
+    // disso foi Ativação, Reparo etc.
+    const porTipo = { ativacao: 0, reparo: 0, mudanca_endereco: 0, mudanca_comodo: 0, upgrade: 0 };
+    ordens.forEach(p => {
+      const t = normalizeHeader(p.tipo_atividade);
+      if (/ativa/.test(t)) porTipo.ativacao++;
+      else if (/reparo/.test(t)) porTipo.reparo++;
+      else if (/mudan.*endereco/.test(t)) porTipo.mudanca_endereco++;
+      else if (/mudan.*comodo/.test(t)) porTipo.mudanca_comodo++;
+      else if (/upgrade|downgrade/.test(t)) porTipo.upgrade++;
+    });
     return {
       tecnico, periodo, total_ordens: ordens.length, valor_total_ordens: valorOrdens,
+      qtd_ativacao: porTipo.ativacao, qtd_reparo: porTipo.reparo,
+      qtd_mudanca_endereco: porTipo.mudanca_endereco, qtd_mudanca_comodo: porTipo.mudanca_comodo, qtd_upgrade: porTipo.upgrade,
       dias_trab: diasTrab, bonus: apto ? 'APTO' : 'INAPTO', frota: '', dias_aluguel: 0, valor_aluguel: 0, emprestimo: 0,
       qtd_ifi: ret.ifi, qtd_irr: ret.irr, ifi_pct: ifiPct, irr_pct: irrPct,
       desc_ifi: 0, desc_irr: 0, desc_equipamento: 0, desc_multa: 0, desc_miscelanea: 0, desc_mecanica: 0,
@@ -9544,6 +9558,15 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
   const cols = [
     ['Técnico', r=>r.tecnico],
     ['Total Ordens', r=>r.total_ordens],
+    // só existe em quem foi gerado por "Gerar novo período" (ver
+    // gerarPeriodoFolha) — linha importada de planilha antiga não tem essa
+    // quebra por tipo, então fica "-" em vez de mostrar 0 (0 seria mentira:
+    // não é que ele não fez nenhuma, é que não temos essa informação aqui)
+    ['Ativação', r => r.qtd_ativacao ?? '-'],
+    ['Reparo', r => r.qtd_reparo ?? '-'],
+    ['Mud. Endereço', r => r.qtd_mudanca_endereco ?? '-'],
+    ['Mud. Cômodo', r => r.qtd_mudanca_comodo ?? '-'],
+    ['Upgrade/Down.', r => r.qtd_upgrade ?? '-'],
     ['Valor Ordens', r=>`<span class="folha-valor-ordens">${money(r.valor_total_ordens)}</span>`],
     ['Dias Trab.', r => podePagamento ? inputNumero(r, 'dias_trab', r.dias_trab) : r.dias_trab],
     ['Bônus', r => podePagamento
