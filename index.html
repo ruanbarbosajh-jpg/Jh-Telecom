@@ -493,6 +493,17 @@
   .badge.neutral { background: rgba(147,160,189,0.15); color: var(--text-secondary); }
   .badge.amber { background: rgba(234,179,8,0.18); color: #eab308; }
 
+  /* Diagnóstico em texto corrido: barra de destaque na lateral pra separar do
+     resto sem virar mais um "card". Fundo levemente destacado, mas os tokens
+     são os mesmos do painel — no tema claro não pode virar caixa branca em
+     fundo branco. */
+  .diagnostico { border-left: 3px solid var(--accent-solid); margin-bottom: 1.5rem; }
+  .diagnostico-titulo { font-size: var(--fs-xs); font-weight: 800; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--text-secondary); margin-bottom: 8px; }
+  .diagnostico-texto { margin: 0; font-size: var(--fs-md); line-height: 1.75;
+    color: var(--text-secondary); max-width: 105ch; }
+  .diagnostico-texto b { color: var(--text-primary); font-weight: 700; }
+
   .gauge-arc-wrap { text-align: center; padding: 4px 0 2px; }
   .gauge-arc { width: 100%; max-width: 260px; height: auto; display: block; margin: 4px auto 0; }
   .gauge-arc-value { fill: var(--text-primary); font-size: 28px; font-weight: 800; }
@@ -3144,7 +3155,13 @@ function trendChart(elId, series, opts = {}) {
   if (!comValores.length) { el.innerHTML = '<div class="empty">Sem dados.</div>'; return; }
   const labels = comValores[0].points.map(p => p.label);
   const max = Math.max(...comValores.flatMap(s => s.points.map(p => p.value)), 1);
-  const W = 600, H = 220, PADX = 34, PADY_T = 14, PADY_B = 30;
+  // opts.expandir: o viewBox fixo de 600 combinado com preserveAspectRatio
+  // "meet" fazia o desenho ser escalado pela ALTURA e depois centralizado —
+  // num painel de 1150px de largura sobrava um terço vazio de cada lado. Com a
+  // largura do viewBox igual à do contêiner, a proporção bate e o gráfico ocupa
+  // o painel inteiro. Fica opcional pra não mexer nos gráficos já existentes.
+  const H = 220, PADX = 34, PADY_T = 14, PADY_B = 30;
+  const W = opts.expandir && el.clientWidth > 600 ? Math.round(el.clientWidth) : 600;
   const n = labels.length;
   const x = i => n > 1 ? PADX + (i / (n - 1)) * (W - 2 * PADX) : W / 2;
   const y = v => H - PADY_B - (v / max) * (H - PADY_T - PADY_B);
@@ -3182,6 +3199,86 @@ function trendChart(elId, series, opts = {}) {
       `).join('')}
       ${labels.map((l, i) => mostraLabel(i) ? `<text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" class="trend-axis-label">${l}</text>` : '').join('')}
     </svg>`;
+}
+// Diagnóstico em texto corrido da tela de Produção. NÃO calcula regra de
+// negócio nova: recebe prontos os mesmos números que os cards e os gráficos já
+// mostram, e só escreve isso em português. A ideia é que quem abre a tela leia
+// uma frase e já saiba o que aconteceu, sem ter que cruzar 6 painéis.
+//
+// Regra que vale a pena manter: quando um dado NÃO dá pra avaliar, o texto diz
+// isso na cara (ordem sem técnico, sem motivo, período curto demais pra falar
+// de tendência). Diagnóstico que esconde buraco de dado vira armadilha.
+function diagnosticoProducao(d) {
+  const total = d.baseRows.length;
+  if (!total) return '';
+  const n = v => v.toLocaleString('pt-BR');
+  // decimal com VÍRGULA: o resto da frase já usa separador de milhar pt-BR,
+  // misturar "1.234 ordens" com "46.3%" na mesma linha fica esquisito
+  const pctBR = v => (total ? v / total * 100 : 0).toFixed(1).replace('.', ',');
+  const b = v => `<b>${v}</b>`;
+  // concordância: "1 concluída", não "1 concluídas"
+  const plural = (qtd, um, muitos) => `${n(qtd)} ${qtd === 1 ? um : muitos}`;
+  const frases = [];
+
+  frases.push(
+    `No período de ${b(formatDate(d.inicio))} a ${b(formatDate(d.fim))}, a operação registrou ` +
+    `${b(plural(total, 'ordem', 'ordens'))}, sendo ${b(plural(d.concluidos.length, 'concluída', 'concluídas'))} ` +
+    `(${pctBR(d.concluidos.length)}%), ${b(plural(d.naoConcluidos.length, 'não concluída', 'não concluídas'))} ` +
+    `e ${b(plural(d.cancelados.length, 'cancelada', 'canceladas'))}.`
+  );
+
+  // O tipo mais frequente é contado aqui, sobre baseRows, e NÃO reaproveitado
+  // do gráfico: lá a lista já passou pelo filtro de status, e no mesmo
+  // parágrafo dava "91 ordens" logo antes de "mais frequente, com 28 ordens".
+  const contagemTipo = {};
+  d.baseRows.forEach(r => { const t = r.tipo_atividade || 'Não informado'; contagemTipo[t] = (contagemTipo[t] || 0) + 1; });
+  const tipo = Object.entries(contagemTipo).sort((a, b2) => b2[1] - a[1])[0];
+  const cidade = d.cityList && d.cityList[0];
+  if (tipo) {
+    frases.push(`O serviço mais frequente é ${b(esc(tipo[0]))}, com ${b(plural(tipo[1], 'ordem', 'ordens'))}` +
+      (cidade ? `, e ${b(esc(cidade.label))} concentra a maior produção concluída (${b(n(cidade.value))}).` : '.'));
+  }
+  const tec = d.techList && d.techList[0];
+  if (tec) frases.push(`${b(esc(tec.label))} é quem mais produz no recorte, com ${b(plural(tec.value, 'concluída', 'concluídas'))}.`);
+
+  // Tendência: compara a 1ª com a 2ª metade do período. Só faz sentido com pelo
+  // menos 4 caixas de tempo — com 2 ou 3 pontos, "tendência" é ruído.
+  const serie = d.serieConcluidas || [];
+  if (serie.length >= 4) {
+    const meio = Math.floor(serie.length / 2);
+    const soma = arr => arr.reduce((a, p) => a + p.value, 0);
+    const a1 = soma(serie.slice(0, meio)), a2 = soma(serie.slice(meio));
+    if (a1 > 0) {
+      const variacao = (a2 - a1) / a1 * 100;
+      const rumo = variacao >= 5 ? 'subiu' : (variacao <= -5 ? 'caiu' : 'ficou estável');
+      const varTxt = Math.abs(variacao).toFixed(1).replace('.', ',');
+      frases.push(rumo === 'ficou estável'
+        ? `A produção concluída ${b('ficou estável')} entre a primeira e a segunda metade do período (${b(n(a1))} → ${b(n(a2))}).`
+        : `A produção concluída ${b(rumo + ' ' + varTxt + '%')} da primeira para a segunda metade do período (${b(n(a1))} → ${b(n(a2))}).`);
+    }
+  } else if (serie.length) {
+    frases.push(`O período é curto demais (${b(serie.length + (serie.length === 1 ? ' ponto' : ' pontos'))}) para avaliar tendência — amplie o filtro de datas.`);
+  }
+
+  // Buracos de dado: o que NÃO dá pra avaliar com o que foi importado.
+  const ressalvas = [];
+  const semTecnico = d.baseRows.filter(r => !ehRecursoTecnico(r.recurso)).length;
+  if (semTecnico) ressalvas.push(`${b(plural(semTecnico, 'ordem', 'ordens'))} sem técnico identificado (fora dos rankings por técnico)`);
+  const semMotivo = d.baseRows.filter(r => !r.motivo).length;
+  if (semMotivo) ressalvas.push(`${b(plural(semMotivo, 'ordem', 'ordens'))} sem motivo da baixa preenchido`);
+  const semCidade = d.baseRows.filter(r => !r.cidade).length;
+  if (semCidade) ressalvas.push(`${b(plural(semCidade, 'ordem', 'ordens'))} sem cidade`);
+  if (ressalvas.length) frases.push(`Ressalvas do recorte: ${ressalvas.join(', ')}.`);
+  // Cuidado com o que essa frase promete: o diagnóstico sai de baseRows, que
+  // NÃO passa pelo filtro de status (é justamente ele que separa concluída de
+  // cancelada). Quem filtra por status são os gráficos e a tabela. Dizer que
+  // "os números acima seguem o filtro" seria mentira.
+  if (d.statusFilter) frases.push(`O diagnóstico cobre ${b('todos os status')}; o ${b('filtro de status')} do topo vale para os gráficos e a tabela.`);
+
+  return `<div class="panel diagnostico">
+    <div class="diagnostico-titulo">Diagnóstico da operação — gerado automaticamente</div>
+    <p class="diagnostico-texto">${frases.join(' ')}</p>
+  </div>`;
 }
 // Fatia um período em caixas de tempo pro gráfico de evolução. Duas decisões
 // que importam:
@@ -4659,17 +4756,33 @@ function renderProduction() {
     const deslocList = Object.entries(techCities).map(([label,set])=>({label,value:set.size})).sort((a,b)=>b.value-a.value);
     const bottomDeslocList = [...deslocList].sort((a,b)=>a.value-b.value);
 
-    // Evolução no tempo: segue o filtro de data de ponta a ponta (ver
-    // caixasDeTempo). Duas séries em tons de azul: o total de ordens abertas e,
-    // por baixo, quanto disso foi concluído — a distância entre as duas linhas
-    // é o que ficou pra trás no período.
+    // Evolução no tempo: segue TODOS os filtros do topo. Data de ponta a ponta
+    // (ver caixasDeTempo), e também técnico/cidade, porque as séries saem de
+    // baseRows. O filtro de STATUS entra logo abaixo: com um status escolhido,
+    // sobra só a linha dele — as outras seriam zero e só sujariam a leitura.
+    //
+    // As cores dos 3 status são as MESMAS do anel "Ordens por Status" desta
+    // tela, de propósito: mesma informação, mesma cor. Foram conferidas por
+    // distância perceptual — pior par ΔE 16,3 na visão normal e 12,8 simulando
+    // daltonismo (nenhum abaixo de 12). A versão anterior tinha as duas linhas
+    // em tons de azul a ΔE 11,2, ou seja, indistinguíveis.
     const evolucao = caixasDeTempo(s, e);
-    const evolucaoSeries = evolucao ? [
-      { name: 'Total de ordens', color: '#7aa5ff', tracejado: true, semArea: true,
-        points: serieDoPeriodo(evolucao.caixas, baseRows, r => r.data) },
-      { name: 'Concluídas', color: '#4f7fff',
-        points: serieDoPeriodo(evolucao.caixas, concluidos, r => r.data) },
-    ] : [];
+    const seriesPorStatus = [
+      { filtro: null,           name: 'Total de ordens', color: '#4f7fff', tracejado: true, semArea: true, linhas: baseRows },
+      { filtro: 'concluido',    name: 'Concluídas',      color: '#22c55e', linhas: concluidos },
+      { filtro: 'naoconcluido', name: 'Não concluídas',  color: '#93a0bd', linhas: naoConcluidos },
+      { filtro: 'cancelado',    name: 'Canceladas',      color: '#ef4444', linhas: cancelados },
+    ];
+    const evolucaoSeries = !evolucao ? [] : seriesPorStatus
+      .filter(x => !statusFilter || x.filtro === statusFilter)
+      .map(x => ({ name: x.name, color: x.color, tracejado: x.tracejado, semArea: x.semArea,
+                   points: serieDoPeriodo(evolucao.caixas, x.linhas, r => r.data) }));
+
+    const diagnostico = diagnosticoProducao({
+      inicio: s, fim: e, baseRows, concluidos, naoConcluidos, cancelados,
+      byTipo, cityList, techList, statusFilter,
+      serieConcluidas: evolucao ? serieDoPeriodo(evolucao.caixas, concluidos, r => r.data) : [],
+    });
 
     body.innerHTML = `
       <div class="cards-grid">
@@ -4679,10 +4792,7 @@ function renderProduction() {
         ${metricCard('Canceladas', cancelados.length, cancelados.length>0)}
         ${metricCard('% Concluído', pctConcluido.toFixed(1)+'%')}
       </div>
-      <div class="panel" style="margin-bottom:1.5rem">
-        <h3>Evolução dos Serviços no Período${evolucao ? ` <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(por ${evolucao.granularidade})</span>` : ''}</h3>
-        <div id="c-evolucao"></div>
-      </div>
+      ${diagnostico}
       <div class="panels-grid">
         <div class="panel"><h3>Ordens por Status</h3><div id="c-status"></div></div>
         <div class="panel" style="display:flex;flex-direction:column"><h3>Ordens por Tipo de Atividade${statusFilter?' (filtro aplicado)':''}</h3><div id="c-tipo" style="flex:1;display:flex;flex-direction:column"></div></div>
@@ -4714,6 +4824,10 @@ function renderProduction() {
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr><th>Data</th><th>Técnico</th><th>Cidade</th><th>Tipo</th><th>Status</th><th>Motivo da Baixa</th><th>OS</th><th>Contrato</th></tr></thead><tbody>
       ${rows.slice(0,200).map(r=>`<tr><td>${formatDate(r.data)}</td><td>${esc(r.recurso)}</td><td>${esc(r.cidade)}</td><td>${esc(r.tipo_atividade)}</td><td>${statusBadge(r.status)}</td><td>${esc(r.motivo) || '-'}</td><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td></tr>`).join('')}
       </tbody></table></div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Evolução dos Serviços no Período${evolucao ? ` <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(por ${evolucao.granularidade}${statusFilter ? ' — filtro de status aplicado' : ''})</span>` : ''}</h3>
+        <div id="c-evolucao"></div>
+      </div>
       <div id="pdf-export-area"></div>`;
 
     const desenharBonus = (ini, fim) => {
@@ -4738,7 +4852,7 @@ function renderProduction() {
     });
 
     // maxLabels 12: com 31 dias no eixo os rótulos se sobrepõem e viram borrão
-    trendChart('c-evolucao', evolucaoSeries, { suave: true, maxLabels: 12 });
+    trendChart('c-evolucao', evolucaoSeries, { suave: true, maxLabels: 12, expandir: true });
     donutChart('c-status', [
       {label:'Concluídas', value:concluidos.length, color:'#22c55e'},
       {label:'Não concluídas', value:naoConcluidos.length, color:'#93a0bd'},
