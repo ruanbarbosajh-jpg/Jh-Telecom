@@ -280,12 +280,14 @@
   }
   input.folha-edit:focus, select.folha-edit:focus { border-color: var(--accent); }
   select.folha-edit { text-align: left; padding: 4px 4px; }
-  /* desconto de material — laranja/amarelo pra chamar atenção de que é
-     dinheiro saindo do bolso do técnico. var(--warn-text) já troca sozinho
-     pra um tom mais escuro no tema claro — #f59e0b fixo aqui deu 1,99:1 de
-     contraste contra o fundo claro do campo, bem abaixo do mínimo AA (4,5:1) */
-  input.folha-edit-moeda { color: var(--warn-text); font-weight: 700; }
-  input.folha-edit-moeda:focus { border-color: var(--warn-text); }
+  /* desconto de material — só fica em laranja/amarelo quando TEM valor (a
+     classe .tem-valor é ligada/desligada no JS a cada dígito digitado);
+     em R$ 0,00 fica com a cor neutra de sempre, pra não acender alerta à toa.
+     var(--warn-text) já troca sozinho pra um tom mais escuro no tema claro —
+     #f59e0b fixo aqui deu 1,99:1 de contraste contra o fundo claro do campo,
+     bem abaixo do mínimo AA (4,5:1) */
+  input.folha-edit-moeda.tem-valor { color: var(--warn-text); font-weight: 700; }
+  input.folha-edit-moeda.tem-valor:focus { border-color: var(--warn-text); }
   .modal-largo { width: min(1100px, 94vw); max-height: 88vh; overflow: auto; position: relative; }
   .mt-fechar {
     position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
@@ -9439,6 +9441,7 @@ function renderFolhaPagamento() {
       const centavos = parseInt(digitos || '0', 10);
       el.dataset.centavos = centavos;
       el.value = formatCurrency(centavos / 100);
+      el.classList.toggle('tem-valor', centavos > 0);
     };
     document.querySelectorAll('input.folha-edit-moeda').forEach(inp => {
       inp.addEventListener('input', () => formatarMoedaInput(inp));
@@ -9501,7 +9504,7 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
   // formatação em tempo real (ver mais abaixo, perto do wireFolhaEdicao).
   const inputMoeda = (r, campo, valor) => {
     const centavos = Math.round((Number(valor) || 0) * 100);
-    return `<input type="text" inputmode="decimal" class="folha-edit folha-edit-moeda"
+    return `<input type="text" inputmode="decimal" class="folha-edit folha-edit-moeda${centavos > 0 ? ' tem-valor' : ''}"
       data-campo="${campo}" ${attrsChave(r)} data-centavos="${centavos}"
       value="${formatCurrency(centavos / 100)}" style="width:110px;text-align:right">`;
   };
