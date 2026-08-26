@@ -5675,7 +5675,10 @@ function classifyStatusGranular(status) {
 // Cor fixa por situação, para a mesma palavra ter sempre a mesma cor em
 // qualquer tabela da PCR: pendente = amarelo (ainda não começou), em rota =
 // laranja (a caminho), iniciado = azul (em atendimento), concluído = verde.
-const COR_SITUACAO = { pendente: '#facc15', em_rota: '#fb923c', iniciado: '#38bdf8', concluido: 'var(--success)' };
+// cancelado e não_concluído entraram aqui pra parar de cair no cinza padrão
+// (sem cor nenhuma) — na tabela "Retornos do Dia" pendente e cancelado saíam
+// exatamente da mesma cor, porque só concluído tinha tratamento diferente.
+const COR_SITUACAO = { pendente: '#facc15', em_rota: '#fb923c', iniciado: '#38bdf8', concluido: 'var(--success)', cancelado: 'var(--danger)', nao_concluido: 'var(--danger)' };
 function corSituacao(bucket) { return COR_SITUACAO[bucket] || 'var(--text-secondary)'; }
 function estiloSituacao(bucket) { return `color:${corSituacao(bucket)};font-weight:700`; }
 function bucketColor(bucket) {
@@ -6103,23 +6106,77 @@ function renderPCR() {
     // "suspenso" e "cancelado" saíram: a visita já aconteceu ou foi descartada,
     // então não é mais um prazo que dá pra correr atrás hoje.
     const ABERTAS = ['pendente', 'em_rota', 'iniciado'];
-    const aVencerDia = rowsReparo
-      .filter(r => r.limite && ABERTAS.includes(classifyStatusGranular(r.status)))
-      .sort((a, b) => a.limite - b.limite);
+    const aberta = r => ABERTAS.includes(classifyStatusGranular(r.status));
     const horasAte = r => (r.limite - agoraPCR) / 36e5;
-    const vencidas = aVencerDia.filter(r => horasAte(r) < 0);
-    const vence2h  = aVencerDia.filter(r => horasAte(r) >= 0 && horasAte(r) < 2);
-    const linhaVenceAgora = r => {
-      const h = horasAte(r);
-      const cor = h < 0 ? 'var(--danger)' : h < 2 ? '#fb923c' : h < 4 ? '#f59e0b' : 'var(--text-secondary)';
-      const falta = h < 0
-        ? `venceu há ${Math.floor(-h) >= 1 ? Math.floor(-h) + 'h' : Math.round(-h * 60) + 'min'}`
-        : h < 1 ? `${Math.round(h * 60)}min` : h < 24 ? `${Math.floor(h)}h${String(Math.round((h % 1) * 60)).padStart(2,'0')}` : `${Math.floor(h / 24)}d`;
-      return `<tr><td style="color:${cor};font-weight:700">${h < 0 ? '⚠️ ' : ''}${falta}</td><td>${fmtDT(r.limite)}</td>
-        <td class="cat-cell">${r.recurso || '-'}</td><td>${r.os || '-'}</td><td>${r.cliente || '-'}</td><td>${r.cidade || '-'}</td>
-        <td style="${estiloSituacao(classifyStatusGranular(r.status))}">${r.status || '-'}</td><td>${r.periodo || '-'}</td></tr>`;
+    // ---- Prazo do dia: UNIFICADO. Antes eram DUAS tabelas quase iguais —
+    // "Vencendo Agora" (só as abertas, ordenadas por urgência) e "Prazos do
+    // Dia — Detalhado" (todo REPARO, mas Status Prazo só preenchido pra quem
+    // já tinha ENCERRADO — pendente/em rota/iniciado ficavam com '-'). Virou
+    // uma tabela só: as abertas entram PRIMEIRO (mais urgente no topo, com a
+    // coluna Falta preenchida); o resto vem depois, ordenado por cidade e O.S.
+    //
+    // Status Prazo das ainda abertas: aplica a MESMA faixaPorAging usada nas
+    // já encerradas, só que sobre o tempo DECORRIDO ATÉ AGORA em vez do aging
+    // final — dá pra ver HOJE quem está a caminho de estourar 48h, sem
+    // esperar a ordem fechar pra descobrir. É só uma leitura do agora: some
+    // sozinha quando a ordem fecha de verdade e ganha o aging definitivo.
+    const abertasOrdenadas = rowsReparo.filter(aberta).sort((a, b) => {
+      if (!a.limite && !b.limite) return 0;
+      if (!a.limite) return 1;   // sem limite (dado incompleto) vai pro fim das abertas
+      if (!b.limite) return -1;
+      return a.limite - b.limite;
+    });
+    const fechadasOrdenadas = rowsReparo.filter(r => !aberta(r)).sort((a, b) =>
+      String(a.cidade||'').localeCompare(String(b.cidade||'')) || String(a.os||'').localeCompare(String(b.os||'')));
+    const prazoUnificado = [...abertasOrdenadas, ...fechadasOrdenadas];
+    const vencidas = abertasOrdenadas.filter(r => r.limite && horasAte(r) < 0);
+    const vence2h  = abertasOrdenadas.filter(r => r.limite && horasAte(r) >= 0 && horasAte(r) < 2);
+    const faixaAtualDaAberta = r => r.abertura ? faixaPorAging((agoraPCR - r.abertura) / 86400000, r.horas_prazo) : null;
+    const faixaEfetiva = r => r.faixa || (aberta(r) ? faixaAtualDaAberta(r) : null);
+    // Extraídos como funções separadas (em vez de só inline na linha da
+    // tabela) pra o PDF poder gerar o MESMO texto que a tela mostra, sem
+    // duplicar a lógica de "quanto falta" / "qual faixa".
+    const horasFalta = r => aberta(r) && r.limite ? horasAte(r) : null;
+    const textoFalta = r => {
+      const h = horasFalta(r);
+      if (h === null) return '-';
+      if (h < 0) return `venceu há ${Math.floor(-h) >= 1 ? Math.floor(-h) + 'h' : Math.round(-h * 60) + 'min'}`;
+      if (h < 1) { const m = Math.round(h * 60); return m === 60 ? '1h00' : `${m}min`; }
+      if (h < 24) {
+        // arredondar os minutos pode "carregar" pra 60 (ex.: 20h59min59s
+        // virava "20h60" em vez de "21h00") — corrige a virada de hora
+        let hh = Math.floor(h), mm = Math.round((h % 1) * 60);
+        if (mm === 60) { hh += 1; mm = 0; }
+        if (hh >= 24) return '1d';
+        return `${hh}h${String(mm).padStart(2,'0')}`;
+      }
+      return `${Math.floor(h / 24)}d`;
     };
-    const porSituacao = b => aVencerDia.filter(r => classifyStatusGranular(r.status) === b).length;
+    const textoFaixaEfetiva = r => {
+      const faixa = faixaEfetiva(r);
+      const rotulo = faixa ? BUCKET_LABEL[faixa] : '-';
+      return aberta(r) && faixa ? '⏳ ' + rotulo : rotulo;
+    };
+    const linhaPrazoUnificado = r => {
+      const abertaAgora = aberta(r);
+      const h = horasFalta(r);
+      const corFalta = h===null ? 'var(--text-muted)' : h < 0 ? 'var(--danger)' : h < 2 ? '#fb923c' : h < 4 ? '#f59e0b' : 'var(--text-secondary)';
+      const faixa = faixaEfetiva(r);
+      const corFaixa = faixa==='ate24'?'var(--success)':faixa==='ate48'?'#38bdf8':faixa?'var(--danger)':'var(--text-muted)';
+      const divergiu = r.periodo && r.periodo_sistema && normalizeHeader(r.periodo)!==normalizeHeader(r.periodo_sistema);
+      const tec = ehRecursoTecnico(r.recurso) ? r.recurso : '';
+      return `<tr>
+        <td style="color:${corFalta};font-weight:700">${h!==null && h<0 ? '⚠️ ' : ''}${textoFalta(r)}</td>
+        <td>${r.cidade || '-'}</td>
+        <td>${tec?`<a href="#" class="link-tec" data-tec="${tec.replace(/"/g,'&quot;')}">${tec}</a>`:'-'}</td>
+        <td>${formatDate(r.data)}</td><td class="cat-cell">${r.os || '-'}</td><td>${r.cliente || '-'}</td>
+        <td style="${estiloSituacao(classifyStatusGranular(r.status))}">${r.status || '-'}</td>
+        <td>${fmtDT(r.abertura)}</td><td>${fmtH(r.limite)}</td><td>${fmtDT(r.limite)}</td>
+        <td${divergiu?' title="O sistema gravou como '+r.periodo_sistema+'" style="color:#f59e0b;font-weight:700"':''}>${r.periodo || '-'}</td>
+        <td style="color:${corFaixa};font-weight:700"${abertaAgora && faixa ? ' title="Ainda em aberto — faixa calculada pelo tempo decorrido até agora, não é definitiva"' : ''}>${textoFaixaEfetiva(r)}</td>
+      </tr>`;
+    };
+    const porSituacao = b => abertasOrdenadas.filter(r => classifyStatusGranular(r.status) === b).length;
 
     // ---- Mão de obra e produção do dia ----
     const tiposFixos = [
@@ -6144,20 +6201,37 @@ function renderPCR() {
       if (/upgrade|downgrade/.test(n)) return 'Upgrade/Downgrade';
       return (t || 'Não informado').trim();
     };
+    // "A Executar" e "Total Geral" eram a MESMA coluna duas vezes — o grupo só
+    // contava pendente, então total geral não passava de repetir o que já
+    // estava em "A Executar". Agora entra também quem já foi CONCLUÍDO
+    // (mesma cidade/tipo), e Total = Concluído + A Executar, por construção —
+    // cancelado/em rota/iniciado/não concluído ficam de fora da conta, porque
+    // não são nem "já entregue" nem "ainda por fazer" nesse recorte.
     const mapaExec = {};
-    rowsPendentes.forEach(r => {
+    rows.forEach(r => {
+      const bucket = classifyStatusGranular(r.status);
+      if (bucket !== 'pendente' && bucket !== 'concluido') return;
       const c = r.cidade || 'Não informado', t = nomeTipoPCR(r.tipo_atividade);
       if (!mapaExec[c]) mapaExec[c] = {};
-      mapaExec[c][t] = (mapaExec[c][t] || 0) + 1;
+      if (!mapaExec[c][t]) mapaExec[c][t] = { concluido: 0, pendente: 0 };
+      mapaExec[c][t][bucket]++;
     });
     const aExecutar = {
-      grupos: Object.keys(mapaExec).sort((a, b) => a.localeCompare(b, 'pt-BR')).map(c => ({
-        cidade: c,
-        total: Object.values(mapaExec[c]).reduce((a, b) => a + b, 0),
-        tipos: Object.entries(mapaExec[c]).sort((a, b) => a[0].localeCompare(b[0], 'pt-BR')).map(([tipo, qtd]) => ({ tipo, qtd })),
-      })),
-      total: rowsPendentes.length,
+      grupos: Object.keys(mapaExec).sort((a, b) => a.localeCompare(b, 'pt-BR')).map(c => {
+        const tipos = Object.entries(mapaExec[c]).sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'))
+          .map(([tipo, v]) => ({ tipo, concluido: v.concluido, pendente: v.pendente, total: v.concluido + v.pendente }));
+        return {
+          cidade: c,
+          concluido: tipos.reduce((a, t) => a + t.concluido, 0),
+          pendente: tipos.reduce((a, t) => a + t.pendente, 0),
+          total: tipos.reduce((a, t) => a + t.total, 0),
+          tipos,
+        };
+      }),
     };
+    aExecutar.concluido = aExecutar.grupos.reduce((a, g) => a + g.concluido, 0);
+    aExecutar.pendente = aExecutar.grupos.reduce((a, g) => a + g.pendente, 0);
+    aExecutar.total = aExecutar.grupos.reduce((a, g) => a + g.total, 0);
     const porCidade = {};
     rowsPendentes.forEach(r => {
       const c = r.cidade || 'Não informado';
@@ -6294,25 +6368,15 @@ function renderPCR() {
         ${metricCard('Concluídas', statusTot.concluido)}
       </div>
 
-      ${!aVencerDia.length ? '' : `
-      <div class="section-heading">Vencendo Agora — Reparos em aberto</div>
-      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
-        Ordens de Reparo que ainda dependem do técnico, da mais perto de estourar para a mais folgada.
-        Na coluna <b>Falta</b>: vermelho já venceu, laranja menos de 2h, amarelo menos de 4h. Situação:
-        <b style="${estiloSituacao('pendente')}">pendente</b> (${porSituacao('pendente')}) ·
-        <b style="${estiloSituacao('em_rota')}">em rota</b> (${porSituacao('em_rota')}) ·
-        <b style="${estiloSituacao('iniciado')}">iniciado</b> (${porSituacao('iniciado')}).
-      </p>
+      <!-- "Vencendo Agora" e "Prazos do Dia — Detalhado" eram duas tabelas
+           quase iguais (a mesma ordem de Reparo, uma só com as abertas
+           ordenadas por urgência, outra com tudo mas sem status prazo pras
+           pendentes) — viraram UMA tabela só, mais abaixo. -->
       <div class="cards-grid">
         ${metricCard('Já vencidas', vencidas.length, vencidas.length > 0)}
         ${metricCard('Vencem em até 2h', vence2h.length, vence2h.length > 0)}
-        ${metricCard('Reparos em aberto', aVencerDia.length)}
+        ${metricCard('Reparos em aberto', abertasOrdenadas.length)}
       </div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
-        <th>Falta</th><th>Limite</th><th>Técnico</th><th>O.S</th><th>Cliente</th><th>Cidade</th><th>Status</th><th>Período</th>
-      </tr></thead><tbody>
-        ${aVencerDia.slice(0, 40).map(linhaVenceAgora).join('')}
-      </tbody></table>${aVencerDia.length > 40 ? `<p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">Mostrando as 40 mais urgentes de ${aVencerDia.length}.</p>` : ''}</div>`}
 
       <div class="section-heading">Técnicos — Situação Agora</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
@@ -6341,20 +6405,33 @@ function renderPCR() {
         Ordem do dia cujo cliente já tinha sido atendido dentro da janela de garantia —
         IFI: retorno em até ${JANELA_IFI} dias de uma Ativação/Mudança de Endereço; IRR: em até ${JANELA_IRR} dias de um Reparo.
         A conta é do técnico do serviço anterior. "Restam" é quanto ainda falta da janela.
+        <b style="color:var(--accent)">Com quem está hoje</b> e <b style="color:var(--accent)">De quem é o retorno</b> saem
+        na mesma cor quando é <b>o mesmo técnico</b> voltando no próprio erro; em
+        <b style="color:#f59e0b">laranja</b> quando o retorno caiu pra <b>outro técnico</b>.
       </p>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="tab-retornos"><thead><tr>
         <th>IFI/IRR</th><th>Data</th><th>O.S de hoje</th><th>Contrato</th><th>Cidade</th><th>Tipo de Serviço</th><th>Status</th>
         <th>Com quem está hoje</th><th>Nome Cliente</th><th>De quem é o retorno</th><th>Serviço anterior</th><th>O.S anterior</th><th>Data anterior</th><th>Dias</th><th>Restam</th>
       </tr></thead><tbody>
-        ${retornos.map(r=>`<tr>
+        ${retornos.map(r=>{
+          // mesmo técnico voltando no próprio erro x retorno que caiu pra outro
+          // técnico — só compara quando os DOIS lados são gente de verdade
+          // (ehRecursoTecnico), senão "sem técnico" e "sem técnico" contariam
+          // como "mesmo técnico" por engano
+          const temOsDois = ehRecursoTecnico(r.tecnico_atual) && ehRecursoTecnico(r.ofensor);
+          const mesmoTec = temOsDois && normalizeHeader(r.tecnico_atual) === normalizeHeader(r.ofensor);
+          const corTec = !temOsDois ? '' : mesmoTec ? 'color:var(--accent);font-weight:700' : 'color:#f59e0b;font-weight:700';
+          const tituloTec = !temOsDois ? '' : mesmoTec ? ' title="Mesmo técnico do atendimento anterior"' : ' title="Técnico diferente do atendimento anterior"';
+          return `<tr>
           <td style="font-weight:700;color:${r.ifi_irr==='IFI'?'#f59e0b':'#eab308'}">${r.ifi_irr}</td>
           <td>${formatDate(r.data)}</td><td class="cat-cell">${r.os}</td><td>${r.contrato||'-'}</td><td>${r.cidade||'-'}</td><td>${r.tipo||'-'}</td>
-          <td style="color:${isConcluido(r.status)?'var(--success)':'var(--warn-text)'};font-weight:600">${r.status||'-'}</td>
-          <td>${ehRecursoTecnico(r.tecnico_atual)?r.tecnico_atual:'-'}</td>
+          <td style="${estiloSituacao(classifyStatusGranular(r.status))}">${r.status||'-'}</td>
+          <td style="${corTec}"${tituloTec}>${ehRecursoTecnico(r.tecnico_atual)?r.tecnico_atual:'-'}</td>
           <td>${r.cliente||'-'}</td>
-          <td class="cat-cell">${r.ofensor||'-'}</td><td>${r.tipo_anterior||'-'}</td><td>${r.os_anterior||'-'}</td>
+          <td class="cat-cell" style="${corTec}"${tituloTec}>${r.ofensor||'-'}</td><td>${r.tipo_anterior||'-'}</td><td>${r.os_anterior||'-'}</td>
           <td>${formatDate(r.data_anterior)}</td><td>${r.dias}</td>
-          <td style="font-weight:700;color:${r.restam<=3?'var(--danger)':r.restam<=7?'#f59e0b':'var(--text-secondary)'}">${r.restam} dia(s)</td></tr>`).join('')}
+          <td style="font-weight:700;color:${r.restam<=3?'var(--danger)':r.restam<=7?'#f59e0b':'var(--text-secondary)'}">${r.restam} dia(s)</td></tr>`;
+        }).join('')}
       </tbody></table></div>`}
 
       <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -6364,26 +6441,24 @@ function renderPCR() {
       </div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
         Só Reparo — Ativação/M.Endereço/M.Cômodo/Upgrade não têm prazo de 24h, ficam de fora dessa tabela.
+        As <b>ainda abertas</b> vêm primeiro, da mais perto de estourar para a mais folgada; o resto (concluída,
+        cancelada...) vem depois, por cidade. Na coluna <b>Falta</b>: vermelho já venceu, laranja menos de 2h,
+        amarelo menos de 4h. Situação de quem está aberto agora:
+        <b style="${estiloSituacao('pendente')}">pendente</b> (${porSituacao('pendente')}) ·
+        <b style="${estiloSituacao('em_rota')}">em rota</b> (${porSituacao('em_rota')}) ·
+        <b style="${estiloSituacao('iniciado')}">iniciado</b> (${porSituacao('iniciado')}).
+        Em <b>Status Prazo</b>, o ⏳ marca faixa AINDA NÃO DEFINITIVA — calculada pelo tempo já decorrido de uma
+        ordem que continua aberta, não pelo aging final.
         O período vem da HORA DO LIMITE (abertura + 24h), não do turno gravado no sistema —
-        um prazo que vence 09:00 é MANHÃ mesmo que o sistema tenha registrado "Tarde".
-        Nesse dia, ${rowsReparo.filter(r=>r.periodo && r.periodo_sistema && normalizeHeader(r.periodo)!==normalizeHeader(r.periodo_sistema)).length} ordens divergem.
+        um prazo que vence 09:00 é MANHÃ mesmo que o sistema tenha registrado "Tarde"
+        (destacado em laranja, com o valor original no balão). Nesse dia,
+        ${rowsReparo.filter(r=>r.periodo && r.periodo_sistema && normalizeHeader(r.periodo)!==normalizeHeader(r.periodo_sistema)).length} ordens divergem.
       </p>
       <div class="table-wrap" style="margin-bottom:1.5rem;max-height:560px;overflow:auto"><table class="data-table" id="tab-prazos"><thead><tr>
-        <th>Cidade</th><th>Técnico</th><th>Data</th><th>O.S</th><th>Nome Cliente</th><th>Status O.S</th>
+        <th>Falta</th><th>Cidade</th><th>Técnico</th><th>Data</th><th>O.S</th><th>Nome Cliente</th><th>Status O.S</th>
         <th>Data de Abertura</th><th>Vencimento</th><th>Limite</th><th>Período</th><th>Status Prazo</th>
       </tr></thead><tbody>
-        ${rowsReparo.map(r=>{
-          const cor = r.faixa==='ate24'?'var(--success)':r.faixa==='ate48'?'#38bdf8':r.faixa?'var(--danger)':'var(--text-muted)';
-          const divergiu = r.periodo && r.periodo_sistema && normalizeHeader(r.periodo)!==normalizeHeader(r.periodo_sistema);
-          const tec = ehRecursoTecnico(r.recurso) ? r.recurso : '';
-          return `<tr><td>${r.cidade||'-'}</td>
-            <td>${tec?`<a href="#" class="link-tec" data-tec="${tec.replace(/"/g,'&quot;')}">${tec}</a>`:'-'}</td>
-            <td>${formatDate(r.data)}</td><td class="cat-cell">${r.os||'-'}</td><td>${r.cliente||'-'}</td>
-            <td style="color:${isConcluido(r.status)?'var(--success)':/cancel/i.test(r.status)?'var(--danger)':'var(--warn-text)'};font-weight:600">${r.status||'-'}</td>
-            <td>${fmtDT(r.abertura)}</td><td>${fmtH(r.limite)}</td><td>${fmtDT(r.limite)}</td>
-            <td${divergiu?' title="O sistema gravou como '+r.periodo_sistema+'" style="color:#f59e0b;font-weight:700"':''}>${r.periodo||'-'}${divergiu?' *':''}</td>
-            <td style="color:${cor};font-weight:700">${r.faixa?BUCKET_LABEL[r.faixa]:'-'}</td></tr>`;
-        }).join('')}
+        ${prazoUnificado.map(linhaPrazoUnificado).join('')}
       </tbody></table></div>
 
       <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -6391,17 +6466,24 @@ function renderPCR() {
         <button type="button" class="btn-export-img" id="exec-img">🖼 Gerar imagem</button>
       </div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
-        As ordens ainda <b>pendentes</b> do dia, agrupadas por cidade e por tipo de serviço — mesmo recorte da dinâmica da planilha.
+        Cidade e tipo de serviço, comparando o que já foi <b style="color:var(--success)">concluído</b> com o que
+        ainda está <b style="color:#f59e0b">pendente</b> — <b>Total Geral = Concluído + A Executar</b>.
+        Cancelado, em rota, iniciado e não concluído ficam fora dessa conta (não são nem entrega nem pendência).
       </p>
-      ${!aExecutar.total ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma ordem pendente nesse dia/filtro.</div></div>' : `
+      ${!aExecutar.total ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma ordem concluída ou pendente nesse dia/filtro.</div></div>' : `
+      <div class="cards-grid" style="margin-bottom:1rem">
+        ${metricCard('Concluídas', aExecutar.concluido)}
+        ${metricCard('A Executar', aExecutar.pendente, aExecutar.pendente > 0)}
+        ${metricCard('Total Geral', aExecutar.total)}
+      </div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="tab-a-executar"><thead><tr>
-        <th>Tipo da O.S</th><th>A Executar</th><th>Total Geral</th>
+        <th>Tipo da O.S</th><th>Concluídos</th><th>A Executar</th><th>Total Geral</th>
       </tr></thead><tbody>
         ${aExecutar.grupos.map(g => `
-          <tr class="total-row"><td class="cat-cell">${g.cidade}</td><td>${g.total}</td><td>${g.total}</td></tr>
-          ${g.tipos.map(t => `<tr><td style="padding-left:26px">${t.tipo}</td><td>${t.qtd}</td><td>${t.qtd}</td></tr>`).join('')}
+          <tr class="total-row"><td class="cat-cell">${g.cidade}</td><td style="color:var(--success);font-weight:700">${g.concluido}</td><td style="color:#f59e0b;font-weight:700">${g.pendente}</td><td style="font-weight:700">${g.total}</td></tr>
+          ${g.tipos.map(t => `<tr><td style="padding-left:26px">${t.tipo}</td><td style="color:var(--success)">${t.concluido}</td><td style="color:#f59e0b">${t.pendente}</td><td>${t.total}</td></tr>`).join('')}
         `).join('')}
-        <tr class="total-row"><td class="cat-cell">Total Geral</td><td>${aExecutar.total}</td><td>${aExecutar.total}</td></tr>
+        <tr class="total-row"><td class="cat-cell">Total Geral</td><td style="color:var(--success);font-weight:700">${aExecutar.concluido}</td><td style="color:#f59e0b;font-weight:700">${aExecutar.pendente}</td><td style="font-weight:700">${aExecutar.total}</td></tr>
       </tbody></table></div>`}
 
       <div class="section-heading">Histórico de Importações do CSV</div>
@@ -6472,14 +6554,14 @@ function renderPCR() {
     if (btnExecImg) btnExecImg.addEventListener('click', () => {
       const linhasImg = [];
       aExecutar.grupos.forEach(gr => {
-        linhasImg.push({ destaque: true, celulas: [gr.cidade, String(gr.total), String(gr.total)] });
-        gr.tipos.forEach(t => linhasImg.push({ celulas: ['   ' + t.tipo, String(t.qtd), String(t.qtd)] }));
+        linhasImg.push({ destaque: true, celulas: [gr.cidade, String(gr.concluido), String(gr.pendente), String(gr.total)] });
+        gr.tipos.forEach(t => linhasImg.push({ celulas: ['   ' + t.tipo, String(t.concluido), String(t.pendente), String(t.total)] }));
       });
       baixarTabelaComoImagem({
         titulo: 'A EXECUTAR — JH TELECOM', subtitulo: formatDate(dia),
-        colunas: [{ titulo: 'TIPO DA O.S' }, { titulo: 'A Executar' }, { titulo: 'Total Geral' }],
+        colunas: [{ titulo: 'TIPO DA O.S' }, { titulo: 'Concluídos' }, { titulo: 'A Executar' }, { titulo: 'Total Geral' }],
         linhas: linhasImg,
-        total: { celulas: ['Total Geral', String(aExecutar.total), String(aExecutar.total)] },
+        total: { celulas: ['Total Geral', String(aExecutar.concluido), String(aExecutar.pendente), String(aExecutar.total)] },
         nomeArquivo: 'a-executar-' + dia,
       });
       aviso(btnExecImg, `🖼 ${aExecutar.total} O.S`, '🖼 Gerar imagem');
@@ -6536,21 +6618,21 @@ function renderPCR() {
     ]);
     wirePdfExportPanel('PCR — ' + formatDate(dia), {
       exec: () => secaoTabela('A Executar — por Cidade e Tipo de Serviço',
-        aExecutar.grupos.flatMap(g => [{ nome: g.cidade, qtd: g.total, grupo: true },
-          ...g.tipos.map(t => ({ nome: '   ' + t.tipo, qtd: t.qtd }))]),
-        [{header:'Tipo da O.S', get:r=>r.nome}, {header:'A Executar', get:r=>r.qtd}, {header:'Total Geral', get:r=>r.qtd}],
-        { totalRow:['Total Geral', aExecutar.total, aExecutar.total] }),
+        aExecutar.grupos.flatMap(g => [{ nome: g.cidade, concluido: g.concluido, pendente: g.pendente, total: g.total, grupo: true },
+          ...g.tipos.map(t => ({ nome: '   ' + t.tipo, concluido: t.concluido, pendente: t.pendente, total: t.total }))]),
+        [{header:'Tipo da O.S', get:r=>r.nome}, {header:'Concluídos', get:r=>r.concluido}, {header:'A Executar', get:r=>r.pendente}, {header:'Total Geral', get:r=>r.total}],
+        { totalRow:['Total Geral', aExecutar.concluido, aExecutar.pendente, aExecutar.total] }),
       ret: () => secaoTabela('Retornos do Dia (IFI / IRR)', retornos, [
         {header:'IFI/IRR',get:r=>r.ifi_irr},{header:'O.S',get:r=>r.os},{header:'Contrato',get:r=>r.contrato||'-'},
         {header:'Cidade',get:r=>r.cidade||'-'},{header:'Status',get:r=>r.status||'-'},
         {header:'Nome Cliente',get:r=>r.cliente||'-'},{header:'De quem é o retorno',get:r=>r.ofensor||'-'},{header:'Serviço anterior',get:r=>r.tipo_anterior||'-'},
         {header:'Dias',get:r=>r.dias},{header:'Restam',get:r=>r.restam},
       ]),
-      det: () => secaoTabela('Prazos do Dia — Detalhado', rows, [
-        {header:'O.S',get:r=>r.os||'-'},{header:'Vencimento',get:r=>fmtH(r.limite)},{header:'Cliente',get:r=>r.cliente||'-'},
-        {header:'Técnico',get:r=>ehRecursoTecnico(r.recurso)?r.recurso:'-'},{header:'Cidade',get:r=>r.cidade||'-'},{header:'Status',get:r=>r.status||'-'},
-        {header:'Abertura',get:r=>fmtDT(r.abertura)},{header:'Limite',get:r=>fmtDT(r.limite)},
-        {header:'Período',get:r=>r.periodo||'-'},{header:'Status Prazo',get:r=>r.faixa?BUCKET_LABEL[r.faixa]:'-'},
+      det: () => secaoTabela('Prazos do Dia — Detalhado', prazoUnificado, [
+        {header:'Falta',get:textoFalta},{header:'Cidade',get:r=>r.cidade||'-'},{header:'Técnico',get:r=>ehRecursoTecnico(r.recurso)?r.recurso:'-'},
+        {header:'O.S',get:r=>r.os||'-'},{header:'Cliente',get:r=>r.cliente||'-'},{header:'Status',get:r=>r.status||'-'},
+        {header:'Abertura',get:r=>fmtDT(r.abertura)},{header:'Vencimento',get:r=>fmtH(r.limite)},{header:'Limite',get:r=>fmtDT(r.limite)},
+        {header:'Período',get:r=>r.periodo||'-'},{header:'Status Prazo',get:textoFaixaEfetiva},
       ]),
     });
   }
@@ -8299,9 +8381,22 @@ function renderOfensoresPrazo() {
       porTecnicoPeriodo[t].total++;
     });
     const listaTecnicoPeriodo = Object.values(porTecnicoPeriodo).sort((a,b)=>b.total-a.total);
+    // Destaca quem tem MAIS atrasos (vermelho) e quem tem MENOS (verde) dentro
+    // da lista que está de fato na tela — no "por Técnico" isso muda com o
+    // Top N escolhido, então o "menos" é sempre em relação ao que está visível,
+    // não à lista inteira escondida atrás do filtro.
+    const corPorExtremo = (lista, valor) => {
+      if (!lista.length) return '';
+      const vals = lista.map(x => x.total);
+      const max = Math.max(...vals), min = Math.min(...vals);
+      if (max === min) return '';
+      if (valor === max) return 'color:var(--danger);font-weight:700';
+      if (valor === min) return 'color:var(--success);font-weight:700';
+      return '';
+    };
     const tecPeriodoRowsHtml = n => {
       const sliced = n === 'Todos' ? listaTecnicoPeriodo : listaTecnicoPeriodo.slice(0, parseInt(n));
-      return sliced.map(t=>`<tr><td class="cat-cell">${t.tecnico}</td><td>${t.manha}</td><td>${t.tarde}</td><td>${t.total}</td></tr>`).join('');
+      return sliced.map(t=>`<tr><td class="cat-cell">${t.tecnico}</td><td>${t.manha}</td><td>${t.tarde}</td><td style="${corPorExtremo(sliced, t.total)}">${t.total}</td></tr>`).join('');
     };
 
     body.innerHTML = `
@@ -8327,7 +8422,7 @@ function renderOfensoresPrazo() {
         <div class="table-wrap"><table class="data-table"><thead><tr>
           <th>Cidades</th><th>Ofensores Manhã</th><th>Ofensores Tarde</th><th>Total Atrasos</th>
         </tr></thead><tbody>
-          ${listaPeriodo.map(c=>`<tr><td class="cat-cell">${c.cidade}</td><td>${c.manha}</td><td>${c.tarde}</td><td>${c.total}</td></tr>`).join('')}
+          ${listaPeriodo.map(c=>`<tr><td class="cat-cell">${c.cidade}</td><td>${c.manha}</td><td>${c.tarde}</td><td style="${corPorExtremo(listaPeriodo, c.total)}">${c.total}</td></tr>`).join('')}
           <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${totPeriodo.manha}</td><td>${totPeriodo.tarde}</td><td>${totPeriodo.total}</td></tr>
         </tbody></table></div>
       </div>
