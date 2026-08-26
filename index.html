@@ -4661,6 +4661,77 @@ function baseDoTecnico(tecnico, ini, fim) {
   });
   return { ativacao, reparos };
 }
+// Campos da Folha de Pagamento que são DESCONTO DE MATERIAL — o Almoxarifado
+// edita esses (podeEditarFolhaMaterial). desc_ifi/desc_irr ficam de fora de
+// propósito: são automáticos, vêm da contagem de retornos × valor fixo do
+// contrato (DESCONTOS_RETORNO_FIXOS), ninguém digita eles à mão.
+const CAMPOS_MATERIAL_FOLHA = ['desc_equipamento','desc_multa','desc_miscelanea','desc_mecanica','desc_vale','desc_ferramentas','desc_combustivel','desc_fiscalizacao'];
+// TOTAL DESCONTOS soma TODOS os descontos (material + IFI/IRR); só os de
+// material são editáveis, mas o indicador entra na soma igual.
+const CAMPOS_TODO_DESCONTO_FOLHA = [...CAMPOS_MATERIAL_FOLHA, 'desc_ifi', 'desc_irr'];
+// Grava 1 campo da folha editado na tela. Ao contrário de salvarMoManual (que
+// engole erro de propósito — pendência conhecida do projeto), aqui o erro
+// VOLTA pra tela: bônus e desconto são dinheiro, não pode "parecer salvo" sem
+// estar. Desconto de material recalcula TOTAL DESCONTOS/TOTAL A RECEBER junto,
+// senão as duas colunas ficavam com o valor antigo da planilha.
+async function salvarCampoFolha(tecnico, periodo, campo, valor) {
+  const key = `${tecnico}|${periodo}`;
+  const idx = DB_INDEX.folhaPagamento.get(key);
+  if (idx === undefined) return { ok: false, error: { message: 'Linha da folha não encontrada (tecnico/período).' } };
+  const linha = { ...DB.folhaPagamento[idx], [campo]: valor };
+  if (CAMPOS_MATERIAL_FOLHA.includes(campo)) {
+    linha.total_descontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(linha[c]) || 0), 0);
+    linha.total_receber = (Number(linha.valor_total_ordens) || 0) - linha.total_descontos;
+  }
+  DB.folhaPagamento[idx] = linha;
+  if (!supa) return { ok: true, offline: true, linha };
+  try {
+    const { error } = await supa.from('folha_pagamento').upsert(linha, { onConflict: 'tecnico,periodo' });
+    if (error) return { ok: false, error, linha };
+    return { ok: true, linha };
+  } catch (e) { return { ok: false, error: e, linha }; }
+}
+// Gera (ou substitui) as linhas da folha de um ciclo INTEIRO a partir do que o
+// sistema já sabe: ordens e valor delas vêm da Produção (fonte: DB.producao,
+// preço fixo por tipo de serviço — VALORES_ORDENS_FIXOS, coluna "normal" ou
+// "d26" conforme os dias trabalhados batem os 26 do bônus), e Qtd. IFI/IRR
+// vêm dos retornos baixados no período (contarRetornosPorOfensor, mesma conta
+// da Tabela de Bônus). Descontos de material começam ZERADOS — são o
+// Almoxarifado/RH/Analista quem preenche depois, ordem por ordem, na tela.
+function gerarPeriodoFolha(inicio, fim) {
+  const periodo = `${formatDate(inicio)} a ${formatDate(fim)}`;
+  const porTecnico = {};
+  DB.producao.forEach(p => {
+    if (!isConcluido(p.status) || !inRange(p.data, inicio, fim) || !ehRecursoTecnico(p.recurso)) return;
+    (porTecnico[p.recurso] = porTecnico[p.recurso] || []).push(p);
+  });
+  const retornos = contarRetornosPorOfensor(inicio, fim);
+  const linhas = Object.keys(porTecnico).sort((a, b) => a.localeCompare(b, 'pt-BR')).map(tecnico => {
+    const ordens = porTecnico[tecnico];
+    // mesma regra da Tabela de Bônus: dias trabalhados = dias DISTINTOS com
+    // pelo menos 1 ordem concluída baixada nesse período
+    const diasTrab = new Set(ordens.map(p => p.data)).size;
+    const usaD26 = diasTrab >= BONUS_DIAS_MIN;
+    let valorOrdens = 0;
+    ordens.forEach(p => { const l = linhaValorOrdem(p.tipo_atividade); if (l) valorOrdens += usaD26 ? l.d26 : l.normal; });
+    const ret = retornos[tecnico] || { ifi: 0, irr: 0 };
+    const base = baseDoTecnico(tecnico, inicio, fim);
+    const ifiPct = base.ativacao ? (ret.ifi / base.ativacao) * 100 : 0;
+    const irrPct = base.reparos ? (ret.irr / base.reparos) * 100 : 0;
+    const apto = ifiPct <= BONUS_IFI_MAX && irrPct <= BONUS_IRR_MAX && diasTrab >= BONUS_DIAS_MIN;
+    return {
+      tecnico, periodo, total_ordens: ordens.length, valor_total_ordens: valorOrdens,
+      dias_trab: diasTrab, bonus: apto ? 'APTO' : 'INAPTO', frota: '', dias_aluguel: 0, valor_aluguel: 0, emprestimo: 0,
+      qtd_ifi: ret.ifi, qtd_irr: ret.irr, ifi_pct: ifiPct, irr_pct: irrPct,
+      desc_ifi: 0, desc_irr: 0, desc_equipamento: 0, desc_multa: 0, desc_miscelanea: 0, desc_mecanica: 0,
+      desc_vale: 0, desc_ferramentas: 0, desc_combustivel: 0, desc_fiscalizacao: 0,
+      total_descontos: 0, total_receber: valorOrdens,
+    };
+  });
+  linhas.forEach(l => upsertRow(DB.folhaPagamento, DB_INDEX.folhaPagamento, `${l.tecnico}|${l.periodo}`, l));
+  const syncPromise = syncBatchToSupabase('folhaPagamento', linhas);
+  return { periodo, total: linhas.length, syncPromise };
+}
 function renderBonusTable(fech, prodRows, retornos) {
   if (!fech.length) return '<div class="empty">Sem dados no período. Importe a aba RELATORIO.</div>';
   const toPct = v => Math.abs(v||0) <= 5 ? (v||0)*100 : (v||0); // fração até 500% — cobre eficiência acima de 100%
@@ -9160,13 +9231,52 @@ function renderFolhaPagamento() {
     <div class="field"><label>até</label><input type="date" id="fol-ret-ate"></div>
     <button class="btn" id="f-apply">Filtrar</button>
     <button class="btn-secundario" id="fol-ret-reset" style="padding:8px 14px;align-self:flex-end">Usar os números da planilha</button>
-  </div><div id="folha-body"></div>`;
+  </div>
+  ${podeEditarFolhaPagamento() ? `
+  <div class="panel" style="margin-bottom:1.5rem">
+    <h3 style="margin:0 0 8px">Gerar novo período</h3>
+    <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
+      Monta a folha do ciclo direto da Produção: total de ordens e valor (preço fixo por tipo de serviço,
+      já considerando os 26 dias pro bônus) e Qtd. IFI/IRR (retornos baixados no período, pelo técnico ofensor).
+      Descontos de material entram ZERADOS — quem preenche depois é o Almoxarifado/RH/Analista, na própria tabela.
+      Reabrir o mesmo período <b>não duplica</b>: atualiza a linha de quem já estava lá.
+    </p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <div class="field" style="margin:0"><label>De</label><input type="date" id="fol-gerar-de"></div>
+      <div class="field" style="margin:0"><label>Até</label><input type="date" id="fol-gerar-ate"></div>
+      <button class="btn" id="fol-gerar-btn">Gerar período</button>
+      <span id="fol-gerar-msg" style="font-size:13px"></span>
+    </div>
+  </div>` : ''}
+  <div id="folha-body"></div>`;
   document.getElementById('f-apply').addEventListener('click', load);
   document.getElementById('fol-ret-reset').addEventListener('click', () => {
     document.getElementById('fol-ret-de').value = '';
     document.getElementById('fol-ret-ate').value = '';
     FOLHA_RET_PERIODO.inicio = ''; FOLHA_RET_PERIODO.fim = '';
     load();
+  });
+  const btnGerar = document.getElementById('fol-gerar-btn');
+  if (btnGerar) btnGerar.addEventListener('click', async () => {
+    const ini = document.getElementById('fol-gerar-de').value, fim = document.getElementById('fol-gerar-ate').value;
+    const msg = document.getElementById('fol-gerar-msg');
+    if (!ini || !fim || ini > fim) { msg.innerHTML = '<span style="color:var(--danger)">Preencha "De" e "Até" (De não pode ser depois de Até).</span>'; return; }
+    if (!DB.producao.length) { msg.innerHTML = '<span style="color:var(--danger)">Sem dados de Produção carregados — importe a BASE PRODUÇÃO antes.</span>'; return; }
+    btnGerar.disabled = true; msg.innerHTML = '<span style="color:var(--text-muted)">Gerando...</span>';
+    const r = gerarPeriodoFolha(ini, fim);
+    if (!r.total) {
+      msg.innerHTML = '<span style="color:var(--warn-text)">Nenhuma ordem concluída da Produção nesse intervalo — nada foi gerado.</span>';
+      btnGerar.disabled = false; return;
+    }
+    msg.innerHTML = `<span style="color:var(--success)">${r.total} técnico(s) gerado(s) em "${esc(r.periodo)}"</span>` + (supa ? ' — salvando...' : '');
+    if (r.syncPromise) {
+      const res = await r.syncPromise;
+      msg.innerHTML = `<span style="color:var(--success)">${r.total} técnico(s) gerado(s) em "${esc(r.periodo)}"</span> — `
+        + (res && res.ok ? '<span style="color:var(--success)">salvo no Supabase</span>'
+                          : `<span style="color:var(--danger)">não consegui salvar: ${esc((res&&res.error&&res.error.message)||'erro desconhecido')} — vale só nesta sessão</span>`);
+    }
+    btnGerar.disabled = false;
+    renderFolhaPagamento(); // reconstrói a tela pra o seletor de período já trazer o novo ciclo
   });
   load();
   function load() {
@@ -9268,6 +9378,32 @@ function renderFolhaPagamento() {
     barsChartTopN('c-bottom', bottomGanham, {defaultN:8});
     barsChartTopN('c-desc', descList, {color:'#0ea5e9'});
 
+    // ---- edição dos campos da folha (dias/bônus: RH+Analista; material: +Almox) ----
+    // Sempre grava no registro RAW (tecnico+período) por baixo, mesmo com o
+    // filtro de retornos ativo — "recalcular pelos retornos" é uma LENTE sobre
+    // os números, editar tem que valer na fonte, não no que está na tela.
+    document.querySelectorAll('.folha-edit').forEach(el => {
+      el.addEventListener('change', async () => {
+        const { tecnico, periodo, campo } = el.dataset;
+        const bruto = campo === 'bonus' ? el.value
+          : campo === 'dias_trab' ? Math.max(0, parseInt(el.value, 10) || 0)
+          : Math.max(0, Number(el.value) || 0);
+        el.disabled = true;
+        const r = await salvarCampoFolha(tecnico, periodo, campo, bruto);
+        el.disabled = false;
+        if (!r.ok) {
+          toast('Não consegui salvar: ' + ((r.error && r.error.message) || 'erro desconhecido'), 'erro');
+          return;
+        }
+        toast('Salvo.', 'ok', 1500);
+        // desconto de material mexe em TOTAL DESCONTOS/TOTAL A RECEBER, que
+        // também mudam o ranking (ordenado por total a receber) e os gráficos
+        // de quem mais/menos ganha — mais seguro recarregar a tela inteira do
+        // que tentar corrigir célula por célula.
+        load();
+      });
+    });
+
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'resumo', label: 'Resumo financeiro e indicadores' },
       { id: 'descontos', label: 'Descontos por tipo' },
@@ -9292,22 +9428,41 @@ function renderFolhaPagamento() {
 function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
   if (!rows.length) return '<div class="empty">Sem dados.</div>';
   const money = v => formatCurrency(v);
+  // Edição por campo: dias trabalhados e bônus são do RH/Analista (decisão de
+  // pagamento — um técnico fora do indicador pode virar APTO se a gestão
+  // liberar); os 8 descontos de MATERIAL abaixo são de quem sabe o que o
+  // técnico levou e não devolveu (Almoxarifado + RH + Analista). O input só
+  // aparece pra quem tem a permissão — quem não tem vê o valor de sempre.
+  const podePagamento = podeEditarFolhaPagamento();
+  const podeMaterial = podeEditarFolhaMaterial();
+  const attrsChave = r => `data-tecnico="${esc(r.tecnico)}" data-periodo="${esc(r.periodo)}"`;
+  const inputNumero = (r, campo, valor, casas) => `<input type="number" class="folha-edit" ${casas ? `step="${casas}"` : 'step="1" min="0"'}
+    data-campo="${campo}" ${attrsChave(r)} value="${valor || 0}" style="width:${casas ? '90px' : '64px'}">`;
   const cols = [
     ['Técnico', r=>r.tecnico],
     ['Total Ordens', r=>r.total_ordens],
     ['Valor Ordens', r=>money(r.valor_total_ordens)],
-    ['Dias Trab.', r=>r.dias_trab],
-    ['Bônus', r=>`<span class="badge ${/apto/i.test(r.bonus)&&!/inapto/i.test(r.bonus)?'ok':'warn'}">${r.bonus||'-'}</span>`],
+    ['Dias Trab.', r => podePagamento ? inputNumero(r, 'dias_trab', r.dias_trab) : r.dias_trab],
+    ['Bônus', r => podePagamento
+      ? `<select class="folha-edit" data-campo="bonus" ${attrsChave(r)}>
+          <option value="APTO"${/apto/i.test(r.bonus)&&!/inapto/i.test(r.bonus)?' selected':''}>APTO</option>
+          <option value="INAPTO"${/inapto/i.test(r.bonus)?' selected':''}>INAPTO</option>
+        </select>`
+      : `<span class="badge ${/apto/i.test(r.bonus)&&!/inapto/i.test(r.bonus)?'ok':'warn'}">${r.bonus||'-'}</span>`],
     ['Qtd IFI', r=>r.qtd_ifi], ['Qtd IRR', r=>r.qtd_irr],
     ['% IFI', r=>`<span class="badge ${pct(r.ifi_pct, r)<=IFI_TARGET?'ok':'warn'}">${pct(r.ifi_pct, r).toFixed(2)}%</span>`],
     ['% IRR', r=>`<span class="badge ${pct(r.irr_pct, r)<=IRR_TARGET?'ok':'warn'}">${pct(r.irr_pct, r).toFixed(2)}%</span>`],
     ['Frota', r=>r.frota], ['Dias Aluguel', r=>r.dias_aluguel], ['Valor Aluguel', r=>money(r.valor_aluguel)],
     ['Empréstimo', r=>money(r.emprestimo)],
     ['Desc. IFI', r=>money(r.desc_ifi)], ['Desc. IRR', r=>money(r.desc_irr)],
-    ['Desc. Equipamento', r=>money(r.desc_equipamento)], ['Desc. Multa', r=>money(r.desc_multa)],
-    ['Desc. Miscelânea', r=>money(r.desc_miscelanea)], ['Desc. Mecânica', r=>money(r.desc_mecanica)],
-    ['Desc. Vale', r=>money(r.desc_vale)], ['Desc. Ferramentas', r=>money(r.desc_ferramentas)],
-    ['Desc. Combustível', r=>money(r.desc_combustivel)], ['Desc. Fiscalização', r=>money(r.desc_fiscalizacao)],
+    ['Desc. Equipamento', r => podeMaterial ? inputNumero(r, 'desc_equipamento', r.desc_equipamento, '0.01') : money(r.desc_equipamento)],
+    ['Desc. Multa', r => podeMaterial ? inputNumero(r, 'desc_multa', r.desc_multa, '0.01') : money(r.desc_multa)],
+    ['Desc. Miscelânea', r => podeMaterial ? inputNumero(r, 'desc_miscelanea', r.desc_miscelanea, '0.01') : money(r.desc_miscelanea)],
+    ['Desc. Mecânica', r => podeMaterial ? inputNumero(r, 'desc_mecanica', r.desc_mecanica, '0.01') : money(r.desc_mecanica)],
+    ['Desc. Vale', r => podeMaterial ? inputNumero(r, 'desc_vale', r.desc_vale, '0.01') : money(r.desc_vale)],
+    ['Desc. Ferramentas', r => podeMaterial ? inputNumero(r, 'desc_ferramentas', r.desc_ferramentas, '0.01') : money(r.desc_ferramentas)],
+    ['Desc. Combustível', r => podeMaterial ? inputNumero(r, 'desc_combustivel', r.desc_combustivel, '0.01') : money(r.desc_combustivel)],
+    ['Desc. Fiscalização', r => podeMaterial ? inputNumero(r, 'desc_fiscalizacao', r.desc_fiscalizacao, '0.01') : money(r.desc_fiscalizacao)],
     ['TOTAL DESCONTOS', r=>`<span style="color:var(--danger);font-weight:700">${money(r.total_descontos)}</span>`],
     ['TOTAL A RECEBER', r=>`<span style="color:var(--success);font-weight:700">${money(r.total_receber)}</span>`],
   ];
