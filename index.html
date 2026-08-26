@@ -4763,22 +4763,13 @@ function gerarPeriodoFolha(inicio, fim) {
     const irrPct = base.reparos ? (ret.irr / base.reparos) * 100 : 0;
     const apto = ifiPct <= BONUS_IFI_MAX && irrPct <= BONUS_IRR_MAX && diasTrab >= BONUS_DIAS_MIN;
     const valorOrdens = valorOrdensDoPeriodo(tecnico, inicio, fim, apto);
-    // Quantas ordens de CADA tipo (mesmas 5 categorias da tabela de preço fixa
-    // — VALORES_ORDENS_FIXOS) — pra a Folha mostrar não só o total, mas quanto
-    // disso foi Ativação, Reparo etc.
-    const porTipo = { ativacao: 0, reparo: 0, mudanca_endereco: 0, mudanca_comodo: 0, upgrade: 0 };
-    ordens.forEach(p => {
-      const t = normalizeHeader(p.tipo_atividade);
-      if (/ativa/.test(t)) porTipo.ativacao++;
-      else if (/reparo/.test(t)) porTipo.reparo++;
-      else if (/mudan.*endereco/.test(t)) porTipo.mudanca_endereco++;
-      else if (/mudan.*comodo/.test(t)) porTipo.mudanca_comodo++;
-      else if (/upgrade|downgrade/.test(t)) porTipo.upgrade++;
-    });
+    // A quebra por tipo (Ativação/Reparo/...) NÃO fica gravada aqui — a tela
+    // calcula na hora, direto da Produção (ver contagemPorTipoNoPeriodo em
+    // renderFolhaCompleta). Assim funciona igual pra período gerado por este
+    // botão e pra folha IMPORTADA de planilha (que nunca traz essa quebra
+    // pronta) — guardar só aqui deixava a coluna sempre "-" pra quem importa.
     return {
       tecnico, periodo, total_ordens: ordens.length, valor_total_ordens: valorOrdens,
-      qtd_ativacao: porTipo.ativacao, qtd_reparo: porTipo.reparo,
-      qtd_mudanca_endereco: porTipo.mudanca_endereco, qtd_mudanca_comodo: porTipo.mudanca_comodo, qtd_upgrade: porTipo.upgrade,
       dias_trab: diasTrab, bonus: apto ? 'APTO' : 'INAPTO', frota: '', dias_aluguel: 0, valor_aluguel: 0, emprestimo: 0,
       qtd_ifi: ret.ifi, qtd_irr: ret.irr, ifi_pct: ifiPct, irr_pct: irrPct,
       desc_ifi: 0, desc_irr: 0, desc_equipamento: 0, desc_multa: 0, desc_miscelanea: 0, desc_mecanica: 0,
@@ -9542,6 +9533,41 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
   const podePagamento = podeEditarFolhaPagamento();
   const podeMaterial = podeEditarFolhaMaterial();
   const attrsChave = r => `data-tecnico="${esc(r.tecnico)}" data-periodo="${esc(r.periodo)}"`;
+  // Quantas ordens de CADA tipo (mesmas 5 categorias da tabela de preço fixa —
+  // VALORES_ORDENS_FIXOS) o técnico teve CONCLUÍDAS no período da linha.
+  // Calculado NA HORA a partir da Produção — não fica gravado na folha —
+  // então funciona igual pra período GERADO pelo botão e pra folha
+  // IMPORTADA de planilha (que nunca traz essa quebra pronta). Se a Produção
+  // desse período ainda não foi importada, sai 0 pra todo mundo — não é bug,
+  // é falta de dado.
+  // Agrupa a Produção por técnico UMA vez (evita varrer DB.producao inteiro
+  // de novo pra cada uma das N linhas da folha).
+  const producaoPorTecnico = {};
+  DB.producao.forEach(p => {
+    if (!isConcluido(p.status)) return;
+    const t = normalizeHeader(p.recurso);
+    (producaoPorTecnico[t] = producaoPorTecnico[t] || []).push(p);
+  });
+  const cachePorTipo = new Map(); // chave "tecnico|periodo" -> contagem, pra nao recalcular a mesma linha 5x (uma por coluna)
+  const contagemPorTipoNoPeriodo = (tecnico, periodo) => {
+    const chave = `${tecnico}|${periodo}`;
+    if (cachePorTipo.has(chave)) return cachePorTipo.get(chave);
+    const vazio = { ativacao: 0, reparo: 0, mudanca_endereco: 0, mudanca_comodo: 0, upgrade: 0 };
+    const janela = datasDoPeriodoFolha(periodo);
+    if (!janela.inicio || !janela.fim) { cachePorTipo.set(chave, vazio); return vazio; }
+    const porTipo = { ...vazio };
+    (producaoPorTecnico[normalizeHeader(tecnico)] || []).forEach(p => {
+      if (!inRange(p.data, janela.inicio, janela.fim)) return;
+      const t = normalizeHeader(p.tipo_atividade);
+      if (/ativa/.test(t)) porTipo.ativacao++;
+      else if (/reparo/.test(t)) porTipo.reparo++;
+      else if (/mudan.*endereco/.test(t)) porTipo.mudanca_endereco++;
+      else if (/mudan.*comodo/.test(t)) porTipo.mudanca_comodo++;
+      else if (/upgrade|downgrade/.test(t)) porTipo.upgrade++;
+    });
+    cachePorTipo.set(chave, porTipo);
+    return porTipo;
+  };
   const inputNumero = (r, campo, valor) => `<input type="number" class="folha-edit" step="1" min="0"
     data-campo="${campo}" ${attrsChave(r)} value="${valor || 0}" style="width:64px">`;
   // Desconto em R$: campo de TEXTO com máscara de moeda (não dá pra digitar
@@ -9558,15 +9584,11 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
   const cols = [
     ['Técnico', r=>r.tecnico],
     ['Total Ordens', r=>r.total_ordens],
-    // só existe em quem foi gerado por "Gerar novo período" (ver
-    // gerarPeriodoFolha) — linha importada de planilha antiga não tem essa
-    // quebra por tipo, então fica "-" em vez de mostrar 0 (0 seria mentira:
-    // não é que ele não fez nenhuma, é que não temos essa informação aqui)
-    ['Ativação', r => r.qtd_ativacao ?? '-'],
-    ['Reparo', r => r.qtd_reparo ?? '-'],
-    ['Mud. Endereço', r => r.qtd_mudanca_endereco ?? '-'],
-    ['Mud. Cômodo', r => r.qtd_mudanca_comodo ?? '-'],
-    ['Upgrade/Down.', r => r.qtd_upgrade ?? '-'],
+    ['Ativação', r => contagemPorTipoNoPeriodo(r.tecnico, r.periodo).ativacao],
+    ['Reparo', r => contagemPorTipoNoPeriodo(r.tecnico, r.periodo).reparo],
+    ['Mud. Endereço', r => contagemPorTipoNoPeriodo(r.tecnico, r.periodo).mudanca_endereco],
+    ['Mud. Cômodo', r => contagemPorTipoNoPeriodo(r.tecnico, r.periodo).mudanca_comodo],
+    ['Upgrade/Down.', r => contagemPorTipoNoPeriodo(r.tecnico, r.periodo).upgrade],
     ['Valor Ordens', r=>`<span class="folha-valor-ordens">${money(r.valor_total_ordens)}</span>`],
     ['Dias Trab.', r => podePagamento ? inputNumero(r, 'dias_trab', r.dias_trab) : r.dias_trab],
     ['Bônus', r => podePagamento
@@ -10118,7 +10140,13 @@ const ARQUIVOS_IMPORT = [
   { nome: 'FROTA_LITORAL.xlsx', desc: 'Abas FROTA LITORAL, TROCA DE VEICULO, MANUTENÇÕES, DESVINCULAÇÕES, MULTAS', assinaturas: [{sheet:'FROTA LITORAL', target:'frotaLinks'}] },
   { nome: 'GESTAO_PEDAGIO.xlsx', desc: 'Passagens de pedágio (Taggy)', assinaturas: [{target:'pedagio'}] },
   { nome: 'base_dados_financeiro.xlsx', desc: 'Aba BASE — receitas/despesas da Base JH por período', assinaturas: [{sheet:'BASE', target:'financeiro'}] },
-  { nome: 'FOLHA_DE_PAGAMENTO...xlsx', desc: 'Aba FOLHA DE PAGAMENTO (ordens/descontos/bônus). A aba VALORES ORDENS não é importada — os valores por serviço são fixos no sistema.', assinaturas: [{sheet:'FOLHA DE PAGAMENTO', target:'folhaPagamento'}] },
+  // sem "sheet" de propósito (mesmo padrão do Pedágio, logo acima): o nome da
+  // aba real muda a cada mês ("FOLHA 21.07 a 20.08", "FOLHA 21.08 a 20.09"...
+  // — é dali que resolverPeriodoPorNomeDaAba tira o período). Exigir o nome
+  // exato "FOLHA DE PAGAMENTO" fazia o card nunca ficar verde, mesmo com a
+  // importação certa — quem decide o destino é o conteúdo das colunas
+  // (pickBestTarget), não o nome da aba.
+  { nome: 'FOLHA_DE_PAGAMENTO...xlsx', desc: 'Aba FOLHA DE PAGAMENTO (ordens/descontos/bônus). A aba VALORES ORDENS não é importada — os valores por serviço são fixos no sistema.', assinaturas: [{target:'folhaPagamento'}] },
   { nome: 'COMPARATIVO.xlsx', desc: 'Abas BASE_PRODUCAO (produção) e COMAPARATIVO (tabela financeira pronta por período)', assinaturas: [{sheet:'BASE_PRODUCAO', target:'producao'}, {sheet:'COMAPARATIVO', target:'comparativoFinanceiro'}] },
 ];
 function renderImport() {
