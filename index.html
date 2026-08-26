@@ -7012,6 +7012,12 @@ function renderParcialDoDia() {
     ];
     const buckets = ['concluido','iniciado','em_rota','pendente','cancelado','nao_concluido'];
     const bucketLabel = { concluido:'Concluído', iniciado:'Iniciado', em_rota:'Em Rota', pendente:'Pendente', cancelado:'Cancelado', nao_concluido:'Não Concluído' };
+    // Efetividade = concluído / (total MENOS cancelado). Cancelamento não é
+    // culpa do técnico executar ou não (a ordem foi cancelada antes/fora do
+    // controle dele) — contar cancelado no denominador diluía a métrica pra
+    // baixo sem motivo. "Não concluído", pendente etc continuam no denominador
+    // (são ordens que ainda dependiam de execução).
+    const efetividade = l => { const base = l.total - (l.cancelado || 0); return base > 0 ? (l.concluido / base) * 100 : 0; };
     const statusTable = tiposFixos.map(([label,re]) => {
       const linhas = rows.filter(r => re.test(normalizeHeader(r.tipo_atividade)));
       const linha = { label, total: linhas.length };
@@ -7028,6 +7034,15 @@ function renderParcialDoDia() {
       buckets.forEach(b => linha[b] = linhas.filter(r=>classifyStatusGranular(r.status)===b).length);
       return linha;
     });
+
+    // ---- Tabela: todos os serviços do dia, linha a linha, direto do CSV ----
+    // Só existe quando a fonte do dia É o CSV (doCsv.length) — é o caso que foi
+    // pedido. A BASE DO DIA (fallback de manhã) não tem esse detalhe linha a
+    // linha no mesmo formato, então não faz sentido fingir a mesma tabela ali.
+    const servicosDoDia = !doCsv.length ? [] : [...rows].sort((a,b) =>
+      String(a.cidade||'').localeCompare(String(b.cidade||'')) ||
+      String(a.recurso||'').localeCompare(String(b.recurso||'')) ||
+      String(a.os||'').localeCompare(String(b.os||'')));
 
     body.innerHTML = `
       <div class="cards-grid">
@@ -7056,10 +7071,10 @@ function renderParcialDoDia() {
         <th>Serviços</th>${buckets.map(b=>`<th>${bucketLabel[b]}</th>`).join('')}<th>Total O.S</th><th>Efetividade</th>
       </tr></thead><tbody>
         ${statusTable.map(l=>{
-          const efet = l.total ? (l.concluido/l.total)*100 : 0;
+          const efet = efetividade(l);
           return `<tr><td class="cat-cell">${l.label}</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="color:#38bdf8;font-weight:700">${efet.toFixed(0)}%</td></tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="color:#38bdf8">${totalStatus.total?((totalStatus.concluido/totalStatus.total)*100).toFixed(0):0}%</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="color:#38bdf8">${efetividade(totalStatus).toFixed(0)}%</td></tr>
       </tbody></table></div>
 
       <div class="section-heading">Status Detalhado por Cidade</div>
@@ -7067,11 +7082,19 @@ function renderParcialDoDia() {
         <th>Cidades</th>${buckets.map(b=>`<th>${bucketLabel[b]}</th>`).join('')}<th>Total O.S</th><th>Efetividade</th>
       </tr></thead><tbody>
         ${statusPorCidadeTable.map(l=>{
-          const efet = l.total ? (l.concluido/l.total)*100 : 0;
+          const efet = efetividade(l);
           return `<tr><td class="cat-cell">${l.label}</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="color:#38bdf8;font-weight:700">${efet.toFixed(0)}%</td></tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="color:#38bdf8">${totalStatus.total?((totalStatus.concluido/totalStatus.total)*100).toFixed(0):0}%</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="color:#38bdf8">${efetividade(totalStatus).toFixed(0)}%</td></tr>
       </tbody></table></div>
+
+      ${!servicosDoDia.length ? '' : `
+      <div class="section-heading">Serviços do Dia <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(${servicosDoDia.length} O.S — do CSV importado na PCR)</span></div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+        <th>O.S</th><th>Cliente</th><th>Contrato</th><th>Técnico</th><th>Cidade</th><th>Tipo de Serviço</th><th>Status</th><th>Motivo</th><th>Abertura</th><th>Limite</th>
+      </tr></thead><tbody>
+        ${servicosDoDia.map(r=>`<tr><td>${esc(r.os)||'-'}</td><td>${esc(r.cliente)||'-'}</td><td>${esc(r.contrato)||'-'}</td><td class="cat-cell">${esc(r.recurso)||'-'}</td><td>${esc(r.cidade)||'-'}</td><td>${esc(r.tipo_atividade)||'-'}</td><td>${statusBadge(r.status)}</td><td>${esc(r.motivo)||'-'}</td><td>${fmtDT(r.abertura)}</td><td>${fmtDT(r.limite)}</td></tr>`).join('')}
+      </tbody></table></div>`}
 
       <div class="section-heading">Gerar imagem (PNG) — Remanejamento por tipo de serviço</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
@@ -7152,6 +7175,7 @@ function renderParcialDoDia() {
       { id: 'maodeobra', label: 'Mão de obra e produção do dia' },
       { id: 'status', label: 'Status detalhado por tipo de serviço' },
       { id: 'statuscidade', label: 'Status detalhado por cidade' },
+      ...(servicosDoDia.length ? [{ id: 'servicos', label: 'Serviços do dia (linha a linha)' }] : []),
     ]);
     wirePdfExportPanel('Parcial do Dia — ' + formatDate(data), {
       maodeobra: () => secaoTabela('Mão de Obra e Produção do Dia', [...cidadesList, {cidade:'TOTAL', ...totais}], [
@@ -7164,6 +7188,11 @@ function renderParcialDoDia() {
       ]),
       statuscidade: () => secaoTabela('Status Detalhado por Cidade', statusPorCidadeTable, [
         {header:'Cidade', get:r=>r.label}, ...buckets.map(b=>({header:bucketLabel[b], get:r=>r[b]})), {header:'Total', get:r=>r.total},
+      ]),
+      servicos: () => secaoTabela('Serviços do Dia', servicosDoDia, [
+        {header:'O.S', get:r=>r.os}, {header:'Cliente', get:r=>r.cliente}, {header:'Contrato', get:r=>r.contrato},
+        {header:'Técnico', get:r=>r.recurso}, {header:'Cidade', get:r=>r.cidade}, {header:'Tipo de Serviço', get:r=>r.tipo_atividade},
+        {header:'Status', get:r=>r.status}, {header:'Motivo', get:r=>r.motivo}, {header:'Abertura', get:r=>fmtDT(r.abertura)}, {header:'Limite', get:r=>fmtDT(r.limite)},
       ]),
     });
   }
