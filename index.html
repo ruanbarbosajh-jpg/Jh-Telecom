@@ -4701,6 +4701,16 @@ async function salvarCampoFolha(tecnico, periodo, campo, valor) {
     linha.total_descontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(linha[c]) || 0), 0);
     linha.total_receber = (Number(linha.valor_total_ordens) || 0) - linha.total_descontos;
   }
+  // Bônus mudou de mão (o RH pode liberar na conversa com a gestão, mesmo sem
+  // o indicador bater — era exatamente esse o pedido) — o valor das ordens
+  // muda junto: faixa "d26" quando vira APTO, "normal" quando vira INAPTO.
+  if (campo === 'bonus') {
+    const janela = datasDoPeriodoFolha(periodo);
+    if (janela.inicio && janela.fim) {
+      linha.valor_total_ordens = valorOrdensDoPeriodo(tecnico, janela.inicio, janela.fim, valor === 'APTO');
+      linha.total_receber = linha.valor_total_ordens - (Number(linha.total_descontos) || 0);
+    }
+  }
   DB.folhaPagamento[idx] = linha;
   if (!supa) return { ok: true, offline: true, linha };
   try {
@@ -4709,13 +4719,31 @@ async function salvarCampoFolha(tecnico, periodo, campo, valor) {
     return { ok: true, linha };
   } catch (e) { return { ok: false, error: e, linha }; }
 }
+// Soma o valor das ordens (o que a JH paga ao técnico) das ordens CONCLUÍDAS
+// dele num período, usando a faixa de preço "d26" quando ele está APTO ao
+// bônus, ou "normal" quando não está. Importante: a faixa segue o BÔNUS
+// (apto/inapto), não só "bateu os 26 dias" — reprovar no IFI/IRR também
+// derruba pra faixa normal, mesmo com os dias em dia; e o RH pode liberar o
+// bônus na mão (ver salvarCampoFolha) mesmo sem o indicador bater, e isso
+// también precisa valer o valor de 26 dias.
+function valorOrdensDoPeriodo(tecnico, inicio, fim, apto) {
+  let valor = 0;
+  DB.producao.forEach(p => {
+    if (!isConcluido(p.status) || !inRange(p.data, inicio, fim)) return;
+    if (normalizeHeader(p.recurso) !== normalizeHeader(tecnico)) return;
+    const l = linhaValorOrdem(p.tipo_atividade);
+    if (l) valor += apto ? l.d26 : l.normal;
+  });
+  return valor;
+}
 // Gera (ou substitui) as linhas da folha de um ciclo INTEIRO a partir do que o
 // sistema já sabe: ordens e valor delas vêm da Produção (fonte: DB.producao,
-// preço fixo por tipo de serviço — VALORES_ORDENS_FIXOS, coluna "normal" ou
-// "d26" conforme os dias trabalhados batem os 26 do bônus), e Qtd. IFI/IRR
-// vêm dos retornos baixados no período (contarRetornosPorOfensor, mesma conta
-// da Tabela de Bônus). Descontos de material começam ZERADOS — são o
-// Almoxarifado/RH/Analista quem preenche depois, ordem por ordem, na tela.
+// preço fixo por tipo de serviço — VALORES_ORDENS_FIXOS, faixa "d26" só pra
+// quem FICA APTO ao bônus, "normal" pros demais — ver valorOrdensDoPeriodo),
+// e Qtd. IFI/IRR vêm dos retornos baixados no período
+// (contarRetornosPorOfensor, mesma conta da Tabela de Bônus). Descontos de
+// material começam ZERADOS — são o Almoxarifado/RH/Analista quem preenche
+// depois, ordem por ordem, na tela.
 function gerarPeriodoFolha(inicio, fim) {
   const periodo = `${formatDate(inicio)} a ${formatDate(fim)}`;
   const porTecnico = {};
@@ -4729,14 +4757,12 @@ function gerarPeriodoFolha(inicio, fim) {
     // mesma regra da Tabela de Bônus: dias trabalhados = dias DISTINTOS com
     // pelo menos 1 ordem concluída baixada nesse período
     const diasTrab = new Set(ordens.map(p => p.data)).size;
-    const usaD26 = diasTrab >= BONUS_DIAS_MIN;
-    let valorOrdens = 0;
-    ordens.forEach(p => { const l = linhaValorOrdem(p.tipo_atividade); if (l) valorOrdens += usaD26 ? l.d26 : l.normal; });
     const ret = retornos[tecnico] || { ifi: 0, irr: 0 };
     const base = baseDoTecnico(tecnico, inicio, fim);
     const ifiPct = base.ativacao ? (ret.ifi / base.ativacao) * 100 : 0;
     const irrPct = base.reparos ? (ret.irr / base.reparos) * 100 : 0;
     const apto = ifiPct <= BONUS_IFI_MAX && irrPct <= BONUS_IRR_MAX && diasTrab >= BONUS_DIAS_MIN;
+    const valorOrdens = valorOrdensDoPeriodo(tecnico, inicio, fim, apto);
     return {
       tecnico, periodo, total_ordens: ordens.length, valor_total_ordens: valorOrdens,
       dias_trab: diasTrab, bonus: apto ? 'APTO' : 'INAPTO', frota: '', dias_aluguel: 0, valor_aluguel: 0, emprestimo: 0,
@@ -9418,6 +9444,13 @@ function renderFolhaPagamento() {
         sel.disabled = false;
         if (!r.ok) { toast('Não consegui salvar: ' + ((r.error && r.error.message) || 'erro desconhecido'), 'erro'); return; }
         toast('Salvo.', 'ok', 1500);
+        // bônus muda a faixa de preço das ordens (APTO usa o valor de 26 dias,
+        // INAPTO usa o padrão) — corrige Valor Ordens e Total a Receber só
+        // NESSA linha, sem recarregar a tela (ver o comentário grande acima)
+        const tr = sel.closest('tr');
+        const tdValor = tr.querySelector('.folha-valor-ordens'), tdReceber = tr.querySelector('.folha-total-receber');
+        if (tdValor) tdValor.textContent = formatCurrency(r.linha.valor_total_ordens);
+        if (tdReceber) tdReceber.textContent = formatCurrency(r.linha.total_receber);
       });
     });
     document.querySelectorAll('input.folha-edit[data-campo="dias_trab"]').forEach(inp => {
@@ -9511,7 +9544,7 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
   const cols = [
     ['Técnico', r=>r.tecnico],
     ['Total Ordens', r=>r.total_ordens],
-    ['Valor Ordens', r=>money(r.valor_total_ordens)],
+    ['Valor Ordens', r=>`<span class="folha-valor-ordens">${money(r.valor_total_ordens)}</span>`],
     ['Dias Trab.', r => podePagamento ? inputNumero(r, 'dias_trab', r.dias_trab) : r.dias_trab],
     ['Bônus', r => podePagamento
       // cor no PRÓPRIO <select> (não só num badge ao lado) — verde quando a
