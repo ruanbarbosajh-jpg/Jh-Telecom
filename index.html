@@ -436,6 +436,11 @@
     padding: 4px 10px; border-radius: var(--r-pill); }
   .fa-selo.ruim { background: var(--danger-bg); color: var(--danger); }
   .fa-selo.ok { background: var(--success-bg); color: var(--success); }
+  /* quando HÁ problemas, o selo vira rótulo do que vem depois ("Pontos de
+     atenção: x, y") — o número dentro do selo confundia, porque contava só os
+     'ruim' e a faixa lista também os 'atencao' (parecia "1" ao lado de 2 itens) */
+  .fa-rotulo { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--text-secondary); }
   .fa-item { font-family: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
     background: transparent; border: 1px solid var(--border); color: var(--text-secondary);
     padding: 5px 10px; border-radius: var(--r-pill); transition: border-color var(--transicao), color var(--transicao); }
@@ -545,6 +550,11 @@
   .grouped-bar-value { fill: var(--text-primary); font-size: 10.5px; font-weight: 700; }
   .trend-dot { cursor: pointer; transition: r .15s ease; }
   .trend-dot:hover { r: 6; }
+  /* na curva suave (evolução dia a dia) são 30+ pontos: mostrar todos vira
+     poeira em cima da linha. Some o preenchimento e deixa a área de clique —
+     o ponto reaparece no hover, com o tooltip de sempre. */
+  .trend-suave .trend-dot { fill-opacity: 0; r: 7; }
+  .trend-suave .trend-dot:hover { fill-opacity: 1; r: 5; }
   .grouped-bars-svg rect { transition: opacity .15s ease; cursor: pointer; }
   .grouped-bars-svg rect:hover { opacity: .75; }
 
@@ -636,9 +646,18 @@
     .sidebar-backdrop.open { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 15; }
 
     /* a topbar precisa poder encolher: sem min-width:0 o flex se recusa a
-       comprimir os filhos e o excesso vira scroll da PÁGINA */
-    .topbar { padding: 10px 14px; gap: 10px; min-width: 0; }
+       comprimir os filhos e o excesso vira scroll da PÁGINA.
+       O sticky/top:0 é o que mantém o ☰ sempre à mão no celular: sem ele, quem
+       rolasse uma tabela longa tinha que voltar ao topo só pra trocar de aba. */
+    .topbar { padding: 10px 14px; gap: 10px; min-width: 0;
+      position: sticky; top: 0; z-index: 12; }
     .topbar > div { min-width: 0; }
+    /* o ☰ é o item que NUNCA pode ser espremido pra fora da barra. E como no
+       celular ele virou a ÚNICA porta pras abas, ganha alvo de toque cheio
+       (44x44) — os 36px do desktop erram fácil com o polegar. */
+    .menu-toggle { flex-shrink: 0; min-width: 44px; min-height: 44px;
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 0; font-size: 18px; }
     .topbar h2 { font-size: var(--fs-lg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .topbar-actions { gap: 6px; flex-shrink: 0; }
     /* botões viram só ícone — o rótulo é redundante com o ícone */
@@ -749,9 +768,14 @@
   }
 
   /* Rede de segurança: nada pode criar rolagem lateral na PÁGINA.
-     As tabelas continuam rolando normalmente dentro do .table-wrap. */
+     As tabelas continuam rolando normalmente dentro do .table-wrap.
+
+     ATENÇÃO — é 'clip', não 'hidden', de propósito: 'overflow-x: hidden' faz o
+     navegador criar um contêiner de rolagem novo, e isso MATA o position:sticky
+     da .topbar (o ☰ some ao rolar a tela). 'clip' corta o excesso do mesmo jeito
+     sem criar contêiner, então a topbar continua grudada no topo. */
   @media (max-width: 900px) {
-    html, body { max-width: 100%; overflow-x: hidden; }
+    html, body { max-width: 100%; overflow-x: clip; }
     .content { overflow-x: visible; }
     .table-wrap { max-width: 100%; }
   }
@@ -2549,22 +2573,39 @@ const PALETTE = ['#4f7fff','#22c55e','#38bdf8','#16a34a','#60a5fa','#2dd4bf','#3
 // "LOCADORAS" e "COMBUSTÍVEL" (dois azuis claros) viravam a mesma coisa na
 // legenda. Aqui os matizes são bem separados no círculo cromático, e a ordem
 // alterna quente/frio pra fatias vizinhas nunca ficarem parecidas.
+// A lista abaixo NÃO foi escolhida no olho: saiu de uma busca que mede a
+// distância perceptual (CIEDE2000) entre TODOS os pares e maximiza a menor
+// delas. A versão anterior tinha 6 pares indistinguíveis — o pior era
+// #a855f7 x #8b5cf6, com ΔE 5,0 (o mesmo roxo duas vezes na legenda);
+// #f59e0b x #eab308 e #84cc16 x #65a30d davam no mesmo. Agora o pior par do
+// conjunto inteiro está em ΔE 14,4 e nenhum fica abaixo de 12.
+//
+// A ORDEM é parte da correção: as cores estão em ordem de "ponto mais
+// distante", ou seja, cada cor é a mais longe possível de todas as anteriores.
+// Como o gráfico consome a lista em sequência, um anel de 6 fatias já pega as
+// 6 cores mais separadas entre si (ΔE mínimo 29,3), não 6 cores quaisquer.
+//
+// Duas restrições do sistema entraram na busca:
+//  - VERMELHO fica de fora: é reservado pra alerta/problema. O mais próximo do
+//    #ef4444 aqui é o laranja #ec5b13, a ΔE 14,2 — dá pra diferenciar.
+//  - toda cor precisa ter contraste >= 2:1 contra o fundo do card NOS DOIS
+//    temas (dark #131a2b e light #ffffff), senão some quando troca o tema.
 const PALETTE_CATEGORICA = [
-  '#4f7fff', // azul
-  '#22c55e', // verde
-  '#f59e0b', // âmbar
-  '#a855f7', // roxo
-  '#06b6d4', // ciano
-  '#ec4899', // rosa
-  '#84cc16', // lima
-  '#f97316', // laranja
-  '#6366f1', // índigo
-  '#14b8a6', // teal
-  '#eab308', // amarelo
-  '#8b5cf6', // violeta
-  '#0ea5e9', // azul-céu
-  '#d946ef', // fúcsia
-  '#65a30d', // oliva
+  '#4f7fff', // azul      (identidade — mantido)
+  '#22c55e', // verde     (identidade — mantido)
+  '#ec5b13', // laranja
+  '#c61096', // magenta
+  '#c6ae10', // ouro
+  '#2dc7d2', // ciano
+  '#6625b1', // roxo escuro
+  '#b581cf', // lilás
+  '#9b753b', // marrom
+  '#3b889b', // azul-petróleo
+  '#cf9b81', // salmão
+  '#cf81a0', // rosa fosco
+  '#829b3b', // oliva
+  '#b213ec', // violeta
+  '#3b619b', // azul-aço
   '#94a3b8', // cinza (sempre por último — usado em "Outros")
 ];
 function corCategorica(i) { return PALETTE_CATEGORICA[i % PALETTE_CATEGORICA.length]; }
@@ -3107,19 +3148,84 @@ function trendChart(elId, series, opts = {}) {
   const n = labels.length;
   const x = i => n > 1 ? PADX + (i / (n - 1)) * (W - 2 * PADX) : W / 2;
   const y = v => H - PADY_B - (v / max) * (H - PADY_T - PADY_B);
-  const linePath = pts => pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ');
+  const reto = pts => pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ');
+  // opts.suave: curva Catmull-Rom convertida em Bézier. Só pra série com MUITOS
+  // pontos (evolução dia a dia), onde a linha quebrada vira serrote e esconde a
+  // tendência. Fica desligado por padrão — os gráficos que já existem (poucos
+  // pontos, um por ciclo) continuam com o segmento reto de sempre.
+  const suave = pts => {
+    if (pts.length < 3) return reto(pts);
+    const P = pts.map((p, i) => [x(i), y(p.value)]);
+    let d = `M${P[0][0].toFixed(1)},${P[0][1].toFixed(1)}`;
+    for (let i = 0; i < P.length - 1; i++) {
+      const p0 = P[i - 1] || P[i], p1 = P[i], p2 = P[i + 1], p3 = P[i + 2] || P[i + 1];
+      const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+      const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+      d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+    }
+    return d;
+  };
+  const linePath = opts.suave ? suave : reto;
   const areaPath = pts => `${linePath(pts)} L${x(pts.length - 1).toFixed(1)},${H - PADY_B} L${x(0).toFixed(1)},${H - PADY_B} Z`;
+  // opts.maxLabels: com 30 dias no eixo os rótulos viram um borrão. Mostra só de
+  // N em N (o primeiro e o último sempre entram). Sem a opção, mostra todos.
+  const passo = opts.maxLabels && n > opts.maxLabels ? Math.ceil(n / opts.maxLabels) : 1;
+  const mostraLabel = i => passo === 1 || i === 0 || i === n - 1 || i % passo === 0;
   el.innerHTML = `
     <div class="trend-legend">${comValores.map(s => `<span class="legend-item"><span class="legend-dot" style="background:${s.color}"></span>${s.name}</span>`).join('')}</div>
-    <svg viewBox="0 0 ${W} ${H}" class="trend-chart-svg" preserveAspectRatio="xMidYMid meet">
+    <svg viewBox="0 0 ${W} ${H}" class="trend-chart-svg${opts.suave ? ' trend-suave' : ''}" preserveAspectRatio="xMidYMid meet">
       ${[0, 0.5, 1].map(f => `<line x1="${PADX}" y1="${(H - PADY_B - f * (H - PADY_T - PADY_B)).toFixed(1)}" x2="${W - PADX}" y2="${(H - PADY_B - f * (H - PADY_T - PADY_B)).toFixed(1)}" class="trend-gridline"/>`).join('')}
       ${comValores.map(s => `
-        <path d="${areaPath(s.points)}" fill="${s.color}" opacity="0.12" stroke="none"/>
-        <path d="${linePath(s.points)}" fill="none" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+        ${s.semArea ? '' : `<path d="${areaPath(s.points)}" fill="${s.color}" opacity="0.12" stroke="none"/>`}
+        <path d="${linePath(s.points)}" fill="none" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"${s.tracejado ? ' stroke-dasharray="2 5"' : ''}/>
         ${s.points.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="4" fill="${s.color}" class="trend-dot"><title>${s.name} — ${p.label}: ${p.display !== undefined ? p.display : p.value}</title></circle>`).join('')}
       `).join('')}
-      ${labels.map((l, i) => `<text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" class="trend-axis-label">${l}</text>`).join('')}
+      ${labels.map((l, i) => mostraLabel(i) ? `<text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" class="trend-axis-label">${l}</text>` : '').join('')}
     </svg>`;
+}
+// Fatia um período em caixas de tempo pro gráfico de evolução. Duas decisões
+// que importam:
+//  1) as caixas cobrem o filtro INTEIRO, de ponta a ponta, mesmo os dias sem
+//     nenhuma ordem — senão a linha "pula" o feriado e finge que a produção
+//     não caiu. Foi pedido explícito: o gráfico segue o filtro, do início ao fim.
+//  2) o tamanho da caixa vem do tamanho do período: 30 dias cabem dia a dia,
+//     mas um ano viraria 365 pontos ilegíveis.
+function caixasDeTempo(inicio, fim) {
+  if (!inicio || !fim || inicio > fim) return null;
+  const dias = diasEntre(fim, inicio) + 1;   // diasEntre(a,b) = a - b
+  const granularidade = dias <= 45 ? 'dia' : (dias <= 200 ? 'semana' : 'mes');
+  // meio-dia evita que o horário de verão jogue a data um dia pra trás
+  const d0 = new Date(inicio + 'T12:00:00'), d1 = new Date(fim + 'T12:00:00');
+  const iso = dt => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+  const MESES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+  const caixas = [];
+  const cursor = new Date(d0);
+  if (granularidade === 'mes') cursor.setDate(1);
+  while (cursor <= d1) {
+    const ini = iso(cursor);
+    const prox = new Date(cursor);
+    if (granularidade === 'dia') prox.setDate(prox.getDate() + 1);
+    else if (granularidade === 'semana') prox.setDate(prox.getDate() + 7);
+    else prox.setMonth(prox.getMonth() + 1);
+    const fimCaixa = new Date(prox); fimCaixa.setDate(fimCaixa.getDate() - 1);
+    caixas.push({
+      ini: ini < inicio ? inicio : ini,
+      fim: iso(fimCaixa) > fim ? fim : iso(fimCaixa),
+      label: granularidade === 'mes'
+        ? `${MESES[cursor.getMonth()]}/${String(cursor.getFullYear()).slice(2)}`
+        : `${String(cursor.getDate()).padStart(2,'0')}/${String(cursor.getMonth()+1).padStart(2,'0')}`,
+    });
+    cursor.setTime(prox.getTime());
+  }
+  return { granularidade, caixas };
+}
+// Conta quantas linhas de cada lista caem em cada caixa de tempo.
+function serieDoPeriodo(caixas, linhas, getData) {
+  return caixas.map(c => {
+    const dt = { label: c.label, value: 0 };
+    linhas.forEach(l => { const d = getData(l); if (d && d >= c.ini && d <= c.fim) dt.value++; });
+    return dt;
+  });
 }
 // Barras agrupadas (várias séries lado a lado por categoria) — para comparar,
 // por exemplo, Ativação × Reparo em cada cidade na mesma régua.
@@ -3986,9 +4092,11 @@ function metricCard(label, value, negative, opts = {}) {
 function faixaAlertas(itens) {
   const validos = (itens || []).filter(Boolean);
   if (!validos.length) return '';
-  const ruins = validos.filter(i => i.tipo === 'ruim').length;
+  // "problema" = qualquer item que não seja 'ok' (ruim OU atenção). Antes só os
+  // 'ruim' entravam na conta, e o selo dizia "1" com 2 itens vermelhos ao lado.
+  const problemas = validos.filter(i => i.tipo !== 'ok').length;
   return `<div class="faixa-alertas">
-    <span class="fa-selo ${ruins ? 'ruim' : 'ok'}">${ruins ? `${ruins} ponto(s) de atenção` : 'tudo dentro da meta'}</span>
+    <span class="${problemas ? 'fa-rotulo' : 'fa-selo ok'}">${problemas ? 'Pontos de atenção:' : 'tudo dentro da meta'}</span>
     ${validos.map(i => `<button type="button" class="fa-item ${i.tipo}"${i.rota ? ` data-alerta-rota="${i.rota}"` : ''}>${i.texto}</button>`).join('')}
   </div>`;
 }
@@ -4551,6 +4659,18 @@ function renderProduction() {
     const deslocList = Object.entries(techCities).map(([label,set])=>({label,value:set.size})).sort((a,b)=>b.value-a.value);
     const bottomDeslocList = [...deslocList].sort((a,b)=>a.value-b.value);
 
+    // Evolução no tempo: segue o filtro de data de ponta a ponta (ver
+    // caixasDeTempo). Duas séries em tons de azul: o total de ordens abertas e,
+    // por baixo, quanto disso foi concluído — a distância entre as duas linhas
+    // é o que ficou pra trás no período.
+    const evolucao = caixasDeTempo(s, e);
+    const evolucaoSeries = evolucao ? [
+      { name: 'Total de ordens', color: '#7aa5ff', tracejado: true, semArea: true,
+        points: serieDoPeriodo(evolucao.caixas, baseRows, r => r.data) },
+      { name: 'Concluídas', color: '#4f7fff',
+        points: serieDoPeriodo(evolucao.caixas, concluidos, r => r.data) },
+    ] : [];
+
     body.innerHTML = `
       <div class="cards-grid">
         ${metricCard('Total de ordens', baseRows.length, false, {sub:'OS únicas — se a mesma OS aparece 2x na planilha, conta 1 vez'})}
@@ -4558,6 +4678,10 @@ function renderProduction() {
         ${metricCard('Não concluídas', naoConcluidos.length)}
         ${metricCard('Canceladas', cancelados.length, cancelados.length>0)}
         ${metricCard('% Concluído', pctConcluido.toFixed(1)+'%')}
+      </div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Evolução dos Serviços no Período${evolucao ? ` <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(por ${evolucao.granularidade})</span>` : ''}</h3>
+        <div id="c-evolucao"></div>
       </div>
       <div class="panels-grid">
         <div class="panel"><h3>Ordens por Status</h3><div id="c-status"></div></div>
@@ -4587,8 +4711,8 @@ function renderProduction() {
         <div id="bon-tabela">${renderBonusTable(fechDoPeriodo, prodConcluida, { inicio: retIni, fim: retFim })}</div>
       </div>
       <p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">${rows.length} registro(s) exibido(s) — exibindo até 200. Retornos IFI/IRR aparecem nas páginas Ofensor e Detalhe de Retornos.</p>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr><th>Data</th><th>Técnico</th><th>Cidade</th><th>Tipo</th><th>Status</th><th>OS</th><th>Contrato</th></tr></thead><tbody>
-      ${rows.slice(0,200).map(r=>`<tr><td>${formatDate(r.data)}</td><td>${r.recurso}</td><td>${r.cidade}</td><td>${r.tipo_atividade}</td><td>${statusBadge(r.status)}</td><td>${r.os}</td><td>${r.contrato}</td></tr>`).join('')}
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr><th>Data</th><th>Técnico</th><th>Cidade</th><th>Tipo</th><th>Status</th><th>Motivo da Baixa</th><th>OS</th><th>Contrato</th></tr></thead><tbody>
+      ${rows.slice(0,200).map(r=>`<tr><td>${formatDate(r.data)}</td><td>${esc(r.recurso)}</td><td>${esc(r.cidade)}</td><td>${esc(r.tipo_atividade)}</td><td>${statusBadge(r.status)}</td><td>${esc(r.motivo) || '-'}</td><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td></tr>`).join('')}
       </tbody></table></div>
       <div id="pdf-export-area"></div>`;
 
@@ -4613,6 +4737,8 @@ function renderProduction() {
       desenharBonus(s, e);
     });
 
+    // maxLabels 12: com 31 dias no eixo os rótulos se sobrepõem e viram borrão
+    trendChart('c-evolucao', evolucaoSeries, { suave: true, maxLabels: 12 });
     donutChart('c-status', [
       {label:'Concluídas', value:concluidos.length, color:'#22c55e'},
       {label:'Não concluídas', value:naoConcluidos.length, color:'#93a0bd'},
