@@ -424,19 +424,8 @@
   .cmdk-dica { padding: 8px 14px; border-top: 1px solid var(--border); font-size: var(--fs-xs);
     color: var(--text-muted); display: flex; gap: 12px; }
 
-  /* ---------- Sidebar recolhida vira RAIL de ícones (antes sumia inteira) ---------- */
-  @media (min-width: 901px) {
-    body.sidebar-collapsed .sidebar { transform: none; width: 62px; }
-    body.sidebar-collapsed .main { margin-left: 62px; }
-    body.sidebar-collapsed .sidebar-brand p,
-    body.sidebar-collapsed .sidebar-group,
-    body.sidebar-collapsed .sidebar-nav a span.nav-txt,
-    body.sidebar-collapsed .logout-btn { display: none; }
-    body.sidebar-collapsed .sidebar-brand { padding: 0 0 12px; text-align: center; }
-    body.sidebar-collapsed .sidebar-brand h1 { font-size: var(--fs-md); }
-    body.sidebar-collapsed .sidebar-nav { padding: 0 8px; }
-    body.sidebar-collapsed .sidebar-nav a { justify-content: center; padding: 11px 0; }
-  }
+  /* Sidebar recolhida some POR COMPLETO e libera a largura toda (pedido do
+     cliente). O rail de icones foi testado e descartado. */
   /* alvo de toque no celular (medido: 23 links abaixo de 44px) */
   @media (max-width: 900px) {
     .sidebar-nav a { min-height: 44px; }
@@ -468,11 +457,11 @@
   .panel h3 { margin: 0 0 14px; font-size: 15px; color: var(--text-primary); }
   .panel .empty { color: var(--text-muted); text-align: center; padding: 3rem 0; }
 
-  /* Filtros FIXOS logo abaixo da topbar. Antes eram `static`: numa tela de
-     9.430px (Producao) era preciso rolar tudo de volta pra trocar uma data. */
+  /* Filtros no fluxo normal da pagina. Ja foram `sticky`, mas flutuavam por
+     cima dos cards da tela seguinte e empurravam o inicio do conteudo pra
+     baixo — o cliente pediu de volta como era. */
   .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; background: var(--card-bg);
-    border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 1.5rem;
-    position: sticky; top: 68px; z-index: 9; box-shadow: 0 6px 18px rgba(0,0,0,.10); }
+    border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 1.5rem; }
   .toolbar .field { display: flex; flex-direction: column; gap: 4px; }
   .toolbar label { font-size: 12px; color: var(--text-secondary); }
   .toolbar input, .toolbar select { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 13px; background: var(--bg-page); color: var(--text-primary); }
@@ -2434,6 +2423,30 @@ function overlaps(aStart, aEnd, bStart, bEnd) {
 // paleta de gráficos restrita a tons de azul e verde (pedido do usuário) —
 // vermelho continua reservado só para indicar problema/alerta nos gráficos que usam isso de propósito
 const PALETTE = ['#4f7fff','#22c55e','#38bdf8','#16a34a','#60a5fa','#2dd4bf','#3d63d1','#4ade80','#0ea5e9','#86efac'];
+// Paleta CATEGÓRICA — para pizza/anel, onde cada fatia precisa ser distinguível
+// da vizinha só pela cor. A PALETTE acima é toda azul-e-verde: com 6+ fatias,
+// "LOCADORAS" e "COMBUSTÍVEL" (dois azuis claros) viravam a mesma coisa na
+// legenda. Aqui os matizes são bem separados no círculo cromático, e a ordem
+// alterna quente/frio pra fatias vizinhas nunca ficarem parecidas.
+const PALETTE_CATEGORICA = [
+  '#4f7fff', // azul
+  '#22c55e', // verde
+  '#f59e0b', // âmbar
+  '#a855f7', // roxo
+  '#06b6d4', // ciano
+  '#ec4899', // rosa
+  '#84cc16', // lima
+  '#f97316', // laranja
+  '#6366f1', // índigo
+  '#14b8a6', // teal
+  '#eab308', // amarelo
+  '#8b5cf6', // violeta
+  '#0ea5e9', // azul-céu
+  '#d946ef', // fúcsia
+  '#65a30d', // oliva
+  '#94a3b8', // cinza (sempre por último — usado em "Outros")
+];
+function corCategorica(i) { return PALETTE_CATEGORICA[i % PALETTE_CATEGORICA.length]; }
 
 // listas de autocomplete (datalist) para os campos de busca por nome
 function refreshNameLists() {
@@ -2880,7 +2893,7 @@ function donutChart(elId, items, opts = {}) {
   let acc = 0;
   const stops = [];
   items.forEach((i, idx) => {
-    const color = i.color || PALETTE[idx % PALETTE.length];
+    const color = i.color || corCategorica(idx);
     stops.push(`${color} ${(acc/total)*360}deg ${((acc + i.value)/total)*360}deg`);
     acc += i.value;
   });
@@ -2903,7 +2916,7 @@ function donutChart(elId, items, opts = {}) {
     </div>
     <div class="donut-legend">${items.map((i,idx) => {
       const pct = ((i.value/total)*100);
-      return `<div class="legend-item"><span class="legend-dot" style="background:${i.color||PALETTE[idx%PALETTE.length]}"></span>${i.label}<b>${i.display !== undefined ? i.display : i.value}</b><span class="legend-pct">${pct.toFixed(1)}%</span></div>`;
+      return `<div class="legend-item"><span class="legend-dot" style="background:${i.color||corCategorica(idx)}"></span>${i.label}<b>${i.display !== undefined ? i.display : i.value}</b><span class="legend-pct">${pct.toFixed(1)}%</span></div>`;
     }).join('')}</div>
   </div>`;
 }
@@ -4731,8 +4744,8 @@ function renderAcomTec() {
     desenhaDetalhe();
 
     barsChartTopN('c-tech', byTechnician, { fill: true });
-    donutChart('c-city', byCity.map((c,i)=>({label:c.label, value:c.value, color:PALETTE[i%PALETTE.length]})), { centroLabel: 'Serviços' });
-    barsChart('c-servico', byServico.map((s,i)=>({label:s.label, value:s.value, color:PALETTE[i%PALETTE.length]})));
+    donutChart('c-city', byCity.map((c,i)=>({label:c.label, value:c.value, color:corCategorica(i)})), { centroLabel: 'Serviços' });
+    barsChart('c-servico', byServico.map((s,i)=>({label:s.label, value:s.value, color:corCategorica(i)})));
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'resumo', label: 'Resumo por tipo de serviço' },
@@ -8028,7 +8041,7 @@ function renderFleet() {
       <div id="pdf-export-area"></div>`;
 
     const locadoraMap = {}; links.forEach(r => { const l=r.locadora||'Não informado'; locadoraMap[l]=(locadoraMap[l]||0)+1; });
-    donutChart('fleet-locadora', Object.entries(locadoraMap).map(([label,value],i)=>({label,value,color:PALETTE[i%PALETTE.length]})), { centroLabel: 'Veículos' });
+    donutChart('fleet-locadora', Object.entries(locadoraMap).map(([label,value],i)=>({label,value,color:corCategorica(i)})), { centroLabel: 'Veículos' });
     const cidadeMap = {}; links.forEach(r => { const c=r.cidade||'Não informado'; cidadeMap[c]=(cidadeMap[c]||0)+1; });
     barsChartTopN('fleet-cidade', Object.entries(cidadeMap).map(([label,value])=>({label,value})).sort((a,b)=>b.value-a.value));
 
@@ -9267,11 +9280,12 @@ function renderPainelBI() {
     // mostra as 5 maiores e junta o resto em "Outros", que é o suficiente pra
     // entender onde o dinheiro está indo.
     const totalDespCats = despesaCats.reduce((a,c)=>a+c.value,0);
-    const despesaTop = despesaCats.slice(0, 5);
-    const restoDesp = despesaCats.slice(5).reduce((a,c)=>a+c.value,0);
-    if (restoDesp > 0) despesaTop.push({ label: `Outros (${despesaCats.length - 5})`, value: restoDesp, display: formatCurrency(restoDesp), color: '#94a3c4' });
+    const LIMITE_FATIAS = 8;   // com cor propria por fatia da pra mostrar mais
+    const despesaTop = despesaCats.slice(0, LIMITE_FATIAS).map((c,i) => ({ ...c, color: corCategorica(i) }));
+    const restoDesp = despesaCats.slice(LIMITE_FATIAS).reduce((a,c)=>a+c.value,0);
+    if (restoDesp > 0) despesaTop.push({ label: `Outros (${despesaCats.length - LIMITE_FATIAS})`, value: restoDesp, display: formatCurrency(restoDesp), color: '#94a3b8' });
     donutChart('bi-despesas', despesaTop, { centroValor: formatCurrency(totalDespCats), centroLabel: 'Despesas' });
-    donutChart('bi-frota', Object.entries(locadoraMap).map(([label, value], i) => ({ label, value, color: PALETTE[i % PALETTE.length] })), { centroLabel: 'Veículos' });
+    donutChart('bi-frota', Object.entries(locadoraMap).map(([label, value], i) => ({ label, value, color: corCategorica(i) })), { centroLabel: 'Veículos' });
     barsChart('bi-pedagio', byPlaca, { color: '#fb923c' });
     trendChart('bi-evolucao', [
       { name: 'Faturamento GIGA', color: 'var(--accent)', points: evoGiga },
