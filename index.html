@@ -288,6 +288,8 @@
      bem abaixo do mínimo AA (4,5:1) */
   input.folha-edit-moeda.tem-valor { color: var(--warn-text); font-weight: 700; }
   input.folha-edit-moeda.tem-valor:focus { border-color: var(--warn-text); }
+  /* "Parcela X" (2/3, 1/1) — texto curto, cor neutra (não é dinheiro) */
+  input.folha-edit-parcela { text-align: center; }
   .modal-largo { width: min(1100px, 94vw); max-height: 88vh; overflow: auto; position: relative; }
   .mt-fechar {
     position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
@@ -3521,6 +3523,15 @@ const SCHEMAS = {
     desc_equipamento: ['desc equipamento'], desc_multa: ['desc multa'], desc_miscelanea: ['desc miscelanea'],
     desc_mecanica: ['des mecanica','desc mecanica'], desc_vale: ['desc vale'], desc_ferramentas: ['desc ferramentas'],
     desc_combustivel: ['desc cartao combustivel'], desc_fiscalizacao: ['desc fiscalizacao'],
+    // "Parcela X" = em qual parcela está aquele desconto (texto "2/3", "1/1"),
+    // pra desconto que o técnico paga aos poucos em vez de de uma vez só.
+    // Dois apelidos em 'parcela_vale' de propósito: a planilha real do
+    // cliente tem "PERCELA VALE" (sem o A), mesmo tipo de variação de nome já
+    // visto em 'desc_mecanica' ("des mecanica" vs "desc mecanica").
+    parcela_equipamento: ['parcela equip', 'parcela equipamento'], parcela_ferramentas: ['parcela ferramentas'],
+    parcela_multa: ['parcela multa'], parcela_miscelanea: ['parcela miscelanea'], parcela_mecanica: ['parcela mecanica'],
+    parcela_vale: ['percela vale', 'parcela vale'], parcela_fiscalizacao: ['parcela fiscalizacao'],
+    parcela_combustivel: ['parcela combustivel', 'parcela cartao combustivel'],
     total_descontos: ['total dos descontos'], total_receber: ['total a receber'],
   }},
 };
@@ -3577,6 +3588,18 @@ function insertRow(target, map, row, extra) {
   const s = v => String(cell(row, map[v]) || '').trim();
   const n = v => parseNum(cell(row, map[v]));
   const money = v => parseMoney(cell(row, map[v]));
+  // "Parcela X" (texto "2/3", "1/1") — o Excel adora "entender" um texto tipo
+  // "2/3" como DATA sozinho (2 de março), mesmo a pessoa só querendo dizer
+  // "parcela 2 de 3". Se vier como Date, reconstrói dia/mês (o mais parecido
+  // possível do que a pessoa digitou); se vier como número/texto normal, usa
+  // direto. Não tem como recuperar 100% se o Excel já converteu de verdade —
+  // isso só evita virar "Thu Mar 02 2023 00:00:00 GMT..." na tela.
+  const parcela = v => {
+    const c = cell(row, map[v]);
+    if (c === null || c === undefined || c === '') return '';
+    if (c instanceof Date) return `${c.getDate()}/${c.getMonth() + 1}`;
+    return String(c).trim();
+  };
   const d = v => excelDateToISO(cell(row, map[v]));
   switch (target) {
     case 'fechamento': {
@@ -3725,6 +3748,9 @@ function insertRow(target, map, row, extra) {
         desc_multa: money('desc_multa'), desc_miscelanea: money('desc_miscelanea'), desc_mecanica: money('desc_mecanica'),
         desc_vale: money('desc_vale'), desc_ferramentas: money('desc_ferramentas'), desc_combustivel: money('desc_combustivel'),
         desc_fiscalizacao: money('desc_fiscalizacao'), total_descontos: money('total_descontos'), total_receber: money('total_receber'),
+        parcela_equipamento: parcela('parcela_equipamento'), parcela_ferramentas: parcela('parcela_ferramentas'),
+        parcela_multa: parcela('parcela_multa'), parcela_miscelanea: parcela('parcela_miscelanea'), parcela_mecanica: parcela('parcela_mecanica'),
+        parcela_vale: parcela('parcela_vale'), parcela_fiscalizacao: parcela('parcela_fiscalizacao'), parcela_combustivel: parcela('parcela_combustivel'),
       };
       return upsertRow(DB.folhaPagamento, DB_INDEX.folhaPagamento, tecnico ? `${tecnico}|${periodo}` : null, obj);
       break;
@@ -4774,6 +4800,8 @@ function gerarPeriodoFolha(inicio, fim) {
       qtd_ifi: ret.ifi, qtd_irr: ret.irr, ifi_pct: ifiPct, irr_pct: irrPct,
       desc_ifi: 0, desc_irr: 0, desc_equipamento: 0, desc_multa: 0, desc_miscelanea: 0, desc_mecanica: 0,
       desc_vale: 0, desc_ferramentas: 0, desc_combustivel: 0, desc_fiscalizacao: 0,
+      parcela_equipamento: '', parcela_ferramentas: '', parcela_multa: '', parcela_miscelanea: '',
+      parcela_mecanica: '', parcela_vale: '', parcela_fiscalizacao: '', parcela_combustivel: '',
       total_descontos: 0, total_receber: valorOrdens,
     };
   });
@@ -9470,6 +9498,18 @@ function renderFolhaPagamento() {
         toast('Salvo.', 'ok', 1500);
       });
     });
+    // "Parcela X" — texto livre, não mexe em nenhum total (só salva).
+    document.querySelectorAll('input.folha-edit-parcela').forEach(inp => {
+      inp.addEventListener('change', async () => {
+        const valor = inp.value.trim();
+        const { tecnico, periodo, campo } = inp.dataset;
+        inp.disabled = true;
+        const r = await salvarCampoFolha(tecnico, periodo, campo, valor);
+        inp.disabled = false;
+        if (!r.ok) { toast('Não consegui salvar: ' + ((r.error && r.error.message) || 'erro desconhecido'), 'erro'); return; }
+        toast('Salvo.', 'ok', 1500);
+      });
+    });
     // Descontos em R$: formata a cada tecla digitada (técnica de "dígitos viram
     // centavos", igual campo de valor de banco/e-commerce — não dá pra digitar
     // "R$ 1.234,56" livremente num input, o navegador cortaria as letras).
@@ -9581,6 +9621,11 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
       data-campo="${campo}" ${attrsChave(r)} data-centavos="${centavos}"
       value="${formatCurrency(centavos / 100)}" style="width:110px;text-align:right">`;
   };
+  // "Em qual parcela" (texto livre "2/3", "1/1") — não é dinheiro nem
+  // quantidade, só um texto curto. Mesmo grupo de permissão do desconto de
+  // material (é o mesmo assunto: o que o técnico está pagando aos poucos).
+  const inputParcela = (r, campo, valor) => `<input type="text" class="folha-edit folha-edit-parcela"
+    data-campo="${campo}" ${attrsChave(r)} value="${esc(valor || '')}" placeholder="-" style="width:52px;text-align:center">`;
   const cols = [
     ['Técnico', r=>r.tecnico],
     ['Total Ordens', r=>r.total_ordens],
@@ -9614,6 +9659,16 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     ['Desc. Ferramentas', r => podeMaterial ? inputMoeda(r, 'desc_ferramentas', r.desc_ferramentas) : money(r.desc_ferramentas)],
     ['Desc. Combustível', r => podeMaterial ? inputMoeda(r, 'desc_combustivel', r.desc_combustivel) : money(r.desc_combustivel)],
     ['Desc. Fiscalização', r => podeMaterial ? inputMoeda(r, 'desc_fiscalizacao', r.desc_fiscalizacao) : money(r.desc_fiscalizacao)],
+    // Bloco "Parcela X" — mesma ordem e mesmo lugar da planilha do cliente
+    // (logo depois dos descontos, antes do TOTAL DOS DESCONTOS).
+    ['Parcela Equip.', r => podeMaterial ? inputParcela(r, 'parcela_equipamento', r.parcela_equipamento) : (r.parcela_equipamento || '-')],
+    ['Parcela Ferramentas', r => podeMaterial ? inputParcela(r, 'parcela_ferramentas', r.parcela_ferramentas) : (r.parcela_ferramentas || '-')],
+    ['Parcela Multa', r => podeMaterial ? inputParcela(r, 'parcela_multa', r.parcela_multa) : (r.parcela_multa || '-')],
+    ['Parcela Miscelânea', r => podeMaterial ? inputParcela(r, 'parcela_miscelanea', r.parcela_miscelanea) : (r.parcela_miscelanea || '-')],
+    ['Parcela Mecânica', r => podeMaterial ? inputParcela(r, 'parcela_mecanica', r.parcela_mecanica) : (r.parcela_mecanica || '-')],
+    ['Parcela Vale', r => podeMaterial ? inputParcela(r, 'parcela_vale', r.parcela_vale) : (r.parcela_vale || '-')],
+    ['Parcela Fiscalização', r => podeMaterial ? inputParcela(r, 'parcela_fiscalizacao', r.parcela_fiscalizacao) : (r.parcela_fiscalizacao || '-')],
+    ['Parcela Combustível', r => podeMaterial ? inputParcela(r, 'parcela_combustivel', r.parcela_combustivel) : (r.parcela_combustivel || '-')],
     ['TOTAL DESCONTOS', r=>`<span class="folha-total-descontos" style="color:var(--danger);font-weight:700">${money(r.total_descontos)}</span>`],
     ['TOTAL A RECEBER', r=>`<span class="folha-total-receber" style="color:var(--success);font-weight:700">${money(r.total_receber)}</span>`],
   ];
