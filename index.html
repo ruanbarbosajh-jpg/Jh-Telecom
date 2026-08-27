@@ -602,6 +602,16 @@
   .trend-tooltip-data { font-weight: 700; color: var(--text-primary); margin-bottom: 5px; font-size: 11.5px; }
   .trend-tooltip-item { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); margin-top: 3px; white-space: nowrap; }
   .trend-tooltip-item b { margin-left: auto; padding-left: 10px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+  /* "mapa" de concentração de volume por bairro (blocos, não geográfico) */
+  .treemap-wrap { position: relative; width: 100%; border-radius: var(--r-sm); overflow: hidden; }
+  .treemap-bloco { position: absolute; box-sizing: border-box; border: 1.5px solid var(--card-bg);
+    padding: 6px 8px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end;
+    transition: filter .12s ease; cursor: default; }
+  .treemap-bloco:hover { filter: brightness(1.12); }
+  .treemap-label { color: #fff; font-size: 12px; font-weight: 700; text-shadow: 0 1px 2px rgba(0,0,0,.5);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .treemap-valor { color: #fff; font-size: 15px; font-weight: 800; text-shadow: 0 1px 2px rgba(0,0,0,.5); }
   .grouped-bars-svg rect { transition: opacity .15s ease; cursor: pointer; }
   .grouped-bars-svg rect:hover { opacity: .75; }
 
@@ -2645,6 +2655,21 @@ function isConcluido(status) {
   const s = (status || '').toLowerCase();
   return s.includes('conclu') && !s.includes('nao') && !s.includes('não') && !s.includes('cancel');
 }
+// A planilha não tem coluna de bairro — vem embutido no Endereço, no formato
+// "TIPO NOME DA RUA, NÚMERO BAIRRO, CIDADE - UF" (às vezes com vírgulas extras
+// dentro do nome da rua/complemento, tipo "RUA X, QD 12, LOTE 3, 45 BAIRRO,
+// CIDADE - UF"). O penúltimo pedaço separado por vírgula é SEMPRE "número +
+// bairro" — testado contra as ~72.800 linhas reais da BASE PRODUÇÃO de
+// 27/08/2026 e só 1 não deu pra extrair (0,001%). Tira o primeiro "token"
+// (o número da casa) e o resto é o bairro.
+function extrairBairro(endereco) {
+  if (!endereco) return '';
+  const partes = String(endereco).split(',');
+  if (partes.length < 2) return '';
+  const meio = partes[partes.length - 2].trim();
+  const espaco = meio.indexOf(' ');
+  return espaco === -1 ? '' : meio.slice(espaco + 1).trim();
+}
 function overlaps(aStart, aEnd, bStart, bEnd) {
   if (!aStart || !aEnd) return true;
   return aStart <= bEnd && aEnd >= bStart;
@@ -3309,6 +3334,55 @@ function trendChart(elId, series, opts = {}) {
     svgEl.addEventListener('mouseleave', () => { tooltipEl.style.display = 'none'; hoverLine.style.display = 'none'; });
   }
 }
+// Divide um retângulo em blocos com ÁREA proporcional ao valor de cada item
+// ("slice-and-dice" — corta ao meio por valor acumulado, alternando o sentido
+// do corte a cada nível). Não é a geometria mais "quadrada" que existe
+// (squarified treemap é mais sofisticado), mas é simples de auditar — a soma
+// das áreas bate exata com o total por construção — e o suficiente pra
+// mostrar concentração de volume sem precisar de biblioteca nenhuma.
+function fatiarEmBlocos(itens, x, y, w, h, horizontal) {
+  if (!itens.length) return [];
+  if (itens.length === 1) return [{ ...itens[0], x, y, w, h }];
+  const total = itens.reduce((a, i) => a + i.value, 0);
+  if (!total) return [];
+  let acc = 0, corte = 1;
+  for (let i = 0; i < itens.length; i++) {
+    acc += itens[i].value;
+    if (acc >= total / 2) { corte = i + 1; break; }
+  }
+  corte = Math.max(1, Math.min(itens.length - 1, corte));
+  const esquerda = itens.slice(0, corte), direita = itens.slice(corte);
+  const fracEsquerda = esquerda.reduce((a, i) => a + i.value, 0) / total;
+  if (horizontal) {
+    const wEsq = w * fracEsquerda;
+    return [...fatiarEmBlocos(esquerda, x, y, wEsq, h, false), ...fatiarEmBlocos(direita, x + wEsq, y, w - wEsq, h, false)];
+  }
+  const hCima = h * fracEsquerda;
+  return [...fatiarEmBlocos(esquerda, x, y, w, hCima, true), ...fatiarEmBlocos(direita, x, y + hCima, w, h - hCima, true)];
+}
+// "Mapa" de concentração de volume (NÃO é mapa geográfico — o sistema não tem
+// latitude/longitude nem bairro como coluna própria, só o texto do Endereço,
+// ver extrairBairro): cada bloco é um bairro, do MAIOR volume pro menor,
+// tamanho proporcional ao total de ordens. opts.corPorItem(item, i) decide a
+// cor de cada bloco (ex.: por cidade).
+function treemapChart(elId, items, opts = {}) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const validos = items.filter(i => i.value > 0).sort((a, b) => b.value - a.value);
+  if (!validos.length) { el.innerHTML = '<div class="empty">Sem dados.</div>'; return; }
+  const W = 1000, H = 460;
+  const blocos = fatiarEmBlocos(validos, 0, 0, W, H, true);
+  const corPorItem = opts.corPorItem || ((item, i) => corCategorica(i));
+  el.innerHTML = `<div class="treemap-wrap" style="aspect-ratio:${W}/${H}">
+    ${blocos.map((b, i) => {
+      const pctW = (b.w / W) * 100, pctH = (b.h / H) * 100, pctX = (b.x / W) * 100, pctY = (b.y / H) * 100;
+      const pequeno = pctW < 6 || pctH < 8;
+      return `<div class="treemap-bloco" style="left:${pctX}%;top:${pctY}%;width:${pctW}%;height:${pctH}%;background:${corPorItem(b, i)}" title="${esc(b.label)} — ${b.display !== undefined ? b.display : b.value}">
+        ${pequeno ? '' : `<div class="treemap-label">${esc(b.label)}</div><div class="treemap-valor">${b.display !== undefined ? b.display : b.value}</div>`}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
 // Diagnóstico em texto corrido da tela de Produção. NÃO calcula regra de
 // negócio nova: recebe prontos os mesmos números que os cards e os gráficos já
 // mostram, e só escreve isso em português. A ideia é que quem abre a tela leia
@@ -3493,6 +3567,11 @@ const SCHEMAS = {
     // 2 atendimentos diferentes no mesmo dia (cliente com 2 pontos de internet,
     // por exemplo) — não vira Date, só compara igual/diferente (ver upsertRowByDate)
     inicio: ['inicio','início'],
+    // endereço completo ("RUA X, 123 BAIRRO, CIDADE - SP") — a planilha não tem
+    // uma coluna de bairro separada; o bairro é extraído daqui na hora de usar
+    // (ver extrairBairro), não fica pré-calculado, pra não precisar reimportar
+    // tudo de novo se a extração for ajustada no futuro.
+    endereco: ['endereco','endereço'],
   }},
   // aba "PRAZO REPARO DO DIA" (dentro de PRAZOS_ESCRITÓRIO.xlsx): já vem com o
   // cálculo de NO PRAZO/FORA DO PRAZO pronto (coluna ACOMP.) e a classificação
@@ -3680,6 +3759,7 @@ function insertRow(target, map, row, extra) {
         tipo_atividade: s('tipo_atividade'), os, contrato: s('contrato'), repetida: s('repetida'),
         ofensor: s('ofensor'), tipo_ordem: s('tipo_ordem'), data_ordem_anterior: d('data_ordem_anterior'),
         dias: s('dias'), ifi_irr: s('ifi_irr'), motivo: s('motivo'), nome: s('nome'), inicio: s('inicio'),
+        endereco: s('endereco'),
       };
       // a MESMA ordem de serviço aparece em REPAROS OK, BASE_PRODUÇÃO e BASE GERAL
       // CONCLUIDO ao mesmo tempo — sem deduplicar por OS, o total de ordens dobra
@@ -10064,13 +10144,63 @@ function renderDashboardVisual() {
     const evoNaoConcluidas = ct ? serieDoPeriodo(ct.caixas, naoConcluidos, p => p.data) : [];
     const evoCanceladas = ct ? serieDoPeriodo(ct.caixas, cancelados, p => p.data) : [];
 
+    // ---- Cidades e bairros atendidos: onde se concentra o volume ----
+    // NÃO é mapa geográfico (o sistema não tem latitude/longitude nem bairro
+    // como coluna própria) — o bairro sai do texto do Endereço (extrairBairro).
+    // Linha sem Endereço (planilha antiga, importada antes do PASSO-9, ou de
+    // uma fonte que não tem essa coluna) cai em "Não informado", não some.
+    const statusDe = p => isConcluido(p.status) ? 'concluida' : (/cancel/i.test(p.status || '') ? 'cancelada' : 'naoConcluida');
+    const porCidadeMap = {}, porBairroMap = {};
+    prod.forEach(p => {
+      const st = statusDe(p);
+      const lc = porCidadeMap[p.cidade] || (porCidadeMap[p.cidade] = { cidade: p.cidade, concluida: 0, cancelada: 0, naoConcluida: 0, total: 0 });
+      lc[st]++; lc.total++;
+      const bairro = extrairBairro(p.endereco) || 'Não informado';
+      const chave = bairro + '|' + p.cidade;
+      const lb = porBairroMap[chave] || (porBairroMap[chave] = { bairro, cidade: p.cidade, concluida: 0, cancelada: 0, naoConcluida: 0, total: 0 });
+      lb[st]++; lb.total++;
+    });
+    const rankingCidades = Object.values(porCidadeMap).sort((a, b) => b.total - a.total);
+    const rankingBairros = Object.values(porBairroMap).sort((a, b) => b.total - a.total);
+    const semEndereco = prod.filter(p => !p.endereco).length;
+    const LIMITE_TREEMAP = 24;
+    const bairrosTreemap = rankingBairros.slice(0, LIMITE_TREEMAP);
+    const restoTreemap = rankingBairros.slice(LIMITE_TREEMAP).reduce((a, b) => a + b.total, 0);
+    const corPorCidade = cidade => corCategorica(Math.max(0, rankingCidades.findIndex(c => c.cidade === cidade)));
+
     body.innerHTML = `
       <div class="panel" style="margin-bottom:1.5rem">
         <h3>Evolução — ${formatDate(s)} a ${formatDate(e)} ${ct ? `<span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(por ${ct.granularidade})</span>` : ''}</h3>
         ${!ct || !(evoConcluidas.length || evoNaoConcluidas.length || evoCanceladas.length) ? '<div class="empty">Sem ordens no período.</div>' : '<div id="dv-evolucao"></div>'}
       </div>
 
-      <div class="panel"><h3>Distribuição por Tipo de Serviço</h3><div id="dv-tipo"></div></div>
+      <div class="panel" style="margin-bottom:1.5rem"><h3>Distribuição por Tipo de Serviço</h3><div id="dv-tipo"></div></div>
+
+      <div class="section-heading">Cidades e Bairros Atendidos</div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
+        Não é um mapa geográfico (o sistema não guarda latitude/longitude) — o bairro vem do texto do campo Endereço da planilha de produção.
+        ${semEndereco ? `${semEndereco} de ${prod.length} ordem(ns) do período não têm Endereço importado e entram em "Não informado".` : ''}
+      </p>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+        <th>Cidade</th><th>Concluídas</th><th>Canceladas</th><th>Não concluídas</th><th>Total</th><th>% do total</th>
+      </tr></thead><tbody>
+        ${rankingCidades.map(c => `<tr><td class="cat-cell">${esc(c.cidade)}</td><td style="color:var(--success)">${c.concluida}</td><td style="color:var(--danger)">${c.cancelada}</td><td style="color:var(--text-secondary)">${c.naoConcluida}</td><td style="font-weight:700">${c.total}</td><td>${prod.length ? ((c.total / prod.length) * 100).toFixed(1) : '0.0'}%</td></tr>`).join('')}
+        <tr class="total-row"><td class="cat-cell" style="color:var(--accent)">TOTAL</td><td style="color:var(--accent)">${concluidos.length}</td><td style="color:var(--accent)">${cancelados.length}</td><td style="color:var(--accent)">${naoConcluidos.length}</td><td style="color:var(--accent)">${prod.length}</td><td style="color:var(--accent)">100%</td></tr>
+      </tbody></table></div>
+
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Concentração de Volume por Bairro <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(bloco maior = mais ordens no período; cor = cidade)</span></h3>
+        ${!rankingBairros.length ? '<div class="empty">Sem ordens no período.</div>' : '<div id="dv-bairros-mapa"></div>'}
+      </div>
+
+      ${rankingBairros.length ? `
+      <div class="section-heading">Bairros — Ranking Detalhado <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(bairro mais atendido: ${esc(rankingBairros[0].bairro)}, ${esc(rankingBairros[0].cidade)} — ${rankingBairros[0].total} ordem(ns))</span></div>
+      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:520px;overflow:auto"><table class="data-table"><thead><tr>
+        <th>#</th><th>Bairro</th><th>Cidade</th><th>Concluídas</th><th>Canceladas</th><th>Não concluídas</th><th>Total</th>
+      </tr></thead><tbody>
+        ${rankingBairros.map((b, i) => `<tr><td style="color:var(--text-muted)">${i + 1}</td><td class="cat-cell">${esc(b.bairro)}</td><td>${esc(b.cidade)}</td><td style="color:var(--success)">${b.concluida}</td><td style="color:var(--danger)">${b.cancelada}</td><td style="color:var(--text-secondary)">${b.naoConcluida}</td><td style="font-weight:700">${b.total}</td></tr>`).join('')}
+      </tbody></table></div>` : ''}
+
       <div id="pdf-export-area"></div>
     `;
 
@@ -10084,9 +10214,16 @@ function renderDashboardVisual() {
       { label: 'Mud. Endereço', value: qtdME }, { label: 'Mud. Cômodo', value: qtdMC },
       { label: 'Upgrade/Downgrade', value: qtdUpgrade },
     ].filter(x => x.value > 0).map((x, i) => ({ ...x, color: corCategorica(i) })), { centroLabel: 'Serviços' });
+    if (rankingBairros.length) {
+      const itensTreemap = bairrosTreemap.map(b => ({ label: b.bairro, value: b.total, display: `${b.total} · ${b.cidade}`, cidade: b.cidade }));
+      if (restoTreemap > 0) itensTreemap.push({ label: `Outros (${rankingBairros.length - LIMITE_TREEMAP} bairros)`, value: restoTreemap, cidade: null });
+      treemapChart('dv-bairros-mapa', itensTreemap, { corPorItem: b => b.cidade ? corPorCidade(b.cidade) : '#94a3b8' });
+    }
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'status', label: 'Produção por status' },
+      { id: 'cidades', label: 'Cidades atendidas' },
+      { id: 'bairros', label: 'Bairros — ranking detalhado' },
     ]);
     wirePdfExportPanel('Dashboard — ' + formatDate(s) + ' a ' + formatDate(e), {
       status: () => secaoTabela('Produção por Status', [
@@ -10099,6 +10236,16 @@ function renderDashboardVisual() {
       ], [{ header: 'Indicador', get: r => r.label }, { header: 'Valor', get: r => r.value }], {
         totalRow: ['TOTAL', prod.length],
       }),
+      cidades: () => secaoTabela('Cidades Atendidas', rankingCidades, [
+        { header: 'Cidade', get: r => r.cidade }, { header: 'Concluídas', get: r => r.concluida },
+        { header: 'Canceladas', get: r => r.cancelada }, { header: 'Não concluídas', get: r => r.naoConcluida },
+        { header: 'Total', get: r => r.total },
+      ], { totalRow: ['TOTAL', concluidos.length, cancelados.length, naoConcluidos.length, prod.length] }),
+      bairros: () => secaoTabela('Bairros — Ranking Detalhado', rankingBairros, [
+        { header: 'Bairro', get: r => r.bairro }, { header: 'Cidade', get: r => r.cidade },
+        { header: 'Concluídas', get: r => r.concluida }, { header: 'Canceladas', get: r => r.cancelada },
+        { header: 'Não concluídas', get: r => r.naoConcluida }, { header: 'Total', get: r => r.total },
+      ]),
     });
   }
 }
