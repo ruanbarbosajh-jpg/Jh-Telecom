@@ -8,6 +8,13 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<!-- Leaflet: mapa de verdade (com base cartográfica) no painel "Cidades e Bairros
+     Atendidos" do Dashboard — pedido explícito do cliente ("quero um mapa, igual a
+     imagem", vendo um bubble map). Sem isso só dava pra mostrar concentração por
+     blocos (treemap), não sobre um mapa de verdade. Igual às outras libs do
+     sistema: CDN direto, sem build/bundler. -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
   /* ============================================================
      DESIGN TOKENS
@@ -603,15 +610,16 @@
   .trend-tooltip-item { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); margin-top: 3px; white-space: nowrap; }
   .trend-tooltip-item b { margin-left: auto; padding-left: 10px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 
-  /* "mapa" de concentração de volume por bairro (blocos, não geográfico) */
-  .treemap-wrap { position: relative; width: 100%; border-radius: var(--r-sm); overflow: hidden; }
-  .treemap-bloco { position: absolute; box-sizing: border-box; border: 1.5px solid var(--card-bg);
-    padding: 6px 8px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end;
-    transition: filter .12s ease; cursor: default; }
-  .treemap-bloco:hover { filter: brightness(1.12); }
-  .treemap-label { color: #fff; font-size: 12px; font-weight: 700; text-shadow: 0 1px 2px rgba(0,0,0,.5);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .treemap-valor { color: #fff; font-size: 15px; font-weight: 800; text-shadow: 0 1px 2px rgba(0,0,0,.5); }
+  /* mapa de cidades (Leaflet) — altura fixa (o Leaflet precisa de uma altura
+     explícita no container, não calcula sozinho a partir do conteúdo) */
+  .mapa-cidades { height: 440px; border-radius: var(--r-sm); overflow: hidden; }
+  /* tema escuro: inverter as cores da base do mapa (truque padrão pra "dark
+     mode" em cima de tiles do OpenStreetMap, que só vêm no claro) — os
+     círculos das cidades não entram nesse filtro, só o painel de tiles. */
+  :root:not([data-theme="light"]) .mapa-cidades .leaflet-tile-pane { filter: invert(92%) hue-rotate(180deg) brightness(0.95) contrast(0.9); }
+  :root:not([data-theme="light"]) .mapa-cidades .leaflet-control-attribution { background: rgba(19,28,48,0.75); color: var(--text-secondary); }
+  :root:not([data-theme="light"]) .mapa-cidades .leaflet-control-attribution a { color: var(--text-secondary); }
+  .leaflet-tooltip { font-size: 12.5px; line-height: 1.5; }
   .grouped-bars-svg rect { transition: opacity .15s ease; cursor: pointer; }
   .grouped-bars-svg rect:hover { opacity: .75; }
 
@@ -3334,54 +3342,51 @@ function trendChart(elId, series, opts = {}) {
     svgEl.addEventListener('mouseleave', () => { tooltipEl.style.display = 'none'; hoverLine.style.display = 'none'; });
   }
 }
-// Divide um retângulo em blocos com ÁREA proporcional ao valor de cada item
-// ("slice-and-dice" — corta ao meio por valor acumulado, alternando o sentido
-// do corte a cada nível). Não é a geometria mais "quadrada" que existe
-// (squarified treemap é mais sofisticado), mas é simples de auditar — a soma
-// das áreas bate exata com o total por construção — e o suficiente pra
-// mostrar concentração de volume sem precisar de biblioteca nenhuma.
-function fatiarEmBlocos(itens, x, y, w, h, horizontal) {
-  if (!itens.length) return [];
-  if (itens.length === 1) return [{ ...itens[0], x, y, w, h }];
-  const total = itens.reduce((a, i) => a + i.value, 0);
-  if (!total) return [];
-  let acc = 0, corte = 1;
-  for (let i = 0; i < itens.length; i++) {
-    acc += itens[i].value;
-    if (acc >= total / 2) { corte = i + 1; break; }
-  }
-  corte = Math.max(1, Math.min(itens.length - 1, corte));
-  const esquerda = itens.slice(0, corte), direita = itens.slice(corte);
-  const fracEsquerda = esquerda.reduce((a, i) => a + i.value, 0) / total;
-  if (horizontal) {
-    const wEsq = w * fracEsquerda;
-    return [...fatiarEmBlocos(esquerda, x, y, wEsq, h, false), ...fatiarEmBlocos(direita, x + wEsq, y, w - wEsq, h, false)];
-  }
-  const hCima = h * fracEsquerda;
-  return [...fatiarEmBlocos(esquerda, x, y, w, hCima, true), ...fatiarEmBlocos(direita, x, y + hCima, w, h - hCima, true)];
-}
-// "Mapa" de concentração de volume (NÃO é mapa geográfico — o sistema não tem
-// latitude/longitude nem bairro como coluna própria, só o texto do Endereço,
-// ver extrairBairro): cada bloco é um bairro, do MAIOR volume pro menor,
-// tamanho proporcional ao total de ordens. opts.corPorItem(item, i) decide a
-// cor de cada bloco (ex.: por cidade).
-function treemapChart(elId, items, opts = {}) {
+// Coordenadas do CENTRO de cada cidade do contrato (fonte: IBGE/IGC, conferido
+// por busca em 27/08/2026) — o sistema não geocodifica bairro (só tem o nome
+// em texto solto dentro do Endereço, ver extrairBairro), então o mapa de
+// verdade só dá pra fazer no nível de CIDADE; o detalhe por bairro continua na
+// tabela de ranking, que já tem o bairro mais atendido no título.
+const COORDENADAS_CIDADES = {
+  'SANTOS': [-23.959722, -46.332222],
+  'SAO VICENTE': [-23.958333, -46.387500],
+  'GUARUJA': [-23.987222, -46.230278],
+  'CUBATAO': [-23.891667, -46.425000],
+  'PRAIA GRANDE': [-24.009722, -46.412500],
+  'BERTIOGA': [-23.846389, -46.139167],
+};
+// Mapa de verdade (Leaflet + base cartográfica OpenStreetMap) com um círculo
+// por cidade — raio proporcional à RAIZ do total de ordens (então a ÁREA do
+// círculo é proporcional ao volume, igual à convenção de bubble map da
+// referência que o cliente mandou), cor por % de conclusão. Se a biblioteca
+// não carregar (CDN bloqueada / sem internet — mesma situação do Supabase),
+// cai num aviso discreto em vez de quebrar a tela.
+function renderMapaCidades(elId, rankingCidades) {
   const el = document.getElementById(elId);
   if (!el) return;
-  const validos = items.filter(i => i.value > 0).sort((a, b) => b.value - a.value);
-  if (!validos.length) { el.innerHTML = '<div class="empty">Sem dados.</div>'; return; }
-  const W = 1000, H = 460;
-  const blocos = fatiarEmBlocos(validos, 0, 0, W, H, true);
-  const corPorItem = opts.corPorItem || ((item, i) => corCategorica(i));
-  el.innerHTML = `<div class="treemap-wrap" style="aspect-ratio:${W}/${H}">
-    ${blocos.map((b, i) => {
-      const pctW = (b.w / W) * 100, pctH = (b.h / H) * 100, pctX = (b.x / W) * 100, pctY = (b.y / H) * 100;
-      const pequeno = pctW < 6 || pctH < 8;
-      return `<div class="treemap-bloco" style="left:${pctX}%;top:${pctY}%;width:${pctW}%;height:${pctH}%;background:${corPorItem(b, i)}" title="${esc(b.label)} — ${b.display !== undefined ? b.display : b.value}">
-        ${pequeno ? '' : `<div class="treemap-label">${esc(b.label)}</div><div class="treemap-valor">${b.display !== undefined ? b.display : b.value}</div>`}
-      </div>`;
-    }).join('')}
-  </div>`;
+  if (el._leafletMap) { el._leafletMap.remove(); el._leafletMap = null; }
+  if (typeof L === 'undefined') {
+    el.innerHTML = '<div class="empty">Não foi possível carregar o mapa (biblioteca bloqueada ou sem internet) — o ranking de bairros abaixo continua disponível.</div>';
+    return;
+  }
+  const comCoord = rankingCidades.filter(c => COORDENADAS_CIDADES[String(c.cidade || '').toUpperCase()]);
+  if (!comCoord.length) { el.innerHTML = '<div class="empty">Nenhuma cidade do filtro tem coordenada conhecida.</div>'; return; }
+  el.innerHTML = '';
+  const map = L.map(el, { scrollWheelZoom: false }).setView([-23.94, -46.30], 11);
+  el._leafletMap = map;
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 18,
+  }).addTo(map);
+  const maxTotal = Math.max(...comCoord.map(c => c.total), 1);
+  comCoord.forEach(c => {
+    const coord = COORDENADAS_CIDADES[String(c.cidade).toUpperCase()];
+    const pctConcluido = c.total ? (c.concluida / c.total) * 100 : 0;
+    const cor = pctConcluido >= 85 ? '#22c55e' : pctConcluido >= 70 ? '#eab308' : '#ef4444';
+    const raio = 10 + Math.sqrt(c.total / maxTotal) * 32; // área ∝ total
+    L.circleMarker(coord, { radius: raio, color: cor, weight: 2, fillColor: cor, fillOpacity: 0.45 })
+      .addTo(map)
+      .bindTooltip(`<b>${esc(c.cidade)}</b><br>Concluídas: ${c.concluida}<br>Canceladas: ${c.cancelada}<br>Não concluídas: ${c.naoConcluida}<br><b>Total: ${c.total}</b>`, { direction: 'top' });
+  });
 }
 // Diagnóstico em texto corrido da tela de Produção. NÃO calcula regra de
 // negócio nova: recebe prontos os mesmos números que os cards e os gráficos já
@@ -10163,10 +10168,6 @@ function renderDashboardVisual() {
     const rankingCidades = Object.values(porCidadeMap).sort((a, b) => b.total - a.total);
     const rankingBairros = Object.values(porBairroMap).sort((a, b) => b.total - a.total);
     const semEndereco = prod.filter(p => !p.endereco).length;
-    const LIMITE_TREEMAP = 24;
-    const bairrosTreemap = rankingBairros.slice(0, LIMITE_TREEMAP);
-    const restoTreemap = rankingBairros.slice(LIMITE_TREEMAP).reduce((a, b) => a + b.total, 0);
-    const corPorCidade = cidade => corCategorica(Math.max(0, rankingCidades.findIndex(c => c.cidade === cidade)));
 
     body.innerHTML = `
       <div class="panel" style="margin-bottom:1.5rem">
@@ -10178,8 +10179,9 @@ function renderDashboardVisual() {
 
       <div class="section-heading">Cidades e Bairros Atendidos</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
-        Não é um mapa geográfico (o sistema não guarda latitude/longitude) — o bairro vem do texto do campo Endereço da planilha de produção.
-        ${semEndereco ? `${semEndereco} de ${prod.length} ordem(ns) do período não têm Endereço importado e entram em "Não informado".` : ''}
+        O bairro vem do texto do campo Endereço da planilha de produção (o sistema não tem bairro como coluna própria nem latitude/longitude por bairro) —
+        por isso o mapa mostra o nível de CIDADE; o detalhe por bairro fica no ranking logo abaixo dele.
+        ${semEndereco ? ` ${semEndereco} de ${prod.length} ordem(ns) do período não têm Endereço importado e entram em "Não informado".` : ''}
       </p>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
         <th>Cidade</th><th>Concluídas</th><th>Canceladas</th><th>Não concluídas</th><th>Total</th><th>% do total</th>
@@ -10189,8 +10191,8 @@ function renderDashboardVisual() {
       </tbody></table></div>
 
       <div class="panel" style="margin-bottom:1.5rem">
-        <h3>Concentração de Volume por Bairro <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(bloco maior = mais ordens no período; cor = cidade)</span></h3>
-        ${!rankingBairros.length ? '<div class="empty">Sem ordens no período.</div>' : '<div id="dv-bairros-mapa"></div>'}
+        <h3>Mapa — Volume por Cidade <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(círculo maior = mais ordens; cor = % concluído — verde ≥85%, amarelo ≥70%, vermelho abaixo)</span></h3>
+        ${!rankingCidades.length ? '<div class="empty">Sem ordens no período.</div>' : '<div id="dv-mapa" class="mapa-cidades"></div>'}
       </div>
 
       ${rankingBairros.length ? `
@@ -10214,11 +10216,7 @@ function renderDashboardVisual() {
       { label: 'Mud. Endereço', value: qtdME }, { label: 'Mud. Cômodo', value: qtdMC },
       { label: 'Upgrade/Downgrade', value: qtdUpgrade },
     ].filter(x => x.value > 0).map((x, i) => ({ ...x, color: corCategorica(i) })), { centroLabel: 'Serviços' });
-    if (rankingBairros.length) {
-      const itensTreemap = bairrosTreemap.map(b => ({ label: b.bairro, value: b.total, display: `${b.total} · ${b.cidade}`, cidade: b.cidade }));
-      if (restoTreemap > 0) itensTreemap.push({ label: `Outros (${rankingBairros.length - LIMITE_TREEMAP} bairros)`, value: restoTreemap, cidade: null });
-      treemapChart('dv-bairros-mapa', itensTreemap, { corPorItem: b => b.cidade ? corPorCidade(b.cidade) : '#94a3b8' });
-    }
+    if (rankingCidades.length) renderMapaCidades('dv-mapa', rankingCidades);
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'status', label: 'Produção por status' },
