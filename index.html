@@ -537,6 +537,22 @@
   .gauge-arc-meta-label { font-size: 9px; font-weight: 700; }
   .gauge-target { font-size: 12px; color: var(--text-primary); margin-top: 2px; }
 
+  /* Dashboard: pedido do cliente foi "escurecer mais, tema azul e preto" com
+     uma foto de referência de painel SaaS (fundo quase preto, cartão com
+     leve gradiente, linha do gráfico com brilho azul). Fica só nesta página
+     (a classe .dv-theme só existe no wrapper do renderDashboardVisual) e só
+     no tema escuro — mexer no :root afetaria as outras 24 telas já
+     validadas, e no tema claro esse visual "preto" não faz sentido. */
+  :root:not([data-theme="light"]) .dv-theme .panel,
+  :root:not([data-theme="light"]) .dv-theme .metric-card {
+    background: linear-gradient(180deg, #0d1424 0%, #060910 100%);
+    border-color: rgba(79,127,255,0.18);
+    box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 16px 32px rgba(0,0,0,.4);
+  }
+  :root:not([data-theme="light"]) .dv-theme .metric-card:hover { box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 16px 32px rgba(0,0,0,.4), 0 0 0 1px rgba(79,127,255,.35); }
+  :root:not([data-theme="light"]) .dv-theme .section-heading { color: var(--text-secondary); }
+  :root:not([data-theme="light"]) .dv-theme #dv-evolucao .trend-chart-svg path[stroke="var(--accent)"] { filter: drop-shadow(0 0 5px rgba(79,127,255,.65)); }
+
   /* gráficos em HTML/CSS puro (sem biblioteca externa) */
   .bars-chart { display: flex; flex-direction: column; gap: 16px; }
   .bars-chart.fill { width: 100%; height: 100%; justify-content: space-evenly; }
@@ -4347,8 +4363,8 @@ function gaugePanel(title, valuePct, target, opts = {}) {
         <text x="${lx}" y="${ly}" text-anchor="${metaAnchor}" style="fill:${corMeta}" class="gauge-arc-meta-label">META ${target.toFixed(1)}%</text>` : ''}
         <text x="${CX-R}" y="${CY+22}" text-anchor="middle" class="gauge-arc-tick">0%</text>
         <text x="${CX+R}" y="${CY+22}" text-anchor="middle" class="gauge-arc-tick">${max.toFixed(0)}%</text>
-        <text x="${CX}" y="${CY+26}" text-anchor="middle" class="gauge-arc-atual-label">ATUAL</text>
-        <text x="${CX}" y="${CY+42}" text-anchor="middle" class="gauge-arc-value">${valuePct.toFixed(decimals)}%</text>
+        <text x="${CX}" y="${CY-6}" text-anchor="middle" class="gauge-arc-atual-label">ATUAL</text>
+        <text x="${CX}" y="${CY+38}" text-anchor="middle" class="gauge-arc-value">${valuePct.toFixed(decimals)}%</text>
       </svg>
       ${target ? `<div class="gauge-target">Meta: ${lowerIsBetter?'até ':''}${target.toFixed(2)}%</div>` : ''}
     </div>
@@ -9992,6 +10008,19 @@ function renderDashboardVisual() {
   document.getElementById('f-apply').addEventListener('click', load);
   load();
 
+  // Volta N dias antes de uma data ISO (meio-dia evita o problema do horário
+  // de verão jogar a data um dia pra trás) — mesma técnica de caixasDeTempo.
+  function isoMenosDias(iso, dias) {
+    const d = new Date(iso + 'T12:00:00');
+    d.setDate(d.getDate() - dias);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  // Variação percentual vs. um valor anterior — undefined quando não dá pra
+  // comparar (período anterior sem nenhuma ordem), pra não mostrar Infinity.
+  function variacaoPct(atual, anterior) {
+    return anterior ? { pct: ((atual - anterior) / anterior) * 100, rotulo: 'vs. mês anterior' } : undefined;
+  }
+
   function load() {
     const s = document.getElementById('f-start').value, e = document.getElementById('f-end').value;
     refreshCityField('dv-cidades', DB.producao.filter(p => inRange(p.data, s, e)), { label: 'Cidades' });
@@ -10005,6 +10034,13 @@ function renderDashboardVisual() {
     const qtdAtivacao = contaTipo(/ativa[cç][aã]o/i), qtdReparo = contaTipo(/reparo/i),
           qtdME = contaTipo(/mudan[cç]a de endere[cç]o/i), qtdMC = contaTipo(/mudan[cç]a de c[oô]modo/i),
           qtdUpgrade = contaTipo(/upgrade|downgrade/i);
+
+    // ---- Mesmo recorte, período imediatamente anterior (mesma duração em
+    // dias) — só pra calcular a variação dos cards, não aparece em mais nada ----
+    const duracaoDias = diasEntre(e, s) + 1;
+    const sAnt = isoMenosDias(s, duracaoDias), eAnt = isoMenosDias(s, 1);
+    const prodConcluidaAnt = DB.producao.filter(p => inRange(p.data, sAnt, eAnt) && cidades.includes(p.cidade) && isConcluido(p.status));
+    const contaTipoAnt = re => prodConcluidaAnt.filter(p => re.test(p.tipo_atividade || '')).length;
 
     // ---- IFI / IRR — mesma regra da tela Ofensor ----
     const bases = basesIfiIrr(prod);
@@ -10023,9 +10059,15 @@ function renderDashboardVisual() {
     const dentro36 = prazoAtiv.filter(r => classifyBucketAtivacao(r.status_prazo, r.aging) === 'ate36').length;
     const pctPrazoAtiv = prazoAtiv.length ? (dentro36 / prazoAtiv.length) * 100 : 0;
 
-    // ---- Evolução da produção concluída no período (caixas adaptativas: dia/semana/mês) ----
+    // ---- Evolução no período por status (caixas adaptativas: dia/semana/mês) —
+    // mesma separação de status usada no gráfico "por Status" da Produção ----
+    const concluidos = prod.filter(p => isConcluido(p.status));
+    const cancelados = prod.filter(p => /cancel/i.test(p.status || ''));
+    const naoConcluidos = prod.filter(p => !isConcluido(p.status) && !/cancel/i.test(p.status || ''));
     const ct = caixasDeTempo(s, e);
-    const evoConcluidas = ct ? serieDoPeriodo(ct.caixas, prodConcluida, p => p.data) : [];
+    const evoConcluidas = ct ? serieDoPeriodo(ct.caixas, concluidos, p => p.data) : [];
+    const evoNaoConcluidas = ct ? serieDoPeriodo(ct.caixas, naoConcluidos, p => p.data) : [];
+    const evoCanceladas = ct ? serieDoPeriodo(ct.caixas, cancelados, p => p.data) : [];
 
     // ---- Técnicos que mais produziram no período ----
     const porTecMap = {};
@@ -10033,29 +10075,41 @@ function renderDashboardVisual() {
     const topTecnicos = Object.entries(porTecMap).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
 
     body.innerHTML = `
+      <div class="dv-theme">
       <div class="cards-grid wide">
-        ${metricCard('◆ Total Concluídas', prodConcluida.length, false, { accent: true })}
-        ${metricCard('🔌 Ativação', qtdAtivacao, false, { sub: prodConcluida.length ? ((qtdAtivacao/prodConcluida.length)*100).toFixed(1)+'% do total' : '' })}
-        ${metricCard('🔧 Reparo', qtdReparo, false, { sub: prodConcluida.length ? ((qtdReparo/prodConcluida.length)*100).toFixed(1)+'% do total' : '' })}
-        ${metricCard('📍 Mud. Endereço', qtdME)}
-        ${metricCard('🏠 Mud. Cômodo', qtdMC)}
-        ${metricCard('⇅ Upgrade/Downgrade', qtdUpgrade)}
+        ${metricCard('◆ Total Concluídas', prodConcluida.length, false, { accent: true, variacao: variacaoPct(prodConcluida.length, prodConcluidaAnt.length) })}
+        ${metricCard('🔌 Ativação', qtdAtivacao, false, { variacao: variacaoPct(qtdAtivacao, contaTipoAnt(/ativa[cç][aã]o/i)) })}
+        ${metricCard('🔧 Reparo', qtdReparo, false, { variacao: variacaoPct(qtdReparo, contaTipoAnt(/reparo/i)) })}
+        ${metricCard('📍 Mud. Endereço', qtdME, false, { variacao: variacaoPct(qtdME, contaTipoAnt(/mudan[cç]a de endere[cç]o/i)) })}
+        ${metricCard('🏠 Mud. Cômodo', qtdMC, false, { variacao: variacaoPct(qtdMC, contaTipoAnt(/mudan[cç]a de c[oô]modo/i)) })}
+        ${metricCard('⇅ Upgrade/Downgrade', qtdUpgrade, false, { variacao: variacaoPct(qtdUpgrade, contaTipoAnt(/upgrade|downgrade/i)) })}
+        ${ringStatCard('Prazo Reparo (24h)', pctPrazoReparo.toFixed(1) + '%', pctPrazoReparo, { color: pctPrazoReparo >= PRAZO_META ? 'var(--success)' : 'var(--danger)' })}
+        ${ringStatCard('Prazo Ativação (36h)', pctPrazoAtiv.toFixed(1) + '%', pctPrazoAtiv, { color: pctPrazoAtiv >= PRAZO_ATIVACAO_META ? 'var(--success)' : 'var(--danger)' })}
       </div>
 
-      <div class="panels-grid" style="grid-template-columns:2fr 1fr">
-        <div class="panel" style="margin-bottom:1.5rem">
-          <h3>Evolução da Produção Concluída ${ct ? `<span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(por ${ct.granularidade})</span>` : ''}</h3>
-          ${!evoConcluidas.length ? '<div class="empty">Sem ordens concluídas no período.</div>' : '<div id="dv-evolucao"></div>'}
-        </div>
-        <div class="panel" style="margin-bottom:1.5rem;display:flex;flex-direction:column;gap:10px;justify-content:center">
-          ${ringStatCard('Prazo Reparo (24h)', pctPrazoReparo.toFixed(1) + '%', pctPrazoReparo, { color: pctPrazoReparo >= PRAZO_META ? 'var(--success)' : 'var(--danger)' })}
-          ${ringStatCard('Prazo Ativação (36h)', pctPrazoAtiv.toFixed(1) + '%', pctPrazoAtiv, { color: pctPrazoAtiv >= PRAZO_ATIVACAO_META ? 'var(--success)' : 'var(--danger)' })}
-        </div>
-      </div>
-
+      <div class="section-heading">Qualidade & Prazo — cidades selecionadas</div>
       <div class="panels-grid">
-        ${gaugePanel('% IFI', pctIfi, 2.50, { lowerIsBetter: true, decimals: 2 })}
+        ${gaugePanel('% Prazo Reparo (24h)', pctPrazoReparo, PRAZO_META, { decimals: 2 })}
+        ${gaugePanel('% Prazo Ativação (36h)', pctPrazoAtiv, PRAZO_ATIVACAO_META, { decimals: 2 })}
+      </div>
+      <div class="panels-grid">
         ${gaugePanel('% IRR', pctIrr, 4.50, { lowerIsBetter: true, decimals: 2 })}
+        ${gaugePanel('% IFI', pctIfi, 2.50, { lowerIsBetter: true, decimals: 2 })}
+      </div>
+
+      <div class="section-heading">Evolução — ${formatDate(s)} a ${formatDate(e)}</div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Produção por Status ${ct ? `<span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(por ${ct.granularidade})</span>` : ''}</h3>
+        ${!ct ? '<div class="empty">Período inválido.</div>' : `
+        <div id="dv-evolucao"></div>
+        <div class="table-wrap" style="margin-top:14px"><table class="data-table"><thead><tr>
+          <th>Status</th><th>Ordens</th><th>% do total</th>
+        </tr></thead><tbody>
+          <tr><td class="cat-cell" style="color:var(--success)">Concluídas</td><td>${concluidos.length}</td><td>${prod.length?((concluidos.length/prod.length)*100).toFixed(1):'0.0'}%</td></tr>
+          <tr><td class="cat-cell" style="color:var(--text-secondary)">Não concluídas</td><td>${naoConcluidos.length}</td><td>${prod.length?((naoConcluidos.length/prod.length)*100).toFixed(1):'0.0'}%</td></tr>
+          <tr><td class="cat-cell" style="color:var(--danger)">Canceladas</td><td>${cancelados.length}</td><td>${prod.length?((cancelados.length/prod.length)*100).toFixed(1):'0.0'}%</td></tr>
+          <tr class="total-row"><td class="cat-cell" style="color:var(--accent)">TOTAL</td><td style="color:var(--accent)">${prod.length}</td><td style="color:var(--accent)">100%</td></tr>
+        </tbody></table></div>`}
       </div>
 
       <div class="panels-grid">
@@ -10063,9 +10117,14 @@ function renderDashboardVisual() {
         <div class="panel" style="display:flex;flex-direction:column"><h3>Técnicos que Mais Produziram</h3><div id="dv-tecnicos" style="flex:1;display:flex;flex-direction:column"></div></div>
       </div>
       <div id="pdf-export-area"></div>
+      </div>
     `;
 
-    if (evoConcluidas.length) trendChart('dv-evolucao', [{ name: 'Concluídas', color: 'var(--accent)', points: evoConcluidas }], { suave: true, maxLabels: 12, expandir: true });
+    if (ct && (evoConcluidas.length || evoNaoConcluidas.length || evoCanceladas.length)) trendChart('dv-evolucao', [
+      { name: 'Concluídas', color: 'var(--accent)', points: evoConcluidas },
+      { name: 'Não concluídas', color: '#93a0bd', points: evoNaoConcluidas, semArea: true },
+      { name: 'Canceladas', color: '#ef4444', points: evoCanceladas, semArea: true },
+    ], { suave: true, maxLabels: 12, expandir: true });
     donutChart('dv-tipo', [
       { label: 'Ativação', value: qtdAtivacao }, { label: 'Reparo', value: qtdReparo },
       { label: 'Mud. Endereço', value: qtdME }, { label: 'Mud. Cômodo', value: qtdMC },
