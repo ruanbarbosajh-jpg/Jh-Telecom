@@ -3501,6 +3501,52 @@ function renderMapaBairros(elId, rankingBairros) {
       .bindTooltip(`<b>${esc(b.bairro)}</b> — ${esc(b.cidade)}<br>Concluídas: ${b.concluida}<br>Canceladas: ${b.cancelada}<br>Não concluídas: ${b.naoConcluida}<br><b>Total: ${b.total}</b>`, { direction: 'top' });
   });
 }
+// Mapa de O.S individuais (Parcial do Dia) — diferente do renderMapaBairros
+// (que agrupa e soma por bairro): aqui cada ORDEM é um ponto. Como só temos a
+// coordenada do BAIRRO (não do endereço exato de cada casa), várias O.S do
+// mesmo bairro cairiam todas empilhadas no mesmo pixel — cada ponto ganha um
+// pequeno deslocamento em espiral (determinístico, pelo índice dentro do
+// bairro) só pra dar pra ver e clicar em cada um separado.
+function renderMapaOrdensAbertas(elId, ordens) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (el._leafletMap) { el._leafletMap.remove(); el._leafletMap = null; }
+  if (typeof L === 'undefined') {
+    el.innerHTML = '<div class="empty">Não foi possível carregar o mapa (biblioteca bloqueada ou sem internet).</div>';
+    return;
+  }
+  const comCoord = ordens
+    .map(o => ({ ...o, coord: COORDENADAS_BAIRROS[`${o.bairro}|${String(o.cidade || '').toUpperCase()}`] }))
+    .filter(o => o.coord);
+  if (!comCoord.length) { el.innerHTML = '<div class="empty">Nenhuma O.S em aberto tem bairro com coordenada conhecida.</div>'; return; }
+  el.innerHTML = '';
+  const map = L.map(el, { scrollWheelZoom: true }).setView([-23.94, -46.30], 11);
+  el._leafletMap = map;
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 18,
+  }).addTo(map);
+  // agrupa por coordenada (= por bairro) só pra saber o índice de cada O.S.
+  // dentro do grupo, e então espalha em espiral ao redor do ponto do bairro —
+  // ~111km por grau de latitude, então um raio de 220m em graus é ~0.002
+  const porCoord = {};
+  comCoord.forEach(o => { const k = o.coord.join(','); (porCoord[k] = porCoord[k] || []).push(o); });
+  Object.values(porCoord).forEach(grupo => {
+    grupo.forEach((o, i) => {
+      const [lat0, lon0] = o.coord;
+      let lat = lat0, lon = lon0;
+      if (grupo.length > 1) {
+        const ang = (i / grupo.length) * 2 * Math.PI;
+        const raioGraus = 0.0015 + Math.floor(i / 8) * 0.0015;
+        lat += Math.sin(ang) * raioGraus;
+        lon += Math.cos(ang) * raioGraus / Math.cos(lat0 * Math.PI / 180);
+      }
+      const cor = o.revisita ? '#ef4444' : '#38bdf8';
+      L.circleMarker([lat, lon], { radius: 7, color: cor, weight: 2, fillColor: cor, fillOpacity: 0.75 })
+        .addTo(map)
+        .bindTooltip(`<b>O.S ${esc(o.os) || '-'}</b> — ${esc(o.bairro)}, ${esc(o.cidade)}<br>Cliente: ${esc(o.cliente) || '-'}<br>Técnico: ${esc(o.recurso) || '-'}<br>Tipo: ${esc(o.tipo_atividade) || '-'}<br>Status: ${esc(o.status) || '-'}${o.motivo ? `<br>Motivo: ${esc(o.motivo)}` : ''}${o.revisita ? '<br><b style="color:#ef4444">Já visitada — voltou pro campo</b>' : ''}`, { direction: 'top' });
+    });
+  });
+}
 // Diagnóstico em texto corrido da tela de Produção. NÃO calcula regra de
 // negócio nova: recebe prontos os mesmos números que os cards e os gráficos já
 // mostram, e só escreve isso em português. A ideia é que quem abre a tela leia
@@ -6159,6 +6205,10 @@ function importarCsvPCR(texto) {
   const iOS = col('ordem de servico'), iCtt = col('numero do contrato'), iNome = col('nome');
   const iTipo = col('tipo de atividade'), iInterv = col('intervalo de tempo'), iMotivo = col('motivo de encerramento das atividades');
   const iInicio = col('inicio'); // "Início" (HH:MM) — quando o técnico começou o atendimento
+  // "Endereço" (opcional — CSV mais antigo pode não ter essa coluna): usado só
+  // pelo mapa de O.S em aberto do Parcial do Dia (extrairBairro tira o bairro
+  // daqui, igual já faz com a planilha de produção).
+  const iEndereco = col('endereco');
   if (iData < 0 || iAbert < 0 || iOS < 0) return { erro: 'Não encontrei as colunas "Data", "Data Abertura Chamado" e "Ordem de Serviço" nesse CSV.' };
 
   const out = [];
@@ -6205,6 +6255,7 @@ function importarCsvPCR(texto) {
       recurso: (l[iRec] || '').trim(), os: normalizeChaveOS(l[iOS]), contrato: (l[iCtt] || '').trim(),
       cliente: (l[iNome] || '').trim(), tipo_atividade: (l[iTipo] || '').trim(),
       motivo: iMotivo >= 0 ? (l[iMotivo] || '').trim() : '',
+      endereco: iEndereco >= 0 ? (l[iEndereco] || '').trim() : '',
     });
   }
   // CHAVE de cada linha: dia + O.S + nº da ocorrência daquela O.S no dia.
@@ -7565,6 +7616,28 @@ function renderParcialDoDia() {
     const CLASSE_BADGE_SERVICO = { concluido:'ok', cancelado:'warn', nao_concluido:'warn', em_rota:'amber', pendente:'laranja', iniciado:'azul' };
     const badgeServicoDia = status => `<span class="badge ${CLASSE_BADGE_SERVICO[classifyStatusGranular(status)] || 'neutral'}">${esc(status) || '-'}</span>`;
 
+    // ---- Mapa: O.S em aberto (pendente/em rota/iniciado) do dia, por bairro ----
+    // "Em aberto" = ainda precisa de ação, igual à régua da Mão de Obra.
+    // "Já visitada, dada improdutiva e voltou pro campo": no jargão da
+    // operação, "improdutiva" É o status Não Concluído/Suspenso (o técnico foi
+    // e não conseguiu fechar — ver ehStatusTerminal). O CSV do dia guarda TODAS
+    // as ocorrências da mesma O.S. naquele dia (não só a mais recente — ver
+    // linhasDoCsvPorDia), então dá pra saber se ALGUMA tentativa anterior da
+    // mesma O.S. hoje terminou improdutiva antes da ordem voltar pra
+    // pendente/em rota — sem inventar estado novo, só olhando o que o CSV
+    // já trouxe.
+    const ABERTOS_BUCKETS = ['pendente', 'em_rota', 'iniciado'];
+    const ordensAbertas = servicosDoDia.filter(r => ABERTOS_BUCKETS.includes(classifyStatusGranular(r.status)));
+    const pcrBrutoHoje = DB.pcr.filter(r => r.data === data);
+    const porOSBruto = {};
+    pcrBrutoHoje.forEach(r => { if (r.os) (porOSBruto[r.os] = porOSBruto[r.os] || []).push(r); });
+    const osJaImprodutiva = new Set(Object.keys(porOSBruto).filter(os =>
+      porOSBruto[os].length > 1 && porOSBruto[os].some(l => ehStatusTerminal(l.status))));
+    const ordensAbertasComBairro = ordensAbertas.map(r => ({
+      ...r, bairro: extrairBairro(r.endereco) || 'Não informado', revisita: osJaImprodutiva.has(r.os),
+    }));
+    const semEnderecoAbertos = ordensAbertas.filter(r => !r.endereco).length;
+
     body.innerHTML = `
       <div class="cards-grid">
         ${metricCard('Total O.S no dia', rows.length)}
@@ -7628,6 +7701,25 @@ function renderParcialDoDia() {
       </tr></thead><tbody>
         ${servicosDoDia.map(r=>`<tr><td>${esc(r.os)||'-'}</td><td>${esc(r.cliente)||'-'}</td><td>${esc(r.contrato)||'-'}</td><td class="cat-cell">${esc(r.recurso)||'-'}</td><td>${esc(r.cidade)||'-'}</td><td>${esc(r.tipo_atividade)||'-'}</td><td>${badgeServicoDia(r.status)}</td><td>${esc(r.motivo)||'-'}</td><td>${fmtDT(r.abertura)}</td><td>${fmtDT(r.limite)}</td></tr>`).join('')}
       </tbody></table></div>`}
+
+      ${!ordensAbertas.length ? '' : `
+      <div class="section-heading">Mapa — O.S em Aberto <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(${ordensAbertas.length} pendente/em rota/iniciado — por bairro)</span></div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
+        O bairro vem do texto do campo Endereço do CSV de atividades — mesma extração e mesma lista de coordenadas conhecidas do mapa do Dashboard.
+        ${semEnderecoAbertos ? `${semEnderecoAbertos} de ${ordensAbertas.length} O.S em aberto não têm Endereço no CSV importado e entram em "Não informado".` : ''}
+      </p>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <div class="toolbar" style="margin-bottom:12px">
+          <div class="field"><label>Bairro</label><select id="pd-mapa-bairro"><option value="">Todos os bairros</option>
+            ${[...new Set(ordensAbertasComBairro.map(r=>r.bairro))].sort((a,b)=>a.localeCompare(b,'pt-BR')).map(b=>`<option value="${esc(b)}">${esc(b)}</option>`).join('')}
+          </select></div>
+        </div>
+        <div id="pd-mapa" class="mapa-cidades"></div>
+        <div class="mapa-legenda">
+          <span class="legend-item"><span class="legend-dot" style="background:#38bdf8"></span>Em aberto (1ª vez hoje)</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#ef4444"></span>Já visitada, dada improdutiva — voltou pro campo</span>
+        </div>
+      </div>`}
 
       <div class="section-heading">Gerar imagem (PNG) — Remanejamento por tipo de serviço</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
@@ -7704,6 +7796,18 @@ function renderParcialDoDia() {
       inp.addEventListener('input', recalc);
     });
 
+    // ---- mapa de O.S em aberto: filtro de bairro local, sem recarregar a tela ----
+    const selBairroMapa = document.getElementById('pd-mapa-bairro');
+    if (selBairroMapa) {
+      const desenhaMapaAbertos = () => {
+        const bairro = selBairroMapa.value;
+        const filtradas = bairro ? ordensAbertasComBairro.filter(o => o.bairro === bairro) : ordensAbertasComBairro;
+        renderMapaOrdensAbertas('pd-mapa', filtradas);
+      };
+      selBairroMapa.addEventListener('change', desenhaMapaAbertos);
+      desenhaMapaAbertos();
+    }
+
     // ---- ocultar/reexibir cada tabela da página (mesmo padrão da PCR) ----
     // Cada "section-heading" ganha um botão que esconde tudo que vem depois
     // dele até o próximo título — assim dá pra deixar na tela só a tabela que
@@ -7731,6 +7835,7 @@ function renderParcialDoDia() {
       { id: 'statuscidade', label: 'Status detalhado por cidade' },
       { id: 'statustecnico', label: 'Status detalhado por técnico' },
       ...(servicosDoDia.length ? [{ id: 'servicos', label: 'Serviços do dia (linha a linha)' }] : []),
+      ...(ordensAbertas.length ? [{ id: 'abertos', label: 'O.S em aberto por bairro (mapa)' }] : []),
     ]);
     wirePdfExportPanel('Parcial do Dia — ' + formatDate(data), {
       maodeobra: () => secaoTabela('Mão de Obra e Produção do Dia (pendentes)', [...cidadesList, {cidade:'TOTAL', ...totais}], [
@@ -7756,6 +7861,11 @@ function renderParcialDoDia() {
         {header:'O.S', get:r=>r.os}, {header:'Cliente', get:r=>r.cliente}, {header:'Contrato', get:r=>r.contrato},
         {header:'Técnico', get:r=>r.recurso}, {header:'Cidade', get:r=>r.cidade}, {header:'Tipo de Serviço', get:r=>r.tipo_atividade},
         {header:'Status', get:r=>r.status}, {header:'Motivo', get:r=>r.motivo}, {header:'Abertura', get:r=>fmtDT(r.abertura)}, {header:'Limite', get:r=>fmtDT(r.limite)},
+      ]),
+      abertos: () => secaoTabela('O.S em Aberto por Bairro', ordensAbertasComBairro, [
+        {header:'O.S', get:r=>r.os}, {header:'Cliente', get:r=>r.cliente}, {header:'Técnico', get:r=>r.recurso},
+        {header:'Cidade', get:r=>r.cidade}, {header:'Bairro', get:r=>r.bairro}, {header:'Status', get:r=>r.status},
+        {header:'Já visitada (improdutiva)', get:r=>r.revisita?'Sim':'Não'},
       ]),
     });
   }
