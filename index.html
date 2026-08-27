@@ -3398,10 +3398,17 @@ function clarearCor(hex, fracaoBranco) {
 // Caraguatatuba/Mongaguá/Itanhaém/São Sebastião/Peruíbe/São Paulo à parte) —
 // geocode que caía longe demais do centro (nome de bairro genérico como
 // "CENTRO" que o Nominatim casou com outro lugar do Brasil, às vezes a
-// centenas de km) foi DESCARTADO, não entrou aqui. Cobre 79% do volume da
-// planilha inteira (era 73% das 6 cidades do contrato só com o top 100) — o
-// resto (bairro sem coordenada confiável, ou ainda não geocodificado) fica de
-// fora do mapa mas continua no ranking detalhado da tabela. Dá pra completar
+// centenas de km) foi DESCARTADO, não entrou aqui. Outro problema achado
+// depois (cliente reportou "alguns estão com endereço errado", 27/08/2026):
+// bairro sem nome específico o bastante pro Nominatim achar caía no centro do
+// distrito/bairro maior mais próximo (ex.: 3 "Jardim X (Vicente de Carvalho)"
+// diferentes todos no mesmo ponto, "Balneário Guarujá" cravado em cima de
+// "Jardim Enseada") — removidos os 7 casos assim que apareciam colados em
+// outro bairro já cadastrado; ficou só 1 representante por ponto real.
+// Cobre ~78% do volume da planilha inteira (era 73% das 6 cidades do
+// contrato só com o top 100) — o resto (bairro sem coordenada confiável, ou
+// ainda não geocodificado) fica de fora do mapa mas continua no ranking
+// detalhado da tabela. Dá pra completar
 // os ~600 que faltam rodando o mesmo processo de novo depois que o limite do
 // serviço "esfriar" (geralmente algumas horas).
 // Não fica pré-calculado por O.S: é só esse dicionário estático bairro→coordenada.
@@ -3416,9 +3423,7 @@ const COORDENADAS_BAIRROS = {
   'AREIA BRANCA|SANTOS': [-23.946248, -46.373532],
   'AVIACAO|PRAIA GRANDE': [-24.016876, -46.444611],
   'BALNEARIO CIDADE ATLANTICA|GUARUJA': [-23.977164, -46.226239],
-  'BALNEARIO GUARUJA|GUARUJA': [-23.978053, -46.223137],
   'BALNEARIO ITAGUAI|MONGAGUA': [-24.126722, -46.695243],
-  'BALNEARIO MONGAGUA|MONGAGUA': [-24.126722, -46.695243],
   'BALNEARIO PRAIA DO PEREQUE|GUARUJA': [-23.933273, -46.182198],
   'BALNEARIO PRAIA DO PEREQUE|GUARUJÁ': [-23.933273, -46.182198],
   'BALNEARIO REGINA MARIA|MONGAGUA': [-24.116348, -46.707266],
@@ -3481,7 +3486,6 @@ const COORDENADAS_BAIRROS = {
   'JARAGUAZINHO|CARAGUATATUBA': [-23.615904, -45.432173],
   'JARAGUA|CARAGUATATUBA': [-23.707507, -45.441782],
   'JARAGUA|SAO SEBASTIAO': [-23.733035, -45.451208],
-  'JARDIM ALBATROZ II|BERTIOGA': [-23.838059, -46.129987],
   'JARDIM ALBATROZ|BERTIOGA': [-23.838059, -46.129987],
   'JARDIM ALVORADA VICENTE DE CARVALHO|GUARUJA': [-23.959546, -46.282914],
   'JARDIM BOA ESPERANCA (VICENTE DE CARVALHO)|GUARUJA': [-23.962766, -46.276301],
@@ -3490,12 +3494,10 @@ const COORDENADAS_BAIRROS = {
   'JARDIM CASQUEIRO|CUBATAO': [-23.928178, -46.412159],
   'JARDIM CASTELO|SANTOS': [-23.944742, -46.377042],
   'JARDIM CONCEICAOZINHA VICENTE DE CARVALHO|GUARUJA': [-23.970987, -46.274101],
-  'JARDIM CUNHAMBEBE VICENTE DE CARVALHO|GUARUJA': [-23.952180, -46.274724],
   'JARDIM ENSEADA|GUARUJA': [-23.978053, -46.223137],
   'JARDIM LAS PALMAS|GUARUJA': [-24.001346, -46.273746],
   'JARDIM MARAVILHA (VICENTE DE CARVALHO)|GUARUJA': [-23.956487, -46.277292],
   'JARDIM MARAVILHA VICENTE DE CARVALHO|GUARUJA': [-23.956487, -46.277292],
-  'JARDIM MONTEIRO DA CRUZ VICENTE DE CARVALHO|GUARUJA': [-23.952180, -46.274724],
   'JARDIM NOVA REPUBLICA|CUBATAO': [-23.920093, -46.426902],
   'JARDIM PEDRA BRANCA|SAO PAULO': [-23.581454, -46.419047],
   'JARDIM PORTO NOVO|CARAGUATATUBA': [-23.681450, -45.434512],
@@ -3509,9 +3511,7 @@ const COORDENADAS_BAIRROS = {
   'JARDIM RIO BRANCO|SAO VICENTE': [-23.980535, -46.472307],
   'JARDIM RIO DA PRAIA|BERTIOGA': [-23.828983, -46.109483],
   'JARDIM RIO NEGRO|SAO VICENTE': [-23.985370, -46.462855],
-  'JARDIM SANTENSE VICENTE DE CARVALHO|GUARUJA': [-23.952180, -46.274724],
   'JARDIM SAO MANOEL|SANTOS': [-23.930576, -46.380788],
-  'JARDIM VICENTE DE CARVALHO II|BERTIOGA': [-23.831380, -46.146173],
   'JARDIM VICENTE DE CARVALHO|BERTIOGA': [-23.831380, -46.146173],
   'JOCKEY CLUB|SAO VICENTE': [-23.946728, -46.395771],
   'JOQUEI CLUBE|SAO VICENTE': [-23.947782, -46.396959],
@@ -3745,7 +3745,7 @@ function renderMapaOrdensAbertas(elId, ordens) {
       const corBorda = o.revisita ? '#ef4444' : corPreenchimento;
       L.circleMarker([lat, lon], { radius: 7, color: corBorda, weight: o.revisita ? 3 : 2, fillColor: corPreenchimento, fillOpacity: 0.8 })
         .addTo(map)
-        .bindPopup(`<b>O.S ${esc(o.os) || '-'}</b> — ${esc(o.bairro)}, ${esc(o.cidade)}<br>Cliente: ${esc(o.cliente) || '-'}<br>Técnico: ${esc(o.recurso) || '-'}<br>Tipo: ${esc(o.tipo_atividade) || '-'}<br>Status: ${esc(o.status) || '-'}${o.motivo ? `<br>Motivo: ${esc(o.motivo)}` : ''}${o.revisita ? '<br><b style="color:#ef4444">Já visitada — voltou pro campo</b>' : ''}`);
+        .bindPopup(`<b>O.S ${esc(o.os) || '-'}</b> — ${esc(o.bairro)}, ${esc(o.cidade)}<br>Cliente: ${esc(o.cliente) || '-'}<br>Técnico: ${esc(o.recurso) || '-'}<br>Tipo: ${esc(o.tipo_atividade) || '-'}<br>Status: ${esc(o.status) || '-'}${o.motivo ? `<br>Motivo: ${esc(o.motivo)}` : ''}${o.revisita ? `<br><b style="color:#ef4444">Já visitada — voltou pro campo</b>${o.motivoImprodutiva ? `<br>Motivo da 1ª tentativa: ${esc(o.motivoImprodutiva)}` : ''}` : ''}`);
     });
   });
 }
@@ -7837,10 +7837,20 @@ function renderParcialDoDia() {
     const pcrBrutoHoje = DB.pcr.filter(r => r.data === data);
     const porOSBruto = {};
     pcrBrutoHoje.forEach(r => { if (r.os) (porOSBruto[r.os] = porOSBruto[r.os] || []).push(r); });
-    const osJaImprodutiva = new Set(Object.keys(porOSBruto).filter(os =>
-      porOSBruto[os].length > 1 && porOSBruto[os].some(l => ehStatusTerminal(l.status))));
+    // motivo da PRIMEIRA tentativa improdutiva do dia (pedido: "quero o motivo
+    // da primeira improdutiva nos que estão em vermelho") — ordena as
+    // tentativas terminais pelo horário de Início e pega a mais cedo; o
+    // motivo da tentativa atual (pendente/em rota de novo) normalmente vem
+    // vazio, então sem isso o popup da revisita não explicava o "porquê".
+    const motivoPrimeiraImprodutiva = new Map();
+    Object.keys(porOSBruto).forEach(os => {
+      const terminais = porOSBruto[os].filter(l => ehStatusTerminal(l.status)).sort((a, b) => String(a.inicio || '').localeCompare(String(b.inicio || '')));
+      if (terminais.length) motivoPrimeiraImprodutiva.set(os, terminais[0].motivo || '');
+    });
+    const osJaImprodutiva = new Set(motivoPrimeiraImprodutiva.keys());
     const ordensAbertasComBairro = ordensAbertas.map(r => ({
       ...r, bairro: extrairBairro(r.endereco) || 'Não informado', revisita: osJaImprodutiva.has(r.os),
+      motivoImprodutiva: motivoPrimeiraImprodutiva.get(r.os) || '',
     }));
     const semEnderecoAbertos = ordensAbertas.filter(r => !r.endereco).length;
 
@@ -8075,6 +8085,7 @@ function renderParcialDoDia() {
         {header:'O.S', get:r=>r.os}, {header:'Cliente', get:r=>r.cliente}, {header:'Técnico', get:r=>r.recurso},
         {header:'Cidade', get:r=>r.cidade}, {header:'Bairro', get:r=>r.bairro}, {header:'Status', get:r=>r.status},
         {header:'Já visitada (improdutiva)', get:r=>r.revisita?'Sim':'Não'},
+        {header:'Motivo da 1ª tentativa', get:r=>r.motivoImprodutiva || '-'},
       ]),
     });
   }
