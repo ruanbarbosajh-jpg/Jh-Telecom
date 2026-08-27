@@ -616,7 +616,7 @@
   /* tema escuro: inverter as cores da base do mapa (truque padrão pra "dark
      mode" em cima de tiles do OpenStreetMap, que só vêm no claro) — os
      círculos das cidades não entram nesse filtro, só o painel de tiles. */
-  :root:not([data-theme="light"]) .mapa-cidades .leaflet-tile-pane { filter: invert(92%) hue-rotate(180deg) brightness(0.95) contrast(0.9); }
+  :root:not([data-theme="light"]) .mapa-cidades .leaflet-tile-pane { filter: invert(85%) hue-rotate(180deg) brightness(1.15) contrast(0.85); }
   :root:not([data-theme="light"]) .mapa-cidades .leaflet-control-attribution { background: rgba(19,28,48,0.75); color: var(--text-secondary); }
   :root:not([data-theme="light"]) .mapa-cidades .leaflet-control-attribution a { color: var(--text-secondary); }
   .leaflet-tooltip { font-size: 12.5px; line-height: 1.5; }
@@ -3685,11 +3685,11 @@ function renderMapaBairros(elId, rankingBairros) {
   // cima na sobreposição, em vez de escondido atrás de um vizinho pequeno.
   [...comCoord].sort((a, b) => a.total - b.total).forEach(b => {
     const ratio = b.total / maxTotal; // 0 (menor bairro do mapa) a 1 (maior)
-    const cor = clarearCor(coresCidades[String(b.cidade || '').toUpperCase()] || '#94a3b8', (1 - ratio) * 0.75);
+    const cor = clarearCor(coresCidades[String(b.cidade || '').toUpperCase()] || '#94a3b8', (1 - ratio) * 0.55);
     const raio = 4 + Math.sqrt(ratio) * 20; // área ∝ total
-    L.circleMarker(b.coord, { radius: raio, color: cor, weight: 1 + ratio * 1.5, fillColor: cor, fillOpacity: 0.3 + ratio * 0.5 })
+    L.circleMarker(b.coord, { radius: raio, color: cor, weight: 1 + ratio * 1.5, fillColor: cor, fillOpacity: 0.4 + ratio * 0.45 })
       .addTo(map)
-      .bindTooltip(`<b>${esc(b.bairro)}</b> — ${esc(b.cidade)}<br>Concluídas: ${b.concluida}<br>Canceladas: ${b.cancelada}<br>Não concluídas: ${b.naoConcluida}<br><b>Total: ${b.total}</b>`, { direction: 'top' });
+      .bindPopup(`<b>${esc(b.bairro)}</b> — ${esc(b.cidade)}<br>Concluídas: ${b.concluida}<br>Canceladas: ${b.cancelada}<br>Não concluídas: ${b.naoConcluida}<br><b>Total: ${b.total}</b>`);
   });
 }
 // Mapa de O.S individuais (Parcial do Dia) — diferente do renderMapaBairros
@@ -3698,6 +3698,13 @@ function renderMapaBairros(elId, rankingBairros) {
 // mesmo bairro cairiam todas empilhadas no mesmo pixel — cada ponto ganha um
 // pequeno deslocamento em espiral (determinístico, pelo índice dentro do
 // bairro) só pra dar pra ver e clicar em cada um separado.
+// Cor por status no mapa — mesma paleta de COR_SITUACAO (usada nas tabelas da
+// PCR/Parcial do Dia), mas em hex literal: o marcador do Leaflet é um <path>
+// SVG desenhado via JS, e "var(--sucesso)" não é garantia de resolver igual
+// num atributo de cor fora do CSS da página, então usa o mesmo tom do tema
+// escuro direto (o mapa já tem cara de tema escuro por causa do filtro do
+// tile).
+const MAPA_CORES_STATUS = { pendente: '#facc15', em_rota: '#fb923c', iniciado: '#38bdf8', concluido: '#22c55e' };
 function renderMapaOrdensAbertas(elId, ordens) {
   const el = document.getElementById(elId);
   if (!el) return;
@@ -3709,7 +3716,7 @@ function renderMapaOrdensAbertas(elId, ordens) {
   const comCoord = ordens
     .map(o => ({ ...o, coord: COORDENADAS_BAIRROS[`${o.bairro}|${String(o.cidade || '').toUpperCase()}`] }))
     .filter(o => o.coord);
-  if (!comCoord.length) { el.innerHTML = '<div class="empty">Nenhuma O.S em aberto tem bairro com coordenada conhecida.</div>'; return; }
+  if (!comCoord.length) { el.innerHTML = '<div class="empty">Nenhuma O.S do dia tem bairro com coordenada conhecida.</div>'; return; }
   el.innerHTML = '';
   const map = L.map(el, { scrollWheelZoom: true }).setView([-23.94, -46.30], 11);
   el._leafletMap = map;
@@ -3731,10 +3738,14 @@ function renderMapaOrdensAbertas(elId, ordens) {
         lat += Math.sin(ang) * raioGraus;
         lon += Math.cos(ang) * raioGraus / Math.cos(lat0 * Math.PI / 180);
       }
-      const cor = o.revisita ? '#ef4444' : '#38bdf8';
-      L.circleMarker([lat, lon], { radius: 7, color: cor, weight: 2, fillColor: cor, fillOpacity: 0.75 })
+      // cor de PREENCHIMENTO = status atual (mesma paleta de COR_SITUACAO, usada
+      // no resto do sistema); revisita (já visitada, dada improdutiva, voltou pro
+      // campo) ganha um CONTORNO vermelho grosso por cima, sem esconder o status.
+      const corPreenchimento = MAPA_CORES_STATUS[classifyStatusGranular(o.status)] || '#94a3b8';
+      const corBorda = o.revisita ? '#ef4444' : corPreenchimento;
+      L.circleMarker([lat, lon], { radius: 7, color: corBorda, weight: o.revisita ? 3 : 2, fillColor: corPreenchimento, fillOpacity: 0.8 })
         .addTo(map)
-        .bindTooltip(`<b>O.S ${esc(o.os) || '-'}</b> — ${esc(o.bairro)}, ${esc(o.cidade)}<br>Cliente: ${esc(o.cliente) || '-'}<br>Técnico: ${esc(o.recurso) || '-'}<br>Tipo: ${esc(o.tipo_atividade) || '-'}<br>Status: ${esc(o.status) || '-'}${o.motivo ? `<br>Motivo: ${esc(o.motivo)}` : ''}${o.revisita ? '<br><b style="color:#ef4444">Já visitada — voltou pro campo</b>' : ''}`, { direction: 'top' });
+        .bindPopup(`<b>O.S ${esc(o.os) || '-'}</b> — ${esc(o.bairro)}, ${esc(o.cidade)}<br>Cliente: ${esc(o.cliente) || '-'}<br>Técnico: ${esc(o.recurso) || '-'}<br>Tipo: ${esc(o.tipo_atividade) || '-'}<br>Status: ${esc(o.status) || '-'}${o.motivo ? `<br>Motivo: ${esc(o.motivo)}` : ''}${o.revisita ? '<br><b style="color:#ef4444">Já visitada — voltou pro campo</b>' : ''}`);
     });
   });
 }
@@ -7807,18 +7818,22 @@ function renderParcialDoDia() {
     const CLASSE_BADGE_SERVICO = { concluido:'ok', cancelado:'warn', nao_concluido:'warn', em_rota:'amber', pendente:'laranja', iniciado:'azul' };
     const badgeServicoDia = status => `<span class="badge ${CLASSE_BADGE_SERVICO[classifyStatusGranular(status)] || 'neutral'}">${esc(status) || '-'}</span>`;
 
-    // ---- Mapa: O.S em aberto (pendente/em rota/iniciado) do dia, por bairro ----
-    // "Em aberto" = ainda precisa de ação, igual à régua da Mão de Obra.
+    // ---- Mapa: O.S do dia por bairro (concluído/em rota/iniciado/pendente) ----
+    // Pedido explícito: "concluídas, em rota e iniciado, cores diferentes" —
+    // cada status com a MESMA cor já usada no resto do sistema (COR_SITUACAO).
+    // Cancelado/não concluído ficam de fora (não pedido, e "onde a ordem está
+    // agora" não ajuda muito pra quem já foi encerrada sem sucesso).
     // "Já visitada, dada improdutiva e voltou pro campo": no jargão da
     // operação, "improdutiva" É o status Não Concluído/Suspenso (o técnico foi
     // e não conseguiu fechar — ver ehStatusTerminal). O CSV do dia guarda TODAS
     // as ocorrências da mesma O.S. naquele dia (não só a mais recente — ver
     // linhasDoCsvPorDia), então dá pra saber se ALGUMA tentativa anterior da
     // mesma O.S. hoje terminou improdutiva antes da ordem voltar pra
-    // pendente/em rota — sem inventar estado novo, só olhando o que o CSV
-    // já trouxe.
-    const ABERTOS_BUCKETS = ['pendente', 'em_rota', 'iniciado'];
-    const ordensAbertas = servicosDoDia.filter(r => ABERTOS_BUCKETS.includes(classifyStatusGranular(r.status)));
+    // pendente/em rota — sem inventar estado novo, só olhando o que o CSV já
+    // trouxe. Continua marcada com um contorno vermelho no mapa, além da cor
+    // normal do status atual.
+    const MAPA_BUCKETS = ['concluido', 'em_rota', 'iniciado', 'pendente'];
+    const ordensAbertas = servicosDoDia.filter(r => MAPA_BUCKETS.includes(classifyStatusGranular(r.status)));
     const pcrBrutoHoje = DB.pcr.filter(r => r.data === data);
     const porOSBruto = {};
     pcrBrutoHoje.forEach(r => { if (r.os) (porOSBruto[r.os] = porOSBruto[r.os] || []).push(r); });
@@ -7894,10 +7909,10 @@ function renderParcialDoDia() {
       </tbody></table></div>`}
 
       ${!ordensAbertas.length ? '' : `
-      <div class="section-heading">Mapa — O.S em Aberto <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(${ordensAbertas.length} pendente/em rota/iniciado — por bairro)</span></div>
+      <div class="section-heading">Mapa — O.S do Dia por Bairro <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(${ordensAbertas.length} concluído/em rota/iniciado/pendente)</span></div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
         O bairro vem do texto do campo Endereço do CSV de atividades — mesma extração e mesma lista de coordenadas conhecidas do mapa do Dashboard.
-        ${semEnderecoAbertos ? `${semEnderecoAbertos} de ${ordensAbertas.length} O.S em aberto não têm Endereço no CSV importado e entram em "Não informado".` : ''}
+        ${semEnderecoAbertos ? `${semEnderecoAbertos} de ${ordensAbertas.length} O.S do dia não têm Endereço no CSV importado e entram em "Não informado".` : ''}
       </p>
       <div class="panel" style="margin-bottom:1.5rem">
         <div class="toolbar" style="margin-bottom:12px">
@@ -7907,8 +7922,11 @@ function renderParcialDoDia() {
         </div>
         <div id="pd-mapa" class="mapa-cidades"></div>
         <div class="mapa-legenda">
-          <span class="legend-item"><span class="legend-dot" style="background:#38bdf8"></span>Em aberto (1ª vez hoje)</span>
-          <span class="legend-item"><span class="legend-dot" style="background:#ef4444"></span>Já visitada, dada improdutiva — voltou pro campo</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#22c55e"></span>Concluído</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#fb923c"></span>Em Rota</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#38bdf8"></span>Iniciado</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#facc15"></span>Pendente</span>
+          <span class="legend-item"><span class="legend-dot" style="background:transparent;border:2.5px solid #ef4444"></span>Já visitada, dada improdutiva — voltou pro campo</span>
         </div>
       </div>`}
 
@@ -8026,7 +8044,7 @@ function renderParcialDoDia() {
       { id: 'statuscidade', label: 'Status detalhado por cidade' },
       { id: 'statustecnico', label: 'Status detalhado por técnico' },
       ...(servicosDoDia.length ? [{ id: 'servicos', label: 'Serviços do dia (linha a linha)' }] : []),
-      ...(ordensAbertas.length ? [{ id: 'abertos', label: 'O.S em aberto por bairro (mapa)' }] : []),
+      ...(ordensAbertas.length ? [{ id: 'abertos', label: 'O.S do dia por bairro (mapa)' }] : []),
     ]);
     wirePdfExportPanel('Parcial do Dia — ' + formatDate(data), {
       maodeobra: () => secaoTabela('Mão de Obra e Produção do Dia (pendentes)', [...cidadesList, {cidade:'TOTAL', ...totais}], [
@@ -8053,7 +8071,7 @@ function renderParcialDoDia() {
         {header:'Técnico', get:r=>r.recurso}, {header:'Cidade', get:r=>r.cidade}, {header:'Tipo de Serviço', get:r=>r.tipo_atividade},
         {header:'Status', get:r=>r.status}, {header:'Motivo', get:r=>r.motivo}, {header:'Abertura', get:r=>fmtDT(r.abertura)}, {header:'Limite', get:r=>fmtDT(r.limite)},
       ]),
-      abertos: () => secaoTabela('O.S em Aberto por Bairro', ordensAbertasComBairro, [
+      abertos: () => secaoTabela('O.S do Dia por Bairro', ordensAbertasComBairro, [
         {header:'O.S', get:r=>r.os}, {header:'Cliente', get:r=>r.cliente}, {header:'Técnico', get:r=>r.recurso},
         {header:'Cidade', get:r=>r.cidade}, {header:'Bairro', get:r=>r.bairro}, {header:'Status', get:r=>r.status},
         {header:'Já visitada (improdutiva)', get:r=>r.revisita?'Sim':'Não'},
