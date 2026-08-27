@@ -537,24 +537,6 @@
   .gauge-arc-meta-label { font-size: 9px; font-weight: 700; }
   .gauge-target { font-size: 12px; color: var(--text-primary); margin-top: 2px; }
 
-  /* Dashboard: pedido do cliente foi "tema dark azul, não pode ficar muito
-     preto" com uma foto de referência de painel SaaS (cartão com gradiente
-     azul-marinho, linha do gráfico com brilho azul) — a primeira versão
-     ficou escura demais (gradiente ia quase a preto puro), corrigido pra um
-     azul-marinho mais presente nas duas pontas. Fica só nesta página (a
-     classe .dv-theme só existe no wrapper do renderDashboardVisual) e só no
-     tema escuro — mexer no :root afetaria as outras 24 telas já validadas,
-     e no tema claro esse visual não faz sentido. */
-  :root:not([data-theme="light"]) .dv-theme .panel,
-  :root:not([data-theme="light"]) .dv-theme .metric-card {
-    background: linear-gradient(160deg, #16233f 0%, #0d1830 100%);
-    border-color: rgba(79,127,255,0.28);
-    box-shadow: 0 1px 0 rgba(120,155,255,.08) inset, 0 16px 32px rgba(3,6,16,.45);
-  }
-  :root:not([data-theme="light"]) .dv-theme .metric-card:hover { box-shadow: 0 1px 0 rgba(120,155,255,.08) inset, 0 16px 32px rgba(3,6,16,.45), 0 0 0 1px rgba(79,127,255,.45); }
-  :root:not([data-theme="light"]) .dv-theme .section-heading { color: var(--text-secondary); }
-  :root:not([data-theme="light"]) .dv-theme #dv-evolucao .trend-chart-svg path[stroke="var(--accent)"] { filter: drop-shadow(0 0 5px rgba(79,127,255,.65)); }
-
   /* gráficos em HTML/CSS puro (sem biblioteca externa) */
   .bars-chart { display: flex; flex-direction: column; gap: 16px; }
   .bars-chart.fill { width: 100%; height: 100%; justify-content: space-evenly; }
@@ -10040,34 +10022,18 @@ function renderComparisonsFromBase() {
   }
 }
 
-// ===================== DASHBOARD (visão rápida, estilo painel executivo) =====================
-// Pedido do cliente: uma aba com a "cara" de painel de SaaS (cards de KPI,
-// gráfico de área/tendência, anéis de indicador) só que com os DADOS DE
-// VERDADE do sistema. Não inventa conta nova: reaproveita exatamente as
-// mesmas funções de regra de negócio das telas de Produção/Prazo/Ofensor
-// (basesIfiIrr, classifyBucket, classifyBucketAtivacao, caixasDeTempo) — só
-// muda a apresentação. Complementa o Resumo Geral - Operação (que é
-// financeiro/frota/pedágio) com um retrato só da operação (produção +
-// qualidade + prazo) num layout mais enxuto.
+// ===================== DASHBOARD (visão rápida: evolução + distribuição) =====================
+// Pedido do cliente depois de testar as versões anteriores (cards de KPI +
+// gauges + anéis, estilo "Resumo Geral - Operação"): "não ficou interessante,
+// só mantenha o gráfico de evolução e pizza". Ficou só isso mesmo — não
+// inventa conta nova: mesma separação de status do gráfico "por Status" da
+// tela Produção (isConcluido / regex "cancel").
 function renderDashboardVisual() {
   const { start, end } = defaultPeriod();
   document.getElementById('content').innerHTML = `${periodToolbar(start, end, multiCityField('dv-cidades', 'Cidades'))}<div id="dv-body"></div>`;
   wireMultiCityField('dv-cidades');
   document.getElementById('f-apply').addEventListener('click', load);
   load();
-
-  // Volta N dias antes de uma data ISO (meio-dia evita o problema do horário
-  // de verão jogar a data um dia pra trás) — mesma técnica de caixasDeTempo.
-  function isoMenosDias(iso, dias) {
-    const d = new Date(iso + 'T12:00:00');
-    d.setDate(d.getDate() - dias);
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  }
-  // Variação percentual vs. um valor anterior — undefined quando não dá pra
-  // comparar (período anterior sem nenhuma ordem), pra não mostrar Infinity.
-  function variacaoPct(atual, anterior) {
-    return anterior ? { pct: ((atual - anterior) / anterior) * 100, rotulo: 'vs. mês anterior' } : undefined;
-  }
 
   function load() {
     const s = document.getElementById('f-start').value, e = document.getElementById('f-end').value;
@@ -10083,32 +10049,13 @@ function renderDashboardVisual() {
           qtdME = contaTipo(/mudan[cç]a de endere[cç]o/i), qtdMC = contaTipo(/mudan[cç]a de c[oô]modo/i),
           qtdUpgrade = contaTipo(/upgrade|downgrade/i);
 
-    // ---- Mesmo recorte, período imediatamente anterior (mesma duração em
-    // dias) — só pra calcular a variação dos cards, não aparece em mais nada ----
-    const duracaoDias = diasEntre(e, s) + 1;
-    const sAnt = isoMenosDias(s, duracaoDias), eAnt = isoMenosDias(s, 1);
-    const prodConcluidaAnt = DB.producao.filter(p => inRange(p.data, sAnt, eAnt) && cidades.includes(p.cidade) && isConcluido(p.status));
-    const contaTipoAnt = re => prodConcluidaAnt.filter(p => re.test(p.tipo_atividade || '')).length;
-
-    // ---- IFI / IRR — mesma regra da tela Ofensor ----
-    const bases = basesIfiIrr(prod);
-    const retornos = prod.filter(p => p.ifi_irr === 'IFI' || p.ifi_irr === 'IRR');
-    const qtdIfi = retornos.filter(r => r.ifi_irr === 'IFI').length, qtdIrr = retornos.filter(r => r.ifi_irr === 'IRR').length;
-    const pctIfi = pctIndicador(qtdIfi, bases.ativacoes), pctIrr = pctIndicador(qtdIrr, bases.reparos);
-
-    // ---- Prazo — mesma regra das telas de Prazo Reparo/Ativação ----
-    const cidadesPrazo = cidades.filter(c => CIDADES_COBRADAS_PRAZO.map(x=>x.toUpperCase()).includes(String(c||'').toUpperCase()));
-    const prazoReparo = DB.prazo.filter(p => inRange(p.data, s, e) && isConcluido(p.status) && cidadesPrazo.includes(p.cidade)
-      && ehPrazoDeReparo(p) && classifyBucket(p.status_prazo) !== 'outro');
-    const dentro24 = prazoReparo.filter(r => classifyBucket(r.status_prazo) === 'ate24').length;
-    const pctPrazoReparo = prazoReparo.length ? (dentro24 / prazoReparo.length) * 100 : 0;
-    const prazoAtiv = DB.prazo.filter(p => inRange(p.data, s, e) && cidadesPrazo.includes(p.cidade)
-      && ehPrazoDeAtivacao(p, true) && classifyBucketAtivacao(p.status_prazo, p.aging) !== 'outro');
-    const dentro36 = prazoAtiv.filter(r => classifyBucketAtivacao(r.status_prazo, r.aging) === 'ate36').length;
-    const pctPrazoAtiv = prazoAtiv.length ? (dentro36 / prazoAtiv.length) * 100 : 0;
-
     // ---- Evolução no período por status (caixas adaptativas: dia/semana/mês) —
-    // mesma separação de status usada no gráfico "por Status" da Produção ----
+    // mesma separação de status usada no gráfico "por Status" da Produção.
+    // O total de cada série (soma de TODAS as caixas de tempo) é sempre igual
+    // ao "concluidos.length"/"naoConcluidos.length"/"cancelados.length" de
+    // baixo, porque as caixas cobrem o período inteiro sem buraco (ver
+    // caixasDeTempo) — o rótulo da legenda mostra os dois lados da conta pra
+    // deixar isso visível na tela, não só no hover. ----
     const concluidos = prod.filter(p => isConcluido(p.status));
     const cancelados = prod.filter(p => /cancel/i.test(p.status || ''));
     const naoConcluidos = prod.filter(p => !isConcluido(p.status) && !/cancel/i.test(p.status || ''));
@@ -10117,91 +10064,41 @@ function renderDashboardVisual() {
     const evoNaoConcluidas = ct ? serieDoPeriodo(ct.caixas, naoConcluidos, p => p.data) : [];
     const evoCanceladas = ct ? serieDoPeriodo(ct.caixas, cancelados, p => p.data) : [];
 
-    // ---- Técnicos que mais produziram no período ----
-    const porTecMap = {};
-    prodConcluida.forEach(p => { const t = p.recurso || 'Não informado'; porTecMap[t] = (porTecMap[t] || 0) + 1; });
-    const topTecnicos = Object.entries(porTecMap).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
-
     body.innerHTML = `
-      <div class="dv-theme">
-      <div class="cards-grid wide">
-        ${metricCard('◆ Total Concluídas', prodConcluida.length, false, { accent: true, nivel: 'heroi', variacao: variacaoPct(prodConcluida.length, prodConcluidaAnt.length) })}
-        ${metricCard('🔌 Ativação', qtdAtivacao, false, { nivel: 'primario', variacao: variacaoPct(qtdAtivacao, contaTipoAnt(/ativa[cç][aã]o/i)) })}
-        ${metricCard('🔧 Reparo', qtdReparo, false, { nivel: 'primario', variacao: variacaoPct(qtdReparo, contaTipoAnt(/reparo/i)) })}
-        ${metricCard('📍 Mud. Endereço', qtdME, false, { nivel: 'compacto', variacao: variacaoPct(qtdME, contaTipoAnt(/mudan[cç]a de endere[cç]o/i)) })}
-        ${metricCard('🏠 Mud. Cômodo', qtdMC, false, { nivel: 'compacto', variacao: variacaoPct(qtdMC, contaTipoAnt(/mudan[cç]a de c[oô]modo/i)) })}
-        ${metricCard('⇅ Upgrade/Downgrade', qtdUpgrade, false, { nivel: 'compacto', variacao: variacaoPct(qtdUpgrade, contaTipoAnt(/upgrade|downgrade/i)) })}
-        ${ringStatCard('Prazo Reparo (24h)', pctPrazoReparo.toFixed(1) + '%', pctPrazoReparo, { color: pctPrazoReparo >= PRAZO_META ? 'var(--success)' : 'var(--danger)' })}
-        ${ringStatCard('Prazo Ativação (36h)', pctPrazoAtiv.toFixed(1) + '%', pctPrazoAtiv, { color: pctPrazoAtiv >= PRAZO_ATIVACAO_META ? 'var(--success)' : 'var(--danger)' })}
-      </div>
-
-      <div class="section-heading">Qualidade & Prazo — cidades selecionadas</div>
-      <div class="panels-grid">
-        ${gaugePanel('% Prazo Reparo (24h)', pctPrazoReparo, PRAZO_META, { decimals: 2 })}
-        ${gaugePanel('% Prazo Ativação (36h)', pctPrazoAtiv, PRAZO_ATIVACAO_META, { decimals: 2 })}
-      </div>
-      <div class="panels-grid">
-        ${gaugePanel('% IRR', pctIrr, 4.50, { lowerIsBetter: true, decimals: 2 })}
-        ${gaugePanel('% IFI', pctIfi, 2.50, { lowerIsBetter: true, decimals: 2 })}
-      </div>
-
-      <div class="section-heading">Evolução — ${formatDate(s)} a ${formatDate(e)}</div>
       <div class="panel" style="margin-bottom:1.5rem">
-        <h3>Produção por Status ${ct ? `<span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(por ${ct.granularidade})</span>` : ''}</h3>
-        ${!ct ? '<div class="empty">Período inválido.</div>' : `
-        <div id="dv-evolucao"></div>
-        <div class="table-wrap" style="margin-top:14px"><table class="data-table"><thead><tr>
-          <th>Status</th><th>Ordens</th><th>% do total</th>
-        </tr></thead><tbody>
-          <tr><td class="cat-cell" style="color:var(--success)">Concluídas</td><td>${concluidos.length}</td><td>${prod.length?((concluidos.length/prod.length)*100).toFixed(1):'0.0'}%</td></tr>
-          <tr><td class="cat-cell" style="color:var(--text-secondary)">Não concluídas</td><td>${naoConcluidos.length}</td><td>${prod.length?((naoConcluidos.length/prod.length)*100).toFixed(1):'0.0'}%</td></tr>
-          <tr><td class="cat-cell" style="color:var(--danger)">Canceladas</td><td>${cancelados.length}</td><td>${prod.length?((cancelados.length/prod.length)*100).toFixed(1):'0.0'}%</td></tr>
-          <tr class="total-row"><td class="cat-cell" style="color:var(--accent)">TOTAL</td><td style="color:var(--accent)">${prod.length}</td><td style="color:var(--accent)">100%</td></tr>
-        </tbody></table></div>`}
+        <h3>Evolução — ${formatDate(s)} a ${formatDate(e)} ${ct ? `<span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(por ${ct.granularidade})</span>` : ''}</h3>
+        ${!ct || !(evoConcluidas.length || evoNaoConcluidas.length || evoCanceladas.length) ? '<div class="empty">Sem ordens no período.</div>' : '<div id="dv-evolucao"></div>'}
       </div>
 
-      <div class="panels-grid">
-        <div class="panel"><h3>Distribuição por Tipo de Serviço</h3><div id="dv-tipo"></div></div>
-        <div class="panel" style="display:flex;flex-direction:column"><h3>Técnicos que Mais Produziram</h3><div id="dv-tecnicos" style="flex:1;display:flex;flex-direction:column"></div></div>
-      </div>
+      <div class="panel"><h3>Distribuição por Tipo de Serviço</h3><div id="dv-tipo"></div></div>
       <div id="pdf-export-area"></div>
-      </div>
     `;
 
     if (ct && (evoConcluidas.length || evoNaoConcluidas.length || evoCanceladas.length)) trendChart('dv-evolucao', [
-      { name: 'Concluídas', color: 'var(--accent)', points: evoConcluidas },
-      { name: 'Não concluídas', color: '#93a0bd', points: evoNaoConcluidas, semArea: true },
-      { name: 'Canceladas', color: '#ef4444', points: evoCanceladas, semArea: true },
+      { name: `Concluídas (${concluidos.length})`, color: '#22c55e', points: evoConcluidas },
+      { name: `Não concluídas (${naoConcluidos.length})`, color: '#93a0bd', points: evoNaoConcluidas, semArea: true },
+      { name: `Canceladas (${cancelados.length})`, color: '#ef4444', points: evoCanceladas, semArea: true },
     ], { suave: true, maxLabels: 12, expandir: true });
-    // Paleta só de azuis (pedido explícito de "tema azul") — diferente da
-    // PALETTE_CATEGORICA (multicor) usada no resto do sistema; fica só neste
-    // anel, do mais claro ao mais escuro pra continuar dando pra distinguir
-    // fatia por fatia.
-    const AZUIS_DASHBOARD = ['#4f7fff', '#1d4ed8', '#7dabff', '#0f2f7a', '#a6c8ff'];
     donutChart('dv-tipo', [
       { label: 'Ativação', value: qtdAtivacao }, { label: 'Reparo', value: qtdReparo },
       { label: 'Mud. Endereço', value: qtdME }, { label: 'Mud. Cômodo', value: qtdMC },
       { label: 'Upgrade/Downgrade', value: qtdUpgrade },
-    ].filter(x => x.value > 0).map((x, i) => ({ ...x, color: AZUIS_DASHBOARD[i % AZUIS_DASHBOARD.length] })), { centroLabel: 'Serviços' });
-    barsChartTopN('dv-tecnicos', topTecnicos, { defaultN: 5, options: [5, 10, 'Todos'], fill: true });
+    ].filter(x => x.value > 0).map((x, i) => ({ ...x, color: corCategorica(i) })), { centroLabel: 'Serviços' });
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'kpis', label: 'Indicadores gerais' },
-      { id: 'tecnicos', label: 'Técnicos que mais produziram' },
+      { id: 'status', label: 'Produção por status' },
     ]);
     wirePdfExportPanel('Dashboard — ' + formatDate(s) + ' a ' + formatDate(e), {
-      kpis: () => secaoTabela('Indicadores Gerais', [
-        { label: 'Total Concluídas', value: prodConcluida.length },
+      status: () => secaoTabela('Produção por Status', [
+        { label: 'Concluídas', value: concluidos.length },
+        { label: 'Não concluídas', value: naoConcluidos.length },
+        { label: 'Canceladas', value: cancelados.length },
         { label: 'Ativação', value: qtdAtivacao }, { label: 'Reparo', value: qtdReparo },
         { label: 'Mudança de Endereço', value: qtdME }, { label: 'Mudança de Cômodo', value: qtdMC },
         { label: 'Upgrade/Downgrade', value: qtdUpgrade },
-        { label: '% Prazo Reparo (24h)', value: pctPrazoReparo.toFixed(2) + '%' },
-        { label: '% Prazo Ativação (36h)', value: pctPrazoAtiv.toFixed(2) + '%' },
-        { label: '% IFI', value: pctIfi.toFixed(2) + '%' }, { label: '% IRR', value: pctIrr.toFixed(2) + '%' },
-      ], [{ header: 'Indicador', get: r => r.label }, { header: 'Valor', get: r => r.value }]),
-      tecnicos: () => secaoTabela('Técnicos que Mais Produziram', topTecnicos, [
-        { header: 'Técnico', get: r => r.label }, { header: 'Ordens Concluídas', get: r => r.value },
-      ]),
+      ], [{ header: 'Indicador', get: r => r.label }, { header: 'Valor', get: r => r.value }], {
+        totalRow: ['TOTAL', prod.length],
+      }),
     });
   }
 }
