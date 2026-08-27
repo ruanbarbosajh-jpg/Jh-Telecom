@@ -10275,6 +10275,12 @@ function renderDashboardVisual() {
     const bairrosComCoord = rankingBairros.filter(b => COORDENADAS_BAIRROS[`${b.bairro}|${String(b.cidade || '').toUpperCase()}`]);
     const volumeComCoord = bairrosComCoord.reduce((a, b) => a + b.total, 0);
     const cidadesNoMapa = [...new Set(bairrosComCoord.map(b => String(b.cidade || '').toUpperCase()))].filter(c => CORES_CIDADES[c]);
+    // Se NENHUMA ordem do período tem Endereço, o mapa nunca vai achar bairro
+    // nenhum — não é "bairro sem coordenada conhecida" (mensagem genérica do
+    // renderMapaBairros), é a coluna `endereco` que ainda não existe/não foi
+    // importada. Avisa isso na cara em vez de deixar parecer que o mapa
+    // travou pedindo alguma coisa.
+    const faltaImportarEndereco = prod.length > 0 && semEndereco === prod.length;
 
     body.innerHTML = `
       <div class="panel" style="margin-bottom:1.5rem">
@@ -10299,7 +10305,10 @@ function renderDashboardVisual() {
 
       <div class="panel" style="margin-bottom:1.5rem">
         <h3>Mapa — Bairros Mais Atendidos <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(círculo maior = mais ordens; cor = cidade)</span></h3>
-        ${!rankingBairros.length ? '<div class="empty">Sem ordens no período.</div>' : `<div id="dv-mapa" class="mapa-cidades"></div>
+        ${!rankingBairros.length ? '<div class="empty">Sem ordens no período.</div>' : faltaImportarEndereco ? `<div class="empty">
+          Nenhuma ordem do período tem Endereço importado, então não dá pra saber o bairro de nenhuma — por isso o mapa não aparece.
+          Rode <code>sql/PASSO-9-coluna-endereco.sql</code> no SQL Editor do Supabase (se ainda não rodou) e reimporte a planilha de produção em "Importar Excel"; depois disso essa tela mostra o mapa normalmente.
+        </div>` : `<div id="dv-mapa" class="mapa-cidades"></div>
         <div class="mapa-legenda">${cidadesNoMapa.map(c => `<span class="legend-item"><span class="legend-dot" style="background:${CORES_CIDADES[c]}"></span>${esc(c)}</span>`).join('')}</div>`}
       </div>
 
@@ -10324,7 +10333,7 @@ function renderDashboardVisual() {
       { label: 'Mud. Endereço', value: qtdME }, { label: 'Mud. Cômodo', value: qtdMC },
       { label: 'Upgrade/Downgrade', value: qtdUpgrade },
     ].filter(x => x.value > 0).map((x, i) => ({ ...x, color: corCategorica(i) })), { centroLabel: 'Serviços' });
-    if (rankingBairros.length) renderMapaBairros('dv-mapa', rankingBairros);
+    if (rankingBairros.length && !faltaImportarEndereco) renderMapaBairros('dv-mapa', rankingBairros);
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'status', label: 'Produção por status' },
