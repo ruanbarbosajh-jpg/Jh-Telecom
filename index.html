@@ -620,6 +620,7 @@
   :root:not([data-theme="light"]) .mapa-cidades .leaflet-control-attribution { background: rgba(19,28,48,0.75); color: var(--text-secondary); }
   :root:not([data-theme="light"]) .mapa-cidades .leaflet-control-attribution a { color: var(--text-secondary); }
   .leaflet-tooltip { font-size: 12.5px; line-height: 1.5; }
+  .mapa-legenda { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-size: 12.5px; }
   .grouped-bars-svg rect { transition: opacity .15s ease; cursor: pointer; }
   .grouped-bars-svg rect:hover { opacity: .75; }
 
@@ -3343,10 +3344,8 @@ function trendChart(elId, series, opts = {}) {
   }
 }
 // Coordenadas do CENTRO de cada cidade do contrato (fonte: IBGE/IGC, conferido
-// por busca em 27/08/2026) — o sistema não geocodifica bairro (só tem o nome
-// em texto solto dentro do Endereço, ver extrairBairro), então o mapa de
-// verdade só dá pra fazer no nível de CIDADE; o detalhe por bairro continua na
-// tabela de ranking, que já tem o bairro mais atendido no título.
+// por busca em 27/08/2026) — usado só pra centralizar o mapa e como raio de
+// tolerância no saneamento das coordenadas de bairro (ver COORDENADAS_BAIRROS).
 const COORDENADAS_CIDADES = {
   'SANTOS': [-23.959722, -46.332222],
   'SAO VICENTE': [-23.958333, -46.387500],
@@ -3355,13 +3354,114 @@ const COORDENADAS_CIDADES = {
   'PRAIA GRANDE': [-24.009722, -46.412500],
   'BERTIOGA': [-23.846389, -46.139167],
 };
+// Cor fixa por cidade (pedido do cliente: "quero cada cidade de uma cor") —
+// fixa por NOME, não por posição no ranking, senão a cor de uma cidade muda
+// de um período pro outro conforme ela sobe/desce no ranking, o que confunde
+// quem está comparando dois recortes. São as 6 primeiras da paleta categórica
+// do sistema, na mesma ordem em que já aparecem em outras telas.
+const CORES_CIDADES = {
+  'GUARUJA': '#4f7fff', 'SANTOS': '#22c55e', 'BERTIOGA': '#ec5b13',
+  'CUBATAO': '#c61096', 'SAO VICENTE': '#c6ae10', 'PRAIA GRANDE': '#2dc7d2',
+};
+function corDaCidade(cidade) { return CORES_CIDADES[String(cidade || '').toUpperCase()] || '#94a3b8'; }
+// Coordenadas de bairro — geocodificadas via Nominatim/OpenStreetMap em
+// 27/08/2026, a partir dos ~100 bairros de MAIOR VOLUME em PRODUÇÃO GERAL
+// JH.xlsx (BASE PRODUÇÃO, ~72.800 linhas). Todo resultado foi conferido contra
+// a distância até o centro da própria cidade (COORDENADAS_CIDADES) — geocode
+// que caía a mais de 20km do centro (nome de bairro genérico demais, tipo
+// "CENTRO" ou "CHÁCARAS", que o Nominatim casou com outro lugar do Brasil)
+// foi DESCARTADO, não entrou aqui. Cobre ~73% do volume das 6 cidades do
+// contrato — o resto (bairro sem coordenada confiável, ou fora do top 100)
+// fica de fora do mapa mas continua no ranking detalhado da tabela.
+// Não fica pré-calculado por O.S: é só esse dicionário estático bairro→coordenada.
+const COORDENADAS_BAIRROS = {
+  'SITIO PAECARA VICENTE DE CARVALHO|GUARUJA': [-23.955159, -46.291345],
+  'ENSEADA|GUARUJA': [-23.984060, -46.231106],
+  'MORRINHOS|GUARUJA': [-23.962080, -46.252382],
+  'VILA ZILDA|GUARUJA': [-23.974766, -46.251631],
+  'BALNEARIO PRAIA DO PEREQUE|GUARUJA': [-23.933273, -46.182198],
+  'RADIO CLUBE|SANTOS': [-23.940277, -46.386687],
+  'CACHOEIRA|GUARUJA': [-23.979389, -46.263645],
+  'VILA AUREA VICENTE DE CARVALHO|GUARUJA': [-23.948009, -46.282965],
+  'CIDADE NAUTICA|SAO VICENTE': [-23.955866, -46.414246],
+  'CATIAPOA|SAO VICENTE': [-23.955142, -46.389705],
+  'MORRO SAO BENTO|SANTOS': [-23.935339, -46.341775],
+  'JARDIM BOA ESPERANCA VICENTE DE CARVALHO|GUARUJA': [-23.962766, -46.276301],
+  'PARQUE SAO VICENTE|SAO VICENTE': [-23.960434, -46.365066],
+  'SAO MANOEL|SANTOS': [-23.929080, -46.382064],
+  'SABOO|SANTOS': [-23.932628, -46.351298],
+  'CARUARA|SANTOS': [-23.885578, -46.190238],
+  'JARDIM PROGRESSO VICENTE DE CARVALHO|GUARUJA': [-23.938932, -46.285178],
+  'CASTELO|SANTOS': [-23.946734, -46.379567],
+  'CENTRO|BERTIOGA': [-23.852677, -46.137737],
+  'VISTA LINDA|BERTIOGA': [-23.810221, -46.081297],
+  'JARDIM PRIMAVERA|GUARUJA': [-23.988056, -46.272357],
+  'RIBEIROPOLIS|PRAIA GRANDE': [-24.022790, -46.516854],
+  'VILA MARGARIDA|SAO VICENTE': [-23.967275, -46.401832],
+  'JARDIM VICENTE DE CARVALHO|BERTIOGA': [-23.831380, -46.146173],
+  'MORRO NOVA CINTRA|SANTOS': [-23.948971, -46.350092],
+  'MORRO PENHA|SANTOS': [-23.931922, -46.343504],
+  'CANELEIRA|SANTOS': [-23.945754, -46.364058],
+  'MAR E CEU|GUARUJA': [-23.974547, -46.197499],
+  'SANTA CRUZ DOS NAVEGANTES|GUARUJA': [-24.011380, -46.303485],
+  'VILA SANTA ROSA|GUARUJA': [-23.993935, -46.280468],
+  'PARQUE BITARU|SAO VICENTE': [-23.970426, -46.394262],
+  'RIO DA PRAIA|BERTIOGA': [-23.804575, -46.106336],
+  'ESPLANADA DOS BARREIROS|SAO VICENTE': [-23.956261, -46.411730],
+  'BOM RETIRO|SANTOS': [-23.936886, -46.375785],
+  'JARDIM ENSEADA|GUARUJA': [-23.978053, -46.223137],
+  'VILA DOS PESCADORES|CUBATAO': [-23.924297, -46.404008],
+  'INDAIA|BERTIOGA': [-23.806686, -46.059065],
+  'VILA SANTO ANTONIO|GUARUJA': [-23.976899, -46.252192],
+  'MORRO SANTA MARIA|SANTOS': [-23.939146, -46.351517],
+  'VILA SONIA|PRAIA GRANDE': [-24.002739, -46.447170],
+  'PARQUE ESTUARIO VICENTE DE CARVALHO|GUARUJA': [-23.940481, -46.293268],
+  'CHICO DE PAULA|SANTOS': [-23.933061, -46.369061],
+  'ESMERALDA|PRAIA GRANDE': [-24.029121, -46.519970],
+  'VILA ALICE VICENTE DE CARVALHO|GUARUJA': [-23.945313, -46.303509],
+  'JARDIM LAS PALMAS|GUARUJA': [-24.001346, -46.273746],
+  'JARDIM MONTEIRO DA CRUZ VICENTE DE CARVALHO|GUARUJA': [-23.952180, -46.274724],
+  'SAO JOAO|BERTIOGA': [-23.855069, -46.134751],
+  'PITANGUEIRAS|GUARUJA': [-23.995105, -46.258885],
+  'VILA MATHIAS|SANTOS': [-23.946647, -46.326076],
+  'VILA ESPERANCA|CUBATAO': [-23.900101, -46.448050],
+  'ALEMOA|SANTOS': [-23.925737, -46.373556],
+  'AREIA BRANCA|SANTOS': [-23.946248, -46.373532],
+  'JARDIM RIO BRANCO|SAO VICENTE': [-23.980535, -46.472307],
+  'PARQUE ENSEADA|GUARUJA': [-23.982869, -46.229432],
+  'JARDIM CUNHAMBEBE VICENTE DE CARVALHO|GUARUJA': [-23.952180, -46.274724],
+  'PARQUE CONTINENTAL|SAO VICENTE': [-23.952959, -46.461818],
+  'MELVI|PRAIA GRANDE': [-24.037499, -46.530903],
+  'JOSE MENINO|SANTOS': [-23.966759, -46.349664],
+  'VILA NOVA|SANTOS': [-23.940965, -46.322203],
+  'VILA PROGRESSO|SANTOS': [-23.939726, -46.348267],
+  'SAMAMBAIA|PRAIA GRANDE': [-24.034234, -46.526474],
+  'CAIUBURA|BERTIOGA': [-23.874896, -46.185220],
+  'MAITINGA|BERTIOGA': [-23.833343, -46.121427],
+  'PARQUE DAS BANDEIRAS|SAO VICENTE': [-23.986998, -46.488256],
+  'MARAPE|SANTOS': [-23.956146, -46.347432],
+  'NOVA MIRIM|PRAIA GRANDE': [-24.022815, -46.497869],
+  'CONCEICAOZINHA|GUARUJA': [-23.975308, -46.284662],
+  'TUPIRY|PRAIA GRANDE': [-24.015068, -46.468767],
+  'JARDIM REAL|CUBATAO': [-23.922330, -46.431497],
+  'ALBATROZ|BERTIOGA': [-23.806140, -46.058732],
+  'JARDIM SANTENSE VICENTE DE CARVALHO|GUARUJA': [-23.952180, -46.274724],
+  'CONCEICAOZINHA VICENTE DE CARVALHO|GUARUJA': [-23.975308, -46.284662],
+  'MORRO SABOO|SANTOS': [-23.942132, -46.357848],
+  'SAO JORGE|SANTOS': [-23.949368, -46.368450],
+  'SITIO CONCEICAOZINHA VICENTE DE CARVALHO|GUARUJA': [-23.975308, -46.284662],
+  'JARDIM NOVA REPUBLICA|CUBATAO': [-23.920093, -46.426902],
+  'MACUCO|SANTOS': [-23.955949, -46.315139],
+  'ANHANGUERA|PRAIA GRANDE': [-24.021408, -46.489910],
+  'CENTRO|SANTOS': [-23.934503, -46.327468],
+};
 // Mapa de verdade (Leaflet + base cartográfica OpenStreetMap) com um círculo
-// por cidade — raio proporcional à RAIZ do total de ordens (então a ÁREA do
+// por BAIRRO — raio proporcional à RAIZ do total de ordens (então a ÁREA do
 // círculo é proporcional ao volume, igual à convenção de bubble map da
-// referência que o cliente mandou), cor por % de conclusão. Se a biblioteca
-// não carregar (CDN bloqueada / sem internet — mesma situação do Supabase),
-// cai num aviso discreto em vez de quebrar a tela.
-function renderMapaCidades(elId, rankingCidades) {
+// referência que o cliente mandou), cor fixa por CIDADE (ver CORES_CIDADES).
+// Se a biblioteca não carregar (CDN bloqueada / sem internet — mesma situação
+// do Supabase), cai num aviso discreto em vez de quebrar a tela.
+function renderMapaBairros(elId, rankingBairros) {
   const el = document.getElementById(elId);
   if (!el) return;
   if (el._leafletMap) { el._leafletMap.remove(); el._leafletMap = null; }
@@ -3369,23 +3469,25 @@ function renderMapaCidades(elId, rankingCidades) {
     el.innerHTML = '<div class="empty">Não foi possível carregar o mapa (biblioteca bloqueada ou sem internet) — o ranking de bairros abaixo continua disponível.</div>';
     return;
   }
-  const comCoord = rankingCidades.filter(c => COORDENADAS_CIDADES[String(c.cidade || '').toUpperCase()]);
-  if (!comCoord.length) { el.innerHTML = '<div class="empty">Nenhuma cidade do filtro tem coordenada conhecida.</div>'; return; }
+  const comCoord = rankingBairros
+    .map(b => ({ ...b, coord: COORDENADAS_BAIRROS[`${b.bairro}|${String(b.cidade || '').toUpperCase()}`] }))
+    .filter(b => b.coord);
+  if (!comCoord.length) { el.innerHTML = '<div class="empty">Nenhum bairro do filtro tem coordenada conhecida — veja o ranking na tabela abaixo.</div>'; return; }
   el.innerHTML = '';
   const map = L.map(el, { scrollWheelZoom: false }).setView([-23.94, -46.30], 11);
   el._leafletMap = map;
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 18,
   }).addTo(map);
-  const maxTotal = Math.max(...comCoord.map(c => c.total), 1);
-  comCoord.forEach(c => {
-    const coord = COORDENADAS_CIDADES[String(c.cidade).toUpperCase()];
-    const pctConcluido = c.total ? (c.concluida / c.total) * 100 : 0;
-    const cor = pctConcluido >= 85 ? '#22c55e' : pctConcluido >= 70 ? '#eab308' : '#ef4444';
-    const raio = 10 + Math.sqrt(c.total / maxTotal) * 32; // área ∝ total
-    L.circleMarker(coord, { radius: raio, color: cor, weight: 2, fillColor: cor, fillOpacity: 0.45 })
+  const maxTotal = Math.max(...comCoord.map(b => b.total), 1);
+  // do MENOR pro MAIOR: assim o bairro de maior volume fica desenhado por
+  // cima na sobreposição, em vez de escondido atrás de um vizinho pequeno.
+  [...comCoord].sort((a, b) => a.total - b.total).forEach(b => {
+    const cor = corDaCidade(b.cidade);
+    const raio = 4 + Math.sqrt(b.total / maxTotal) * 20; // área ∝ total
+    L.circleMarker(b.coord, { radius: raio, color: cor, weight: 1.5, fillColor: cor, fillOpacity: 0.55 })
       .addTo(map)
-      .bindTooltip(`<b>${esc(c.cidade)}</b><br>Concluídas: ${c.concluida}<br>Canceladas: ${c.cancelada}<br>Não concluídas: ${c.naoConcluida}<br><b>Total: ${c.total}</b>`, { direction: 'top' });
+      .bindTooltip(`<b>${esc(b.bairro)}</b> — ${esc(b.cidade)}<br>Concluídas: ${b.concluida}<br>Canceladas: ${b.cancelada}<br>Não concluídas: ${b.naoConcluida}<br><b>Total: ${b.total}</b>`, { direction: 'top' });
   });
 }
 // Diagnóstico em texto corrido da tela de Produção. NÃO calcula regra de
@@ -10168,6 +10270,11 @@ function renderDashboardVisual() {
     const rankingCidades = Object.values(porCidadeMap).sort((a, b) => b.total - a.total);
     const rankingBairros = Object.values(porBairroMap).sort((a, b) => b.total - a.total);
     const semEndereco = prod.filter(p => !p.endereco).length;
+    // quantos bairros do ranking (e qual % do volume) têm coordenada geocodificada
+    // conhecida — usado só pra avisar na tela, não filtra a tabela
+    const bairrosComCoord = rankingBairros.filter(b => COORDENADAS_BAIRROS[`${b.bairro}|${String(b.cidade || '').toUpperCase()}`]);
+    const volumeComCoord = bairrosComCoord.reduce((a, b) => a + b.total, 0);
+    const cidadesNoMapa = [...new Set(bairrosComCoord.map(b => String(b.cidade || '').toUpperCase()))].filter(c => CORES_CIDADES[c]);
 
     body.innerHTML = `
       <div class="panel" style="margin-bottom:1.5rem">
@@ -10179,8 +10286,8 @@ function renderDashboardVisual() {
 
       <div class="section-heading">Cidades e Bairros Atendidos</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
-        O bairro vem do texto do campo Endereço da planilha de produção (o sistema não tem bairro como coluna própria nem latitude/longitude por bairro) —
-        por isso o mapa mostra o nível de CIDADE; o detalhe por bairro fica no ranking logo abaixo dele.
+        O bairro vem do texto do campo Endereço da planilha de produção — geocodificado (OpenStreetMap/Nominatim) pra virar um ponto no mapa.
+        ${rankingBairros.length ? `${bairrosComCoord.length} de ${rankingBairros.length} bairros do período (${prod.length ? ((volumeComCoord / prod.length) * 100).toFixed(0) : '0'}% do volume) têm coordenada conhecida e aparecem no mapa; o resto continua no ranking detalhado abaixo.` : ''}
         ${semEndereco ? ` ${semEndereco} de ${prod.length} ordem(ns) do período não têm Endereço importado e entram em "Não informado".` : ''}
       </p>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
@@ -10191,8 +10298,9 @@ function renderDashboardVisual() {
       </tbody></table></div>
 
       <div class="panel" style="margin-bottom:1.5rem">
-        <h3>Mapa — Volume por Cidade <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(círculo maior = mais ordens; cor = % concluído — verde ≥85%, amarelo ≥70%, vermelho abaixo)</span></h3>
-        ${!rankingCidades.length ? '<div class="empty">Sem ordens no período.</div>' : '<div id="dv-mapa" class="mapa-cidades"></div>'}
+        <h3>Mapa — Bairros Mais Atendidos <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(círculo maior = mais ordens; cor = cidade)</span></h3>
+        ${!rankingBairros.length ? '<div class="empty">Sem ordens no período.</div>' : `<div id="dv-mapa" class="mapa-cidades"></div>
+        <div class="mapa-legenda">${cidadesNoMapa.map(c => `<span class="legend-item"><span class="legend-dot" style="background:${CORES_CIDADES[c]}"></span>${esc(c)}</span>`).join('')}</div>`}
       </div>
 
       ${rankingBairros.length ? `
@@ -10216,7 +10324,7 @@ function renderDashboardVisual() {
       { label: 'Mud. Endereço', value: qtdME }, { label: 'Mud. Cômodo', value: qtdMC },
       { label: 'Upgrade/Downgrade', value: qtdUpgrade },
     ].filter(x => x.value > 0).map((x, i) => ({ ...x, color: corCategorica(i) })), { centroLabel: 'Serviços' });
-    if (rankingCidades.length) renderMapaCidades('dv-mapa', rankingCidades);
+    if (rankingBairros.length) renderMapaBairros('dv-mapa', rankingBairros);
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'status', label: 'Produção por status' },
