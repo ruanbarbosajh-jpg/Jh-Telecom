@@ -7138,34 +7138,51 @@ function renderParcialDoDia() {
     if (!rows.length && !reparoDiaPreCheck.length) { body.innerHTML = '<div class="panel"><div class="empty">Sem dados para essa data. Importe o CSV de atividades no campo acima, ou a aba "BASE DO DIA" / "PRAZO REPARO DO DIA" (PRAZOS_ESCRITÓRIO.xlsx) em "Importar Excel".</div></div>'; return; }
 
     // ---- Tabela 1: Mão de obra e produção do dia por cidade ----
+    // "Mão de Obra e Produção do Dia" é sobre o que AINDA FALTA no dia — as
+    // colunas Ativação/Reparo/M.E/M.C/Upgrade/Total contam SÓ AS PENDENTES,
+    // mesma regra que o M.O. já seguia sozinho (e a mesma regra que a versão
+    // desta tabela dentro de "Relatórios — Excel e Imagem" já usa, rotulada
+    // "(pendentes)" lá). Contar concluído/cancelado junto inflava a "produção
+    // do dia" bem além do que realmente resta fazer.
+    const rowsPendentesMO = rows.filter(r => /pendente/i.test(r.status || ''));
+    // dia sem NENHUMA pendente em lugar nenhum (base de fim de dia, tudo já
+    // encerrado): usa todas as ordens do dia, pra tabela não ficar em branco
+    const universoMO = rowsPendentesMO.length ? rowsPendentesMO : rows;
+    const porCidadeMO = {};
+    universoMO.forEach(r => {
+      const c = r.cidade || 'Não informado';
+      if (!porCidadeMO[c]) porCidadeMO[c] = { ativacao:0, reparo:0, me:0, mc:0, upgrade:0, total:0, tecnicos:new Set() };
+      const t = normalizeHeader(r.tipo_atividade);
+      if (/ativa/.test(t)) porCidadeMO[c].ativacao++;
+      else if (/reparo/.test(t)) porCidadeMO[c].reparo++;
+      else if (/mudan.*endereco/.test(t)) porCidadeMO[c].me++;
+      else if (/mudan.*comodo/.test(t)) porCidadeMO[c].mc++;
+      else if (/upgrade|downgrade/.test(t)) porCidadeMO[c].upgrade++;
+      porCidadeMO[c].total++;
+      if (ehRecursoTecnico(r.recurso)) porCidadeMO[c].tecnicos.add(r.recurso);
+    });
+    const vazioMO = { ativacao:0, reparo:0, me:0, mc:0, upgrade:0, total:0, tecnicos: new Set() };
+    const moDaCidadeLinha = cidade => porCidadeMO[cidade] || vazioMO;
+
+    // ---- roster de cidades do dia (pra Status Detalhado / Prazo / Faixa) ----
+    // Esse aqui SEGUE contando tudo (concluído, cancelado, pendente...): é só
+    // a lista de cidades do dia com o total geral, usada por outras tabelas
+    // mais abaixo que não são sobre "o que falta" e sim sobre "o dia inteiro".
     const porCidade = {};
     rows.forEach(r => {
       const c = r.cidade || 'Não informado';
-      if (!porCidade[c]) porCidade[c] = { cidade:c, ativacao:0, reparo:0, me:0, mc:0, upgrade:0, total:0, tecnicos:new Set(), todosTecnicos:new Set() };
-      const t = normalizeHeader(r.tipo_atividade);
-      if (/ativa/.test(t)) porCidade[c].ativacao++;
-      else if (/reparo/.test(t)) porCidade[c].reparo++;
-      else if (/mudan.*endereco/.test(t)) porCidade[c].me++;
-      else if (/mudan.*comodo/.test(t)) porCidade[c].mc++;
-      else if (/upgrade|downgrade/.test(t)) porCidade[c].upgrade++;
+      if (!porCidade[c]) porCidade[c] = { cidade:c, total:0 };
       porCidade[c].total++;
-      // M.O = técnico com ordem PENDENTE (o escalado com serviço em aberto);
-      // contar qualquer técnico que aparecesse na cidade inflava o número
-      if (ehRecursoTecnico(r.recurso)) {
-        porCidade[c].todosTecnicos.add(r.recurso);
-        if (/pendente/i.test(r.status || '')) porCidade[c].tecnicos.add(r.recurso);
-      }
     });
-    // dia sem nenhuma ordem pendente (base de fim de dia): usa o total,
-    // pra tabela não ficar zerada
-    if (Object.values(porCidade).every(c => c.tecnicos.size === 0)) {
-      Object.values(porCidade).forEach(c => c.tecnicos = c.todosTecnicos);
-    }
     const cidadesList = Object.values(porCidade).sort((a,b)=>b.total-a.total);
-    const totais = cidadesList.reduce((acc,c)=>{ acc.ativacao+=c.ativacao; acc.reparo+=c.reparo; acc.me+=c.me; acc.mc+=c.mc; acc.upgrade+=c.upgrade; acc.total+=c.total; acc.mo+=c.tecnicos.size; return acc; }, {ativacao:0,reparo:0,me:0,mc:0,upgrade:0,total:0,mo:0});
+    const totais = cidadesList.reduce((acc,c)=>{
+      const m = moDaCidadeLinha(c.cidade);
+      acc.ativacao+=m.ativacao; acc.reparo+=m.reparo; acc.me+=m.me; acc.mc+=m.mc; acc.upgrade+=m.upgrade; acc.total+=m.total; acc.mo+=m.tecnicos.size;
+      return acc;
+    }, {ativacao:0,reparo:0,me:0,mc:0,upgrade:0,total:0,mo:0});
     // M.O corrigida à mão — a mesma memória usada na PCR (dia + cidade), então
     // o número que o coordenador ajusta numa tela vale na outra
-    const moDoDia = c => { const k = data + '|' + c.cidade; return MO_MANUAL[k] !== undefined ? MO_MANUAL[k] : c.tecnicos.size; };
+    const moDoDia = c => { const k = data + '|' + c.cidade; return MO_MANUAL[k] !== undefined ? MO_MANUAL[k] : moDaCidadeLinha(c.cidade).tecnicos.size; };
     const moTotalDia = () => cidadesList.reduce((a,c)=>a + moDoDia(c), 0);
 
     // ---- Tabela 2: Prazo geral do dia por cidade ----
@@ -7285,12 +7302,13 @@ function renderParcialDoDia() {
         <th>Cidades</th><th>Ativação</th><th>Reparo</th><th>M.E</th><th>M.C</th><th>Upgrade</th><th>Total</th><th>M.O</th><th>Média</th>
       </tr></thead><tbody>
         ${cidadesList.map(c=>{
+          const m = moDaCidadeLinha(c.cidade);
           const chave = data + '|' + c.cidade;
           const mo = moDoDia(c);
-          return `<tr><td class="cat-cell">${c.cidade}</td><td>${c.ativacao}</td><td>${c.reparo}</td><td>${c.me}</td><td>${c.mc}</td><td>${c.upgrade}</td><td>${c.total}</td>
-          <td><input type="number" min="0" class="mo-edit" value="${mo}" data-chave="${chave}" data-cidade="${c.cidade}" data-total="${c.total}"
+          return `<tr><td class="cat-cell">${c.cidade}</td><td>${m.ativacao}</td><td>${m.reparo}</td><td>${m.me}</td><td>${m.mc}</td><td>${m.upgrade}</td><td>${m.total}</td>
+          <td><input type="number" min="0" class="mo-edit" value="${mo}" data-chave="${chave}" data-cidade="${c.cidade}" data-total="${m.total}"
               ${podeEditarMO() ? 'title="Editável — a média recalcula sozinha e o número fica salvo"' : 'readonly disabled title="Só leitura para o perfil Escritório"'}></td>
-          <td data-media="${c.cidade}">${mo?(c.total/mo).toFixed(1):'-'}</td></tr>`;}).join('')}
+          <td data-media="${c.cidade}">${mo?(m.total/mo).toFixed(1):'-'}</td></tr>`;}).join('')}
         <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${totais.ativacao}</td><td>${totais.reparo}</td><td>${totais.me}</td><td>${totais.mc}</td><td>${totais.upgrade}</td><td>${totais.total}</td>
           <td style="color:#c084fc;font-weight:700" data-mo-total>${moTotalDia()}</td>
           <td data-media-total>${moTotalDia()?(totais.total/moTotalDia()).toFixed(1):'-'}</td></tr>
@@ -7408,10 +7426,15 @@ function renderParcialDoDia() {
       ...(servicosDoDia.length ? [{ id: 'servicos', label: 'Serviços do dia (linha a linha)' }] : []),
     ]);
     wirePdfExportPanel('Parcial do Dia — ' + formatDate(data), {
-      maodeobra: () => secaoTabela('Mão de Obra e Produção do Dia', [...cidadesList, {cidade:'TOTAL', ...totais}], [
-        {header:'Cidade', get:r=>r.cidade}, {header:'Ativação', get:r=>r.ativacao}, {header:'Reparo', get:r=>r.reparo},
-        {header:'M.E', get:r=>r.me}, {header:'M.C', get:r=>r.mc}, {header:'Upgrade', get:r=>r.upgrade}, {header:'Total', get:r=>r.total},
-        {header:'M.O', get:r=>r.tecnicos?moDoDia(r):r.mo},
+      maodeobra: () => secaoTabela('Mão de Obra e Produção do Dia (pendentes)', [...cidadesList, {cidade:'TOTAL', ...totais}], [
+        {header:'Cidade', get:r=>r.cidade},
+        {header:'Ativação', get:r=>r.cidade==='TOTAL'?r.ativacao:moDaCidadeLinha(r.cidade).ativacao},
+        {header:'Reparo', get:r=>r.cidade==='TOTAL'?r.reparo:moDaCidadeLinha(r.cidade).reparo},
+        {header:'M.E', get:r=>r.cidade==='TOTAL'?r.me:moDaCidadeLinha(r.cidade).me},
+        {header:'M.C', get:r=>r.cidade==='TOTAL'?r.mc:moDaCidadeLinha(r.cidade).mc},
+        {header:'Upgrade', get:r=>r.cidade==='TOTAL'?r.upgrade:moDaCidadeLinha(r.cidade).upgrade},
+        {header:'Total', get:r=>r.cidade==='TOTAL'?r.total:moDaCidadeLinha(r.cidade).total},
+        {header:'M.O', get:r=>r.cidade==='TOTAL'?r.mo:moDoDia(r)},
       ]),
       status: () => secaoTabela('Status Detalhado por Tipo de Serviço', statusTable, [
         {header:'Serviço', get:r=>r.label}, ...buckets.map(b=>({header:bucketLabel[b], get:r=>r[b]})), {header:'Total', get:r=>r.total},
