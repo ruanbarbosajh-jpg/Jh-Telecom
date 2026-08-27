@@ -537,19 +537,21 @@
   .gauge-arc-meta-label { font-size: 9px; font-weight: 700; }
   .gauge-target { font-size: 12px; color: var(--text-primary); margin-top: 2px; }
 
-  /* Dashboard: pedido do cliente foi "escurecer mais, tema azul e preto" com
-     uma foto de referência de painel SaaS (fundo quase preto, cartão com
-     leve gradiente, linha do gráfico com brilho azul). Fica só nesta página
-     (a classe .dv-theme só existe no wrapper do renderDashboardVisual) e só
-     no tema escuro — mexer no :root afetaria as outras 24 telas já
-     validadas, e no tema claro esse visual "preto" não faz sentido. */
+  /* Dashboard: pedido do cliente foi "tema dark azul, não pode ficar muito
+     preto" com uma foto de referência de painel SaaS (cartão com gradiente
+     azul-marinho, linha do gráfico com brilho azul) — a primeira versão
+     ficou escura demais (gradiente ia quase a preto puro), corrigido pra um
+     azul-marinho mais presente nas duas pontas. Fica só nesta página (a
+     classe .dv-theme só existe no wrapper do renderDashboardVisual) e só no
+     tema escuro — mexer no :root afetaria as outras 24 telas já validadas,
+     e no tema claro esse visual não faz sentido. */
   :root:not([data-theme="light"]) .dv-theme .panel,
   :root:not([data-theme="light"]) .dv-theme .metric-card {
-    background: linear-gradient(180deg, #0d1424 0%, #060910 100%);
-    border-color: rgba(79,127,255,0.18);
-    box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 16px 32px rgba(0,0,0,.4);
+    background: linear-gradient(160deg, #16233f 0%, #0d1830 100%);
+    border-color: rgba(79,127,255,0.28);
+    box-shadow: 0 1px 0 rgba(120,155,255,.08) inset, 0 16px 32px rgba(3,6,16,.45);
   }
-  :root:not([data-theme="light"]) .dv-theme .metric-card:hover { box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 16px 32px rgba(0,0,0,.4), 0 0 0 1px rgba(79,127,255,.35); }
+  :root:not([data-theme="light"]) .dv-theme .metric-card:hover { box-shadow: 0 1px 0 rgba(120,155,255,.08) inset, 0 16px 32px rgba(3,6,16,.45), 0 0 0 1px rgba(79,127,255,.45); }
   :root:not([data-theme="light"]) .dv-theme .section-heading { color: var(--text-secondary); }
   :root:not([data-theme="light"]) .dv-theme #dv-evolucao .trend-chart-svg path[stroke="var(--accent)"] { filter: drop-shadow(0 0 5px rgba(79,127,255,.65)); }
 
@@ -608,6 +610,16 @@
      o ponto reaparece no hover, com o tooltip de sempre. */
   .trend-suave .trend-dot { fill-opacity: 0; r: 7; }
   .trend-suave .trend-dot:hover { fill-opacity: 1; r: 5; }
+  /* tooltip ao passar o mouse no gráfico de evolução/tendência — mostra a
+     data e o valor de cada série no ponto mais próximo do cursor */
+  .trend-chart-wrap { position: relative; }
+  .trend-hover-line { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 4; pointer-events: none; }
+  .trend-tooltip { position: absolute; top: 4px; z-index: 5; background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: var(--r-sm); padding: 8px 10px; font-size: 12px; box-shadow: var(--sombra-flutuante);
+    pointer-events: none; min-width: 150px; }
+  .trend-tooltip-data { font-weight: 700; color: var(--text-primary); margin-bottom: 5px; font-size: 11.5px; }
+  .trend-tooltip-item { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); margin-top: 3px; white-space: nowrap; }
+  .trend-tooltip-item b { margin-left: auto; padding-left: 10px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
   .grouped-bars-svg rect { transition: opacity .15s ease; cursor: pointer; }
   .grouped-bars-svg rect:hover { opacity: .75; }
 
@@ -3269,15 +3281,51 @@ function trendChart(elId, series, opts = {}) {
   const mostraLabel = i => passo === 1 || i === 0 || i === n - 1 || i % passo === 0;
   el.innerHTML = `
     <div class="trend-legend">${comValores.map(s => `<span class="legend-item"><span class="legend-dot" style="background:${s.color}"></span>${s.name}</span>`).join('')}</div>
+    <div class="trend-chart-wrap">
     <svg viewBox="0 0 ${W} ${H}" class="trend-chart-svg${opts.suave ? ' trend-suave' : ''}" preserveAspectRatio="xMidYMid meet">
       ${[0, 0.5, 1].map(f => `<line x1="${PADX}" y1="${(H - PADY_B - f * (H - PADY_T - PADY_B)).toFixed(1)}" x2="${W - PADX}" y2="${(H - PADY_B - f * (H - PADY_T - PADY_B)).toFixed(1)}" class="trend-gridline"/>`).join('')}
       ${comValores.map(s => `
         ${s.semArea ? '' : `<path d="${areaPath(s.points)}" fill="${s.color}" opacity="0.12" stroke="none"/>`}
         <path d="${linePath(s.points)}" fill="none" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"${s.tracejado ? ' stroke-dasharray="2 5"' : ''}/>
-        ${s.points.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="4" fill="${s.color}" class="trend-dot"><title>${s.name} — ${p.label}: ${p.display !== undefined ? p.display : p.value}</title></circle>`).join('')}
+        ${s.points.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="4" fill="${s.color}" class="trend-dot" data-idx="${i}"><title>${s.name} — ${p.label}: ${p.display !== undefined ? p.display : p.value}</title></circle>`).join('')}
       `).join('')}
+      <line class="trend-hover-line" x1="0" y1="${PADY_T}" x2="0" y2="${H - PADY_B}" style="display:none"/>
       ${labels.map((l, i) => mostraLabel(i) ? `<text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" class="trend-axis-label">${l}</text>` : '').join('')}
-    </svg>`;
+    </svg>
+    <div class="trend-tooltip" style="display:none"></div>
+    </div>`;
+
+  // ---- tooltip interativo ao passar o mouse ----
+  // Antes só existia o title nativo do navegador em cima do pontinho (que na
+  // curva suave fica INVISÍVEL — opacity 0 — então só aparecia se acertasse o
+  // pixel exato e esperasse o navegador mostrar). Agora qualquer ponto do
+  // gráfico mostra um rótulo com a data e o valor de cada série.
+  const svgEl = el.querySelector('.trend-chart-svg');
+  const tooltipEl = el.querySelector('.trend-tooltip');
+  const hoverLine = el.querySelector('.trend-hover-line');
+  if (svgEl && tooltipEl && n > 0) {
+    const posicionar = clientX => {
+      const rect = svgEl.getBoundingClientRect();
+      const svgX = ((clientX - rect.left) / rect.width) * W;
+      let idx = 0, melhorDist = Infinity;
+      for (let i = 0; i < n; i++) { const d = Math.abs(x(i) - svgX); if (d < melhorDist) { melhorDist = d; idx = i; } }
+      hoverLine.setAttribute('x1', x(idx).toFixed(1));
+      hoverLine.setAttribute('x2', x(idx).toFixed(1));
+      hoverLine.style.display = 'block';
+      tooltipEl.innerHTML = `<div class="trend-tooltip-data">${esc(labels[idx])}</div>` + comValores.map(s => {
+        const p = s.points[idx];
+        return `<div class="trend-tooltip-item"><span class="legend-dot" style="background:${s.color}"></span>${esc(s.name)}<b>${p.display !== undefined ? p.display : p.value}</b></div>`;
+      }).join('');
+      tooltipEl.style.display = 'block';
+      const pxX = (x(idx) / W) * rect.width;
+      const wrapWidth = svgEl.closest('.trend-chart-wrap').clientWidth;
+      let left = pxX + 12;
+      if (left + 180 > wrapWidth) left = pxX - 180 - 12;
+      tooltipEl.style.left = Math.max(0, left) + 'px';
+    };
+    svgEl.addEventListener('mousemove', ev => posicionar(ev.clientX));
+    svgEl.addEventListener('mouseleave', () => { tooltipEl.style.display = 'none'; hoverLine.style.display = 'none'; });
+  }
 }
 // Diagnóstico em texto corrido da tela de Produção. NÃO calcula regra de
 // negócio nova: recebe prontos os mesmos números que os cards e os gráficos já
@@ -10077,12 +10125,12 @@ function renderDashboardVisual() {
     body.innerHTML = `
       <div class="dv-theme">
       <div class="cards-grid wide">
-        ${metricCard('◆ Total Concluídas', prodConcluida.length, false, { accent: true, variacao: variacaoPct(prodConcluida.length, prodConcluidaAnt.length) })}
-        ${metricCard('🔌 Ativação', qtdAtivacao, false, { variacao: variacaoPct(qtdAtivacao, contaTipoAnt(/ativa[cç][aã]o/i)) })}
-        ${metricCard('🔧 Reparo', qtdReparo, false, { variacao: variacaoPct(qtdReparo, contaTipoAnt(/reparo/i)) })}
-        ${metricCard('📍 Mud. Endereço', qtdME, false, { variacao: variacaoPct(qtdME, contaTipoAnt(/mudan[cç]a de endere[cç]o/i)) })}
-        ${metricCard('🏠 Mud. Cômodo', qtdMC, false, { variacao: variacaoPct(qtdMC, contaTipoAnt(/mudan[cç]a de c[oô]modo/i)) })}
-        ${metricCard('⇅ Upgrade/Downgrade', qtdUpgrade, false, { variacao: variacaoPct(qtdUpgrade, contaTipoAnt(/upgrade|downgrade/i)) })}
+        ${metricCard('◆ Total Concluídas', prodConcluida.length, false, { accent: true, nivel: 'heroi', variacao: variacaoPct(prodConcluida.length, prodConcluidaAnt.length) })}
+        ${metricCard('🔌 Ativação', qtdAtivacao, false, { nivel: 'primario', variacao: variacaoPct(qtdAtivacao, contaTipoAnt(/ativa[cç][aã]o/i)) })}
+        ${metricCard('🔧 Reparo', qtdReparo, false, { nivel: 'primario', variacao: variacaoPct(qtdReparo, contaTipoAnt(/reparo/i)) })}
+        ${metricCard('📍 Mud. Endereço', qtdME, false, { nivel: 'compacto', variacao: variacaoPct(qtdME, contaTipoAnt(/mudan[cç]a de endere[cç]o/i)) })}
+        ${metricCard('🏠 Mud. Cômodo', qtdMC, false, { nivel: 'compacto', variacao: variacaoPct(qtdMC, contaTipoAnt(/mudan[cç]a de c[oô]modo/i)) })}
+        ${metricCard('⇅ Upgrade/Downgrade', qtdUpgrade, false, { nivel: 'compacto', variacao: variacaoPct(qtdUpgrade, contaTipoAnt(/upgrade|downgrade/i)) })}
         ${ringStatCard('Prazo Reparo (24h)', pctPrazoReparo.toFixed(1) + '%', pctPrazoReparo, { color: pctPrazoReparo >= PRAZO_META ? 'var(--success)' : 'var(--danger)' })}
         ${ringStatCard('Prazo Ativação (36h)', pctPrazoAtiv.toFixed(1) + '%', pctPrazoAtiv, { color: pctPrazoAtiv >= PRAZO_ATIVACAO_META ? 'var(--success)' : 'var(--danger)' })}
       </div>
@@ -10125,11 +10173,16 @@ function renderDashboardVisual() {
       { name: 'Não concluídas', color: '#93a0bd', points: evoNaoConcluidas, semArea: true },
       { name: 'Canceladas', color: '#ef4444', points: evoCanceladas, semArea: true },
     ], { suave: true, maxLabels: 12, expandir: true });
+    // Paleta só de azuis (pedido explícito de "tema azul") — diferente da
+    // PALETTE_CATEGORICA (multicor) usada no resto do sistema; fica só neste
+    // anel, do mais claro ao mais escuro pra continuar dando pra distinguir
+    // fatia por fatia.
+    const AZUIS_DASHBOARD = ['#4f7fff', '#1d4ed8', '#7dabff', '#0f2f7a', '#a6c8ff'];
     donutChart('dv-tipo', [
       { label: 'Ativação', value: qtdAtivacao }, { label: 'Reparo', value: qtdReparo },
       { label: 'Mud. Endereço', value: qtdME }, { label: 'Mud. Cômodo', value: qtdMC },
       { label: 'Upgrade/Downgrade', value: qtdUpgrade },
-    ].filter(x => x.value > 0).map((x, i) => ({ ...x, color: corCategorica(i) })), { centroLabel: 'Serviços' });
+    ].filter(x => x.value > 0).map((x, i) => ({ ...x, color: AZUIS_DASHBOARD[i % AZUIS_DASHBOARD.length] })), { centroLabel: 'Serviços' });
     barsChartTopN('dv-tecnicos', topTecnicos, { defaultN: 5, options: [5, 10, 'Todos'], fill: true });
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
