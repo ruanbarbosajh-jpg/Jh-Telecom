@@ -3364,6 +3364,16 @@ const CORES_CIDADES = {
   'CUBATAO': '#c61096', 'SAO VICENTE': '#c6ae10', 'PRAIA GRANDE': '#2dc7d2',
 };
 function corDaCidade(cidade) { return CORES_CIDADES[String(cidade || '').toUpperCase()] || '#94a3b8'; }
+// Mistura uma cor hex com branco — fração 0 devolve a cor original, fração 1
+// devolve branco puro. Usado pra clarear a cor de um bairro proporcional ao
+// quanto ele é pequeno perto do maior (pedido: "bairro com mais [volume]
+// deixe a bolinha mais escura e chamativa, e as outras clarinho").
+function clarearCor(hex, fracaoBranco) {
+  const m = String(hex).match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (!m) return hex;
+  const misturar = c => Math.round(parseInt(c, 16) + (255 - parseInt(c, 16)) * fracaoBranco);
+  return `rgb(${misturar(m[1])},${misturar(m[2])},${misturar(m[3])})`;
+}
 // Coordenadas de bairro — geocodificadas via Nominatim/OpenStreetMap em
 // 27/08/2026, a partir dos ~100 bairros de MAIOR VOLUME em PRODUÇÃO GERAL
 // JH.xlsx (BASE PRODUÇÃO, ~72.800 linhas). Todo resultado foi conferido contra
@@ -3483,9 +3493,10 @@ function renderMapaBairros(elId, rankingBairros) {
   // do MENOR pro MAIOR: assim o bairro de maior volume fica desenhado por
   // cima na sobreposição, em vez de escondido atrás de um vizinho pequeno.
   [...comCoord].sort((a, b) => a.total - b.total).forEach(b => {
-    const cor = corDaCidade(b.cidade);
-    const raio = 4 + Math.sqrt(b.total / maxTotal) * 20; // área ∝ total
-    L.circleMarker(b.coord, { radius: raio, color: cor, weight: 1.5, fillColor: cor, fillOpacity: 0.55 })
+    const ratio = b.total / maxTotal; // 0 (menor bairro do mapa) a 1 (maior)
+    const cor = clarearCor(corDaCidade(b.cidade), (1 - ratio) * 0.75);
+    const raio = 4 + Math.sqrt(ratio) * 20; // área ∝ total
+    L.circleMarker(b.coord, { radius: raio, color: cor, weight: 1 + ratio * 1.5, fillColor: cor, fillOpacity: 0.3 + ratio * 0.5 })
       .addTo(map)
       .bindTooltip(`<b>${esc(b.bairro)}</b> — ${esc(b.cidade)}<br>Concluídas: ${b.concluida}<br>Canceladas: ${b.cancelada}<br>Não concluídas: ${b.naoConcluida}<br><b>Total: ${b.total}</b>`, { direction: 'top' });
   });
