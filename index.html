@@ -512,6 +512,11 @@
   .badge.warn { background: var(--danger-bg); color: var(--danger); }
   .badge.neutral { background: rgba(147,160,189,0.15); color: var(--text-secondary); }
   .badge.amber { background: rgba(234,179,8,0.18); color: #eab308; }
+  /* usados no status do "Serviços do Dia": em rota = amarelo (.amber, já
+     existe acima), pendente = laranja (mesmo tom "laranja" já usado em
+     alerta no resto do sistema), iniciado = azul */
+  .badge.laranja { background: rgba(245,158,11,0.18); color: #f59e0b; }
+  .badge.azul { background: rgba(56,189,248,0.18); color: #38bdf8; }
 
   /* Diagnóstico em texto corrido: barra de destaque na lateral pra separar do
      resto sem virar mais um "card". Fundo levemente destacado, mas os tokens
@@ -7282,6 +7287,21 @@ function renderParcialDoDia() {
       return linha;
     });
 
+    // ---- Tabela: status detalhado por técnico (mesmos baldes, agrupado por técnico) ----
+    const porTecnicoStatus = {};
+    rows.forEach(r => { if (ehRecursoTecnico(r.recurso)) (porTecnicoStatus[r.recurso] = porTecnicoStatus[r.recurso] || []).push(r); });
+    const statusPorTecnicoTable = Object.keys(porTecnicoStatus).sort((a,b)=>porTecnicoStatus[b].length-porTecnicoStatus[a].length).map(t => {
+      const linhas = porTecnicoStatus[t];
+      const linha = { label: t, total: linhas.length };
+      buckets.forEach(b => linha[b] = linhas.filter(r=>classifyStatusGranular(r.status)===b).length);
+      return linha;
+    });
+    // total PRÓPRIO (não o totalStatus da tabela de tipo/cidade): ordem sem
+    // técnico de verdade (ex.: recurso = nome de cidade) fica fora do
+    // agrupamento por técnico, então a soma das linhas é menor que o dia todo
+    const totalStatusTecnico = { label:'TOTAL', total: statusPorTecnicoTable.reduce((a,l)=>a+l.total,0) };
+    buckets.forEach(b => totalStatusTecnico[b] = statusPorTecnicoTable.reduce((a,l)=>a+l[b],0));
+
     // ---- Tabela: todos os serviços do dia, linha a linha, direto do CSV ----
     // Só existe quando a fonte do dia É o CSV (doCsv.length) — é o caso que foi
     // pedido. A BASE DO DIA (fallback de manhã) não tem esse detalhe linha a
@@ -7290,6 +7310,11 @@ function renderParcialDoDia() {
       String(a.cidade||'').localeCompare(String(b.cidade||'')) ||
       String(a.recurso||'').localeCompare(String(b.recurso||'')) ||
       String(a.os||'').localeCompare(String(b.os||'')));
+    // Status do "Serviços do Dia" com uma cor por situação (pedido explícito):
+    // em rota = amarelo, pendente = laranja — diferente do statusBadge() padrão
+    // (só 2 cores, ok/warn), usado nas outras tabelas do sistema.
+    const CLASSE_BADGE_SERVICO = { concluido:'ok', cancelado:'warn', nao_concluido:'warn', em_rota:'amber', pendente:'laranja', iniciado:'azul' };
+    const badgeServicoDia = status => `<span class="badge ${CLASSE_BADGE_SERVICO[classifyStatusGranular(status)] || 'neutral'}">${esc(status) || '-'}</span>`;
 
     body.innerHTML = `
       <div class="cards-grid">
@@ -7336,12 +7361,23 @@ function renderParcialDoDia() {
         <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="color:#38bdf8">${efetividade(totalStatus).toFixed(0)}%</td></tr>
       </tbody></table></div>
 
+      <div class="section-heading">Status Detalhado por Técnico</div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+        <th>Técnico</th>${buckets.map(b=>`<th>${bucketLabel[b]}</th>`).join('')}<th>Total O.S</th><th>Efetividade</th>
+      </tr></thead><tbody>
+        ${statusPorTecnicoTable.map(l=>{
+          const efet = efetividade(l);
+          return `<tr><td class="cat-cell">${esc(l.label)}</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="color:#38bdf8;font-weight:700">${efet.toFixed(0)}%</td></tr>`;
+        }).join('')}
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${totalStatusTecnico[b]}</td>`).join('')}<td>${totalStatusTecnico.total}</td><td style="color:#38bdf8">${efetividade(totalStatusTecnico).toFixed(0)}%</td></tr>
+      </tbody></table></div>
+
       ${!servicosDoDia.length ? '' : `
       <div class="section-heading">Serviços do Dia <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(${servicosDoDia.length} O.S — do CSV importado na PCR)</span></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
         <th>O.S</th><th>Cliente</th><th>Contrato</th><th>Técnico</th><th>Cidade</th><th>Tipo de Serviço</th><th>Status</th><th>Motivo</th><th>Abertura</th><th>Limite</th>
       </tr></thead><tbody>
-        ${servicosDoDia.map(r=>`<tr><td>${esc(r.os)||'-'}</td><td>${esc(r.cliente)||'-'}</td><td>${esc(r.contrato)||'-'}</td><td class="cat-cell">${esc(r.recurso)||'-'}</td><td>${esc(r.cidade)||'-'}</td><td>${esc(r.tipo_atividade)||'-'}</td><td>${statusBadge(r.status)}</td><td>${esc(r.motivo)||'-'}</td><td>${fmtDT(r.abertura)}</td><td>${fmtDT(r.limite)}</td></tr>`).join('')}
+        ${servicosDoDia.map(r=>`<tr><td>${esc(r.os)||'-'}</td><td>${esc(r.cliente)||'-'}</td><td>${esc(r.contrato)||'-'}</td><td class="cat-cell">${esc(r.recurso)||'-'}</td><td>${esc(r.cidade)||'-'}</td><td>${esc(r.tipo_atividade)||'-'}</td><td>${badgeServicoDia(r.status)}</td><td>${esc(r.motivo)||'-'}</td><td>${fmtDT(r.abertura)}</td><td>${fmtDT(r.limite)}</td></tr>`).join('')}
       </tbody></table></div>`}
 
       <div class="section-heading">Gerar imagem (PNG) — Remanejamento por tipo de serviço</div>
@@ -7419,10 +7455,32 @@ function renderParcialDoDia() {
       inp.addEventListener('input', recalc);
     });
 
+    // ---- ocultar/reexibir cada tabela da página (mesmo padrão da PCR) ----
+    // Cada "section-heading" ganha um botão que esconde tudo que vem depois
+    // dele até o próximo título — assim dá pra deixar na tela só a tabela que
+    // interessa no momento.
+    document.querySelectorAll('#pd-body .section-heading').forEach(h => {
+      if (h.querySelector('.secao-toggle')) return;
+      if (!h.style.display) { h.style.display = 'flex'; h.style.alignItems = 'center'; h.style.gap = '12px'; h.style.flexWrap = 'wrap'; }
+      const alvos = [];
+      let el = h.nextElementSibling;
+      while (el && !el.classList.contains('section-heading')) { alvos.push(el); el = el.nextElementSibling; }
+      if (!alvos.length) return;
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'secao-toggle'; b.textContent = '▾ ocultar';
+      b.addEventListener('click', () => {
+        const escondido = alvos[0].classList.contains('secao-oculta');
+        alvos.forEach(a => a.classList.toggle('secao-oculta', !escondido));
+        b.textContent = escondido ? '▾ ocultar' : '▸ exibir';
+      });
+      h.appendChild(b);
+    });
+
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'maodeobra', label: 'Mão de obra e produção do dia' },
       { id: 'status', label: 'Status detalhado por tipo de serviço' },
       { id: 'statuscidade', label: 'Status detalhado por cidade' },
+      { id: 'statustecnico', label: 'Status detalhado por técnico' },
       ...(servicosDoDia.length ? [{ id: 'servicos', label: 'Serviços do dia (linha a linha)' }] : []),
     ]);
     wirePdfExportPanel('Parcial do Dia — ' + formatDate(data), {
@@ -7441,6 +7499,9 @@ function renderParcialDoDia() {
       ]),
       statuscidade: () => secaoTabela('Status Detalhado por Cidade', statusPorCidadeTable, [
         {header:'Cidade', get:r=>r.label}, ...buckets.map(b=>({header:bucketLabel[b], get:r=>r[b]})), {header:'Total', get:r=>r.total},
+      ]),
+      statustecnico: () => secaoTabela('Status Detalhado por Técnico', statusPorTecnicoTable, [
+        {header:'Técnico', get:r=>r.label}, ...buckets.map(b=>({header:bucketLabel[b], get:r=>r[b]})), {header:'Total', get:r=>r.total},
       ]),
       servicos: () => secaoTabela('Serviços do Dia', servicosDoDia, [
         {header:'O.S', get:r=>r.os}, {header:'Cliente', get:r=>r.cliente}, {header:'Contrato', get:r=>r.contrato},
