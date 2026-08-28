@@ -9671,7 +9671,7 @@ function renderToll() {
       <div class="panel" style="margin-bottom:1.5rem"><div id="c-placa"></div></div>
       <div class="section-heading">Pedágio por Condutor</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Todos os pedágios de cada condutor, do mais frequente pro menos frequente.</p>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="ped-tab-condutor"><thead><tr>
         <th>Condutor / Pedágio</th><th>Passagens</th><th>Valor</th>
       </tr></thead><tbody>
         ${porCondutor.map(c => `<tr class="total-row"><td class="cat-cell">${c.condutor === 'Não encontrada' ? `<span class="badge warn">Não encontrada</span>` : esc(c.condutor)}</td>
@@ -9682,13 +9682,13 @@ function renderToll() {
       </tbody></table></div>
       <div class="section-heading">Detalhamento por Condutor e Local <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(pra desconto)</span></div>
       <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Uma linha por passagem, com data e placa — endereço e valor de CADA pedágio, não só o mais frequente.</p>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="ped-tab-detalhe"><thead><tr>
         <th>Data/Hora</th><th>Placa</th><th>Endereço</th><th>Valor</th>
       </tr></thead><tbody>
         ${detalhamentoLocal.map(d => `<tr><td class="cat-cell">${formatDate(d.data)} ${d.hora}</td><td>${esc(d.placa)}</td>
           <td style="${enderecoForaDasCidades(d.local)?'color:#fb923c':''}">${esc(d.local)}</td>
           <td style="font-weight:600">${formatCurrency(d.valor)}</td></tr>`).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td><td>-</td><td>-</td><td>${formatCurrency(totalValue)}</td></tr>
+        <tr class="total-row" id="ped-detalhe-total"><td class="cat-cell">TOTAL</td><td>-</td><td>-</td><td>${formatCurrency(totalValue)}</td></tr>
       </tbody></table></div>
       <div class="section-heading">Todas as Passagens</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Nome em <span style="color:var(--danger)">vermelho</span> = fora do horário. Endereço em <span style="color:#fb923c">laranja</span> = fora das cidades cobradas (Guarujá, Bertioga, Cubatão, Santos, São Vicente, Praia Grande).</p>
@@ -9719,6 +9719,63 @@ function renderToll() {
     if (selPed) selPed.addEventListener('change', () => { limitePed = +selPed.value; load(); });
     barsChartTopN('c-placa', byPlaca);
 
+    // ---- filtro por coluna (funil ▾) também muda o cálculo, não só esconde
+    // linha — pedido do cliente. "Detalhamento" é lista plana: soma direto as
+    // linhas que sobraram. "Pedágio por Condutor" é agrupada (condutor em
+    // negrito + locais embaixo), então recalcula cada grupo pelos LOCAIS dele
+    // que continuam visíveis, e a linha TOTAL GERAL por cima disso — sem essa
+    // conta, o funil escondia linha mas a tabela continuava dizendo o total de
+    // antes de filtrar.
+    const tabDetalhe = document.getElementById('ped-tab-detalhe');
+    if (tabDetalhe) {
+      const atualizarTotalDetalhe = () => {
+        const visiveis = filtrarPorColunasAtivas(tabDetalhe, detalhamentoLocal, [
+          d => formatDate(d.data) + ' ' + d.hora, d => d.placa, d => d.local, d => formatCurrency(d.valor),
+        ]);
+        const totalLinha = document.getElementById('ped-detalhe-total');
+        if (totalLinha) totalLinha.children[3].textContent = formatCurrency(visiveis.reduce((a, d) => a + d.valor, 0));
+      };
+      tabDetalhe.addEventListener('filtro-aplicado', atualizarTotalDetalhe);
+    }
+    const tabCondutor = document.getElementById('ped-tab-condutor');
+    if (tabCondutor) {
+      const atualizarTotaisCondutor = () => {
+        const linhasTr = [...tabCondutor.querySelectorAll('tbody tr')];
+        let i = 0, totGeralPass = 0, totGeralValor = 0;
+        porCondutor.forEach(c => {
+          const trGrupo = linhasTr[i]; i++;
+          let pass = 0, valor = 0;
+          c.locais.forEach(l => {
+            const trLocal = linhasTr[i]; i++;
+            if (trLocal && trLocal.style.display !== 'none') { pass += l.passagens; valor += l.valor; }
+          });
+          if (trGrupo) { trGrupo.children[1].textContent = pass; trGrupo.children[2].textContent = formatCurrency(valor); }
+          totGeralPass += pass; totGeralValor += valor;
+        });
+        const trTotalGeral = linhasTr[linhasTr.length - 1];
+        if (trTotalGeral) { trTotalGeral.children[1].textContent = totGeralPass; trTotalGeral.children[2].textContent = formatCurrency(totGeralValor); }
+      };
+      tabCondutor.addEventListener('filtro-aplicado', atualizarTotaisCondutor);
+    }
+    // versão "achatada" (1 linha por condutor+local) de porCondutor, só com o
+    // que sobrou visível na tela — usada pelo export de PDF/Excel, senão o PDF
+    // levava tudo, ignorando o funil (mesmo problema que o Detalhamento tinha).
+    function condutorFiltradoAchatado() {
+      const tabC = document.getElementById('ped-tab-condutor');
+      if (!tabC) return porCondutor.flatMap(c => c.locais.map(l => ({ condutor: c.condutor, local: l.local, passagens: l.passagens, valor: l.valor })));
+      const linhasTr = [...tabC.querySelectorAll('tbody tr')];
+      let i = 0;
+      const out = [];
+      porCondutor.forEach(c => {
+        i++; // pula a linha do condutor (total-row)
+        c.locais.forEach(l => {
+          const trLocal = linhasTr[i]; i++;
+          if (trLocal && trLocal.style.display !== 'none') out.push({ condutor: c.condutor, local: l.local, passagens: l.passagens, valor: l.valor });
+        });
+      });
+      return out;
+    }
+
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'resumo', label: 'Resumo de pedágio' },
       { id: 'placa', label: 'Gasto por veículo' },
@@ -9731,14 +9788,25 @@ function renderToll() {
         {l:'Fora do horário', v:foraHorario}, {l:'Fora das cidades cobradas', v:foraCidade}, {l:'Condutor não encontrado', v:naoEncontrada},
       ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
       placa: () => secaoTabela('Gasto de Pedágio por Veículo', byPlaca, [{header:'Placa', get:r=>r.label}, {header:'Valor', get:r=>formatCurrency(r.value)}]),
-      condutor: () => secaoTabela('Pedágio por Condutor', porCondutor.flatMap(c => c.locais.map(l => ({ condutor: c.condutor, local: l.local, passagens: l.passagens, valor: l.valor }))), [
-        {header:'Condutor', get:r=>r.condutor}, {header:'Pedágio', get:r=>r.local},
-        {header:'Passagens', get:r=>r.passagens}, {header:'Valor', get:r=>formatCurrency(r.valor)},
-      ], { totalRow: ['TOTAL GERAL', '-', rows.length, formatCurrency(totalValue)] }),
-      detalhelocal: () => secaoTabela('Detalhamento por Condutor e Local (pra desconto)', detalhamentoLocal, [
-        {header:'Endereço', get:r=>r.local}, {header:'Data/Hora', get:r=>formatDate(r.data)+' '+r.hora},
-        {header:'Placa', get:r=>r.placa}, {header:'Valor', get:r=>formatCurrency(r.valor)},
-      ], { totalRow: ['TOTAL', '-', '-', formatCurrency(totalValue)] }),
+      // os dois abaixo levam SÓ o que está filtrado na tela (barra de cima +
+      // funil de coluna) — antes o PDF sempre saía com a lista inteira
+      condutor: () => {
+        const linhas = condutorFiltradoAchatado();
+        return secaoTabela(`Pedágio por Condutor (${linhas.length} de ${porCondutor.reduce((a,c)=>a+c.locais.length,0)} pedágio(s))`, linhas, [
+          {header:'Condutor', get:r=>r.condutor}, {header:'Pedágio', get:r=>r.local},
+          {header:'Passagens', get:r=>r.passagens}, {header:'Valor', get:r=>formatCurrency(r.valor)},
+        ], { totalRow: ['TOTAL GERAL', '-', linhas.reduce((a,r)=>a+r.passagens,0), formatCurrency(linhas.reduce((a,r)=>a+r.valor,0))] });
+      },
+      detalhelocal: () => {
+        const tabDet = document.getElementById('ped-tab-detalhe');
+        const linhas = filtrarPorColunasAtivas(tabDet, detalhamentoLocal, [
+          d => formatDate(d.data) + ' ' + d.hora, d => d.placa, d => d.local, d => formatCurrency(d.valor),
+        ]);
+        return secaoTabela(`Detalhamento por Condutor e Local (pra desconto) — ${linhas.length} de ${detalhamentoLocal.length} passagem(ns)`, linhas, [
+          {header:'Endereço', get:r=>r.local}, {header:'Data/Hora', get:r=>formatDate(r.data)+' '+r.hora},
+          {header:'Placa', get:r=>r.placa}, {header:'Valor', get:r=>formatCurrency(r.valor)},
+        ], { totalRow: ['TOTAL', '-', '-', formatCurrency(linhas.reduce((a,r)=>a+r.valor,0))] });
+      },
     });
   }
 }
