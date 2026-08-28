@@ -7824,27 +7824,35 @@ function renderParcialDoDia() {
     // Cancelado/não concluído ficam de fora (não pedido, e "onde a ordem está
     // agora" não ajuda muito pra quem já foi encerrada sem sucesso).
     // "Já visitada, dada improdutiva e voltou pro campo": no jargão da
-    // operação, "improdutiva" É o status Não Concluído/Suspenso (o técnico foi
-    // e não conseguiu fechar — ver ehStatusTerminal). O CSV do dia guarda TODAS
-    // as ocorrências da mesma O.S. naquele dia (não só a mais recente — ver
-    // linhasDoCsvPorDia), então dá pra saber se ALGUMA tentativa anterior da
-    // mesma O.S. hoje terminou improdutiva antes da ordem voltar pra
-    // pendente/em rota — sem inventar estado novo, só olhando o que o CSV já
-    // trouxe. Continua marcada com um contorno vermelho no mapa, além da cor
-    // normal do status atual.
+    // operação, "improdutiva" aqui é SÓ o status Não Concluído (pedido
+    // explícito do cliente pra não contar cancelado/suspenso — mais restrito
+    // que o ehStatusTerminal usado no resto do sistema). Pedido do cliente:
+    // olhar não só hoje, mas os ÚLTIMOS 32 DIAS de PCR importado — uma O.S.
+    // pode ter sido tentada e dado improdutiva há alguns dias e só hoje
+    // voltar pro campo como pendente/em rota, e isso também conta como
+    // revisita. Não inventa estado novo: só junta as linhas que o CSV de
+    // cada dia já trouxe.
+    const JANELA_REVISITA_DIAS = 32;
+    const pcrJanela = DB.pcr.filter(r => { const d = diasEntre(data, r.data); return d >= 0 && d <= JANELA_REVISITA_DIAS; });
     const MAPA_BUCKETS = ['concluido', 'em_rota', 'iniciado', 'pendente'];
     const ordensAbertas = servicosDoDia.filter(r => MAPA_BUCKETS.includes(classifyStatusGranular(r.status)));
-    const pcrBrutoHoje = DB.pcr.filter(r => r.data === data);
     const porOSBruto = {};
-    pcrBrutoHoje.forEach(r => { if (r.os) (porOSBruto[r.os] = porOSBruto[r.os] || []).push(r); });
-    // motivo da PRIMEIRA tentativa improdutiva do dia (pedido: "quero o motivo
-    // da primeira improdutiva nos que estão em vermelho") — ordena as
-    // tentativas terminais pelo horário de Início e pega a mais cedo; o
-    // motivo da tentativa atual (pendente/em rota de novo) normalmente vem
-    // vazio, então sem isso o popup da revisita não explicava o "porquê".
+    pcrJanela.forEach(r => { if (r.os) (porOSBruto[r.os] = porOSBruto[r.os] || []).push(r); });
+    // motivo da PRIMEIRA tentativa improdutiva na janela (pedido: "quero o
+    // motivo da primeira improdutiva nos que estão em vermelho") — ordena as
+    // tentativas terminais por data+horário de Início (inicio é um Date de
+    // verdade — comparar por getTime(), não como texto, senão a ordem quebra
+    // entre dias diferentes) e pega a mais antiga; o motivo da tentativa
+    // atual (pendente/em rota de novo) normalmente vem vazio, então sem isso
+    // o popup da revisita não explicava o "porquê".
+    // "e somente não concluída": pedido explícito de restringir a SÓ esse
+    // status — ehStatusTerminal (usado no resto do sistema) também pega
+    // "cancelado" e "suspenso", que aqui NÃO contam como improdutiva.
+    const ehNaoConcluidaEspecifico = status => /nao conclu/.test(normalizeHeader(status));
     const motivoPrimeiraImprodutiva = new Map();
     Object.keys(porOSBruto).forEach(os => {
-      const terminais = porOSBruto[os].filter(l => ehStatusTerminal(l.status)).sort((a, b) => String(a.inicio || '').localeCompare(String(b.inicio || '')));
+      const terminais = porOSBruto[os].filter(l => ehNaoConcluidaEspecifico(l.status))
+        .sort((a, b) => (a.data || '').localeCompare(b.data || '') || ((a.inicio ? a.inicio.getTime() : 0) - (b.inicio ? b.inicio.getTime() : 0)));
       if (terminais.length) motivoPrimeiraImprodutiva.set(os, terminais[0].motivo || '');
     });
     const osJaImprodutiva = new Set(motivoPrimeiraImprodutiva.keys());
@@ -8883,9 +8891,15 @@ function renderGestaoPresencaEscritorio() {
   function renderPainelFolgas() {
     const body = document.getElementById('ge-body');
     if (!body) return;
+    // idempotente: se essa função já tiver rodado nesse #ge-body antes (chamada
+    // de novo por qualquer motivo — reportado pelo cliente como o painel
+    // aparecendo duplicado), tira o painel antigo antes de montar o novo, em
+    // vez de só ir empilhando um em cima do outro.
+    body.querySelectorAll('[data-painel-folgas]').forEach(el => el.remove());
     const folgas = [...DB.presencaEscritorioFolgas].sort((a, b) => (b.data || '').localeCompare(a.data || ''));
     const painel = document.createElement('div');
     painel.className = 'panel';
+    painel.dataset.painelFolgas = '1';
     painel.style.marginTop = '1.5rem';
     painel.innerHTML = `
       <div class="section-heading" style="margin-top:0">Gestão de Folgas</div>
