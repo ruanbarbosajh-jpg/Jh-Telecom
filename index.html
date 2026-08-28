@@ -9573,6 +9573,11 @@ function renderToll() {
       <option value="dentro">Dentro do horário</option>
       <option value="fora">Fora do horário</option>
     </select></div>
+    <div class="field"><label>Cidade cobrada</label><select id="f-foracidade">
+      <option value="">Todos</option>
+      <option value="fora">Só fora das cidades cobradas (laranja)</option>
+      <option value="dentro">Só dentro das cidades cobradas</option>
+    </select></div>
   `)}<div id="toll-body"></div>`;
   // quantas linhas a tabela mostra. Antes cortava em 200 sem avisar — e a
   // exportação, que lê a tabela da tela, levava só essas 200 sem dizer nada.
@@ -9590,6 +9595,11 @@ function renderToll() {
     const valorMinStr = document.getElementById('f-valor-min').value, valorMaxStr = document.getElementById('f-valor-max').value;
     const valorMin = valorMinStr !== '' ? parseFloat(valorMinStr) : null, valorMax = valorMaxStr !== '' ? parseFloat(valorMaxStr) : null;
     const statusFilter = document.getElementById('f-status').value;
+    // "Cidade cobrada": isola de um clique as passagens com Endereço em
+    // laranja (fora de Guarujá/Bertioga/Cubatão/Santos/São Vicente/Praia
+    // Grande) — antes só dava pra ver a cor da linha, sem jeito de filtrar
+    // só essas.
+    const foraCidadeFilter = document.getElementById('f-foracidade').value;
     const rows = DB.pedagio.filter(r => inRange(r.data_transacao,s,e)
       && (!condutor || (r.cadastro||'').toLowerCase().includes(condutor) || (r.condutor_atual||'').toLowerCase().includes(condutor))
       && (!placa || (r.placa||'').toLowerCase().includes(placa))
@@ -9597,6 +9607,7 @@ function renderToll() {
       && (valorMin === null || (r.valor||0) >= valorMin)
       && (valorMax === null || (r.valor||0) <= valorMax)
       && (!statusFilter || (statusFilter==='fora' ? /fora/i.test(r.status||'') : !/fora/i.test(r.status||'')))
+      && (!foraCidadeFilter || (foraCidadeFilter==='fora' ? enderecoForaDasCidades(r.endereco) : !enderecoForaDasCidades(r.endereco)))
     );
     const body = document.getElementById('toll-body');
     if (!rows.length) { body.innerHTML = '<div class="panel"><div class="empty">Nenhuma passagem encontrada. Importe GESTAO_PEDAGIO.xlsx.</div></div>'; return; }
