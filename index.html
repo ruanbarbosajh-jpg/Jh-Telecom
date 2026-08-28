@@ -3681,13 +3681,28 @@ function renderMapaBairros(elId, rankingBairros) {
   }).addTo(map);
   const maxTotal = Math.max(...comCoord.map(b => b.total), 1);
   const coresCidades = construirCoresCidades();
+  // No tema claro o tile NÃO é escurecido (só o escuro ganha o filtro de
+  // invert() lá no CSS) — fundo do mapa fica claro/branco, e a mesma mistura
+  // com branco que faz a bolinha "clarinha" se destacar no tema escuro vira
+  // bolinha invisível em cima de um mapa já claro. Tema claro clareia bem
+  // menos e nunca deixa a opacidade/borda cair tanto.
+  const temaClaro = document.documentElement.getAttribute('data-theme') === 'light';
   // do MENOR pro MAIOR: assim o bairro de maior volume fica desenhado por
   // cima na sobreposição, em vez de escondido atrás de um vizinho pequeno.
   [...comCoord].sort((a, b) => a.total - b.total).forEach(b => {
     const ratio = b.total / maxTotal; // 0 (menor bairro do mapa) a 1 (maior)
-    const cor = clarearCor(coresCidades[String(b.cidade || '').toUpperCase()] || '#94a3b8', (1 - ratio) * 0.55);
+    const corCidade = coresCidades[String(b.cidade || '').toUpperCase()] || '#94a3b8';
+    const cor = clarearCor(corCidade, (1 - ratio) * (temaClaro ? 0.22 : 0.55));
     const raio = 4 + Math.sqrt(ratio) * 20; // área ∝ total
-    L.circleMarker(b.coord, { radius: raio, color: cor, weight: 1 + ratio * 1.5, fillColor: cor, fillOpacity: 0.4 + ratio * 0.45 })
+    L.circleMarker(b.coord, {
+      radius: raio,
+      // borda no tema claro usa a cor cheia da cidade (nunca clareada) pra
+      // sempre ter um contorno com contraste contra o tile branco
+      color: temaClaro ? corCidade : cor,
+      weight: temaClaro ? 1.5 + ratio * 1.5 : 1 + ratio * 1.5,
+      fillColor: cor,
+      fillOpacity: temaClaro ? 0.55 + ratio * 0.4 : 0.4 + ratio * 0.45,
+    })
       .addTo(map)
       .bindPopup(`<b>${esc(b.bairro)}</b> — ${esc(b.cidade)}<br>Concluídas: ${b.concluida}<br>Canceladas: ${b.cancelada}<br>Não concluídas: ${b.naoConcluida}<br><b>Total: ${b.total}</b>`);
   });
