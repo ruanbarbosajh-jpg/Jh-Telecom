@@ -9664,6 +9664,17 @@ function renderToll() {
       condutor: r.condutor_atual === 'NÃO ENCONTRADA' ? 'Não encontrada' : (r.condutor_atual || 'Não informado'),
       data: r.data_transacao, hora: r.hora || '', placa: r.placa, local: r.endereco || 'Não informado', valor: r.valor,
     })).sort((a,b) => String(a.data).localeCompare(String(b.data)) || String(a.hora).localeCompare(String(b.hora)));
+    // Coluna "Data/Hora": o funil de coluna reduz "DD/MM/AAAA HH:MM" pro só o
+    // DIA antes de comparar (ativarFiltrosDeColuna faz isso pra não listar um
+    // item por horário) — o getter usado em filtrarPorColunasAtivas precisa
+    // devolver o MESMO texto reduzido, senão nada bate e o filtro por data
+    // zera a tabela inteira (foi exatamente esse o bug: filtrar por dia deixava
+    // o TOTAL em R$ 0,00 mesmo com linhas visíveis).
+    const dataHoraChave = d => {
+      const txt = formatDate(d.data) + ' ' + d.hora;
+      const m = /^(\d{2}\/\d{2}\/\d{4})\s+\d{1,2}:\d{2}/.exec(txt);
+      return m ? m[1] : txt;
+    };
     body.innerHTML = `
       <div class="cards-grid">${metricCard('Total de passagens', rows.length)}${metricCard('Valor total', formatCurrency(totalValue))}${metricCard('Fora do horário', foraHorario, foraHorario>0)}${metricCard('Fora das cidades cobradas', foraCidade, foraCidade>0)}${metricCard('Condutor não encontrado', naoEncontrada, naoEncontrada>0)}</div>
       ${divergent.length?`<div class="warning-box">${divergent.length} passagem(ns) com condutor atual diferente do cadastrado.</div>`:''}
@@ -9730,7 +9741,7 @@ function renderToll() {
     if (tabDetalhe) {
       const atualizarTotalDetalhe = () => {
         const visiveis = filtrarPorColunasAtivas(tabDetalhe, detalhamentoLocal, [
-          d => formatDate(d.data) + ' ' + d.hora, d => d.placa, d => d.local, d => formatCurrency(d.valor),
+          dataHoraChave, d => d.placa, d => d.local, d => formatCurrency(d.valor),
         ]);
         const totalLinha = document.getElementById('ped-detalhe-total');
         if (totalLinha) totalLinha.children[3].textContent = formatCurrency(visiveis.reduce((a, d) => a + d.valor, 0));
@@ -9800,7 +9811,7 @@ function renderToll() {
       detalhelocal: () => {
         const tabDet = document.getElementById('ped-tab-detalhe');
         const linhas = filtrarPorColunasAtivas(tabDet, detalhamentoLocal, [
-          d => formatDate(d.data) + ' ' + d.hora, d => d.placa, d => d.local, d => formatCurrency(d.valor),
+          dataHoraChave, d => d.placa, d => d.local, d => formatCurrency(d.valor),
         ]);
         return secaoTabela(`Detalhamento por Condutor e Local (pra desconto) — ${linhas.length} de ${detalhamentoLocal.length} passagem(ns)`, linhas, [
           {header:'Endereço', get:r=>r.local}, {header:'Data/Hora', get:r=>formatDate(r.data)+' '+r.hora},
