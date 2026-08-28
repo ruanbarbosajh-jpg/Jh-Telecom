@@ -5590,7 +5590,8 @@ function renderProduction() {
       </div>
       <div class="section-heading">Ordens do Período — Detalhamento</div>
       <p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">${rows.length} registro(s) exibido(s). Retornos IFI/IRR aparecem nas páginas Ofensor e Detalhe de Retornos.</p>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr><th>Data</th><th>Técnico</th><th>Cidade</th><th>Tipo</th><th>Status</th><th>Motivo da Baixa</th><th>OS</th><th>Contrato</th></tr></thead><tbody>
+      <div class="cards-grid" id="prod-det-cards" style="margin-bottom:1rem"></div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="prod-tab-periodo"><thead><tr><th>Data</th><th>Técnico</th><th>Cidade</th><th>Tipo</th><th>Status</th><th>Motivo da Baixa</th><th>OS</th><th>Contrato</th></tr></thead><tbody>
       ${rows.map(r=>`<tr><td>${formatDate(r.data)}</td><td>${esc(r.recurso)}</td><td>${esc(r.cidade)}</td><td>${esc(r.tipo_atividade)}</td><td>${statusBadge(r.status)}</td><td>${esc(r.motivo) || '-'}</td><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td></tr>`).join('')}
       </tbody></table></div>
       <div class="panel" style="margin-bottom:1.5rem">
@@ -5598,6 +5599,34 @@ function renderProduction() {
         <div id="c-evolucao"></div>
       </div>
       <div id="pdf-export-area"></div>`;
+
+    // ---- cards de Concluída/Não concluída/Cancelada SÓ da tabela "Ordens do
+    // Período" logo abaixo — pedido do cliente: os cards do topo da página não
+    // acompanham o filtro por coluna (o funil ▾ de cada cabeçalho), só os
+    // filtros da barra de cima. Esses aqui recontam toda vez que um funil é
+    // aplicado (evento "filtro-aplicado", disparado por ativarFiltrosDeColuna),
+    // lendo o texto que já está na tela — sem duplicar a lógica de filtro.
+    const tabPeriodo = document.getElementById('prod-tab-periodo');
+    if (tabPeriodo) {
+      const atualizarCardsDetalhe = () => {
+        const visiveis = tabPeriodo.__linhasVisiveis
+          ? tabPeriodo.__linhasVisiveis()
+          : [...tabPeriodo.querySelectorAll('tbody tr')].filter(tr => tr.querySelector('td'));
+        let conc = 0, canc = 0;
+        visiveis.forEach(tr => {
+          const statusTxt = (tr.querySelectorAll('td')[4] || {}).textContent || '';
+          if (isConcluido(statusTxt)) conc++;
+          else if (/cancel/i.test(statusTxt)) canc++;
+        });
+        const naoConc = visiveis.length - conc - canc;
+        document.getElementById('prod-det-cards').innerHTML =
+          metricCard('Concluídas (tabela)', conc, false, { nivel: 'compacto' }) +
+          metricCard('Não concluídas (tabela)', naoConc, false, { nivel: 'compacto' }) +
+          metricCard('Canceladas (tabela)', canc, canc > 0, { nivel: 'compacto' });
+      };
+      tabPeriodo.addEventListener('filtro-aplicado', atualizarCardsDetalhe);
+      atualizarCardsDetalhe();
+    }
 
     const desenharBonus = (ini, fim) => {
       document.getElementById('bon-tabela').innerHTML =
