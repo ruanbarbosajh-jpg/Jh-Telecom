@@ -9655,15 +9655,13 @@ function renderToll() {
       const locais = Object.values(c.porLocal).sort((a,b) => b.passagens-a.passagens);
       return { ...c, localTop: locais[0].local, vezesLocalTop: locais[0].passagens };
     }).sort((a,b) => b.valor - a.valor);
-    // ---- Detalhamento por Condutor e Local — endereço + valor de CADA
-    // pedágio (não só o mais frequente), pra dar pra montar o desconto sem
-    // precisar abrir o Excel bruto e somar na mão.
-    const detalhamentoLocal = [];
-    porCondutor.forEach(c => {
-      Object.values(c.porLocal).sort((a,b) => b.valor-a.valor).forEach(l => {
-        detalhamentoLocal.push({ condutor: c.condutor, local: l.local, passagens: l.passagens, valor: l.valor });
-      });
-    });
+    // ---- Detalhamento por Condutor e Local — uma linha por PASSAGEM (não
+    // agrupada), com data e placa — pedido do cliente: pra desconto precisa
+    // saber de qual dia/veículo é cada valor, não só o total do local.
+    const detalhamentoLocal = rows.map(r => ({
+      condutor: r.condutor_atual === 'NÃO ENCONTRADA' ? 'Não encontrada' : (r.condutor_atual || 'Não informado'),
+      data: r.data_transacao, hora: r.hora || '', placa: r.placa, local: r.endereco || 'Não informado', valor: r.valor,
+    })).sort((a,b) => a.condutor.localeCompare(b.condutor,'pt-BR') || a.local.localeCompare(b.local,'pt-BR') || String(a.data).localeCompare(String(b.data)));
     body.innerHTML = `
       <div class="cards-grid">${metricCard('Total de passagens', rows.length)}${metricCard('Valor total', formatCurrency(totalValue))}${metricCard('Fora do horário', foraHorario, foraHorario>0)}${metricCard('Fora das cidades cobradas', foraCidade, foraCidade>0)}${metricCard('Condutor não encontrado', naoEncontrada, naoEncontrada>0)}</div>
       ${divergent.length?`<div class="warning-box">${divergent.length} passagem(ns) com condutor atual diferente do cadastrado.</div>`:''}
@@ -9679,14 +9677,14 @@ function renderToll() {
         <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${rows.length}</td><td>${formatCurrency(totalValue)}</td><td>-</td><td>-</td></tr>
       </tbody></table></div>
       <div class="section-heading">Detalhamento por Condutor e Local <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(pra desconto)</span></div>
-      <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Endereço e valor de CADA pedágio (não só o mais frequente) — uma linha por condutor + local.</p>
-      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:520px;overflow:auto"><table class="data-table"><thead><tr>
-        <th>Condutor</th><th>Endereço</th><th>Passagens</th><th>Valor</th>
+      <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Uma linha por passagem, com data e placa — endereço e valor de CADA pedágio, não só o mais frequente.</p>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+        <th>Data/Hora</th><th>Placa</th><th>Endereço</th><th>Valor</th>
       </tr></thead><tbody>
-        ${detalhamentoLocal.map(d => `<tr><td class="cat-cell">${d.condutor === 'Não encontrada' ? `<span class="badge warn">Não encontrada</span>` : esc(d.condutor)}</td>
+        ${detalhamentoLocal.map(d => `<tr><td class="cat-cell">${formatDate(d.data)} ${d.hora}</td><td>${esc(d.placa)}</td>
           <td style="${enderecoForaDasCidades(d.local)?'color:#fb923c':''}">${esc(d.local)}</td>
-          <td>${d.passagens}</td><td style="font-weight:600">${formatCurrency(d.valor)}</td></tr>`).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td><td>-</td><td>${rows.length}</td><td>${formatCurrency(totalValue)}</td></tr>
+          <td style="font-weight:600">${formatCurrency(d.valor)}</td></tr>`).join('')}
+        <tr class="total-row"><td class="cat-cell">TOTAL</td><td>-</td><td>-</td><td>${formatCurrency(totalValue)}</td></tr>
       </tbody></table></div>
       <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px">Nome em <span style="color:var(--danger)">vermelho</span> = fora do horário. Endereço em <span style="color:#fb923c">laranja</span> = fora das cidades cobradas (Guarujá, Bertioga, Cubatão, Santos, São Vicente, Praia Grande).</p>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
@@ -9733,9 +9731,9 @@ function renderToll() {
         {header:'Pedágio mais frequente', get:r=>r.localTop}, {header:'Vezes nesse pedágio', get:r=>r.vezesLocalTop},
       ], { totalRow: ['TOTAL', rows.length, formatCurrency(totalValue), '-', '-'] }),
       detalhelocal: () => secaoTabela('Detalhamento por Condutor e Local (pra desconto)', detalhamentoLocal, [
-        {header:'Condutor', get:r=>r.condutor}, {header:'Endereço', get:r=>r.local},
-        {header:'Passagens', get:r=>r.passagens}, {header:'Valor', get:r=>formatCurrency(r.valor)},
-      ], { totalRow: ['TOTAL', '-', rows.length, formatCurrency(totalValue)] }),
+        {header:'Data/Hora', get:r=>formatDate(r.data)+' '+r.hora}, {header:'Placa', get:r=>r.placa},
+        {header:'Endereço', get:r=>r.local}, {header:'Valor', get:r=>formatCurrency(r.valor)},
+      ], { totalRow: ['TOTAL', '-', '-', formatCurrency(totalValue)] }),
     });
   }
 }
