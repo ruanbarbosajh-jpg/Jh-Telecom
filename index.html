@@ -9652,8 +9652,10 @@ function renderToll() {
       c.porLocal[local].passagens++; c.porLocal[local].valor += r.valor;
     });
     const porCondutor = Object.values(porCondutorMap).map(c => {
-      const locais = Object.values(c.porLocal).sort((a,b) => b.passagens-a.passagens);
-      return { ...c, localTop: locais[0].local, vezesLocalTop: locais[0].passagens };
+      // TODOS os locais desse condutor, do mais frequente pro menos frequente
+      // (empate: maior valor primeiro) — antes só mostrava o topo 1.
+      const locais = Object.values(c.porLocal).sort((a,b) => b.passagens-a.passagens || b.valor-a.valor);
+      return { ...c, locais };
     }).sort((a,b) => b.valor - a.valor);
     // ---- Detalhamento por Condutor e Local — uma linha por PASSAGEM (não
     // agrupada), com data e placa — pedido do cliente: pra desconto precisa
@@ -9661,20 +9663,22 @@ function renderToll() {
     const detalhamentoLocal = rows.map(r => ({
       condutor: r.condutor_atual === 'NÃO ENCONTRADA' ? 'Não encontrada' : (r.condutor_atual || 'Não informado'),
       data: r.data_transacao, hora: r.hora || '', placa: r.placa, local: r.endereco || 'Não informado', valor: r.valor,
-    })).sort((a,b) => a.condutor.localeCompare(b.condutor,'pt-BR') || a.local.localeCompare(b.local,'pt-BR') || String(a.data).localeCompare(String(b.data)));
+    })).sort((a,b) => String(a.data).localeCompare(String(b.data)) || String(a.hora).localeCompare(String(b.hora)));
     body.innerHTML = `
       <div class="cards-grid">${metricCard('Total de passagens', rows.length)}${metricCard('Valor total', formatCurrency(totalValue))}${metricCard('Fora do horário', foraHorario, foraHorario>0)}${metricCard('Fora das cidades cobradas', foraCidade, foraCidade>0)}${metricCard('Condutor não encontrado', naoEncontrada, naoEncontrada>0)}</div>
       ${divergent.length?`<div class="warning-box">${divergent.length} passagem(ns) com condutor atual diferente do cadastrado.</div>`:''}
-      <div class="panel" style="margin:1rem 0"><h3>Gasto de pedágio por veículo</h3><div id="c-placa"></div></div>
+      <div class="section-heading">Gasto de Pedágio por Veículo</div>
+      <div class="panel" style="margin-bottom:1.5rem"><div id="c-placa"></div></div>
       <div class="section-heading">Pedágio por Condutor</div>
-      <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">"Pedágio mais frequente" é o local (mesmo endereço) que esse condutor mais repetiu no período.</p>
+      <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Todos os pedágios de cada condutor, do mais frequente pro menos frequente.</p>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
-        <th>Condutor</th><th>Passagens</th><th>Valor total</th><th>Pedágio mais frequente</th><th>Vezes nesse pedágio</th>
+        <th>Condutor / Pedágio</th><th>Passagens</th><th>Valor</th>
       </tr></thead><tbody>
-        ${porCondutor.map(c => `<tr><td class="cat-cell">${c.condutor === 'Não encontrada' ? `<span class="badge warn">Não encontrada</span>` : esc(c.condutor)}</td>
-          <td>${c.passagens}</td><td style="font-weight:600">${formatCurrency(c.valor)}</td>
-          <td>${esc(c.localTop)}</td><td style="${c.vezesLocalTop>1?'font-weight:700;color:var(--accent)':''}">${c.vezesLocalTop}</td></tr>`).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${rows.length}</td><td>${formatCurrency(totalValue)}</td><td>-</td><td>-</td></tr>
+        ${porCondutor.map(c => `<tr class="total-row"><td class="cat-cell">${c.condutor === 'Não encontrada' ? `<span class="badge warn">Não encontrada</span>` : esc(c.condutor)}</td>
+          <td>${c.passagens}</td><td>${formatCurrency(c.valor)}</td></tr>
+          ${c.locais.map(l => `<tr><td style="padding-left:26px;${enderecoForaDasCidades(l.local)?'color:#fb923c':''}">${esc(l.local)}</td>
+            <td>${l.passagens}</td><td>${formatCurrency(l.valor)}</td></tr>`).join('')}`).join('')}
+        <tr class="total-row"><td class="cat-cell">TOTAL GERAL</td><td>${rows.length}</td><td>${formatCurrency(totalValue)}</td></tr>
       </tbody></table></div>
       <div class="section-heading">Detalhamento por Condutor e Local <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(pra desconto)</span></div>
       <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Uma linha por passagem, com data e placa — endereço e valor de CADA pedágio, não só o mais frequente.</p>
@@ -9686,7 +9690,8 @@ function renderToll() {
           <td style="font-weight:600">${formatCurrency(d.valor)}</td></tr>`).join('')}
         <tr class="total-row"><td class="cat-cell">TOTAL</td><td>-</td><td>-</td><td>${formatCurrency(totalValue)}</td></tr>
       </tbody></table></div>
-      <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px">Nome em <span style="color:var(--danger)">vermelho</span> = fora do horário. Endereço em <span style="color:#fb923c">laranja</span> = fora das cidades cobradas (Guarujá, Bertioga, Cubatão, Santos, São Vicente, Praia Grande).</p>
+      <div class="section-heading">Todas as Passagens</div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Nome em <span style="color:var(--danger)">vermelho</span> = fora do horário. Endereço em <span style="color:#fb923c">laranja</span> = fora das cidades cobradas (Guarujá, Bertioga, Cubatão, Santos, São Vicente, Praia Grande).</p>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
         <span style="font-size:12px;color:var(--text-muted)">${rows.length} passagem(ns) no filtro${rows.length > limitePed ? ` — mostrando as ${limitePed} mais recentes` : ''}</span>
         <select class="topn-select" id="ped-limite">
@@ -9726,13 +9731,13 @@ function renderToll() {
         {l:'Fora do horário', v:foraHorario}, {l:'Fora das cidades cobradas', v:foraCidade}, {l:'Condutor não encontrado', v:naoEncontrada},
       ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
       placa: () => secaoTabela('Gasto de Pedágio por Veículo', byPlaca, [{header:'Placa', get:r=>r.label}, {header:'Valor', get:r=>formatCurrency(r.value)}]),
-      condutor: () => secaoTabela('Pedágio por Condutor', porCondutor, [
-        {header:'Condutor', get:r=>r.condutor}, {header:'Passagens', get:r=>r.passagens}, {header:'Valor total', get:r=>formatCurrency(r.valor)},
-        {header:'Pedágio mais frequente', get:r=>r.localTop}, {header:'Vezes nesse pedágio', get:r=>r.vezesLocalTop},
-      ], { totalRow: ['TOTAL', rows.length, formatCurrency(totalValue), '-', '-'] }),
+      condutor: () => secaoTabela('Pedágio por Condutor', porCondutor.flatMap(c => c.locais.map(l => ({ condutor: c.condutor, local: l.local, passagens: l.passagens, valor: l.valor }))), [
+        {header:'Condutor', get:r=>r.condutor}, {header:'Pedágio', get:r=>r.local},
+        {header:'Passagens', get:r=>r.passagens}, {header:'Valor', get:r=>formatCurrency(r.valor)},
+      ], { totalRow: ['TOTAL GERAL', '-', rows.length, formatCurrency(totalValue)] }),
       detalhelocal: () => secaoTabela('Detalhamento por Condutor e Local (pra desconto)', detalhamentoLocal, [
-        {header:'Data/Hora', get:r=>formatDate(r.data)+' '+r.hora}, {header:'Placa', get:r=>r.placa},
-        {header:'Endereço', get:r=>r.local}, {header:'Valor', get:r=>formatCurrency(r.valor)},
+        {header:'Endereço', get:r=>r.local}, {header:'Data/Hora', get:r=>formatDate(r.data)+' '+r.hora},
+        {header:'Placa', get:r=>r.placa}, {header:'Valor', get:r=>formatCurrency(r.valor)},
       ], { totalRow: ['TOTAL', '-', '-', formatCurrency(totalValue)] }),
     });
   }
