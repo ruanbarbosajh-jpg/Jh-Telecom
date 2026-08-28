@@ -9624,10 +9624,38 @@ function renderToll() {
     const foraCidade = rows.filter(r => enderecoForaDasCidades(r.endereco)).length;
     const byPlacaMap = {}; rows.forEach(r => { const p=r.placa||'Não informado'; byPlacaMap[p]=(byPlacaMap[p]||0)+r.valor; });
     const byPlaca = Object.entries(byPlacaMap).map(([placa,total])=>({label:placa,value:total,display:formatCurrency(total)})).sort((a,b)=>b.value-a.value);
+    // ---- Pedágio por Condutor: total gasto, quantas passagens, e o pedágio
+    // (mesmo endereço) que ele mais repetiu — pedido do cliente: "quantas
+    // vezes esteve no mesmo pedágio". "Não encontrada" fica num grupo só (não
+    // dá pra saber quem dirigia, então não assume que foi o cadastro do
+    // veículo — misturaria pessoas diferentes na mesma linha).
+    const porCondutorMap = {};
+    rows.forEach(r => {
+      const cond = r.condutor_atual === 'NÃO ENCONTRADA' ? 'Não encontrada' : (r.condutor_atual || 'Não informado');
+      if (!porCondutorMap[cond]) porCondutorMap[cond] = { condutor: cond, passagens: 0, valor: 0, porLocal: {} };
+      const c = porCondutorMap[cond];
+      c.passagens++; c.valor += r.valor;
+      const local = r.endereco || 'Não informado';
+      c.porLocal[local] = (c.porLocal[local] || 0) + 1;
+    });
+    const porCondutor = Object.values(porCondutorMap).map(c => {
+      const locais = Object.entries(c.porLocal).sort((a,b) => b[1]-a[1]);
+      return { ...c, localTop: locais[0][0], vezesLocalTop: locais[0][1] };
+    }).sort((a,b) => b.valor - a.valor);
     body.innerHTML = `
       <div class="cards-grid">${metricCard('Total de passagens', rows.length)}${metricCard('Valor total', formatCurrency(totalValue))}${metricCard('Fora do horário', foraHorario, foraHorario>0)}${metricCard('Fora das cidades cobradas', foraCidade, foraCidade>0)}${metricCard('Condutor não encontrado', naoEncontrada, naoEncontrada>0)}</div>
       ${divergent.length?`<div class="warning-box">${divergent.length} passagem(ns) com condutor atual diferente do cadastrado.</div>`:''}
       <div class="panel" style="margin:1rem 0"><h3>Gasto de pedágio por veículo</h3><div id="c-placa"></div></div>
+      <div class="section-heading">Pedágio por Condutor</div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">"Pedágio mais frequente" é o local (mesmo endereço) que esse condutor mais repetiu no período.</p>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+        <th>Condutor</th><th>Passagens</th><th>Valor total</th><th>Pedágio mais frequente</th><th>Vezes nesse pedágio</th>
+      </tr></thead><tbody>
+        ${porCondutor.map(c => `<tr><td class="cat-cell">${c.condutor === 'Não encontrada' ? `<span class="badge warn">Não encontrada</span>` : esc(c.condutor)}</td>
+          <td>${c.passagens}</td><td style="font-weight:600">${formatCurrency(c.valor)}</td>
+          <td>${esc(c.localTop)}</td><td style="${c.vezesLocalTop>1?'font-weight:700;color:var(--accent)':''}">${c.vezesLocalTop}</td></tr>`).join('')}
+        <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${rows.length}</td><td>${formatCurrency(totalValue)}</td><td>-</td><td>-</td></tr>
+      </tbody></table></div>
       <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px">Nome em <span style="color:var(--danger)">vermelho</span> = fora do horário. Endereço em <span style="color:#fb923c">laranja</span> = fora das cidades cobradas (Guarujá, Bertioga, Cubatão, Santos, São Vicente, Praia Grande).</p>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
         <span style="font-size:12px;color:var(--text-muted)">${rows.length} passagem(ns) no filtro${rows.length > limitePed ? ` — mostrando as ${limitePed} mais recentes` : ''}</span>
@@ -9659,6 +9687,7 @@ function renderToll() {
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'resumo', label: 'Resumo de pedágio' },
       { id: 'placa', label: 'Gasto por veículo' },
+      { id: 'condutor', label: 'Pedágio por condutor' },
     ]);
     wirePdfExportPanel('Pedágio', {
       resumo: () => secaoTabela('Resumo de Pedágio', [
@@ -9666,6 +9695,10 @@ function renderToll() {
         {l:'Fora do horário', v:foraHorario}, {l:'Fora das cidades cobradas', v:foraCidade}, {l:'Condutor não encontrado', v:naoEncontrada},
       ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
       placa: () => secaoTabela('Gasto de Pedágio por Veículo', byPlaca, [{header:'Placa', get:r=>r.label}, {header:'Valor', get:r=>formatCurrency(r.value)}]),
+      condutor: () => secaoTabela('Pedágio por Condutor', porCondutor, [
+        {header:'Condutor', get:r=>r.condutor}, {header:'Passagens', get:r=>r.passagens}, {header:'Valor total', get:r=>formatCurrency(r.valor)},
+        {header:'Pedágio mais frequente', get:r=>r.localTop}, {header:'Vezes nesse pedágio', get:r=>r.vezesLocalTop},
+      ], { totalRow: ['TOTAL', rows.length, formatCurrency(totalValue), '-', '-'] }),
     });
   }
 }
