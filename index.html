@@ -4580,14 +4580,21 @@ function ativarTogglesDeSecao(raiz) {
     });
     return b;
   };
-  // 1) Blocos demarcados por "section-heading": esconde tudo que vem depois
-  // dele até o próximo título (pode ter mais de uma tabela/gráfico junto).
-  alvo.querySelectorAll('.section-heading').forEach(h => {
+  // 1) Blocos demarcados por "section-heading" OU "faixa-secao" (a faixa
+  // colorida das telas de Prazo: "Prazo do DIA"/"Prazo do MÊS" — mesma ideia,
+  // classe diferente): esconde tudo que vem depois dele até o próximo título
+  // de QUALQUER um dos dois tipos, senão a faixa do DIA "engolia" a faixa do
+  // MÊS ao ocultar.
+  const ehTitulo = el => el.classList.contains('section-heading') || el.classList.contains('faixa-secao');
+  alvo.querySelectorAll('.section-heading, .faixa-secao').forEach(h => {
     if (h.querySelector('.secao-toggle')) return;
-    if (!h.style.display) { h.style.display = 'flex'; h.style.alignItems = 'center'; h.style.gap = '12px'; h.style.flexWrap = 'wrap'; }
+    // "faixa-secao" já é flex por CSS; só "section-heading" precisa do ajuste.
+    if (h.classList.contains('section-heading') && !h.style.display) {
+      h.style.display = 'flex'; h.style.alignItems = 'center'; h.style.gap = '12px'; h.style.flexWrap = 'wrap';
+    }
     const alvos = [];
     let el = h.nextElementSibling;
-    while (el && !el.classList.contains('section-heading')) { alvos.push(el); el = el.nextElementSibling; }
+    while (el && !ehTitulo(el)) { alvos.push(el); el = el.nextElementSibling; }
     if (!alvos.length) return;
     h.appendChild(criarBotao(alvos));
   });
@@ -5581,6 +5588,7 @@ function renderProduction() {
         </div>
         <div id="bon-tabela">${renderBonusTable(fechDoPeriodo, prodConcluida, { inicio: retIni, fim: retFim })}</div>
       </div>
+      <div class="section-heading">Ordens do Período — Detalhamento</div>
       <p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">${rows.length} registro(s) exibido(s). Retornos IFI/IRR aparecem nas páginas Ofensor e Detalhe de Retornos.</p>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr><th>Data</th><th>Técnico</th><th>Cidade</th><th>Tipo</th><th>Status</th><th>Motivo da Baixa</th><th>OS</th><th>Contrato</th></tr></thead><tbody>
       ${rows.map(r=>`<tr><td>${formatDate(r.data)}</td><td>${esc(r.recurso)}</td><td>${esc(r.cidade)}</td><td>${esc(r.tipo_atividade)}</td><td>${statusBadge(r.status)}</td><td>${esc(r.motivo) || '-'}</td><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td></tr>`).join('')}
