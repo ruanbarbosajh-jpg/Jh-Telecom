@@ -4715,9 +4715,15 @@ function ativarFiltrosDeColuna(raiz) {
         <div class="fm-lista"></div>
         <div class="fm-rodape"><button type="button" class="fm-ok">OK</button><button type="button" class="fm-cancela">Cancelar</button></div>`;
       document.body.appendChild(menu);
+      // largura acompanha o tamanho dos valores da coluna — "Endereço" tem
+      // texto bem mais longo que "Status", e o menu fixo em 248px cortava
+      // tudo em "...", sem dar pra ler nem a rua inteira.
+      const maiorValor = valores.reduce((a, v) => Math.max(a, String(v).length), 0);
+      const largura = Math.min(520, Math.max(248, maiorValor * 6.4 + 70));
+      menu.style.width = largura + 'px';
       const r = th.getBoundingClientRect();
       menu.style.top = (window.scrollY + r.bottom + 4) + 'px';
-      menu.style.left = Math.min(window.scrollX + r.left, window.scrollX + window.innerWidth - 260) + 'px';
+      menu.style.left = Math.min(window.scrollX + r.left, window.scrollX + window.innerWidth - largura - 12) + 'px';
       const lista = menu.querySelector('.fm-lista');
       function pintarLista(termo) {
         const t = normalizeHeader(termo || '');
@@ -9642,12 +9648,22 @@ function renderToll() {
       const c = porCondutorMap[cond];
       c.passagens++; c.valor += r.valor;
       const local = r.endereco || 'Não informado';
-      c.porLocal[local] = (c.porLocal[local] || 0) + 1;
+      if (!c.porLocal[local]) c.porLocal[local] = { local, passagens: 0, valor: 0 };
+      c.porLocal[local].passagens++; c.porLocal[local].valor += r.valor;
     });
     const porCondutor = Object.values(porCondutorMap).map(c => {
-      const locais = Object.entries(c.porLocal).sort((a,b) => b[1]-a[1]);
-      return { ...c, localTop: locais[0][0], vezesLocalTop: locais[0][1] };
+      const locais = Object.values(c.porLocal).sort((a,b) => b.passagens-a.passagens);
+      return { ...c, localTop: locais[0].local, vezesLocalTop: locais[0].passagens };
     }).sort((a,b) => b.valor - a.valor);
+    // ---- Detalhamento por Condutor e Local — endereço + valor de CADA
+    // pedágio (não só o mais frequente), pra dar pra montar o desconto sem
+    // precisar abrir o Excel bruto e somar na mão.
+    const detalhamentoLocal = [];
+    porCondutor.forEach(c => {
+      Object.values(c.porLocal).sort((a,b) => b.valor-a.valor).forEach(l => {
+        detalhamentoLocal.push({ condutor: c.condutor, local: l.local, passagens: l.passagens, valor: l.valor });
+      });
+    });
     body.innerHTML = `
       <div class="cards-grid">${metricCard('Total de passagens', rows.length)}${metricCard('Valor total', formatCurrency(totalValue))}${metricCard('Fora do horário', foraHorario, foraHorario>0)}${metricCard('Fora das cidades cobradas', foraCidade, foraCidade>0)}${metricCard('Condutor não encontrado', naoEncontrada, naoEncontrada>0)}</div>
       ${divergent.length?`<div class="warning-box">${divergent.length} passagem(ns) com condutor atual diferente do cadastrado.</div>`:''}
@@ -9661,6 +9677,16 @@ function renderToll() {
           <td>${c.passagens}</td><td style="font-weight:600">${formatCurrency(c.valor)}</td>
           <td>${esc(c.localTop)}</td><td style="${c.vezesLocalTop>1?'font-weight:700;color:var(--accent)':''}">${c.vezesLocalTop}</td></tr>`).join('')}
         <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${rows.length}</td><td>${formatCurrency(totalValue)}</td><td>-</td><td>-</td></tr>
+      </tbody></table></div>
+      <div class="section-heading">Detalhamento por Condutor e Local <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(pra desconto)</span></div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Endereço e valor de CADA pedágio (não só o mais frequente) — uma linha por condutor + local.</p>
+      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:520px;overflow:auto"><table class="data-table"><thead><tr>
+        <th>Condutor</th><th>Endereço</th><th>Passagens</th><th>Valor</th>
+      </tr></thead><tbody>
+        ${detalhamentoLocal.map(d => `<tr><td class="cat-cell">${d.condutor === 'Não encontrada' ? `<span class="badge warn">Não encontrada</span>` : esc(d.condutor)}</td>
+          <td style="${enderecoForaDasCidades(d.local)?'color:#fb923c':''}">${esc(d.local)}</td>
+          <td>${d.passagens}</td><td style="font-weight:600">${formatCurrency(d.valor)}</td></tr>`).join('')}
+        <tr class="total-row"><td class="cat-cell">TOTAL</td><td>-</td><td>${rows.length}</td><td>${formatCurrency(totalValue)}</td></tr>
       </tbody></table></div>
       <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px">Nome em <span style="color:var(--danger)">vermelho</span> = fora do horário. Endereço em <span style="color:#fb923c">laranja</span> = fora das cidades cobradas (Guarujá, Bertioga, Cubatão, Santos, São Vicente, Praia Grande).</p>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
@@ -9694,6 +9720,7 @@ function renderToll() {
       { id: 'resumo', label: 'Resumo de pedágio' },
       { id: 'placa', label: 'Gasto por veículo' },
       { id: 'condutor', label: 'Pedágio por condutor' },
+      { id: 'detalhelocal', label: 'Detalhamento por condutor e local (desconto)' },
     ]);
     wirePdfExportPanel('Pedágio', {
       resumo: () => secaoTabela('Resumo de Pedágio', [
@@ -9705,6 +9732,10 @@ function renderToll() {
         {header:'Condutor', get:r=>r.condutor}, {header:'Passagens', get:r=>r.passagens}, {header:'Valor total', get:r=>formatCurrency(r.valor)},
         {header:'Pedágio mais frequente', get:r=>r.localTop}, {header:'Vezes nesse pedágio', get:r=>r.vezesLocalTop},
       ], { totalRow: ['TOTAL', rows.length, formatCurrency(totalValue), '-', '-'] }),
+      detalhelocal: () => secaoTabela('Detalhamento por Condutor e Local (pra desconto)', detalhamentoLocal, [
+        {header:'Condutor', get:r=>r.condutor}, {header:'Endereço', get:r=>r.local},
+        {header:'Passagens', get:r=>r.passagens}, {header:'Valor', get:r=>formatCurrency(r.valor)},
+      ], { totalRow: ['TOTAL', '-', rows.length, formatCurrency(totalValue)] }),
     });
   }
 }
