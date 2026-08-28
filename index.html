@@ -7741,14 +7741,20 @@ function renderParcialDoDia() {
 
     // ---- Tabela 1: Mão de obra e produção do dia por cidade ----
     // "Mão de Obra e Produção do Dia" é sobre o que AINDA FALTA no dia — as
-    // colunas Ativação/Reparo/M.E/M.C/Upgrade/Total contam SÓ AS PENDENTES,
-    // mesma regra que o M.O. já seguia sozinho (e a mesma regra que a versão
-    // desta tabela dentro de "Relatórios — Excel e Imagem" já usa, rotulada
-    // "(pendentes)" lá). Contar concluído/cancelado junto inflava a "produção
-    // do dia" bem além do que realmente resta fazer.
-    const rowsPendentesMO = rows.filter(r => /pendente/i.test(r.status || ''));
-    // dia sem NENHUMA pendente em lugar nenhum (base de fim de dia, tudo já
-    // encerrado): usa todas as ordens do dia, pra tabela não ficar em branco
+    // colunas Ativação/Reparo/M.E/M.C/Upgrade/Total/M.O contam as ordens AINDA
+    // EM ABERTO (mesma regra que ABERTAS na PCR): PENDENTE (não começou), EM
+    // ROTA (a caminho) e INICIADO (em atendimento) — as três situações que
+    // ainda dependem do técnico hoje. Concluído/cancelado/não concluído ficam
+    // de fora (mesma regra que a versão desta tabela dentro de "Relatórios —
+    // Excel e Imagem" usa).
+    // Antes contava só PENDENTE, e a M.O ficava contando bem menos gente do
+    // que realmente está trabalhando no dia — confirmado com o cliente em
+    // 28/08/2026: quem já saiu pra rota ou já começou o atendimento também é
+    // mão de obra empregada naquele momento, não "não conta mais".
+    const ABERTAS_MO = ['pendente', 'em_rota', 'iniciado'];
+    const rowsPendentesMO = rows.filter(r => ABERTAS_MO.includes(classifyStatusGranular(r.status)));
+    // dia sem NENHUMA ordem em aberto (base de fim de dia, tudo já encerrado):
+    // usa todas as ordens do dia, pra tabela não ficar em branco
     const universoMO = rowsPendentesMO.length ? rowsPendentesMO : rows;
     const porCidadeMO = {};
     universoMO.forEach(r => {
@@ -9573,10 +9579,10 @@ function renderToll() {
       <option value="dentro">Dentro do horário</option>
       <option value="fora">Fora do horário</option>
     </select></div>
-    <div class="field"><label>Cidade cobrada</label><select id="f-foracidade">
+    <div class="field"><label>Área de atendimento</label><select id="f-foracidade">
       <option value="">Todos</option>
-      <option value="fora">Só fora das cidades cobradas (laranja)</option>
-      <option value="dentro">Só dentro das cidades cobradas</option>
+      <option value="fora">Só fora da área de atendimento (laranja)</option>
+      <option value="dentro">Só dentro da área de atendimento</option>
     </select></div>
   `)}<div id="toll-body"></div>`;
   // quantas linhas a tabela mostra. Antes cortava em 200 sem avisar — e a
@@ -11244,9 +11250,13 @@ function renderRelatoriosDia() {
         colunas: ['Tipo da O.S', 'A Executar', 'Total Geral'], linhas: linhasExec,
         total: ['Total Geral', String(pend.length), String(pend.length)] });
 
-      // Mão de obra e produção (pendentes)
+      // Mão de obra e produção (em aberto: pendente + em rota + iniciado —
+      // mesma regra da tela Parcial do Dia, pra não exportar um M.O diferente
+      // do que está na tela)
+      const ABERTAS_MO_RD = ['pendente', 'em_rota', 'iniciado'];
+      const pendMO = linhas.filter(r => ABERTAS_MO_RD.includes(classifyStatusGranular(r.status)));
       const porCidade = {};
-      pend.forEach(r => {
+      pendMO.forEach(r => {
         const c = r.cidade || 'Não informado';
         if (!porCidade[c]) porCidade[c] = { cidade:c, ativacao:0, reparo:0, me:0, mc:0, upgrade:0, total:0, tec:new Set() };
         const t = normalizeHeader(r.tipo_atividade);
@@ -11262,7 +11272,7 @@ function renderRelatoriosDia() {
       const moDe = c => { const k = dia + '|' + c.cidade; return MO_MANUAL[k] !== undefined ? MO_MANUAL[k] : c.tec.size; };
       const totMO = listaMO.reduce((a,c)=>{ a.ativacao+=c.ativacao; a.reparo+=c.reparo; a.me+=c.me; a.mc+=c.mc; a.upgrade+=c.upgrade; a.total+=c.total; a.mo+=moDe(c); return a; },
         {ativacao:0,reparo:0,me:0,mc:0,upgrade:0,total:0,mo:0});
-      blocos.push({ id: 'mo', titulo: 'Mão de Obra e Produção do Dia (pendentes)', sub: formatDate(dia),
+      blocos.push({ id: 'mo', titulo: 'Mão de Obra e Produção do Dia (em aberto)', sub: formatDate(dia),
         colunas: ['Cidades','Ativação','Reparo','M.E','M.C','Upgrade','Total','M.O','Média'],
         linhas: listaMO.map(c => ({ celulas: [c.cidade, c.ativacao, c.reparo, c.me, c.mc, c.upgrade, c.total, moDe(c), moDe(c) ? (c.total/moDe(c)).toFixed(1) : '-'] })),
         total: ['TOTAL', totMO.ativacao, totMO.reparo, totMO.me, totMO.mc, totMO.upgrade, totMO.total, totMO.mo, totMO.mo ? (totMO.total/totMO.mo).toFixed(1) : '-'] });
