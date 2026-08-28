@@ -1852,7 +1852,7 @@ atualizarCampoNome('li-user','li-campo-nome','li-nome');
   new MutationObserver(() => {
     if (agendado) return;
     agendado = true;
-    setTimeout(() => { agendado = false; ativarFiltrosDeColuna(); }, 60);
+    setTimeout(() => { agendado = false; ativarFiltrosDeColuna(); ativarTogglesDeSecao(); }, 60);
   }).observe(alvo, { childList: true, subtree: true });
 })();
 aplicarTema('dark');
@@ -4519,6 +4519,7 @@ function navigate(route) {
     if (aplicar) aplicar.click();
   }
   ativarFiltrosDeColuna();
+  ativarTogglesDeSecao();
 }
 // ---------- Filtro por coluna estilo Excel, em TODAS as tabelas ----------
 // Cada cabeçalho ganha um funil. Clicando, abre a lista de valores únicos
@@ -4547,6 +4548,49 @@ function fecharMenusFiltro() { document.querySelectorAll('.filtro-menu').forEach
 document.addEventListener('click', e => {
   if (!e.target.closest('.filtro-menu') && !e.target.closest('.filtro-btn')) fecharMenusFiltro();
 });
+// ---------- Ocultar/reexibir tabela, em TODAS as telas ----------
+// Antes cada página que queria isso (PCR, Parcial do Dia, Relatórios) tinha a
+// própria cópia da mesma wiring. Virou uma função só, chamada depois de CADA
+// render — igual a ativarFiltrosDeColuna logo abaixo — pra valer em qualquer
+// tela sem precisar mexer página por página: "quero que todas as tabelas seja
+// possível ocultar".
+function ativarTogglesDeSecao(raiz) {
+  const alvo = raiz || document.getElementById('content');
+  if (!alvo) return;
+  const criarBotao = (alvos) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'secao-toggle'; b.textContent = '▾ ocultar';
+    b.addEventListener('click', () => {
+      const escondido = alvos[0].classList.contains('secao-oculta');
+      alvos.forEach(a => a.classList.toggle('secao-oculta', !escondido));
+      b.textContent = escondido ? '▾ ocultar' : '▸ exibir';
+    });
+    return b;
+  };
+  // 1) Blocos demarcados por "section-heading": esconde tudo que vem depois
+  // dele até o próximo título (pode ter mais de uma tabela/gráfico junto).
+  alvo.querySelectorAll('.section-heading').forEach(h => {
+    if (h.querySelector('.secao-toggle')) return;
+    if (!h.style.display) { h.style.display = 'flex'; h.style.alignItems = 'center'; h.style.gap = '12px'; h.style.flexWrap = 'wrap'; }
+    const alvos = [];
+    let el = h.nextElementSibling;
+    while (el && !el.classList.contains('section-heading')) { alvos.push(el); el = el.nextElementSibling; }
+    if (!alvos.length) return;
+    h.appendChild(criarBotao(alvos));
+  });
+  // 2) Painéis (.panel > h3) com tabela dentro que NÃO estão debaixo de um
+  // "section-heading" (a maioria das telas usa só isso, sem título de seção) —
+  // esconde tudo que vem depois do <h3>, mantendo o título do painel visível.
+  alvo.querySelectorAll('.panel').forEach(p => {
+    if (p.querySelector('.secao-toggle') || !p.querySelector('table')) return;
+    const h3 = p.querySelector(':scope > h3');
+    if (!h3) return;
+    if (!h3.style.display) { h3.style.display = 'flex'; h3.style.alignItems = 'center'; h3.style.gap = '12px'; h3.style.flexWrap = 'wrap'; }
+    const alvosPainel = [...p.children].filter(c => c !== h3);
+    if (!alvosPainel.length) return;
+    h3.appendChild(criarBotao(alvosPainel));
+  });
+}
 function ativarFiltrosDeColuna(raiz) {
   const alvo = raiz || document.getElementById('content');
   if (!alvo) return;
@@ -7184,25 +7228,7 @@ function renderPCR() {
     }));
 
     // ---- ocultar/reexibir cada tabela da página ----
-    // Cada "section-heading" ganha um botão que esconde tudo que vem depois
-    // dele até o próximo título — assim dá pra deixar na tela só a tabela que
-    // interessa no momento.
-    document.querySelectorAll('#pcr-body .section-heading').forEach(h => {
-      if (h.querySelector('.secao-toggle')) return;
-      if (!h.style.display) { h.style.display = 'flex'; h.style.alignItems = 'center'; h.style.gap = '12px'; h.style.flexWrap = 'wrap'; }
-      const alvos = [];
-      let el = h.nextElementSibling;
-      while (el && !el.classList.contains('section-heading')) { alvos.push(el); el = el.nextElementSibling; }
-      if (!alvos.length) return;
-      const b = document.createElement('button');
-      b.type = 'button'; b.className = 'secao-toggle'; b.textContent = '▾ ocultar';
-      b.addEventListener('click', () => {
-        const escondido = alvos[0].classList.contains('secao-oculta');
-        alvos.forEach(a => a.classList.toggle('secao-oculta', !escondido));
-        b.textContent = escondido ? '▾ ocultar' : '▸ exibir';
-      });
-      h.appendChild(b);
-    });
+    ativarTogglesDeSecao(document.getElementById('pcr-body'));
 
     // ---- exportações (sempre respeitando o que o filtro deixou na tela) ----
     const aviso = (btn, txt, original) => { btn.textContent = txt; setTimeout(() => { btn.textContent = original; }, 2500); };
@@ -8070,25 +8096,7 @@ function renderParcialDoDia() {
     }
 
     // ---- ocultar/reexibir cada tabela da página (mesmo padrão da PCR) ----
-    // Cada "section-heading" ganha um botão que esconde tudo que vem depois
-    // dele até o próximo título — assim dá pra deixar na tela só a tabela que
-    // interessa no momento.
-    document.querySelectorAll('#pd-body .section-heading').forEach(h => {
-      if (h.querySelector('.secao-toggle')) return;
-      if (!h.style.display) { h.style.display = 'flex'; h.style.alignItems = 'center'; h.style.gap = '12px'; h.style.flexWrap = 'wrap'; }
-      const alvos = [];
-      let el = h.nextElementSibling;
-      while (el && !el.classList.contains('section-heading')) { alvos.push(el); el = el.nextElementSibling; }
-      if (!alvos.length) return;
-      const b = document.createElement('button');
-      b.type = 'button'; b.className = 'secao-toggle'; b.textContent = '▾ ocultar';
-      b.addEventListener('click', () => {
-        const escondido = alvos[0].classList.contains('secao-oculta');
-        alvos.forEach(a => a.classList.toggle('secao-oculta', !escondido));
-        b.textContent = escondido ? '▾ ocultar' : '▸ exibir';
-      });
-      h.appendChild(b);
-    });
+    ativarTogglesDeSecao(document.getElementById('pd-body'));
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'maodeobra', label: 'Mão de obra e produção do dia' },
@@ -11366,22 +11374,7 @@ function renderRelatoriosDia() {
       }));
 
       // ---- ocultar/reexibir cada relatório direto no título ----
-      alvo.querySelectorAll('.section-heading').forEach(h => {
-        if (h.querySelector('.secao-toggle')) return;
-        if (!h.style.display) { h.style.display = 'flex'; h.style.alignItems = 'center'; h.style.gap = '12px'; h.style.flexWrap = 'wrap'; }
-        const alvos = [];
-        let el = h.nextElementSibling;
-        while (el && !el.classList.contains('section-heading')) { alvos.push(el); el = el.nextElementSibling; }
-        if (!alvos.length) return;
-        const b = document.createElement('button');
-        b.type = 'button'; b.className = 'secao-toggle'; b.textContent = '▾ ocultar';
-        b.addEventListener('click', () => {
-          const escondido = alvos[0].classList.contains('secao-oculta');
-          alvos.forEach(a => a.classList.toggle('secao-oculta', !escondido));
-          b.textContent = escondido ? '▾ ocultar' : '▸ exibir';
-        });
-        h.appendChild(b);
-      });
+      ativarTogglesDeSecao(alvo);
 
       // imagem do remanejamento (mesma função do Parcial do Dia)
       if (comRemanejamento) {
