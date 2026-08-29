@@ -7553,10 +7553,18 @@ function montarPrazoReparoDoDia(dia, cidades) {
   const encerradas = doDia.filter(r => r.faixa);
   const cabecalho = faixaDeSecao('Prazo do DIA — Reparo (24h)',
     `${formatDate(dia)} · vem do CSV de atividades (PCR / Parcial do Dia) · limite = abertura + 24h · só reparo já encerrado`, 'dia');
-  if (!encerradas.length) {
-    return cabecalho + `<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhum reparo encerrado nesse dia/cidades no CSV importado.</div></div>`;
+  if (!cidades.length) {
+    return cabecalho + `<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma cidade selecionada no filtro.</div></div>`;
   }
   const porCidade = {};
+  // as 6 cidades do contrato sempre entram na tabela, mesmo com 0 reparo
+  // encerrado nesse dia — pedido do cliente: a supervisão precisa VER que uma
+  // cidade ficou zerada, não simplesmente sumir da lista. Sempre as 6, sem
+  // filtrar por `cidades` (a seleção do multiselect): o multiselect só
+  // OFERECE cidade que já tem alguma linha no CSV do dia, então uma cidade
+  // 100% zerada nunca vira nem opção marcável ali pra poder ser "excluída" —
+  // mostrar ela sempre não contraria nenhuma escolha real do usuário.
+  CIDADES_COBRADAS_PRAZO.forEach(c => { porCidade[c] = { cidade:c, ate24:0, ate48:0, maior48:0, outlier:0, total:0 }; });
   encerradas.forEach(r => {
     const c = r.cidade || 'Não informado';
     if (!porCidade[c]) porCidade[c] = { cidade:c, ate24:0, ate48:0, maior48:0, outlier:0, total:0 };
