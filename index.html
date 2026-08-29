@@ -5457,14 +5457,25 @@ function valorOrdensDoPeriodo(tecnico, inicio, fim, apto) {
   });
   return valor;
 }
+// campos que o Almoxarifado/RH preenche à mão na própria tela da Folha
+// (salvarCampoFolha) — não vêm da Produção, então gerarPeriodoFolha nunca pode
+// zerá-los ao reprocessar um período que já tinha lançamento.
+const CAMPOS_MANUAIS_FOLHA = [
+  'frota', 'dias_aluguel', 'valor_aluguel', 'emprestimo', ...CAMPOS_TODO_DESCONTO_FOLHA,
+  'parcela_equipamento', 'parcela_ferramentas', 'parcela_multa', 'parcela_miscelanea',
+  'parcela_mecanica', 'parcela_vale', 'parcela_fiscalizacao', 'parcela_combustivel',
+];
+const FOLHA_CAMPO_VAZIO = c => (c === 'frota' || c.startsWith('parcela_')) ? '' : 0;
 // Gera (ou substitui) as linhas da folha de um ciclo INTEIRO a partir do que o
 // sistema já sabe: ordens e valor delas vêm da Produção (fonte: DB.producao,
 // preço fixo por tipo de serviço — VALORES_ORDENS_FIXOS, faixa "d26" só pra
 // quem FICA APTO ao bônus, "normal" pros demais — ver valorOrdensDoPeriodo),
 // e Qtd. IFI/IRR vêm dos retornos baixados no período
-// (contarRetornosPorOfensor, mesma conta da Tabela de Bônus). Descontos de
-// material começam ZERADOS — são o Almoxarifado/RH/Analista quem preenche
-// depois, ordem por ordem, na tela.
+// (contarRetornosPorOfensor, mesma conta da Tabela de Bônus). Reabrir um
+// período que JÁ tinha lançamento (reimportação de Produção, por exemplo) NÃO
+// pode apagar desconto/parcela/frota que o Almoxarifado/RH já preencheu à mão
+// — herda esses campos da linha existente (CAMPOS_MANUAIS_FOLHA); só entram
+// zerados quando a linha é nova de verdade.
 function gerarPeriodoFolha(inicio, fim) {
   const periodo = `${formatDate(inicio)} a ${formatDate(fim)}`;
   const porTecnico = {};
@@ -5484,6 +5495,11 @@ function gerarPeriodoFolha(inicio, fim) {
     const irrPct = base.reparos ? (ret.irr / base.reparos) * 100 : 0;
     const apto = ifiPct <= BONUS_IFI_MAX && irrPct <= BONUS_IRR_MAX && diasTrab >= BONUS_DIAS_MIN;
     const valorOrdens = valorOrdensDoPeriodo(tecnico, inicio, fim, apto);
+    const existenteIdx = DB_INDEX.folhaPagamento.get(`${tecnico}|${periodo}`);
+    const existente = existenteIdx !== undefined ? DB.folhaPagamento[existenteIdx] : null;
+    const manuais = {};
+    CAMPOS_MANUAIS_FOLHA.forEach(c => { manuais[c] = existente && existente[c] !== undefined && existente[c] !== null ? existente[c] : FOLHA_CAMPO_VAZIO(c); });
+    const totalDescontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(manuais[c]) || 0), 0);
     // A quebra por tipo (Ativação/Reparo/...) NÃO fica gravada aqui — a tela
     // calcula na hora, direto da Produção (ver contagemPorTipoNoPeriodo em
     // renderFolhaCompleta). Assim funciona igual pra período gerado por este
@@ -5491,13 +5507,10 @@ function gerarPeriodoFolha(inicio, fim) {
     // pronta) — guardar só aqui deixava a coluna sempre "-" pra quem importa.
     return {
       tecnico, periodo, total_ordens: ordens.length, valor_total_ordens: valorOrdens,
-      dias_trab: diasTrab, bonus: apto ? 'APTO' : 'INAPTO', frota: '', dias_aluguel: 0, valor_aluguel: 0, emprestimo: 0,
+      dias_trab: diasTrab, bonus: apto ? 'APTO' : 'INAPTO',
       qtd_ifi: ret.ifi, qtd_irr: ret.irr, ifi_pct: ifiPct, irr_pct: irrPct,
-      desc_ifi: 0, desc_irr: 0, desc_equipamento: 0, desc_multa: 0, desc_miscelanea: 0, desc_mecanica: 0,
-      desc_vale: 0, desc_ferramentas: 0, desc_combustivel: 0, desc_fiscalizacao: 0,
-      parcela_equipamento: '', parcela_ferramentas: '', parcela_multa: '', parcela_miscelanea: '',
-      parcela_mecanica: '', parcela_vale: '', parcela_fiscalizacao: '', parcela_combustivel: '',
-      total_descontos: 0, total_receber: valorOrdens,
+      ...manuais,
+      total_descontos: totalDescontos, total_receber: valorOrdens - totalDescontos,
     };
   });
   linhas.forEach(l => upsertRow(DB.folhaPagamento, DB_INDEX.folhaPagamento, `${l.tecnico}|${l.periodo}`, l));
@@ -11574,6 +11587,48 @@ function renderImport() {
                 : `<p style="font-size:12px;color:var(--text-muted)">✓ Salvo no Supabase — vai continuar disponível mesmo saindo e voltando.</p>`) + sqlAlter + avisoSessao
               : '')
           : `<div class="warning-box">Nenhuma aba deste arquivo foi reconhecida. Verifique se é uma das planilhas listadas acima.</div>`;
+        // Essa importação trouxe Produção/Retornos (target 'producao', ver
+        // ARQUIVOS_IMPORT)? Oferece na hora atualizar a Folha pro período que o
+        // usuário informar, sem precisar ir até a aba Folha e clicar "Gerar
+        // período" de novo — pedido do cliente: recalcular total de ordens e
+        // Qtd. IFI/IRR toda vez que reimporta Produção. gerarPeriodoFolha já
+        // preserva desconto/parcela/frota já lançados (ver CAMPOS_MANUAIS_FOLHA).
+        if (reconhecidas.some(r => r.target === 'producao') && podeEditarFolhaPagamento()) {
+          resultEl.innerHTML += `
+            <div class="panel" style="margin-top:14px">
+              <h3 style="margin:0 0 8px">Atualizar Folha de Pagamento com essa Produção</h3>
+              <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
+                Recalcula total de ordens, valor e Qtd. IFI/IRR do período informado, direto do que acabou de ser importado.
+                Desconto de material, parcela, frota e aluguel já lançados nesse período NÃO são apagados.
+              </p>
+              <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+                <div class="field" style="margin:0"><label>De</label><input type="date" id="imp-fol-de"></div>
+                <div class="field" style="margin:0"><label>Até</label><input type="date" id="imp-fol-ate"></div>
+                <button class="btn" id="imp-fol-btn">Atualizar Folha</button>
+                <span id="imp-fol-msg" style="font-size:13px"></span>
+              </div>
+            </div>`;
+          const btnFol = document.getElementById('imp-fol-btn');
+          btnFol.addEventListener('click', async () => {
+            const ini = document.getElementById('imp-fol-de').value, fim = document.getElementById('imp-fol-ate').value;
+            const msg = document.getElementById('imp-fol-msg');
+            if (!ini || !fim || ini > fim) { msg.innerHTML = '<span style="color:var(--danger)">Preencha "De" e "Até" (De não pode ser depois de Até).</span>'; return; }
+            btnFol.disabled = true; msg.innerHTML = '<span style="color:var(--text-muted)">Atualizando...</span>';
+            const r = gerarPeriodoFolha(ini, fim);
+            if (!r.total) {
+              msg.innerHTML = '<span style="color:var(--warn-text)">Nenhuma ordem concluída da Produção nesse intervalo — nada foi atualizado.</span>';
+              btnFol.disabled = false; return;
+            }
+            msg.innerHTML = `<span style="color:var(--success)">${r.total} técnico(s) atualizado(s) em "${esc(r.periodo)}"</span>` + (supa ? ' — salvando...' : '');
+            if (r.syncPromise) {
+              const res = await r.syncPromise;
+              msg.innerHTML = `<span style="color:var(--success)">${r.total} técnico(s) atualizado(s) em "${esc(r.periodo)}"</span> — `
+                + (res && res.ok ? '<span style="color:var(--success)">salvo no Supabase</span>'
+                                  : `<span style="color:var(--danger)">não consegui salvar: ${esc((res&&res.error&&res.error.message)||'erro desconhecido')} — vale só nesta sessão</span>`);
+            }
+            btnFol.disabled = false;
+          });
+        }
         refreshNameLists();
         drawCards();
       } catch (err) { resultEl.innerHTML = `<div class="warning-box">Erro ao processar a planilha: ${err.message}</div>`; }
