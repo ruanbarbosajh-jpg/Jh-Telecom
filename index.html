@@ -365,7 +365,7 @@
   .pzcard { border-radius: var(--r-md); overflow: hidden; border: 1px solid var(--border); margin-bottom: 1.5rem; background: var(--card-bg); }
   .pzcard-header {
     display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-    background: linear-gradient(135deg, #0d1a4d 0%, #1d4ed8 100%); color: #fff; padding: 18px 24px 22px;
+    background: linear-gradient(135deg, #0a1440 0%, #15308a 100%); color: #fff; padding: 18px 24px 22px;
   }
   .pzcard-header-left { display: flex; align-items: center; gap: 14px; }
   .pzcard-icon { flex-shrink: 0; opacity: .92; }
@@ -379,12 +379,12 @@
   .pzcard-progress-fill { height: 100%; }
   .pzcard-mes-pill {
     display: inline-block; margin: 16px 0 4px 20px; padding: 7px 18px; border-radius: 8px; font-weight: 800;
-    font-size: 13px; letter-spacing: .04em; background: #0d1a4d; color: #fff;
+    font-size: 13px; letter-spacing: .04em; background: #0a1440; color: #fff;
   }
   .pzcard-table-wrap { padding: 10px 20px 20px; }
   table.pzcard-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13.5px; }
   table.pzcard-table thead th {
-    background: #0d1a4d; color: #fff; font-weight: 700; text-align: left; padding: 10px 14px;
+    background: #0a1440; color: #fff; font-weight: 700; text-align: left; padding: 10px 14px;
     white-space: nowrap; border: none;
   }
   table.pzcard-table thead th:first-child { border-radius: 8px 0 0 8px; }
@@ -392,7 +392,7 @@
   table.pzcard-table th .pzcard-ico { vertical-align: -3px; margin-right: 6px; }
   table.pzcard-table tbody td { padding: 10px 14px; border-bottom: 1px solid var(--border); font-weight: 700; color: var(--text-primary); }
   table.pzcard-table tbody tr:last-child td { border-bottom: none; }
-  table.pzcard-table tfoot td { padding: 12px 14px; font-weight: 800; background: #0d1a4d; color: #fff; }
+  table.pzcard-table tfoot td { padding: 12px 14px; font-weight: 800; background: #0a1440; color: #fff; }
   table.pzcard-table tfoot tr td:first-child { border-radius: 0 0 0 8px; }
   table.pzcard-table tfoot tr td:last-child { border-radius: 0 0 8px 0; }
   /* especificidade tem que bater "table.pzcard-table tbody td" (que fixa
@@ -620,10 +620,8 @@
   .gauge-arc-wrap { text-align: center; padding: 4px 0 2px; }
   .gauge-arc { width: 100%; max-width: 260px; height: auto; display: block; margin: 4px auto 0; }
   .gauge-arc-value { fill: var(--text-primary); font-size: 28px; font-weight: 800; }
-  .gauge-arc-atual-label { fill: var(--text-muted); font-size: 10px; font-weight: 700; letter-spacing: 0.06em; }
   .gauge-arc-tick { fill: var(--text-primary); font-size: 12px; }
   .gauge-arc-meta-label { font-size: 9px; font-weight: 700; }
-  .gauge-target { font-size: 12px; color: var(--text-primary); margin-top: 2px; }
 
   /* gráficos em HTML/CSS puro (sem biblioteca externa) */
   .bars-chart { display: flex; flex-direction: column; gap: 16px; }
@@ -5012,10 +5010,8 @@ function gaugePanel(title, valuePct, target, opts = {}) {
         <text x="${lx}" y="${ly}" text-anchor="${metaAnchor}" style="fill:${corMeta}" class="gauge-arc-meta-label">META ${target.toFixed(1)}%</text>` : ''}
         <text x="${CX-R}" y="${CY+22}" text-anchor="middle" class="gauge-arc-tick">0%</text>
         <text x="${CX+R}" y="${CY+22}" text-anchor="middle" class="gauge-arc-tick">${max.toFixed(0)}%</text>
-        <text x="${CX}" y="${CY-6}" text-anchor="middle" class="gauge-arc-atual-label">ATUAL</text>
-        <text x="${CX}" y="${CY+38}" text-anchor="middle" class="gauge-arc-value">${valuePct.toFixed(decimals)}%</text>
+        <text x="${CX}" y="${CY+14}" text-anchor="middle" class="gauge-arc-value">${valuePct.toFixed(decimals)}%</text>
       </svg>
-      ${target ? `<div class="gauge-target">Meta: ${lowerIsBetter?'até ':''}${target.toFixed(2)}%</div>` : ''}
     </div>
   </div>`;
 }
@@ -6417,23 +6413,29 @@ function esc(v) {
 // Gera uma imagem PNG da tabela com o que está visível na tela. Desenha no
 // canvas em vez de depender de biblioteca externa — assim funciona offline e
 // sai igual em qualquer navegador.
-// Gera um PNG do CARTÃO de prazo (renderCartaoPrazo) — pedido do cliente:
-// "quero que seja a imagem perfeita igual tá no sistema", não um redesenho
-// tipo exportarTabelaImagem (que redesenha do zero e ignora gradiente/ícone).
-// Usa o html2canvas (CDN, ver <head>): a primeira tentativa foi sem
-// biblioteca nova (SVG com <foreignObject> rasterizado em canvas), mas o
-// Chrome marca esse canvas como "tainted" e bloqueia toBlob/toDataURL — é uma
-// trava de segurança do navegador contra esse tipo de imagem, não tem contorno
-// sem lib. html2canvas lê o DOM de verdade (sem esse bloqueio).
-function capturarCartaoPrazoImagem(elemento, nomeArquivo) {
-  if (!elemento) return;
-  if (typeof html2canvas !== 'function') { toast('Biblioteca de imagem não carregou (sem internet?).', 'aviso'); return; }
+// Gera um PNG de um elemento da tela EXATAMENTE como está renderizado — pedido
+// do cliente: "quero que seja a imagem perfeita igual tá no sistema", não um
+// redesenho tipo exportarTabelaImagem (que redesenha do zero e ignora
+// gradiente/ícone). Usa o html2canvas (CDN, ver <head>): a primeira tentativa
+// foi sem biblioteca nova (SVG com <foreignObject> rasterizado em canvas), mas
+// o Chrome marca esse canvas como "tainted" e bloqueia toBlob/toDataURL — é
+// uma trava de segurança do navegador contra esse tipo de imagem, não tem
+// contorno sem lib. html2canvas lê o DOM de verdade (sem esse bloqueio).
+// `aoTerminar` (opcional) roda depois da captura — usado por
+// ativarBotoesImagem pra desfazer um wrapper temporário (ver mais abaixo).
+function capturarElementoComoImagem(elemento, nomeArquivo, aoTerminar) {
+  const limpar = () => { if (aoTerminar) aoTerminar(); };
+  if (!elemento) { limpar(); return; }
+  if (typeof html2canvas !== 'function') { toast('Biblioteca de imagem não carregou (sem internet?).', 'aviso'); limpar(); return; }
   const corFundo = getComputedStyle(elemento).backgroundColor;
+  const corPagina = getComputedStyle(document.documentElement).getPropertyValue('--bg-page').trim();
   html2canvas(elemento, {
-    backgroundColor: corFundo && corFundo !== 'rgba(0, 0, 0, 0)' ? corFundo : '#ffffff',
+    backgroundColor: corFundo && corFundo !== 'rgba(0, 0, 0, 0)' ? corFundo : (corPagina || '#ffffff'),
     scale: window.devicePixelRatio > 1 ? 2 : 1,
     useCORS: true,
+    ignoreElements: el => el.classList && (el.classList.contains('secao-toggle') || el.classList.contains('gerar-imagem-btn')),
   }).then(cv => {
+    limpar();
     cv.toBlob(blob => {
       if (!blob) { toast('Não consegui gerar a imagem — tente de novo.', 'aviso'); return; }
       const url = URL.createObjectURL(blob);
@@ -6442,7 +6444,7 @@ function capturarCartaoPrazoImagem(elemento, nomeArquivo) {
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
-  }).catch(() => toast('Não consegui gerar a imagem — tente de novo.', 'aviso'));
+  }).catch(() => { limpar(); toast('Não consegui gerar a imagem — tente de novo.', 'aviso'); });
 }
 // Liga o botão "🖼 Gerar imagem" de cada renderCartaoPrazo (DIA e MÊS) — um
 // só wiring serve pros dois, porque os dois usam o mesmo atributo/data-id.
@@ -6453,8 +6455,56 @@ function wireGerarImagemCartaoPrazo() {
     btn.addEventListener('click', () => {
       const cartao = document.getElementById(btn.dataset.gerarImagemCartao);
       const nome = 'prazo-' + btn.dataset.gerarImagemCartao.replace('pzcard-', '') + '-' + hojeISOLocal();
-      capturarCartaoPrazoImagem(cartao, nome);
+      capturarElementoComoImagem(cartao, nome);
     });
+  });
+}
+// Botão "🖼 Gerar imagem" em cada tabela da PCR e do Parcial do Dia — pedido
+// do cliente depois de ver o das telas de Prazo. Mesmo escopo de
+// ativarTogglesDeSecao (chamado com o mesmo `raiz`): pega tanto os blocos
+// demarcados por "section-heading"/"faixa-secao" (a maioria nessas duas
+// telas) quanto painel ".panel > h3" solto.
+//
+// Um grupo por "section-heading" não é 1 elemento só — é o título + vários
+// irmãos soltos. html2canvas precisa de UM elemento pra capturar, então esses
+// casos CLONAM o título + os irmãos pra dentro de um wrapper temporário (fora
+// da tela, mas renderizado de verdade — não dá pra tirar print de algo com
+// display:none), tira o print desse clone, e desfaz o wrapper depois. O
+// painel ".panel" já é um elemento único, esse caso captura ele direto.
+function ativarBotoesImagem(raiz) {
+  const alvo = raiz;
+  if (!alvo) return;
+  const nomeArquivoDe = tituloTexto => 'tabela-' + normalizeHeader(tituloTexto).replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '') + '-' + hojeISOLocal();
+  const criarBotaoImg = onClick => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'secao-toggle gerar-imagem-btn'; b.textContent = '🖼 Gerar imagem';
+    b.addEventListener('click', onClick);
+    return b;
+  };
+  const ehTitulo = el => el.classList.contains('section-heading') || el.classList.contains('faixa-secao');
+  alvo.querySelectorAll('.section-heading, .faixa-secao').forEach(h => {
+    if (h.querySelector('.gerar-imagem-btn')) return;
+    const alvos = [];
+    let el = h.nextElementSibling;
+    while (el && !ehTitulo(el)) { alvos.push(el); el = el.nextElementSibling; }
+    if (!alvos.some(a => a.querySelector && a.querySelector('table'))) return; // só onde tem tabela de verdade
+    h.appendChild(criarBotaoImg(() => {
+      const largura = alvo.clientWidth || 1000;
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = `position:fixed;top:0;left:-${largura + 200}px;width:${largura}px;background:var(--bg-page);padding:16px;`;
+      const headClone = h.cloneNode(true);
+      headClone.querySelectorAll('.secao-toggle').forEach(btn => btn.remove());
+      wrapper.appendChild(headClone);
+      alvos.forEach(a => wrapper.appendChild(a.cloneNode(true)));
+      document.body.appendChild(wrapper);
+      capturarElementoComoImagem(wrapper, nomeArquivoDe(h.textContent), () => wrapper.remove());
+    }));
+  });
+  alvo.querySelectorAll('.panel').forEach(p => {
+    if (p.querySelector('.gerar-imagem-btn') || !p.querySelector('table')) return;
+    const h3 = p.querySelector(':scope > h3');
+    if (!h3) return;
+    h3.appendChild(criarBotaoImg(() => capturarElementoComoImagem(p, nomeArquivoDe(h3.textContent))));
   });
 }
 function exportarTabelaImagem(tabela, nomeArquivo, titulo) {
@@ -7476,6 +7526,7 @@ function renderPCR() {
 
     // ---- ocultar/reexibir cada tabela da página ----
     ativarTogglesDeSecao(document.getElementById('pcr-body'));
+    ativarBotoesImagem(document.getElementById('pcr-body'));
 
     // ---- exportações (sempre respeitando o que o filtro deixou na tela) ----
     const aviso = (btn, txt, original) => { btn.textContent = txt; setTimeout(() => { btn.textContent = original; }, 2500); };
@@ -8345,6 +8396,7 @@ function renderParcialDoDia() {
 
     // ---- ocultar/reexibir cada tabela da página (mesmo padrão da PCR) ----
     ativarTogglesDeSecao(document.getElementById('pd-body'));
+    ativarBotoesImagem(document.getElementById('pd-body'));
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'maodeobra', label: 'Mão de obra e produção do dia' },
