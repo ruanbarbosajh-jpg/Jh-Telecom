@@ -5628,15 +5628,27 @@ function datasDoPeriodoFolha(periodo) {
 // VALORES_ORDENS_FIXOS/precoGigaPorTipo), só que pros períodos escolhidos nas
 // telas de Comparativo Financeiro (que usam texto livre "DD/MM/AAAA a
 // DD/MM/AAAA" em vez de De/Até — por isso reaproveita datasDoPeriodoFolha).
-// O preço usa a vigência de cada ORDEM (sua própria data), não a do período
-// selecionado — importa quando o período atravessa um reajuste de contrato.
+// A CONTAGEM vem do fechamento oficial (DB.fechamento, aba RELATORIO), não da
+// Produção filtrada — decisão do cliente, já confirmada e documentada no
+// Resumo Geral: a Produção tem técnico/cidade fora do fechamento oficial, e
+// as duas telas passavam a bater números diferentes pro mesmo painel. Mesmo
+// filtro dos outros paineis de GIGA: só técnico com total_geral > 0 no ciclo
+// (quem tem 0 produção não está mais na planta). Preço pela vigência do FIM
+// de cada ciclo (o fechamento não tem data por ordem individual, só por
+// técnico/ciclo agregado).
 function tabelaServicosGiga(periodosTexto) {
   const ranges = periodosTexto.map(datasDoPeriodoFolha).filter(r => r.inicio && r.fim);
-  const prod = DB.producao.filter(p => isConcluido(p.status) && ranges.some(r => inRange(p.data, r.inicio, r.fim)));
-  const itens = VALORES_ORDENS_FIXOS.map(v => {
-    const ordens = prod.filter(p => v.re.test(normalizeHeader(p.tipo_atividade)));
-    const valor = ordens.reduce((a, p) => a + (precoGigaPorTipo(p.tipo_atividade, p.data) || 0), 0);
-    return { label: v.label, qtd: ordens.length, valor };
+  const CAMPOS_GIGA = ['ativacao', 'reparos', 'me', 'mc', 'upgrade'];
+  const itens = VALORES_ORDENS_FIXOS.map((v, idx) => {
+    const campo = CAMPOS_GIGA[idx];
+    let qtd = 0, valor = 0;
+    ranges.forEach(r => {
+      const doCiclo = DB.fechamento.filter(f => f.total_geral > 0 && f.inicio === r.inicio && f.ate_o_dia === r.fim);
+      const q = doCiclo.reduce((a, f) => a + (f[campo] || 0), 0);
+      qtd += q;
+      valor += q * (precoGigaPorTipo(v.label, r.fim) || 0);
+    });
+    return { label: v.label, qtd, valor };
   });
   return { itens, totalQtd: itens.reduce((a, i) => a + i.qtd, 0), totalValor: itens.reduce((a, i) => a + i.valor, 0) };
 }
@@ -11461,8 +11473,8 @@ function renderComparisonsFromPivot() {
       </tbody></table></div>
       <div class="section-heading">Serviços Concluídos e Valor a Receber (GIGA → JH)</div>
       <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
-        Ordens CONCLUÍDAS nos períodos marcados acima, pelo preço de contrato vigente na data de cada ordem
-        (${formatDate(VALORES_ORDENS_HISTORICO[VALORES_ORDENS_HISTORICO.length-1].vigenciaDesde)} em diante usa o valor reajustado).
+        Contagem do fechamento oficial (aba RELATORIO — mesma fonte do Relatório de Eficiência), pelo preço de contrato
+        vigente no fim de cada ciclo (${formatDate(VALORES_ORDENS_HISTORICO[VALORES_ORDENS_HISTORICO.length-1].vigenciaDesde)} em diante usa o valor reajustado).
       </p>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
         <th>Serviço</th><th>Qtd. Concluída</th><th>Total a Receber (GIGA)</th>
@@ -11584,8 +11596,8 @@ function renderComparisonsFromBase() {
       </tbody></table></div>
       <div class="section-heading">Serviços Concluídos e Valor a Receber (GIGA → JH)</div>
       <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
-        Ordens CONCLUÍDAS nos períodos marcados acima, pelo preço de contrato vigente na data de cada ordem
-        (${formatDate(VALORES_ORDENS_HISTORICO[VALORES_ORDENS_HISTORICO.length-1].vigenciaDesde)} em diante usa o valor reajustado).
+        Contagem do fechamento oficial (aba RELATORIO — mesma fonte do Relatório de Eficiência), pelo preço de contrato
+        vigente no fim de cada ciclo (${formatDate(VALORES_ORDENS_HISTORICO[VALORES_ORDENS_HISTORICO.length-1].vigenciaDesde)} em diante usa o valor reajustado).
       </p>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
         <th>Serviço</th><th>Qtd. Concluída</th><th>Total a Receber (GIGA)</th>
