@@ -863,6 +863,8 @@
      não brigar com a cor que já identifica Despesas/Receita/Lucro ali. */
   table.data-table th.col-total, table.data-table td.col-total { border-left: 2px solid var(--accent); border-right: 2px solid var(--accent); font-weight: 800; }
   table.data-table tbody tr:not(.total-row) td.col-total { background: var(--accent-bg); }
+  /* checkbox "Ocultar coluna Total" no Comparativo Financeiro */
+  table.data-table.esconder-col-total th.col-total, table.data-table.esconder-col-total td.col-total { display: none; }
   /* linha de TIPO DE SERVIÇO por baixo da linha (em negrito) da CIDADE nos
      relatórios agrupados — mais clara/leve que o cabeçalho, pra hierarquia
      ficar óbvia num relance. E uma linha em branco entre uma cidade e a
@@ -5333,11 +5335,15 @@ function renderDashboard() {
     // Todos os números desta página vêm exclusivamente da aba RELATORIO
     // (fechamento) — não mistura com outras planilhas (produção, prazo etc.),
     // pra bater 1:1 com o que está no Relatório Geral.
-    // Técnico com total_geral = 0 no ciclo não está mais na planta (pedido do
-    // cliente: "hoje temos 34 na planta, tira quem tem 0 de produção") — fica
-    // de fora daqui em diante (cards, rankings, tabela completa e PDF), pra não
-    // inflar a contagem de técnicos nem poluir o ranking com gente que já saiu.
-    const fech = DB.fechamento.filter(f => overlaps(f.inicio, f.ate_o_dia, s, e) && f.total_geral > 0);
+    // ATUALIZADO (31/08/2026, pedido do cliente): cards e valores desta tela
+    // têm que bater com a SOMA da própria planilha — sem filtrar ninguém.
+    // Antes (28/08/2026) técnico com total_geral = 0 no ciclo era excluído
+    // ("tira quem tem 0 de produção"), mas isso fazia Despesas/Lucro da tela
+    // ficarem diferentes da soma real da planilha quando um técnico tinha
+    // despesa lançada (ex.: aluguel de carro) sem nenhuma ordem no ciclo —
+    // achado real: técnico com total_geral 0, R$2.605,50 de despesa, sumia
+    // da conta e criava uma diferença de R$2.605,50 entre tela e Excel.
+    const fech = DB.fechamento.filter(f => overlaps(f.inicio, f.ate_o_dia, s, e));
 
     if (!fech.length) {
       const ciclos = ciclosDoFechamento().lista;
@@ -5422,7 +5428,7 @@ function renderDashboard() {
     const idxAtual = listaCiclos.findIndex(c => c.start === s && c.end === e);
     const anterior = idxAtual >= 0 ? listaCiclos[idxAtual + 1] : null;
     const somaCiclo = (ciclo, campo) => !ciclo ? null : DB.fechamento
-      .filter(f => f.inicio === ciclo.start && f.ate_o_dia === ciclo.end && f.total_geral > 0)
+      .filter(f => f.inicio === ciclo.start && f.ate_o_dia === ciclo.end)
       .reduce((a, f) => a + (f[campo] || 0), 0);
     const varDe = (atual, campo, invertido) => {
       const ant = somaCiclo(anterior, campo);
@@ -11462,8 +11468,13 @@ function renderComparisonsFromPivot() {
         ${metricCard('Total Despesas — '+ultimo, formatCurrency(val(pivot.totalDespesas,ultimo)), false, penultimo?{sub: diffBadge(val(pivot.totalDespesas,penultimo),val(pivot.totalDespesas,ultimo)).replace(/<[^>]+>/g,'') + ' vs período anterior'}:{})}
         ${metricCard('Lucro — '+ultimo, formatCurrency(val(pivot.lucro,ultimo)), val(pivot.lucro,ultimo)<0, {accent:true, ...(penultimo?{sub: diffBadge(val(pivot.lucro,penultimo),val(pivot.lucro,ultimo)).replace(/<[^>]+>/g,'') + ' vs período anterior'}:{})})}
       </div>
-      <div class="section-heading">Detalhamento de Despesas</div>
-      <div class="table-wrap"><table class="data-table"><thead><tr>
+      <div class="section-heading">
+        <span>Detalhamento de Despesas</span>
+        <label style="font-size:12.5px;font-weight:600;color:var(--text-secondary);display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="cmp1-esconder-total" style="accent-color:var(--accent)"> Ocultar coluna Total
+        </label>
+      </div>
+      <div class="table-wrap"><table class="data-table" id="cmp1-tabela-despesas"><thead><tr>
         <th>Despesas / Receitas</th>${selecionados.map(p=>`<th>${p}</th>`).join('')}<th class="col-total">Total do período selecionado</th>${penultimo?`<th>Variação (${penultimo} → ${ultimo})</th>`:''}
       </tr></thead><tbody>
         ${categorias.map(c=>`<tr><td class="cat-cell">${c}</td>${selecionados.map(p=>`<td>${pivot.porCategoria[c][p] ? formatCurrency(pivot.porCategoria[c][p]) : '-'}</td>`).join('')}<td class="col-total">${formatCurrency(totalCategoria(c))}</td>${penultimo?`<td>${diffMoney(val(pivot.porCategoria[c],penultimo),val(pivot.porCategoria[c],ultimo),true)}</td>`:''}</tr>`).join('')}
@@ -11485,6 +11496,9 @@ function renderComparisonsFromPivot() {
       ${narrativa}
       <div id="pdf-export-area"></div>`;
 
+    document.getElementById('cmp1-esconder-total').addEventListener('change', e => {
+      document.getElementById('cmp1-tabela-despesas').classList.toggle('esconder-col-total', e.target.checked);
+    });
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'detalhamento', label: 'Detalhamento de Despesas/Receitas (igual à planilha)' },
     ]);
@@ -11585,8 +11599,13 @@ function renderComparisonsFromBase() {
         ${metricCard('Total Despesas — '+ultimo.periodo, formatCurrency(ultimo.despesa), false, penultimo?{sub: diffBadge(penultimo.despesa,ultimo.despesa).replace(/<[^>]+>/g,'') + ' vs período anterior'}:{})}
         ${metricCard('Lucro Líquido — '+ultimo.periodo, formatCurrency(ultimo.lucro), ultimo.lucro<0, {accent:true, ...(penultimo?{sub: diffBadge(penultimo.lucro,ultimo.lucro).replace(/<[^>]+>/g,'') + ' vs período anterior'}:{})})}
       </div>
-      <div class="section-heading">Detalhamento de Despesas</div>
-      <div class="table-wrap"><table class="data-table"><thead><tr>
+      <div class="section-heading">
+        <span>Detalhamento de Despesas</span>
+        <label style="font-size:12.5px;font-weight:600;color:var(--text-secondary);display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="cmp2-esconder-total" style="accent-color:var(--accent)"> Ocultar coluna Total
+        </label>
+      </div>
+      <div class="table-wrap"><table class="data-table" id="cmp2-tabela-despesas"><thead><tr>
         <th>Despesas / Receitas</th>${dados.map(d=>`<th>${d.periodo}</th>`).join('')}<th class="col-total">Total do período selecionado</th>${penultimo?`<th>Variação (${penultimo.periodo} → ${ultimo.periodo})</th>`:''}
       </tr></thead><tbody>
         ${categorias.map(c=>`<tr><td class="cat-cell">${c}</td>${dados.map(d=>`<td>${d.porCategoria[c] ? formatCurrency(d.porCategoria[c]) : '-'}</td>`).join('')}<td class="col-total">${formatCurrency(totalCategoria(c))}</td>${penultimo?`<td>${diffMoney(penultimo.porCategoria[c]||0,ultimo.porCategoria[c]||0,true)}</td>`:''}</tr>`).join('')}
@@ -11608,6 +11627,9 @@ function renderComparisonsFromBase() {
       ${narrativa}
       <div id="pdf-export-area"></div>`;
 
+    document.getElementById('cmp2-esconder-total').addEventListener('change', e => {
+      document.getElementById('cmp2-tabela-despesas').classList.toggle('esconder-col-total', e.target.checked);
+    });
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'detalhamento', label: 'Detalhamento de Despesas/Receitas' },
     ]);
