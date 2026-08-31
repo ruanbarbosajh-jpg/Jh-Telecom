@@ -1293,6 +1293,13 @@ const SUPABASE_TABLES = {
   // no banco viram texto ISO, então precisam voltar a ser Date ao carregar,
   // senão as contas de prazo e de "tempo em rota" quebram.
   pcr:             { table: 'pcr',                conflict: 'chave', hydrate: hidratarLinhaPCR },
+  // Abas de PLEITO (histórico de tentativas "não concluído") — chave composta
+  // pelos 3 campos que já formam a chave do upsertRow local (ver case 'pleito'
+  // em insertRow). Sem tabela no banco até rodar PASSO-5-tabela-pleito.sql, a
+  // aba fica marcada "não persistido" e some ao recarregar — foi exatamente
+  // isso que zerou o Total Justificadas em produção (BASE DE DADOS tem tabela
+  // e recarrega OK, pleito não tinha e voltava vazio).
+  pleito:          { table: 'pleito',              conflict: 'os,data,abertura,inicio' },
   // Gestão Presença: quadro de técnicos (roster) + status por dia + log de
   // auditoria (quem alterou o quê). presencaLog é só de INSERT (nunca upsert de
   // verdade) — o "conflict" abaixo só existe pra esse loader genérico conseguir
@@ -4269,6 +4276,13 @@ const SCHEMAS = {
     contrato: ['numero do contrato','número do contrato'],
     tipo_atividade: ['tipo de atividade 2','tipo de atividade'],
     motivo: ['motivo de encerramento das atividades','motivo de encerramento'],
+    // só entra na CHAVE (ver case 'pleito' em insertRow) — a mesma O.S., no
+    // mesmo dia, com a mesma abertura, pode ter duas tentativas de verdade
+    // (técnico tentou de manhã, voltou à tarde); sem o horário de início na
+    // chave as duas colidiam e uma sumia (achado real: 58 pares assim só na
+    // aba de Reparo — cliente reportou "tem 862 em agosto, no sistema tá
+    // faltando").
+    inicio: ['inicio','início'],
   }},
   frotaLinks: { fields: {
     motorista: ['nome do motorista'], placa: ['veiculo placa'], supervisor: ['supervisor'],
@@ -4496,9 +4510,14 @@ function insertRow(target, map, row, extra) {
     case 'pleito': {
       // NÃO deduplica por O.S: a mesma O.S. pode ter várias tentativas "não
       // concluído" de verdade (925 O.S. repetidas na aba de Reparo sozinha),
-      // e todas interessam pro pleito — a chave junta O.S+data+abertura pra
-      // reimportar o mesmo arquivo atualizar em vez de duplicar, mas mantém
-      // tentativas DIFERENTES como linhas separadas.
+      // e todas interessam pro pleito — a chave junta O.S+data+abertura+início
+      // pra reimportar o mesmo arquivo atualizar em vez de duplicar, mas
+      // mantém tentativas DIFERENTES como linhas separadas. Precisa do
+      // horário de Início também: O.S+data+abertura sozinhos colidiam quando
+      // o técnico tentava 2x no mesmo dia (58 casos reais só na aba de
+      // Reparo — uma tentativa de manhã "Não cumprimento de agenda", outra à
+      // tarde "Cliente ausente", mesma abertura registrada) e uma das duas
+      // sumia no merge.
       const os = normalizeChaveOS(s('os'));
       const dataISO = d('data');
       // "Data Abertura Chamado" vem sem ANO ("31/12 11:34") — mesmo formato e
@@ -4511,12 +4530,16 @@ function insertRow(target, map, row, extra) {
       const dataCelula = cell(row, map['data']);
       const dataDiaObj = dataCelula instanceof Date ? dataCelula : (dataISO ? new Date(dataISO + 'T00:00:00') : null);
       const aberturaDate = pcrParseAbertura(s('abertura'), dataDiaObj);
+      // "início" guardado como veio (não precisa de parse bonito): só serve
+      // pra diferenciar 2 tentativas do mesmo dia na CHAVE — precisa ser uma
+      // coluna de verdade no objeto pra virar parte do ON CONFLICT no Supabase também.
+      const inicioChave = String(cell(row, map['inicio']) ?? '');
       const obj = {
         recurso: s('recurso'), data: dataISO, status: s('status'), cliente: s('cliente'),
         endereco: s('endereco'), cidade: s('cidade'), abertura: aberturaDate ? fmtDT(aberturaDate) : '', os,
-        contrato: s('contrato'), tipo_atividade: s('tipo_atividade'), motivo: s('motivo'),
+        contrato: s('contrato'), tipo_atividade: s('tipo_atividade'), motivo: s('motivo'), inicio: inicioChave,
       };
-      const chave = os ? `${os}|${obj.data}|${obj.abertura}` : null;
+      const chave = os ? `${os}|${obj.data}|${obj.abertura}|${inicioChave}` : null;
       return upsertRow(DB.pleito, DB_INDEX.pleito, chave, obj);
       break;
     }
