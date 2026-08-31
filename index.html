@@ -820,6 +820,22 @@
   .report-section-row .rs-check input { accent-color: var(--accent); flex-shrink: 0; }
   .report-section-row select { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; background: var(--card-bg); color: var(--text-primary); }
   .rs-order-btns { display: flex; gap: 4px; }
+  /* Pré-visualização do relatório em abas — pedido do cliente: em vez de
+     empilhar TODA seção marcada numa rolagem só, clica na aba e troca o
+     conteúdo, sem recarregar a página. Uma aba por seção marcada, na mesma
+     ordem escolhida na lista acima. */
+  .report-tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--border); margin-bottom: 1rem; padding-bottom: 0; }
+  .report-tab {
+    padding: 10px 16px; border: none; background: transparent; color: var(--text-secondary);
+    font-size: 13.5px; font-weight: 600; cursor: pointer; border-bottom: 2.5px solid transparent;
+    margin-bottom: -1px; transition: color .15s ease, border-color .15s ease;
+  }
+  .report-tab:hover { color: var(--text-primary); }
+  .report-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 800; }
+  /* fade suave ao trocar de aba — a classe é removida e reaplicada no clique
+     (forçando reflow no meio) pra reiniciar a animação toda vez */
+  @keyframes reportTabFadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .report-tab-fade { animation: reportTabFadeIn .25s ease-out both; }
   .btn-icon { width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 6px; background: var(--card-bg); color: var(--text-secondary); cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center; }
   .btn-icon:hover { background: var(--accent-solid); color: #fff; border-color: var(--accent-solid); }
   .btn-icon:disabled { opacity: .35; cursor: not-allowed; }
@@ -12518,20 +12534,32 @@ function renderRelatorios() {
     if (!partes.length) { area.innerHTML = '<div class="panel"><div class="empty">Nenhuma seção marcada.</div></div>'; return; }
     const titulo = document.getElementById('rel-titulo').value || 'Relatório';
     const subtitulo = document.getElementById('rel-subtitulo').value;
-    let html = `<div class="section-heading">Pré-visualização</div>
-      <div class="panel" style="margin-bottom:1rem"><h3 style="margin-bottom:4px">${titulo}</h3>${subtitulo?`<p style="color:var(--text-muted);font-size:13px;margin:0">${subtitulo}</p>`:''}</div>`;
-    partes.forEach(p => {
-      html += `<div class="section-heading">${p.titulo}</div>`;
-      if (p.vazio) { html += '<div class="panel"><div class="empty">Sem dados para essa seleção/período.</div></div>'; return; }
-      (p.tabelas||[]).forEach(t => { html += renderPreviewTable(t.titulo, t.rows, t.columns, { totalRow: t.totalRow }); });
-      (p.graficos||[]).forEach((g,gi) => { html += `<div class="panel" style="margin-bottom:1rem"><h3>${g.titulo}</h3><div id="rel-chart-${p.id}-${gi}"></div></div>`; });
-    });
-    area.innerHTML = html;
-    // os gráficos só podem ser desenhados depois que o HTML acima já está no DOM
-    partes.forEach(p => {
-      if (p.vazio) return;
-      (p.graficos||[]).forEach((g,gi) => { barsChart(`rel-chart-${p.id}-${gi}`, g.items, { color: g.cor }); });
-    });
+    // Pré-visualização em ABAS — uma por seção marcada, na mesma ordem da
+    // lista acima. Antes empilhava tabela+gráfico de TODA seção marcada numa
+    // rolagem só; com muita seção marcada isso virava um scroll enorme.
+    // Desenha só a aba ativa (lazy): além de mais rápido, evita gráfico
+    // sendo desenhado num container ainda com display:none (largura 0).
+    area.innerHTML = `<div class="section-heading">Pré-visualização</div>
+      <div class="panel" style="margin-bottom:1rem"><h3 style="margin-bottom:4px">${esc(titulo)}</h3>${subtitulo?`<p style="color:var(--text-muted);font-size:13px;margin:0">${esc(subtitulo)}</p>`:''}</div>
+      <div class="report-tabs" id="rel-tabs">${partes.map((p,i) => `<button type="button" class="report-tab${i===0?' active':''}" data-rel-tab="${p.id}">${esc(p.titulo)}</button>`).join('')}</div>
+      <div id="rel-tab-content"></div>`;
+    function desenharAba(id) {
+      area.querySelectorAll('[data-rel-tab]').forEach(btn => btn.classList.toggle('active', btn.dataset.relTab === id));
+      const p = partes.find(x => x.id === id);
+      const painel = document.getElementById('rel-tab-content');
+      let html = '';
+      if (p.vazio) {
+        html = '<div class="panel"><div class="empty">Sem dados para essa seleção/período.</div></div>';
+      } else {
+        (p.tabelas||[]).forEach(t => { html += renderPreviewTable(t.titulo, t.rows, t.columns, { totalRow: t.totalRow }); });
+        (p.graficos||[]).forEach((g,gi) => { html += `<div class="panel" style="margin-bottom:1rem"><h3>${esc(g.titulo)}</h3><div id="rel-chart-${p.id}-${gi}"></div></div>`; });
+      }
+      painel.innerHTML = html;
+      painel.classList.remove('report-tab-fade'); void painel.offsetWidth; painel.classList.add('report-tab-fade');
+      if (!p.vazio) (p.graficos||[]).forEach((g,gi) => { barsChart(`rel-chart-${p.id}-${gi}`, g.items, { color: g.cor }); });
+    }
+    area.querySelectorAll('[data-rel-tab]').forEach(btn => btn.addEventListener('click', () => desenharAba(btn.dataset.relTab)));
+    desenharAba(partes[0].id);
   });
 
   document.getElementById('rel-pdf-btn').addEventListener('click', () => {
