@@ -1217,6 +1217,8 @@
       <a data-route="parcialdia"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2" y="3.8" width="14" height="12" rx="1.5"/><line x1="2" y1="7.2" x2="16" y2="7.2"/><line x1="5.5" y1="1.8" x2="5.5" y2="4.8"/><line x1="12.5" y1="1.8" x2="12.5" y2="4.8"/><path d="M5.7 11.2 7.4 12.9 11 9"/></svg></i><span class="nav-txt">Parcial do Dia</span></a>
       <a data-route="pcr"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M1.5 9.3h3.3l1.5-5 3 10 1.5-5h5.7"/></svg></i><span class="nav-txt">PCR</span></a>
       <a data-route="ofensoresprazo"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="4" y1="1.8" x2="4" y2="16.2"/><path d="M4 2.8h10l-2.6 3.5L14 9.8H4"/></svg></i><span class="nav-txt">Ofensores de Prazo</span></a>
+      <a data-route="pleitoreparo"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M3 2.5h9l3 3v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-12a1 1 0 0 1 1-1Z"/><path d="M12 2.5v3h3"/><path d="M6 10.5 8 12.5 12.5 8"/></svg></i><span class="nav-txt">Pleito — Reparo</span></a>
+      <a data-route="pleitoativacao"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M3 2.5h9l3 3v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-12a1 1 0 0 1 1-1Z"/><path d="M12 2.5v3h3"/><path d="M6 10.5 8 12.5 12.5 8"/></svg></i><span class="nav-txt">Pleito — Ativação/M.E</span></a>
       <a data-route="relatoriosdia"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M9 2.2v9"/><path d="M5.5 7.7 9 11.2l3.5-3.5"/><line x1="3" y1="15.2" x2="15" y2="15.2"/></svg></i><span class="nav-txt">Relatórios (Excel/Imagem)</span></a>
       <div class="sidebar-group">Frota</div>
       <a data-route="fleet"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.3" y="5.8" width="9" height="7.2" rx="1"/><path d="M10.3 8.6h3.4l2.4 2.6v1.8h-5.8Z"/><circle cx="4.8" cy="14.6" r="1.4"/><circle cx="13.2" cy="14.6" r="1.4"/></svg></i><span class="nav-txt">Frota</span></a>
@@ -1712,6 +1714,7 @@ const ROUTE_PERMISSIONS = {
   // 'retornosgiga'] antes dessa restrição).
   rh: ['dashboard', 'production', 'acomtec', 'bi', 'presenca', 'presencaescritorio',
        'ofensor', 'table', 'prazo', 'prazoativacao', 'parcialdia', 'pcr', 'ofensoresprazo',
+       'pleitoreparo', 'pleitoativacao',
        'relatoriosdia', 'fleet', 'finance', 'folha', 'cmpproducao', 'cmpifiirr', 'cmpprazo',
        'comparisons', 'relatorios', 'import', 'retornosgiga'],
   gestao: ['dashboard', 'finance', 'folha', 'toll', 'comparisons', 'import', 'parcialdia', 'bi', 'retornosgiga'],
@@ -1726,6 +1729,7 @@ const ROUTE_PERMISSIONS = {
   // por isso rota nova precisa ser somada aqui também.
   almox: ['dashboard', 'acomtec', 'bi', 'presenca', 'presencaescritorio',
           'prazo', 'prazoativacao', 'parcialdia', 'pcr', 'ofensoresprazo',
+          'pleitoreparo', 'pleitoativacao',
           'relatoriosdia', 'fleet', 'toll', 'finance', 'retornosgiga',
           'cmpproducao', 'cmpifiirr', 'cmpprazo', 'comparisons', 'relatorios', 'import'],
 };
@@ -1789,6 +1793,14 @@ const DB = {
   frotaLinks: [], frotaTroca: [], frotaManutencao: [], frotaDesvinc: [], frotaMultas: [], frotaRevisao: [],
   pedagio: [], financeiro: [], importsLog: [],
   pcr: [], // linhas do CSV de atividades importado na aba PCR
+  // Abas "PRAZO INFORMADO REPARO (PLEITO)" e "PRAZO INFORMADO AT-ME (PLEITO)"
+  // de PRAZOS_ESCRITÓRIO.xlsx — uma linha por TENTATIVA "não concluído" (não
+  // é resumo, é histórico: a mesma O.S. aparece várias vezes se teve mais de
+  // uma tentativa improdutiva). As duas abas caem na MESMA tabela — o que
+  // diferencia Reparo de Ativação/M.E não é a aba de origem, é o campo
+  // tipo_atividade de cada linha (ver renderPleito). Usado pra achar o motivo
+  // da 1ª improdutividade de uma O.S. que depois foi concluída fora do prazo.
+  pleito: [],
   // Retornos IFI/IRR da planilha que a GIGA manda todo fechamento. É a fonte
   // OFICIAL do desconto: quando existe retorno da GIGA no período, ele manda
   // sobre o retorno que o próprio sistema calcula (ver retornosDoPeriodo).
@@ -1813,7 +1825,7 @@ const DB = {
 const DB_INDEX = {
   producao: new Map(), fechamento: new Map(), prazo: new Map(), folhaPagamento: new Map(), baseDoDia: new Map(), prazoReparoDia: new Map(),
   frotaLinks: new Map(), frotaTroca: new Map(), frotaManutencao: new Map(), frotaDesvinc: new Map(), frotaMultas: new Map(), frotaRevisao: new Map(),
-  pedagio: new Map(), financeiro: new Map(), pcr: new Map(),
+  pedagio: new Map(), financeiro: new Map(), pcr: new Map(), pleito: new Map(),
   presencaTecnicos: new Map(), presenca: new Map(),
   presencaEscritorioPessoas: new Map(), presencaEscritorio: new Map(),
 };
@@ -4245,6 +4257,19 @@ const SCHEMAS = {
     tipo_atividade: ['tipo de atividade 2','tipo de atividade'],
     inicio: ['inicio','início'],
   }},
+  // Abas "PRAZO INFORMADO REPARO (PLEITO)" e "PRAZO INFORMADO AT-ME (PLEITO)"
+  // — mesmas colunas de BASE DE DADOS/prazo (é por isso que o roteamento pelo
+  // NOME da aba, em importSheet, é obrigatório aqui: por conteúdo, cai tudo
+  // em "prazo"). Só que aqui interessa é Nome/Endereço/Data Abertura Chamado/
+  // Motivo — dados que a aba "prazo" nem importa.
+  pleito: { fields: {
+    recurso: ['recurso'], data: ['data'], status: ['status da atividade'],
+    cliente: ['nome'], endereco: ['endereco','endereço'], cidade: ['cidade'],
+    abertura: ['data abertura chamado'], os: ['ordem de servico','ordem de serviço'],
+    contrato: ['numero do contrato','número do contrato'],
+    tipo_atividade: ['tipo de atividade 2','tipo de atividade'],
+    motivo: ['motivo de encerramento das atividades','motivo de encerramento'],
+  }},
   frotaLinks: { fields: {
     motorista: ['nome do motorista'], placa: ['veiculo placa'], supervisor: ['supervisor'],
     cidade: ['cidade'], locadora: ['locadora'], vinculacao: ['vinculacao','vinculação'], observacao: ['obervacao','observacao','observação'],
@@ -4468,6 +4493,33 @@ function insertRow(target, map, row, extra) {
       return upsertRowByDate(DB.prazo, DB_INDEX.prazo, os || null, obj, 'data', { ignoreIf: ehLimpezaCanceladaAposConcluido, venceSempre: ehConclusaoChegando, novaVisitaSe: ehVisitaNova });
       break;
     }
+    case 'pleito': {
+      // NÃO deduplica por O.S: a mesma O.S. pode ter várias tentativas "não
+      // concluído" de verdade (925 O.S. repetidas na aba de Reparo sozinha),
+      // e todas interessam pro pleito — a chave junta O.S+data+abertura pra
+      // reimportar o mesmo arquivo atualizar em vez de duplicar, mas mantém
+      // tentativas DIFERENTES como linhas separadas.
+      const os = normalizeChaveOS(s('os'));
+      const dataISO = d('data');
+      // "Data Abertura Chamado" vem sem ANO ("31/12 11:34") — mesmo formato e
+      // mesmo problema da coluna equivalente no CSV do PCR (ver
+      // pcrParseAbertura). Reconstrói o ano a partir da própria coluna Data da
+      // linha (que essa, sim, vem completa). Guarda já formatado (string), não
+      // como Date: só DB.pcr guarda Date de verdade — outra tabela com Date
+      // exigiria reidratação depois de recarregar a página (ver comentário em
+      // hidratarLinhaPCR), e aqui só precisamos EXIBIR e ordenar por "data".
+      const dataCelula = cell(row, map['data']);
+      const dataDiaObj = dataCelula instanceof Date ? dataCelula : (dataISO ? new Date(dataISO + 'T00:00:00') : null);
+      const aberturaDate = pcrParseAbertura(s('abertura'), dataDiaObj);
+      const obj = {
+        recurso: s('recurso'), data: dataISO, status: s('status'), cliente: s('cliente'),
+        endereco: s('endereco'), cidade: s('cidade'), abertura: aberturaDate ? fmtDT(aberturaDate) : '', os,
+        contrato: s('contrato'), tipo_atividade: s('tipo_atividade'), motivo: s('motivo'),
+      };
+      const chave = os ? `${os}|${obj.data}|${obj.abertura}` : null;
+      return upsertRow(DB.pleito, DB_INDEX.pleito, chave, obj);
+      break;
+    }
     case 'frotaLinks': {
       const obj = { motorista: s('motorista'), placa: s('placa'), supervisor: s('supervisor'), cidade: s('cidade'), locadora: s('locadora'), vinculacao: d('vinculacao'), observacao: s('observacao') };
       return upsertRow(DB.frotaLinks, DB_INDEX.frotaLinks, obj.motorista && obj.placa ? `${obj.motorista}|${obj.placa}|${obj.vinculacao}` : null, obj);
@@ -4608,6 +4660,14 @@ function importSheet(sheetName, rows) {
     // aba, as revisões cairiam na tabela de manutenção
     : sheetNorm.includes('revisao') && best.maps.frotaRevisao && best.maps.frotaRevisao.placa !== undefined && best.maps.frotaRevisao.data_revisao !== undefined
     ? 'frotaRevisao'
+    // "PRAZO INFORMADO REPARO/AT-ME (PLEITO)" têm as MESMAS colunas de BASE DE
+    // DADOS (mesmo layout de exportação) — por conteúdo cairia sempre em
+    // "prazo" (pickBestTarget nem chega a olhar "pleito"). Só o nome da aba
+    // ("PLEITO") separa uma coisa da outra. As duas abas (Reparo e AT-ME) vão
+    // pra MESMA tabela — o que diferencia uma da outra é o tipo_atividade de
+    // cada linha, não a aba de origem (ver renderPleito).
+    : sheetNorm.includes('pleito') && best.maps.pleito && Object.keys(best.maps.pleito).length >= 3
+    ? 'pleito'
     : pickBestTarget(best.maps, best.scores);
   if (!target) return { target: null, inserted: 0, headersSeen: rows[headerRowIdx] || [] };
   const map = best.maps[target];
@@ -4682,6 +4742,8 @@ const PAGES = {
   parcialdia: { title: 'Parcial do Dia', render: renderParcialDoDia },
   pcr: { title: 'PCR — Prazo Controle Real', render: renderPCR },
   ofensoresprazo: { title: 'Ofensores de Prazo', render: renderOfensoresPrazo },
+  pleitoreparo: { title: 'Pleito — Reparo', render: () => renderPleito('reparo') },
+  pleitoativacao: { title: 'Pleito — Ativação e M.E', render: () => renderPleito('ativacao') },
   relatoriosdia: { title: 'Relatórios — Excel e Imagem', render: renderRelatoriosDia },
   fleet: { title: 'Frota', render: renderFleet },
   toll: { title: 'Pedágio', render: renderToll },
@@ -9818,6 +9880,135 @@ function renderOfensoresPrazo() {
   }
 }
 
+// ===================== PLEITO =====================
+// "Pleito" é o processo de contestar junto à operadora o desconto por SLA
+// estourado quando existe justificativa: a O.S. teve uma tentativa "não
+// concluído" documentada (motivo real — cliente ausente, falha massiva,
+// endereço não localizado etc.) antes de ser concluída fora do prazo. Sem
+// essa tentativa registrada, o desconto fica sem contestação ("sem motivo").
+//
+// Fonte dos dados (confirmado com o cliente, 31/08/2026 — NÃO vem do CSV
+// diário/DB.pcr, vem da própria planilha de Prazo):
+//   BASE DE DADOS                    -> DB.prazo — decide quem está "fora do
+//                                        prazo, concluída" (mesma fonte/regra
+//                                        de sempre: classifyBucket(Ativação)
+//                                        + isConcluido)
+//   PRAZO INFORMADO REPARO (PLEITO)  -> DB.pleito — histórico de tentativas
+//   PRAZO INFORMADO AT-ME (PLEITO)   -> "não concluído" por O.S. (as 2 abas
+//                                        caem na MESMA tabela; o que separa
+//                                        Reparo de Ativação/M.E é o
+//                                        tipo_atividade de cada linha, não a
+//                                        aba de origem — confirmado: a aba
+//                                        AT-ME mistura Ativação e Mudança de
+//                                        Endereço, "AT-ME" = as duas juntas)
+// As abas de pleito são HISTÓRICO (uma linha por tentativa — a mesma O.S.
+// repete se teve mais de uma tentativa improdutiva), não resumo por O.S.
+// "Data de Abertura" mostrada na tela é a da 1ª tentativa "não concluído" da
+// O.S. (confirmado com o cliente) — DB.prazo nem tem essa coluna.
+function montarPleito(tipo, s, e, cidades) {
+  const ehDoServico = p => tipo === 'reparo' ? ehPrazoDeReparo(p) : ehPrazoDeAtivacao(p, true);
+  const faixaDe = p => tipo === 'reparo' ? classifyBucket(p.status_prazo) : classifyBucketAtivacao(p.status_prazo, p.aging);
+  const faixaDentro = tipo === 'reparo' ? 'ate24' : 'ate36';
+  const foraPrazo = DB.prazo.filter(p => inRange(p.data, s, e) && isConcluido(p.status) && cidades.includes(p.cidade)
+    && ehDoServico(p) && faixaDe(p) !== 'outro' && faixaDe(p) !== faixaDentro);
+  // tentativas "não concluído" agrupadas por O.S, ordenadas por data — a
+  // primeira da lista é a 1ª improdutividade (pedido explícito do cliente).
+  const tentativasPorOS = {};
+  DB.pleito.forEach(l => { if (l.os) (tentativasPorOS[l.os] = tentativasPorOS[l.os] || []).push(l); });
+  Object.values(tentativasPorOS).forEach(lista => lista.sort((a, b) => (a.data || '').localeCompare(b.data || '')));
+  return foraPrazo.map(p => {
+    const primeira = (tentativasPorOS[p.os] || [])[0] || null;
+    return {
+      os: p.os, cidade: p.cidade, recurso: p.recurso, tipoAtividade: p.tipo_atividade,
+      dataBaixa: p.encerramento, statusBaixa: p.status,
+      cliente: primeira ? primeira.cliente : '', endereco: primeira ? primeira.endereco : '',
+      bairro: primeira ? (extrairBairro(primeira.endereco) || '') : '',
+      dataAbertura: primeira ? primeira.abertura : '', dataPrimeiraVisita: primeira ? primeira.data : '',
+      motivo: primeira ? primeira.motivo : '',
+      statusPleito: primeira ? 'Justificada' : 'Sem motivo',
+    };
+  });
+}
+function renderPleito(tipo) {
+  const rotuloAba = tipo === 'reparo' ? 'REPARO' : 'AT-ME';
+  const { start, end } = defaultMonthPeriod();
+  document.getElementById('content').innerHTML = `${periodToolbar(start, end, `
+    ${multiCityField('pl-cidades', 'Cidades', { preset: CIDADES_COBRADAS_PRAZO })}
+  `)}<div id="pl-body"></div>`;
+  wireMultiCityField('pl-cidades');
+  document.getElementById('f-apply').addEventListener('click', load);
+  load();
+  function load() {
+    const s = document.getElementById('f-start').value, e = document.getElementById('f-end').value;
+    refreshCityField('pl-cidades', DB.prazo.filter(p => inRange(p.data, s, e)), { label: 'Cidades', presetPadrao: CIDADES_COBRADAS_PRAZO });
+    const cidades = getSelectedCities('pl-cidades');
+    const body = document.getElementById('pl-body');
+    if (!DB.prazo.length) {
+      body.innerHTML = '<div class="panel"><div class="empty">Nenhuma linha de prazo carregada — importe a aba "BASE DE DADOS" de PRAZOS_ESCRITÓRIO.xlsx em "Importar Excel".</div></div>';
+      return;
+    }
+    const linhas = montarPleito(tipo, s, e, cidades);
+    if (!linhas.length) {
+      const dica = !DB.pleito.length
+        ? `Nenhuma linha das abas de Pleito carregada ainda — importe "PRAZO INFORMADO ${esc(rotuloAba)} (PLEITO)" de PRAZOS_ESCRITÓRIO.xlsx em "Importar Excel".`
+        : 'Nenhuma O.S fora do prazo nesse período/cidades.';
+      body.innerHTML = `<div class="panel"><div class="empty">${dica}</div></div>`;
+      return;
+    }
+    const justificadas = linhas.filter(l => l.statusPleito === 'Justificada').length;
+    const semMotivo = linhas.length - justificadas;
+    const pctEficiencia = linhas.length ? (justificadas / linhas.length) * 100 : 0;
+    body.innerHTML = `
+      <div class="cards-grid">
+        ${metricCard('Total de O.S. Fora do Prazo', linhas.length)}
+        ${metricCard('Total Justificadas', justificadas)}
+        ${metricCard('Total Sem Motivo', semMotivo, semMotivo > 0)}
+        ${metricCard('% Eficiência do Pleito', pctEficiencia.toFixed(1) + '%')}
+      </div>
+      <div class="toolbar" style="margin-bottom:0">
+        <div class="field"><label>Status do Pleito</label><select id="pl-status-filtro">
+          <option value="">Todos</option><option value="Justificada">Justificada</option><option value="Sem motivo">Sem motivo</option>
+        </select></div>
+        <div class="field"><label>Buscar (O.S ou bairro)</label><input type="text" id="pl-busca" placeholder="Ex.: 11398099 ou Boqueirão"></div>
+        <button class="btn-secundario" id="pl-exportar" style="padding:9px 14px;align-self:flex-end">⤓ Exportar Pleito (Excel)</button>
+      </div>
+      <p style="font-size:12px;color:var(--text-muted);margin:10px 0" id="pl-contagem">${linhas.length} O.S fora do prazo no filtro.</p>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="pl-tabela"><thead><tr>
+        <th>O.S</th><th>Cliente</th><th>Endereço</th><th>Bairro</th><th>Cidade</th><th>Técnico</th>
+        <th>Data de Abertura</th><th>Data de Baixa</th><th>Status da Baixa</th>
+        <th>Data 1ª Visita Improdutiva</th><th>Motivo da 1ª Improdutividade</th><th>Status do Pleito</th>
+      </tr></thead><tbody>
+        ${linhas.map(l => `<tr data-status-pleito="${esc(l.statusPleito)}" data-busca="${esc((l.os + ' ' + l.bairro).toLowerCase())}">
+          <td>${esc(l.os)}</td><td>${esc(l.cliente) || '-'}</td><td>${esc(l.endereco) || '-'}</td><td>${esc(l.bairro) || '-'}</td>
+          <td>${esc(l.cidade)}</td><td>${esc(l.recurso)}</td>
+          <td>${esc(l.dataAbertura) || '-'}</td><td>${l.dataBaixa ? formatDate(l.dataBaixa) : '-'}</td>
+          <td>${esc(l.statusBaixa) || '-'}</td>
+          <td>${l.dataPrimeiraVisita ? formatDate(l.dataPrimeiraVisita) : '-'}</td><td>${esc(l.motivo) || '-'}</td>
+          <td><span class="badge ${l.statusPleito === 'Justificada' ? 'ok' : 'warn'}">${esc(l.statusPleito)}</span></td>
+        </tr>`).join('')}
+      </tbody></table></div>`;
+
+    function aplicarFiltrosTabela() {
+      const statusSel = document.getElementById('pl-status-filtro').value;
+      const busca = document.getElementById('pl-busca').value.toLowerCase().trim();
+      let visiveis = 0;
+      document.querySelectorAll('#pl-tabela tbody tr').forEach(tr => {
+        const okStatus = !statusSel || tr.dataset.statusPleito === statusSel;
+        const okBusca = !busca || tr.dataset.busca.includes(busca);
+        const mostra = okStatus && okBusca;
+        tr.style.display = mostra ? '' : 'none';
+        if (mostra) visiveis++;
+      });
+      document.getElementById('pl-contagem').textContent = `${visiveis} de ${linhas.length} O.S no filtro.`;
+    }
+    document.getElementById('pl-status-filtro').addEventListener('change', aplicarFiltrosTabela);
+    document.getElementById('pl-busca').addEventListener('input', aplicarFiltrosTabela);
+    document.getElementById('pl-exportar').addEventListener('click', () => {
+      exportarTabelaVisivel(document.getElementById('pl-tabela'), `pleito_${tipo}_${s}_a_${e}`);
+    });
+  }
+}
+
 // ===================== FROTA =====================
 function renderFleet() {
   // O período começa cobrindo TODO o histórico de frota que existe (manutenções
@@ -11635,7 +11826,7 @@ const ARQUIVOS_IMPORT = [
   { nome: 'RELATORIO_GERAL.xlsx', desc: 'Abas RELATORIO (fechamento/bônus), REPAROS OK e BASE_PRODUÇÃO', assinaturas: [{sheet:'RELATORIO', target:'fechamento'}] },
   { nome: 'PRODUÇÃO_GERAL_JH.xlsx', desc: 'Aba BASE PRODUÇÃO — todos os serviços por técnico', assinaturas: [{sheet:'BASE PRODUÇÃO', target:'producao'}] },
   { nome: 'BASE_CONCLUIDOS-IRR-IFI.xlsx', desc: 'Abas BASE GERAL CONCLUIDO e REPAROS OK — retornos IFI/IRR', assinaturas: [{sheet:'BASE GERAL CONCLUIDO', target:'producao'}] },
-  { nome: 'PRAZOS_ESCRITÓRIO.xlsx', desc: 'Abas BASE DE DADOS, BASE DO DIA e PRAZO REPARO DO DIA (parcial do dia)', assinaturas: [{sheet:'BASE DE DADOS', target:'prazo'}, {sheet:'BASE DO DIA', target:'baseDoDia'}, {sheet:'PRAZO REPARO DO DIA', target:'prazoReparoDia'}] },
+  { nome: 'PRAZOS_ESCRITÓRIO.xlsx', desc: 'Abas BASE DE DADOS, BASE DO DIA, PRAZO REPARO DO DIA (parcial do dia) e PRAZO INFORMADO REPARO/AT-ME (PLEITO)', assinaturas: [{sheet:'BASE DE DADOS', target:'prazo'}, {sheet:'BASE DO DIA', target:'baseDoDia'}, {sheet:'PRAZO REPARO DO DIA', target:'prazoReparoDia'}, {sheet:'PRAZO INFORMADO REPARO (PLEITO)', target:'pleito'}, {sheet:'PRAZO INFORMADO AT-ME (PLEITO)', target:'pleito'}] },
   { nome: 'FROTA_LITORAL.xlsx', desc: 'Abas FROTA LITORAL, TROCA DE VEICULO, MANUTENÇÕES, DESVINCULAÇÕES, MULTAS', assinaturas: [{sheet:'FROTA LITORAL', target:'frotaLinks'}] },
   { nome: 'GESTAO_PEDAGIO.xlsx', desc: 'Passagens de pedágio (Taggy)', assinaturas: [{target:'pedagio'}] },
   { nome: 'base_dados_financeiro.xlsx', desc: 'Aba BASE — receitas/despesas da Base JH por período', assinaturas: [{sheet:'BASE', target:'financeiro'}] },
