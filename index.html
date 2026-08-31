@@ -855,6 +855,14 @@
   /* cor fixa deixava a linha TOTAL azul-marinho no meio de uma tabela clara */
   table.data-table tr.total-row td { font-weight: 700; background: var(--total-bg); color: var(--text-primary); border-top: 2px solid var(--border); }
   table.data-table td.cat-cell { font-weight: 600; color: var(--text-primary); }
+  /* coluna "Total do período selecionado" nos comparativos (Financeiro) —
+     pedido do cliente: precisa de um design diferente pra diferenciar das
+     colunas de cada período e da coluna de Variação ao lado. Borda nos dois
+     lados funciona em qualquer linha (normal ou total-row, que já tem cor
+     própria por categoria); o fundo tingido só entra fora da total-row pra
+     não brigar com a cor que já identifica Despesas/Receita/Lucro ali. */
+  table.data-table th.col-total, table.data-table td.col-total { border-left: 2px solid var(--accent); border-right: 2px solid var(--accent); font-weight: 800; }
+  table.data-table tbody tr:not(.total-row) td.col-total { background: var(--accent-bg); }
   /* linha de TIPO DE SERVIÇO por baixo da linha (em negrito) da CIDADE nos
      relatórios agrupados — mais clara/leve que o cabeçalho, pra hierarquia
      ficar óbvia num relance. E uma linha em branco entre uma cidade e a
@@ -5612,6 +5620,23 @@ function datasDoPeriodoFolha(periodo) {
     return `${ano}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`; };
   if (!achadas.length) return { inicio: '', fim: '' };
   return { inicio: iso(achadas[0]), fim: iso(achadas[achadas.length - 1]) };
+}
+// Tabela "Serviços concluídos e valor a receber (GIGA → JH)" — mesma conta do
+// painel "Valor pago pela GIGA" do Relatório de Eficiência/Resumo Geral (ver
+// VALORES_ORDENS_FIXOS/precoGigaPorTipo), só que pros períodos escolhidos nas
+// telas de Comparativo Financeiro (que usam texto livre "DD/MM/AAAA a
+// DD/MM/AAAA" em vez de De/Até — por isso reaproveita datasDoPeriodoFolha).
+// O preço usa a vigência de cada ORDEM (sua própria data), não a do período
+// selecionado — importa quando o período atravessa um reajuste de contrato.
+function tabelaServicosGiga(periodosTexto) {
+  const ranges = periodosTexto.map(datasDoPeriodoFolha).filter(r => r.inicio && r.fim);
+  const prod = DB.producao.filter(p => isConcluido(p.status) && ranges.some(r => inRange(p.data, r.inicio, r.fim)));
+  const itens = VALORES_ORDENS_FIXOS.map(v => {
+    const ordens = prod.filter(p => v.re.test(normalizeHeader(p.tipo_atividade)));
+    const valor = ordens.reduce((a, p) => a + (precoGigaPorTipo(p.tipo_atividade, p.data) || 0), 0);
+    return { label: v.label, qtd: ordens.length, valor };
+  });
+  return { itens, totalQtd: itens.reduce((a, i) => a + i.qtd, 0), totalValor: itens.reduce((a, i) => a + i.valor, 0) };
 }
 // Conta os retornos IFI/IRR baixados num período, por TÉCNICO OFENSOR — que é
 // quem fez o serviço anterior e, portanto, responde pelo retorno. Confirmado
@@ -11391,6 +11416,10 @@ function renderComparisonsFromPivot() {
     const totalLinha = (obj) => selecionados.reduce((a,p)=>a+val(obj,p),0);
     const totalCategoria = c => selecionados.reduce((a,p)=>a+(pivot.porCategoria[c][p]||0),0);
 
+    // Serviços concluídos e valor a receber da GIGA nos períodos marcados
+    // (pedido do cliente) — ver tabelaServicosGiga.
+    const giga = tabelaServicosGiga(selecionados);
+
     // texto narrativo comparando o último período marcado com o anterior — em
     // despesa, subir é ruim (vermelho); em receita/lucro, subir é bom (verde)
     let narrativa = '';
@@ -11421,12 +11450,23 @@ function renderComparisonsFromPivot() {
       </div>
       <div class="section-heading">Detalhamento de Despesas</div>
       <div class="table-wrap"><table class="data-table"><thead><tr>
-        <th>Despesas / Receitas</th>${selecionados.map(p=>`<th>${p}</th>`).join('')}<th>Total do período selecionado</th>${penultimo?`<th>Variação (${penultimo} → ${ultimo})</th>`:''}
+        <th>Despesas / Receitas</th>${selecionados.map(p=>`<th>${p}</th>`).join('')}<th class="col-total">Total do período selecionado</th>${penultimo?`<th>Variação (${penultimo} → ${ultimo})</th>`:''}
       </tr></thead><tbody>
-        ${categorias.map(c=>`<tr><td class="cat-cell">${c}</td>${selecionados.map(p=>`<td>${pivot.porCategoria[c][p] ? formatCurrency(pivot.porCategoria[c][p]) : '-'}</td>`).join('')}<td style="font-weight:700">${formatCurrency(totalCategoria(c))}</td>${penultimo?`<td>${diffMoney(val(pivot.porCategoria[c],penultimo),val(pivot.porCategoria[c],ultimo),true)}</td>`:''}</tr>`).join('')}
-        <tr class="total-row"><td class="cat-cell" style="color:var(--danger)">TOTAL DESPESAS</td>${selecionados.map(p=>`<td style="color:var(--danger)">${formatCurrency(val(pivot.totalDespesas,p))}</td>`).join('')}<td style="color:var(--danger)">${formatCurrency(totalLinha(pivot.totalDespesas))}</td>${penultimo?`<td style="color:var(--danger)">${diffMoney(val(pivot.totalDespesas,penultimo),val(pivot.totalDespesas,ultimo),true)}</td>`:''}</tr>
-        <tr class="total-row"><td class="cat-cell" style="color:var(--accent)">RECEITA DAS ORDENS</td>${selecionados.map(p=>`<td style="color:var(--accent)">${formatCurrency(val(pivot.receitaOrdens,p))}</td>`).join('')}<td style="color:var(--accent)">${formatCurrency(totalLinha(pivot.receitaOrdens))}</td>${penultimo?`<td style="color:var(--accent)">${diffMoney(val(pivot.receitaOrdens,penultimo),val(pivot.receitaOrdens,ultimo))}</td>`:''}</tr>
-        <tr class="total-row"><td class="cat-cell" style="color:var(--success)">LUCRO</td>${selecionados.map(p=>`<td style="color:var(--success)">${formatCurrency(val(pivot.lucro,p))}</td>`).join('')}<td style="color:var(--success)">${formatCurrency(totalLinha(pivot.lucro))}</td>${penultimo?`<td style="color:var(--success)">${diffMoney(val(pivot.lucro,penultimo),val(pivot.lucro,ultimo))}</td>`:''}</tr>
+        ${categorias.map(c=>`<tr><td class="cat-cell">${c}</td>${selecionados.map(p=>`<td>${pivot.porCategoria[c][p] ? formatCurrency(pivot.porCategoria[c][p]) : '-'}</td>`).join('')}<td class="col-total">${formatCurrency(totalCategoria(c))}</td>${penultimo?`<td>${diffMoney(val(pivot.porCategoria[c],penultimo),val(pivot.porCategoria[c],ultimo),true)}</td>`:''}</tr>`).join('')}
+        <tr class="total-row"><td class="cat-cell" style="color:var(--danger)">TOTAL DESPESAS</td>${selecionados.map(p=>`<td style="color:var(--danger)">${formatCurrency(val(pivot.totalDespesas,p))}</td>`).join('')}<td class="col-total" style="color:var(--danger)">${formatCurrency(totalLinha(pivot.totalDespesas))}</td>${penultimo?`<td style="color:var(--danger)">${diffMoney(val(pivot.totalDespesas,penultimo),val(pivot.totalDespesas,ultimo),true)}</td>`:''}</tr>
+        <tr class="total-row"><td class="cat-cell" style="color:var(--accent)">RECEITA DAS ORDENS</td>${selecionados.map(p=>`<td style="color:var(--accent)">${formatCurrency(val(pivot.receitaOrdens,p))}</td>`).join('')}<td class="col-total" style="color:var(--accent)">${formatCurrency(totalLinha(pivot.receitaOrdens))}</td>${penultimo?`<td style="color:var(--accent)">${diffMoney(val(pivot.receitaOrdens,penultimo),val(pivot.receitaOrdens,ultimo))}</td>`:''}</tr>
+        <tr class="total-row"><td class="cat-cell" style="color:var(--success)">LUCRO</td>${selecionados.map(p=>`<td style="color:var(--success)">${formatCurrency(val(pivot.lucro,p))}</td>`).join('')}<td class="col-total" style="color:var(--success)">${formatCurrency(totalLinha(pivot.lucro))}</td>${penultimo?`<td style="color:var(--success)">${diffMoney(val(pivot.lucro,penultimo),val(pivot.lucro,ultimo))}</td>`:''}</tr>
+      </tbody></table></div>
+      <div class="section-heading">Serviços Concluídos e Valor a Receber (GIGA → JH)</div>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
+        Ordens CONCLUÍDAS nos períodos marcados acima, pelo preço de contrato vigente na data de cada ordem
+        (${formatDate(VALORES_ORDENS_HISTORICO[VALORES_ORDENS_HISTORICO.length-1].vigenciaDesde)} em diante usa o valor reajustado).
+      </p>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+        <th>Serviço</th><th>Qtd. Concluída</th><th>Total a Receber (GIGA)</th>
+      </tr></thead><tbody>
+        ${giga.itens.map(i=>`<tr><td class="cat-cell">${i.label}</td><td>${i.qtd}</td><td style="color:var(--accent);font-weight:700">${formatCurrency(i.valor)}</td></tr>`).join('')}
+        <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${giga.totalQtd}</td><td style="color:var(--accent)">${formatCurrency(giga.totalValor)}</td></tr>
       </tbody></table></div>
       ${narrativa}
       <div id="pdf-export-area"></div>`;
@@ -11503,6 +11543,9 @@ function renderComparisonsFromBase() {
       .sort((x,y)=>dados.reduce((a,d)=>a+(d.porCategoria[y]||0),0) - dados.reduce((a,d)=>a+(d.porCategoria[x]||0),0));
     const totalCategoria = c => dados.reduce((a,d)=>a+(d.porCategoria[c]||0),0);
     const totalDespesa = dados.reduce((a,d)=>a+d.despesa,0), totalReceita = dados.reduce((a,d)=>a+d.receita,0), totalLucro = dados.reduce((a,d)=>a+d.lucro,0);
+    // Serviços concluídos e valor a receber da GIGA nos períodos marcados
+    // (pedido do cliente) — ver tabelaServicosGiga.
+    const giga = tabelaServicosGiga(selecionados);
 
     let narrativa = '';
     if (penultimo) {
@@ -11530,12 +11573,23 @@ function renderComparisonsFromBase() {
       </div>
       <div class="section-heading">Detalhamento de Despesas</div>
       <div class="table-wrap"><table class="data-table"><thead><tr>
-        <th>Despesas / Receitas</th>${dados.map(d=>`<th>${d.periodo}</th>`).join('')}<th>Total do período selecionado</th>${penultimo?`<th>Variação (${penultimo.periodo} → ${ultimo.periodo})</th>`:''}
+        <th>Despesas / Receitas</th>${dados.map(d=>`<th>${d.periodo}</th>`).join('')}<th class="col-total">Total do período selecionado</th>${penultimo?`<th>Variação (${penultimo.periodo} → ${ultimo.periodo})</th>`:''}
       </tr></thead><tbody>
-        ${categorias.map(c=>`<tr><td class="cat-cell">${c}</td>${dados.map(d=>`<td>${d.porCategoria[c] ? formatCurrency(d.porCategoria[c]) : '-'}</td>`).join('')}<td style="font-weight:700">${formatCurrency(totalCategoria(c))}</td>${penultimo?`<td>${diffMoney(penultimo.porCategoria[c]||0,ultimo.porCategoria[c]||0,true)}</td>`:''}</tr>`).join('')}
-        <tr class="total-row"><td class="cat-cell" style="color:var(--danger)">TOTAL DESPESAS</td>${dados.map(d=>`<td style="color:var(--danger)">${formatCurrency(d.despesa)}</td>`).join('')}<td style="color:var(--danger)">${formatCurrency(totalDespesa)}</td>${penultimo?`<td style="color:var(--danger)">${diffMoney(penultimo.despesa,ultimo.despesa,true)}</td>`:''}</tr>
-        <tr class="total-row"><td class="cat-cell" style="color:var(--accent)">RECEITA DAS ORDENS</td>${dados.map(d=>`<td style="color:var(--accent)">${formatCurrency(d.receita)}</td>`).join('')}<td style="color:var(--accent)">${formatCurrency(totalReceita)}</td>${penultimo?`<td style="color:var(--accent)">${diffMoney(penultimo.receita,ultimo.receita)}</td>`:''}</tr>
-        <tr class="total-row"><td class="cat-cell" style="color:var(--success)">LUCRO</td>${dados.map(d=>`<td style="color:var(--success)">${formatCurrency(d.lucro)}</td>`).join('')}<td style="color:var(--success)">${formatCurrency(totalLucro)}</td>${penultimo?`<td style="color:var(--success)">${diffMoney(penultimo.lucro,ultimo.lucro)}</td>`:''}</tr>
+        ${categorias.map(c=>`<tr><td class="cat-cell">${c}</td>${dados.map(d=>`<td>${d.porCategoria[c] ? formatCurrency(d.porCategoria[c]) : '-'}</td>`).join('')}<td class="col-total">${formatCurrency(totalCategoria(c))}</td>${penultimo?`<td>${diffMoney(penultimo.porCategoria[c]||0,ultimo.porCategoria[c]||0,true)}</td>`:''}</tr>`).join('')}
+        <tr class="total-row"><td class="cat-cell" style="color:var(--danger)">TOTAL DESPESAS</td>${dados.map(d=>`<td style="color:var(--danger)">${formatCurrency(d.despesa)}</td>`).join('')}<td class="col-total" style="color:var(--danger)">${formatCurrency(totalDespesa)}</td>${penultimo?`<td style="color:var(--danger)">${diffMoney(penultimo.despesa,ultimo.despesa,true)}</td>`:''}</tr>
+        <tr class="total-row"><td class="cat-cell" style="color:var(--accent)">RECEITA DAS ORDENS</td>${dados.map(d=>`<td style="color:var(--accent)">${formatCurrency(d.receita)}</td>`).join('')}<td class="col-total" style="color:var(--accent)">${formatCurrency(totalReceita)}</td>${penultimo?`<td style="color:var(--accent)">${diffMoney(penultimo.receita,ultimo.receita)}</td>`:''}</tr>
+        <tr class="total-row"><td class="cat-cell" style="color:var(--success)">LUCRO</td>${dados.map(d=>`<td style="color:var(--success)">${formatCurrency(d.lucro)}</td>`).join('')}<td class="col-total" style="color:var(--success)">${formatCurrency(totalLucro)}</td>${penultimo?`<td style="color:var(--success)">${diffMoney(penultimo.lucro,ultimo.lucro)}</td>`:''}</tr>
+      </tbody></table></div>
+      <div class="section-heading">Serviços Concluídos e Valor a Receber (GIGA → JH)</div>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
+        Ordens CONCLUÍDAS nos períodos marcados acima, pelo preço de contrato vigente na data de cada ordem
+        (${formatDate(VALORES_ORDENS_HISTORICO[VALORES_ORDENS_HISTORICO.length-1].vigenciaDesde)} em diante usa o valor reajustado).
+      </p>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+        <th>Serviço</th><th>Qtd. Concluída</th><th>Total a Receber (GIGA)</th>
+      </tr></thead><tbody>
+        ${giga.itens.map(i=>`<tr><td class="cat-cell">${i.label}</td><td>${i.qtd}</td><td style="color:var(--accent);font-weight:700">${formatCurrency(i.valor)}</td></tr>`).join('')}
+        <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${giga.totalQtd}</td><td style="color:var(--accent)">${formatCurrency(giga.totalValor)}</td></tr>
       </tbody></table></div>
       ${narrativa}
       <div id="pdf-export-area"></div>`;
