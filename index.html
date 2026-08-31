@@ -9989,6 +9989,18 @@ function montarPleito(tipo, s, e, cidades) {
     };
   });
 }
+// Linhas CRUAS do DB.pleito (pedido do cliente: "quero que pegue a tabela do
+// pleito e coloque no sistema com todas as linhas" — a base é a própria aba
+// PRAZO INFORMADO REPARO/AT-ME (PLEITO), sem cruzar com DB.prazo). Cada linha
+// aqui é 1 tentativa "não concluído" — a MESMA O.S. pode aparecer mais de uma
+// vez se teve mais de uma tentativa no período (é assim na planilha também).
+function pleitoRowsBrutas(tipo, s, e, cidades) {
+  const ehDoServico = l => tipo === 'reparo' ? ehServicoReparo(l.tipo_atividade) : ehPrazoDeAtivacao(l, true);
+  return DB.pleito
+    .filter(l => inRange(l.data, s, e) && cidades.includes(l.cidade) && ehDoServico(l))
+    .map(l => ({ ...l, bairro: extrairBairro(l.endereco) || '' }))
+    .sort((a, b) => (a.data || '').localeCompare(b.data || '') || String(a.os).localeCompare(String(b.os)));
+}
 function renderPleito(tipo) {
   const rotuloAba = tipo === 'reparo' ? 'REPARO' : 'AT-ME';
   const { start, end } = defaultMonthPeriod();
@@ -10000,7 +10012,13 @@ function renderPleito(tipo) {
   load();
   function load() {
     const s = document.getElementById('f-start').value, e = document.getElementById('f-end').value;
-    refreshCityField('pl-cidades', DB.prazo.filter(p => inRange(p.data, s, e)), { label: 'Cidades', presetPadrao: CIDADES_COBRADAS_PRAZO });
+    // a lista de cidades tem que juntar DB.prazo E DB.pleito: uma O.S. com
+    // tentativa "não concluído" registrada em agosto pode ainda não ter
+    // chegado na BASE DE DADOS (achado real: 331 das 663 O.S. de agosto/
+    // Reparo) — se a cidade dela só existisse na aba de pleito, o checkbox
+    // nem aparecia pra marcar, e a linha sumia da tabela de tentativas sem
+    // nenhum aviso.
+    refreshCityField('pl-cidades', [...DB.prazo.filter(p => inRange(p.data, s, e)), ...DB.pleito.filter(l => inRange(l.data, s, e))], { label: 'Cidades', presetPadrao: CIDADES_COBRADAS_PRAZO });
     const cidades = getSelectedCities('pl-cidades');
     const body = document.getElementById('pl-body');
     if (!DB.prazo.length) {
@@ -10008,10 +10026,14 @@ function renderPleito(tipo) {
       return;
     }
     const linhas = montarPleito(tipo, s, e, cidades);
-    if (!linhas.length) {
+    // Linhas cruas do DB.pleito (pedido do cliente: "pegue a tabela do pleito
+    // e coloque no sistema com todas as linhas" — sem cruzar com DB.prazo,
+    // igual a aba de origem, uma linha por tentativa).
+    const brutas = pleitoRowsBrutas(tipo, s, e, cidades);
+    if (!linhas.length && !brutas.length) {
       const dica = !DB.pleito.length
         ? `Nenhuma linha das abas de Pleito carregada ainda — importe "PRAZO INFORMADO ${esc(rotuloAba)} (PLEITO)" de PRAZOS_ESCRITÓRIO.xlsx em "Importar Excel".`
-        : 'Nenhuma O.S fora do prazo nesse período/cidades.';
+        : 'Nenhuma O.S fora do prazo nem tentativa registrada nesse período/cidades.';
       body.innerHTML = `<div class="panel"><div class="empty">${dica}</div></div>`;
       return;
     }
@@ -10031,6 +10053,8 @@ function renderPleito(tipo) {
         ${metricCard('Total Sem Motivo', semMotivo, semMotivo > 0)}
         ${metricCard('% Eficiência do Pleito', pctEficiencia.toFixed(1) + '%')}
       </div>
+      ${!linhas.length ? '' : `
+      <div class="section-heading">O.S fora do prazo — com ou sem justificativa</div>
       <div class="toolbar" style="margin-bottom:0">
         <div class="field"><label>Justificativa</label><select id="pl-status-filtro">
           <option value="">Todos</option><option value="Justificado">Justificado</option><option value="Não Justificado">Não Justificado</option>
@@ -10052,37 +10076,83 @@ function renderPleito(tipo) {
           <td>${l.dataBaixa ? formatDate(l.dataBaixa) : '-'}</td><td>${esc(l.statusBaixa) || '-'}</td>
           <td><span class="badge ${l.statusPleito === 'Justificada' ? 'ok' : 'warn'}">${esc(rotuloJustificado(l))}</span></td>
         </tr>`).join('')}
-      </tbody></table></div>`;
+      </tbody></table></div>`}
+      ${!brutas.length ? '' : `
+      <div class="section-heading">Todas as tentativas "Não Concluído" importadas (${esc(rotuloAba)})</div>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
+        Toda linha da aba de origem, uma por tentativa — sem cruzar com O.S fora do prazo. A mesma O.S. repete
+        se teve mais de uma tentativa no período. Total bate com o Excel: ${brutas.length} linha(s).
+      </p>
+      <div class="toolbar" style="margin-bottom:0">
+        <div class="field"><label>Buscar (O.S ou bairro)</label><input type="text" id="pl-busca-brutas" placeholder="Ex.: 11398099 ou Boqueirão"></div>
+        <button class="btn-secundario" id="pl-exportar-brutas" style="padding:9px 14px;align-self:flex-end">⤓ Exportar Tentativas (Excel)</button>
+      </div>
+      <p style="font-size:12px;color:var(--text-muted);margin:10px 0" id="pl-contagem-brutas">${brutas.length} tentativa(s) no filtro.</p>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="pl-tabela-brutas"><thead><tr>
+        <th>O.S</th><th>Cliente</th><th>Endereço</th><th>Bairro</th><th>Cidade</th><th>Técnico</th>
+        <th>Data</th><th>Data de Abertura</th><th>Motivo</th><th>Contrato</th>
+      </tr></thead><tbody>
+        ${brutas.map(l => `<tr data-busca="${esc((String(l.os) + ' ' + l.bairro).toLowerCase())}">
+          <td>${esc(l.os)}</td><td>${esc(l.cliente) || '-'}</td><td>${esc(l.endereco) || '-'}</td><td>${esc(l.bairro) || '-'}</td>
+          <td>${esc(l.cidade)}</td><td>${esc(l.recurso)}</td>
+          <td>${l.data ? formatDate(l.data) : '-'}</td><td>${esc(l.abertura) || '-'}</td>
+          <td>${esc(l.motivo) || '-'}</td><td>${esc(l.contrato) || '-'}</td>
+        </tr>`).join('')}
+      </tbody></table></div>`}`;
 
-    function aplicarFiltrosTabela() {
-      const statusSel = document.getElementById('pl-status-filtro').value;
-      const busca = document.getElementById('pl-busca').value.toLowerCase().trim();
-      let visiveis = 0;
-      document.querySelectorAll('#pl-tabela tbody tr').forEach(tr => {
-        const okStatus = !statusSel || tr.dataset.justificativa === statusSel;
-        const okBusca = !busca || tr.dataset.busca.includes(busca);
-        const mostra = okStatus && okBusca;
-        tr.style.display = mostra ? '' : 'none';
-        if (mostra) visiveis++;
+    if (linhas.length) {
+      function aplicarFiltrosTabela() {
+        const statusSel = document.getElementById('pl-status-filtro').value;
+        const busca = document.getElementById('pl-busca').value.toLowerCase().trim();
+        let visiveis = 0;
+        document.querySelectorAll('#pl-tabela tbody tr').forEach(tr => {
+          const okStatus = !statusSel || tr.dataset.justificativa === statusSel;
+          const okBusca = !busca || tr.dataset.busca.includes(busca);
+          const mostra = okStatus && okBusca;
+          tr.style.display = mostra ? '' : 'none';
+          if (mostra) visiveis++;
+        });
+        document.getElementById('pl-contagem').textContent = `${visiveis} de ${linhas.length} O.S no filtro.`;
+      }
+      document.getElementById('pl-status-filtro').addEventListener('change', aplicarFiltrosTabela);
+      document.getElementById('pl-busca').addEventListener('input', aplicarFiltrosTabela);
+      // Exporta SEMPRE todas as linhas do período/cidades filtrados (pedido do
+      // cliente: "quero que tenha todas as linhas"), não só as que estão
+      // visíveis com busca/filtro de justificativa aplicados na tela — por
+      // isso não usa exportarTabelaVisivel (que só lê <tr> sem display:none).
+      const CAB_PLEITO = ['O.S', 'Cliente', 'Endereço', 'Bairro', 'Cidade', 'Técnico', 'Data de Abertura',
+        'Data 1ª Visita Improdutiva', 'Motivo da 1ª Improdutividade', 'Data de Baixa', 'Status da Baixa', 'Justificativa'];
+      document.getElementById('pl-exportar').addEventListener('click', () => {
+        const linhasExcel = linhas.map(l => [
+          l.os, l.cliente || '-', l.endereco || '-', l.bairro || '-', l.cidade, l.recurso,
+          l.dataAbertura || '-', l.dataPrimeiraVisita ? formatDate(l.dataPrimeiraVisita) : '-', l.motivo || '-',
+          l.dataBaixa ? formatDate(l.dataBaixa) : '-', l.statusBaixa || '-', rotuloJustificado(l),
+        ]);
+        exportarQuadroPresenca(`pleito_${tipo}_${s}_a_${e}`, CAB_PLEITO, linhasExcel, 'Pleito');
       });
-      document.getElementById('pl-contagem').textContent = `${visiveis} de ${linhas.length} O.S no filtro.`;
     }
-    document.getElementById('pl-status-filtro').addEventListener('change', aplicarFiltrosTabela);
-    document.getElementById('pl-busca').addEventListener('input', aplicarFiltrosTabela);
-    // Exporta SEMPRE todas as linhas do período/cidades filtrados (pedido do
-    // cliente: "quero que tenha todas as linhas"), não só as que estão
-    // visíveis com busca/filtro de justificativa aplicados na tela — por
-    // isso não usa exportarTabelaVisivel (que só lê <tr> sem display:none).
-    const CAB_PLEITO = ['O.S', 'Cliente', 'Endereço', 'Bairro', 'Cidade', 'Técnico', 'Data de Abertura',
-      'Data 1ª Visita Improdutiva', 'Motivo da 1ª Improdutividade', 'Data de Baixa', 'Status da Baixa', 'Justificativa'];
-    document.getElementById('pl-exportar').addEventListener('click', () => {
-      const linhasExcel = linhas.map(l => [
-        l.os, l.cliente || '-', l.endereco || '-', l.bairro || '-', l.cidade, l.recurso,
-        l.dataAbertura || '-', l.dataPrimeiraVisita ? formatDate(l.dataPrimeiraVisita) : '-', l.motivo || '-',
-        l.dataBaixa ? formatDate(l.dataBaixa) : '-', l.statusBaixa || '-', rotuloJustificado(l),
-      ]);
-      exportarQuadroPresenca(`pleito_${tipo}_${s}_a_${e}`, CAB_PLEITO, linhasExcel, 'Pleito');
-    });
+
+    if (brutas.length) {
+      function aplicarFiltroBrutas() {
+        const busca = document.getElementById('pl-busca-brutas').value.toLowerCase().trim();
+        let visiveis = 0;
+        document.querySelectorAll('#pl-tabela-brutas tbody tr').forEach(tr => {
+          const mostra = !busca || tr.dataset.busca.includes(busca);
+          tr.style.display = mostra ? '' : 'none';
+          if (mostra) visiveis++;
+        });
+        document.getElementById('pl-contagem-brutas').textContent = `${visiveis} de ${brutas.length} tentativa(s) no filtro.`;
+      }
+      document.getElementById('pl-busca-brutas').addEventListener('input', aplicarFiltroBrutas);
+      const CAB_BRUTAS = ['O.S', 'Cliente', 'Endereço', 'Bairro', 'Cidade', 'Técnico', 'Data', 'Data de Abertura', 'Motivo', 'Contrato'];
+      document.getElementById('pl-exportar-brutas').addEventListener('click', () => {
+        const linhasExcel = brutas.map(l => [
+          l.os, l.cliente || '-', l.endereco || '-', l.bairro || '-', l.cidade, l.recurso,
+          l.data ? formatDate(l.data) : '-', l.abertura || '-', l.motivo || '-', l.contrato || '-',
+        ]);
+        exportarQuadroPresenca(`pleito_${tipo}_tentativas_${s}_a_${e}`, CAB_BRUTAS, linhasExcel, 'Tentativas');
+      });
+    }
   }
 }
 
