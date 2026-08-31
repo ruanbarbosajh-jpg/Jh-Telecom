@@ -820,6 +820,12 @@
   /* cor fixa deixava a linha TOTAL azul-marinho no meio de uma tabela clara */
   table.data-table tr.total-row td { font-weight: 700; background: var(--total-bg); color: var(--text-primary); border-top: 2px solid var(--border); }
   table.data-table td.cat-cell { font-weight: 600; color: var(--text-primary); }
+  /* linha de TIPO DE SERVIÇO por baixo da linha (em negrito) da CIDADE nos
+     relatórios agrupados — mais clara/leve que o cabeçalho, pra hierarquia
+     ficar óbvia num relance. E uma linha em branco entre uma cidade e a
+     próxima, pra não parecer tudo grudado num bloco só. */
+  tr.linha-subitem td { color: var(--text-secondary); font-weight: 400; }
+  tr.linha-espaco td { border: none; padding: 4px 0; background: transparent; }
   .import-file-card b { color: var(--text-primary); font-size: 13px; display: block; margin-bottom: 4px; }
   .import-file-card span { color: var(--text-secondary); line-height: 1.5; display: block; }
 
@@ -4084,7 +4090,12 @@ function groupedBarsChart(elId, categorias, series, opts = {}) {
   if (!el) return;
   if (!categorias.length || !series.length) { el.innerHTML = '<div class="empty">Sem dados.</div>'; return; }
   const max = Math.max(...series.flatMap(s => s.values), 1);
-  const W = Math.max(340, categorias.length * 95), H = 220, PADY_T = 10, PADY_B = 34;
+  // largura pelo CONTAINER, não só pela quantidade de categorias — sem isso o
+  // viewBox saía pequeno (340-760px) e o preserveAspectRatio "meet" encolhia
+  // e CENTRALIZAVA o desenho num painel bem mais largo, sobrando um vão enorme
+  // dos dois lados (pedido do cliente: "aumente a largura").
+  const larguraNatural = Math.max(340, categorias.length * 95);
+  const W = el.clientWidth > larguraNatural ? Math.round(el.clientWidth) : larguraNatural, H = 220, PADY_T = 10, PADY_B = 34;
   const groupW = (W - 20) / categorias.length;
   const barW = Math.min(24, (groupW - 12) / series.length);
   const bodyH = H - PADY_T - PADY_B;
@@ -11765,11 +11776,16 @@ function renderRelatoriosDia() {
         mapaExec[c][t] = (mapaExec[c][t] || 0) + 1;
       });
       const linhasExec = [];
-      Object.keys(mapaExec).sort((a,b)=>a.localeCompare(b,'pt-BR')).forEach(c => {
+      // pedido do cliente: separar visualmente a linha da CIDADE (destaque,
+      // continua igual) das linhas de TIPO DE SERVIÇO por baixo dela (agora
+      // mais claras/leves — "classe" vira <tr class="...">) e pular uma linha
+      // em branco entre uma cidade e a próxima, pra não parecer tudo grudado.
+      Object.keys(mapaExec).sort((a,b)=>a.localeCompare(b,'pt-BR')).forEach((c, idxCidade) => {
+        if (idxCidade > 0) linhasExec.push({ classe: 'linha-espaco', celulas: ['', '', ''] });
         const total = Object.values(mapaExec[c]).reduce((a,b)=>a+b,0);
         linhasExec.push({ destaque: true, celulas: [c, String(total), String(total)] });
         Object.entries(mapaExec[c]).sort((a,b)=>a[0].localeCompare(b[0],'pt-BR'))
-          .forEach(([t,q]) => linhasExec.push({ celulas: ['   ' + t, String(q), String(q)] }));
+          .forEach(([t,q]) => linhasExec.push({ classe: 'linha-subitem', celulas: ['   ' + t, String(q), String(q)] }));
       });
       blocos.push({ id: 'exec', titulo: 'A Executar — por Cidade e Tipo de Serviço', sub: formatDate(dia),
         colunas: ['Tipo da O.S', 'A Executar', 'Total Geral'], linhas: linhasExec,
@@ -11939,7 +11955,7 @@ function renderRelatoriosDia() {
         <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="rd-tab-${b.id}"><thead><tr>
           ${b.colunas.map(c=>`<th>${c}</th>`).join('')}
         </tr></thead><tbody>
-          ${b.linhas.map(l => `<tr${l.destaque ? ' class="total-row"' : ''}>${l.celulas.map(c=>`<td>${c === '' || c === null || c === undefined ? '' : c}</td>`).join('')}</tr>`).join('')}
+          ${b.linhas.map(l => `<tr${l.destaque ? ' class="total-row"' : l.classe ? ` class="${l.classe}"` : ''}>${l.celulas.map(c=>`<td>${c === '' || c === null || c === undefined ? '' : c}</td>`).join('')}</tr>`).join('')}
           ${b.total ? `<tr class="total-row">${b.total.map(c=>`<td>${c}</td>`).join('')}</tr>` : ''}
         </tbody></table></div>`).join('')
         + (comRemanejamento ? `<div class="section-heading">Remanejamento (técnicos × status) — imagem</div>
