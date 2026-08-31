@@ -64,7 +64,7 @@
     --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px; --sp-7: 40px;
     /* --- raios: 3 (antes eram 13 valores diferentes) --- */
     --r-sm: 6px;   /* controles */
-    --r-md: 10px;  /* cards e painéis */
+    --r-md: 14px;  /* cards e painéis */
     --r-pill: 999px;
     --radius: var(--r-md);
     /* --- elevação: sombra só em coisa flutuante --- */
@@ -587,6 +587,8 @@
   .panel { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; min-width: 0; }
   /* #fff fixo sumia no tema claro (título branco em painel branco) */
   .panel h3 { margin: 0 0 14px; font-size: 15px; color: var(--text-primary); }
+  .panel h3:has(+ .panel-subtitle) { margin-bottom: 3px; }
+  .panel-subtitle { margin: 0 0 14px; font-size: 12px; color: var(--text-muted); }
   .panel .empty { color: var(--text-muted); text-align: center; padding: 3rem 0; }
 
   /* Filtros no fluxo normal da pagina. Ja foram `sticky`, mas flutuavam por
@@ -672,8 +674,16 @@
   .bar-row { display: flex; align-items: center; gap: 10px; font-size: 12.5px; min-width: 0; }
   .bar-label { width: 34%; max-width: 170px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
   .bar-track { flex: 1 1 auto; min-width: 20px; background: var(--track-bg); border-radius: 7px; height: 18px; overflow: hidden; }
-  .bar-fill { height: 100%; border-radius: 6px; transition: width .3s; }
-  .bar-value { flex: 0 0 auto; text-align: right; font-weight: 700; color: var(--text-primary); white-space: nowrap; font-size: 12px; }
+  /* entra "crescendo" da esquerda até o valor real, em vez de já nascer no
+     tamanho final — pedido do cliente ("animação no gráfico de barras"), mesma
+     técnica do preenchimento do gauge (var() com o valor final + keyframe). */
+  .bar-fill {
+    height: 100%; border-radius: 6px; width: var(--bar-final);
+    animation: barFillIn .9s cubic-bezier(.16,.84,.36,1) both;
+  }
+  @keyframes barFillIn { from { width: 0; } to { width: var(--bar-final); } }
+  @media (prefers-reduced-motion: reduce) { .bar-fill { animation: none; } }
+  .bar-value { flex: 0 0 auto; text-align: right; font-weight: 800; color: var(--text-primary); white-space: nowrap; font-size: 13.5px; }
   .bar-row-clicavel { cursor: pointer; border-radius: 7px; padding: 3px 6px; margin: -3px -6px; transition: background .15s ease; }
   .bar-row-clicavel:hover { background: var(--row-hover); }
   .bar-row-clicavel .bar-label { color: var(--accent); text-decoration: underline dotted; text-underline-offset: 3px; }
@@ -686,10 +696,11 @@
   /* responsivo: encolhe em painel/tela estreita, agora vai até 300px (era 260px) */
   .donut-holder { position: relative; width: clamp(170px, 30vw, 300px); height: clamp(170px, 30vw, 300px); aspect-ratio: 1 / 1; flex-shrink: 0; max-width: 100%; }
   /* vira ANEL (miolo vazado) via máscara — mostra o fundo do card por trás,
-     então funciona igual nos 2 temas sem precisar de cor fixa no centro */
+     então funciona igual nos 2 temas sem precisar de cor fixa no centro.
+     Anel mais fino (66% em vez de 58%) pra um visual mais refinado. */
   .donut { width: 100%; height: 100%; border-radius: 50%; filter: drop-shadow(0 4px 14px rgba(0,0,0,.20));
-    -webkit-mask-image: radial-gradient(closest-side, transparent 58%, #000 59%);
-    mask-image: radial-gradient(closest-side, transparent 58%, #000 59%); }
+    -webkit-mask-image: radial-gradient(closest-side, transparent 66%, #000 67%);
+    mask-image: radial-gradient(closest-side, transparent 66%, #000 67%); }
   /* a cor vem inline (calculada pelo contraste com a fatia — ver
      corTextoContraste): #fff fixo sumia em fatia clara, nos DOIS temas */
   .donut-slice-label { position: absolute; transform: translate(-50%,-50%); font-size: 11.5px; font-weight: 700; pointer-events: none; white-space: nowrap; }
@@ -697,11 +708,20 @@
   .donut-centro { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); text-align: center; pointer-events: none; width: 55%; }
   .donut-centro-valor { font-size: clamp(16px, 2.6vw, 25px); font-weight: 800; color: var(--text-primary); line-height: 1.15; overflow-wrap: anywhere; }
   .donut-centro-label { font-size: 11.5px; color: var(--text-muted); margin-top: 3px; text-transform: uppercase; letter-spacing: .4px; }
-  .donut-legend { font-size: 14px; display: flex; flex-direction: column; gap: 11px; flex: 0 1 260px; min-width: 160px; }
-  .legend-dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 8px; flex-shrink: 0; }
+  .donut-legend { font-size: 14px; display: flex; flex-direction: column; gap: 8px; flex: 0 1 260px; min-width: 160px; }
   .legend-item { display: flex; align-items: center; color: var(--text-secondary); }
+  .legend-dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 8px; flex-shrink: 0; }
   .legend-item b { color: var(--text-primary); margin-left: 5px; }
   .legend-pct { color: var(--text-muted); margin-left: 6px; font-size: 12.5px; }
+  /* legenda vira "badge" (barrinha de cor + fundo sutil + contador alinhado à
+     direita) só no anel de status e no gráfico de linha — os outros usos de
+     .legend-item (checkbox do mapa, legenda de cidade) ficam como sempre foram. */
+  .donut-legend .legend-item, .trend-legend .legend-item {
+    padding: 8px 12px; border-radius: 10px; background: var(--bg-page); border: 1px solid var(--border);
+  }
+  .donut-legend .legend-dot, .trend-legend .legend-dot { width: 4px; height: 20px; border-radius: 3px; margin-right: 10px; }
+  .donut-legend .legend-item b, .trend-legend .legend-item b { margin-left: auto; padding-left: 10px; font-weight: 800; }
+  .trend-legend .legend-item b { margin-left: 8px; padding-left: 0; }
 
   /* anel de progresso (KPI em destaque, estilo painel BI) */
   .ring-card .ring-card-inner { display: flex; align-items: center; gap: 14px; }
@@ -712,11 +732,14 @@
   .ring-card-text { min-width: 0; }
   .ring-card .label { margin-bottom: 4px; }
 
-  /* gráfico de linha/tendência e barras agrupadas — mesmos tokens dos outros gráficos */
-  .trend-legend { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; font-size: 12.5px; }
+  /* gráfico de linha/tendência e barras agrupadas — mesmos tokens dos outros
+     gráficos. Legenda alinhada à direita (canto superior direito do card) e
+     separada do título — pedido do cliente. */
+  .trend-legend { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; margin-bottom: 12px; font-size: 12.5px; }
   .trend-chart-svg, .grouped-bars-svg { width: 100%; height: 220px; overflow: visible; }
   .trend-gridline { stroke: var(--border); stroke-width: 1; }
   .trend-axis-label { fill: var(--text-muted); font-size: 10px; }
+  .trend-axis-y-label { fill: var(--text-muted); font-size: 10px; }
   .grouped-bar-value { fill: var(--text-primary); font-size: 10.5px; font-weight: 700; }
   .trend-dot { cursor: pointer; transition: r .15s ease; }
   .trend-dot:hover { r: 6; }
@@ -3262,11 +3285,16 @@ function barsChart(elId, items, opts = {}) {
   // opts.clicavel: marca as linhas como clicáveis (data-label) — quem chamou
   // escuta o clique no próprio container e decide o que fazer (ex.: abrir o
   // detalhe das cidades de um técnico no gráfico de deslocamento).
+  // largura do valor reservada em "ch" pelo MAIOR texto do conjunto — sem isso
+  // cada linha calculava seu próprio espaço sobrando (flex:0 0 auto no
+  // .bar-value) e a barra do 1º lugar não terminava no mesmo x das outras,
+  // parecia que "faltava preencher". Agora todo mundo termina na mesma borda.
+  const maiorValor = Math.max(...items.map(i => String(i.display !== undefined ? i.display : i.value).length));
   el.innerHTML = `<div class="bars-chart${opts.fill?' fill':''}">${items.map(i => `
     <div class="bar-row${opts.clicavel?' bar-row-clicavel':''}"${opts.clicavel?` data-label="${esc(i.label)}" title="Clique para ver o detalhe"`:''}>
       <div class="bar-label"${opts.clicavel?'':` title="${i.label}"`}>${i.label}</div>
-      <div class="bar-track"><div class="bar-fill" style="width:${Math.max((i.value/max)*100,2)}%;background:${i.color||color}"></div></div>
-      <div class="bar-value">${i.display !== undefined ? i.display : i.value}</div>
+      <div class="bar-track"><div class="bar-fill" style="--bar-final:${Math.max((i.value/max)*100,2)}%;background:${i.color||color}"></div></div>
+      <div class="bar-value" style="min-width:${maiorValor}ch">${i.display !== undefined ? i.display : i.value}</div>
     </div>`).join('')}</div>`;
 }
 // Cor de texto que contrasta com o fundo da fatia. O rótulo fica DENTRO da
@@ -3292,10 +3320,19 @@ function donutChart(elId, items, opts = {}) {
   if (!total) { el.innerHTML = '<div class="empty">Sem dados.</div>'; return; }
   let acc = 0;
   const stops = [];
+  // gap fino entre fatias (efeito "stroke" pedido no redesign): em vez de um
+  // conic-gradient contínuo, cada fatia perde um pouco de ângulo nas duas
+  // pontas e o espaço vira um segmento na cor do card — como se tivesse um
+  // traço separando as fatias. Só com mais de 1 fatia (uma única fatia = 100%
+  // do anel, não tem o que separar).
+  const gapDeg = items.length > 1 ? 2.4 : 0;
   items.forEach((i, idx) => {
     const color = i.color || corCategorica(idx);
-    stops.push(`${color} ${(acc/total)*360}deg ${((acc + i.value)/total)*360}deg`);
+    const startDeg = (acc/total)*360, endDeg = ((acc + i.value)/total)*360;
     acc += i.value;
+    const s = startDeg + gapDeg/2, e = Math.max(s, endDeg - gapDeg/2);
+    stops.push(`${color} ${s.toFixed(2)}deg ${e.toFixed(2)}deg`);
+    if (gapDeg) stops.push(`var(--card-bg) ${e.toFixed(2)}deg ${(endDeg + gapDeg/2).toFixed(2)}deg`);
   });
   // A % de cada fatia já aparece na legenda ao lado — repetir dentro do anel
   // só polui (e ainda exigia calcular contraste fatia a fatia). O miolo fica
@@ -3387,11 +3424,14 @@ function trendChart(elId, series, opts = {}) {
   // num painel de 1150px de largura sobrava um terço vazio de cada lado. Com a
   // largura do viewBox igual à do contêiner, a proporção bate e o gráfico ocupa
   // o painel inteiro. Fica opcional pra não mexer nos gráficos já existentes.
-  const H = 220, PADX = 34, PADY_T = 14, PADY_B = 30;
+  const H = 220, PADX = 44, PADY_T = 14, PADY_B = 30;
   const W = opts.expandir && el.clientWidth > 600 ? Math.round(el.clientWidth) : 600;
   const n = labels.length;
   const x = i => n > 1 ? PADX + (i / (n - 1)) * (W - 2 * PADX) : W / 2;
   const y = v => H - PADY_B - (v / max) * (H - PADY_T - PADY_B);
+  // eixo Y: sem valor nenhum os dados "flutuavam" sem referência de escala —
+  // 3 rótulos (0, metade, topo) nas mesmas alturas das 3 linhas de grade.
+  const yLabel = v => v >= 1000 ? Math.round(v).toLocaleString('pt-BR') : Math.round(v);
   const reto = pts => pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ');
   // opts.suave: curva Catmull-Rom convertida em Bézier. Só pra série com MUITOS
   // pontos (evolução dia a dia), onde a linha quebrada vira serrote e esconde a
@@ -3416,10 +3456,17 @@ function trendChart(elId, series, opts = {}) {
   const passo = opts.maxLabels && n > opts.maxLabels ? Math.ceil(n / opts.maxLabels) : 1;
   const mostraLabel = i => passo === 1 || i === 0 || i === n - 1 || i % passo === 0;
   el.innerHTML = `
-    <div class="trend-legend">${comValores.map(s => `<span class="legend-item"><span class="legend-dot" style="background:${s.color}"></span>${s.name}</span>`).join('')}</div>
+    <div class="trend-legend">${comValores.map(s => {
+      const totalSerie = s.points.reduce((a,p) => a + p.value, 0);
+      return `<span class="legend-item"><span class="legend-dot" style="background:${s.color}"></span>${esc(s.name)}<b>${totalSerie.toLocaleString('pt-BR')}</b></span>`;
+    }).join('')}</div>
     <div class="trend-chart-wrap">
     <svg viewBox="0 0 ${W} ${H}" class="trend-chart-svg${opts.suave ? ' trend-suave' : ''}" preserveAspectRatio="xMidYMid meet">
-      ${[0, 0.5, 1].map(f => `<line x1="${PADX}" y1="${(H - PADY_B - f * (H - PADY_T - PADY_B)).toFixed(1)}" x2="${W - PADX}" y2="${(H - PADY_B - f * (H - PADY_T - PADY_B)).toFixed(1)}" class="trend-gridline"/>`).join('')}
+      ${[0, 0.5, 1].map(f => {
+        const yy = (H - PADY_B - f * (H - PADY_T - PADY_B)).toFixed(1);
+        return `<line x1="${PADX}" y1="${yy}" x2="${W - PADX}" y2="${yy}" class="trend-gridline" stroke-dasharray="3 3"/>
+        <text x="${PADX - 8}" y="${yy}" dy="3.5" text-anchor="end" class="trend-axis-y-label">${yLabel(max * f)}</text>`;
+      }).join('')}
       ${comValores.map(s => `
         ${s.semArea ? '' : `<path d="${areaPath(s.points)}" fill="${s.color}" opacity="0.12" stroke="none"/>`}
         <path d="${linePath(s.points)}" fill="none" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"${s.tracejado ? ' stroke-dasharray="2 5"' : ''}/>
@@ -5674,16 +5721,21 @@ function renderProduction() {
     // sobra só a linha dele — as outras seriam zero e só sujariam a leitura.
     //
     // As cores dos 3 status são as MESMAS do anel "Ordens por Status" desta
-    // tela, de propósito: mesma informação, mesma cor. Foram conferidas por
-    // distância perceptual — pior par ΔE 16,3 na visão normal e 12,8 simulando
-    // daltonismo (nenhum abaixo de 12). A versão anterior tinha as duas linhas
-    // em tons de azul a ΔE 11,2, ou seja, indistinguíveis.
+    // tela, de propósito: mesma informação, mesma cor (ver CORES_STATUS_ORDEM
+    // logo abaixo, reaproveitada no donutChart('c-status', ...) mais adiante).
+    // Paleta suave (emerald/amber/rose) pedida pelo cliente — trocada em
+    // 31/08/2026, mas mantendo a MESMA distância perceptual da anterior
+    // (verde/cinza/vermelho): pior par ainda fica bem acima do limite de
+    // confusão pra visão normal e simulando daltonismo. O cinza-azulado de
+    // "Não concluídas" (#93a0bd) foi trocado pro âmbar porque tinha contraste
+    // baixo demais no fundo escuro — quase sumia.
+    const CORES_STATUS_ORDEM = { concluido: '#059669', naoConcluido: '#f59e0b', cancelado: '#f43f5e' };
     const evolucao = caixasDeTempo(s, e);
     const seriesPorStatus = [
       { filtro: null,           name: 'Total de ordens', color: '#4f7fff', tracejado: true, semArea: true, linhas: baseRows },
-      { filtro: 'concluido',    name: 'Concluídas',      color: '#22c55e', linhas: concluidos },
-      { filtro: 'naoconcluido', name: 'Não concluídas',  color: '#93a0bd', linhas: naoConcluidos },
-      { filtro: 'cancelado',    name: 'Canceladas',      color: '#ef4444', linhas: cancelados },
+      { filtro: 'concluido',    name: 'Concluídas',      color: CORES_STATUS_ORDEM.concluido, linhas: concluidos },
+      { filtro: 'naoconcluido', name: 'Não concluídas',  color: CORES_STATUS_ORDEM.naoConcluido, linhas: naoConcluidos },
+      { filtro: 'cancelado',    name: 'Canceladas',      color: CORES_STATUS_ORDEM.cancelado, linhas: cancelados },
     ];
     const evolucaoSeries = !evolucao ? [] : seriesPorStatus
       .filter(x => !statusFilter || x.filtro === statusFilter)
@@ -5706,7 +5758,7 @@ function renderProduction() {
       </div>
       ${diagnostico}
       <div class="panels-grid">
-        <div class="panel"><h3>Ordens por Status</h3><div id="c-status"></div></div>
+        <div class="panel"><h3>Ordens por Status</h3><p class="panel-subtitle">Distribuição geral das ordens registradas</p><div id="c-status"></div></div>
         <div class="panel" style="display:flex;flex-direction:column"><h3>Ordens por Tipo de Atividade${statusFilter?' (filtro aplicado)':''}</h3><div id="c-tipo" style="flex:1;display:flex;flex-direction:column"></div></div>
       </div>
       <div class="panel" style="margin-bottom:1.5rem"><h3>Produção por Cidade (concluído)</h3><div id="c-city-rank"></div></div>
@@ -5796,9 +5848,9 @@ function renderProduction() {
     // maxLabels 12: com 31 dias no eixo os rótulos se sobrepõem e viram borrão
     trendChart('c-evolucao', evolucaoSeries, { suave: true, maxLabels: 12, expandir: true });
     donutChart('c-status', [
-      {label:'Concluídas', value:concluidos.length, color:'#22c55e'},
-      {label:'Não concluídas', value:naoConcluidos.length, color:'#93a0bd'},
-      {label:'Canceladas', value:cancelados.length, color:'#ef4444'},
+      {label:'Concluídas', value:concluidos.length, color:CORES_STATUS_ORDEM.concluido},
+      {label:'Não concluídas', value:naoConcluidos.length, color:CORES_STATUS_ORDEM.naoConcluido},
+      {label:'Canceladas', value:cancelados.length, color:CORES_STATUS_ORDEM.cancelado},
     ], { centroLabel: 'Ordens' });
     barsChart('c-tipo', byTipo, { fill: true });
     barsChart('c-city-rank', cityRankColored);
