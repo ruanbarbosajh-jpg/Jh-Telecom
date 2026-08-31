@@ -2390,25 +2390,56 @@ function formatCurrency(v) { return (v || 0).toLocaleString('pt-BR', { style: 'c
 //   d26     = quanto a JH paga o técnico com 26 dias ou mais trabalhados
 // `re` casa com o "Tipo de Atividade" da base de produção, que usa nomes mais
 // compridos ("Reparo Corretivo", "Upgrade/Downgrade").
-const VALORES_ORDENS_FIXOS = [
-  { label: 'Ativação',            re: /ativa/,                giga: 194.25, normal: 48.50, d26: 53.00 },
-  { label: 'Reparo',              re: /reparo/,               giga: 107.00, normal: 38.50, d26: 42.00 },
-  { label: 'Mudança de Endereço', re: /mudan.*endereco/,      giga: 194.25, normal: 48.50, d26: 53.00 },
-  { label: 'Mudança de Cômodo',   re: /mudan.*comodo/,        giga:  97.13, normal: 30.00, d26: 30.00 },
-  { label: 'Upgrade/Downgrade',   re: /upgrade|downgrade/,    giga:  77.70, normal: 27.00, d26: 27.00 },
+// A GIGA reajusta esses valores de tempos em tempos — cada vigência vale a
+// PARTIR da data indicada (inclusive) até a vigência seguinte começar. NUNCA
+// aplicar o valor novo retroativo a um ciclo já fechado, senão o financeiro
+// de mês passado muda sozinho quando o contrato reajusta (ver
+// linhaValorOrdem/precoGigaPorTipo, que recebem a DATA da ordem e escolhem a
+// vigência certa). "normal"/"d26" (o que a JH paga o TÉCNICO) não mudou
+// nesse reajuste de 31/08/2026, mas ficam repetidos em cada vigência pra um
+// reajuste futuro do lado do técnico não exigir mexer na estrutura de novo.
+const VALORES_ORDENS_HISTORICO = [
+  { vigenciaDesde: '2000-01-01', valores: [
+    { label: 'Ativação',            re: /ativa/,                giga: 194.25, normal: 48.50, d26: 53.00 },
+    { label: 'Reparo',              re: /reparo/,               giga: 107.00, normal: 38.50, d26: 42.00 },
+    { label: 'Mudança de Endereço', re: /mudan.*endereco/,      giga: 194.25, normal: 48.50, d26: 53.00 },
+    { label: 'Mudança de Cômodo',   re: /mudan.*comodo/,        giga:  97.13, normal: 30.00, d26: 30.00 },
+    { label: 'Upgrade/Downgrade',   re: /upgrade|downgrade/,    giga:  77.70, normal: 27.00, d26: 27.00 },
+  ]},
+  // Reajuste confirmado pelo cliente em 31/08/2026 — vale pra ordem concluída
+  // a PARTIR de agosto/2026. Reparo não mudou (continua 107,00); os outros 4
+  // tipos subiram.
+  { vigenciaDesde: '2026-08-01', valores: [
+    { label: 'Ativação',            re: /ativa/,                giga: 202.80, normal: 48.50, d26: 53.00 },
+    { label: 'Reparo',              re: /reparo/,               giga: 107.00, normal: 38.50, d26: 42.00 },
+    { label: 'Mudança de Endereço', re: /mudan.*endereco/,      giga: 202.80, normal: 48.50, d26: 53.00 },
+    { label: 'Mudança de Cômodo',   re: /mudan.*comodo/,        giga: 101.40, normal: 30.00, d26: 30.00 },
+    { label: 'Upgrade/Downgrade',   re: /upgrade|downgrade/,    giga:  81.00, normal: 27.00, d26: 27.00 },
+  ]},
 ];
+// Tabela "atual" (vigência mais recente) — pros painéis que só mostram
+// referência de preço, sem calcular nada por período (ver onde é usada).
+const VALORES_ORDENS_FIXOS = VALORES_ORDENS_HISTORICO[VALORES_ORDENS_HISTORICO.length - 1].valores;
 // Descontos por retorno — mesma origem, também de contrato.
 const DESCONTOS_RETORNO_FIXOS = [
   { label: 'Desconto IFI', giga: 107.00, tecnico: 48.50 },
   { label: 'Desconto IRR', giga: 107.00, tecnico: 38.50 },
 ];
-function linhaValorOrdem(tipoAtividade) {
+// Vigência que vale NA data da ordem (ISO "AAAA-MM-DD"); sem data, usa a mais
+// recente (chamador que só quer mostrar o preço "atual", sem contexto de período).
+function valoresVigentesEm(dataISO) {
+  if (!dataISO) return VALORES_ORDENS_FIXOS;
+  let escolhida = VALORES_ORDENS_HISTORICO[0].valores;
+  for (const v of VALORES_ORDENS_HISTORICO) { if (v.vigenciaDesde <= dataISO) escolhida = v.valores; else break; }
+  return escolhida;
+}
+function linhaValorOrdem(tipoAtividade, dataISO) {
   const t = normalizeHeader(tipoAtividade);
-  return VALORES_ORDENS_FIXOS.find(v => v.re.test(t)) || null;
+  return valoresVigentesEm(dataISO).find(v => v.re.test(t)) || null;
 }
 // Quanto a GIGA paga por uma ordem desse tipo (null = tipo não reconhecido).
-function precoGigaPorTipo(tipoAtividade) {
-  const l = linhaValorOrdem(tipoAtividade);
+function precoGigaPorTipo(tipoAtividade, dataISO) {
+  const l = linhaValorOrdem(tipoAtividade, dataISO);
   return l ? l.giga : null;
 }
 // Painel "Valor das Ordens — pago pela GIGA": Dashboard, Resumo Geral e
@@ -5350,10 +5381,14 @@ function renderDashboard() {
     // Valor pago pela GIGA por tipo de serviço (preço fixo × contagem) — usa
     // VALORES_ORDENS_FIXOS, não o "Valor Ordens" interno da Folha (esse é
     // métrica de produção, não o que a GIGA realmente paga).
+    // preço pela vigência do CICLO (fech é sempre de 1 ciclo só nessa tela) —
+    // sem isso, um reajuste de contrato mudaria sozinho o valor de um ciclo
+    // já fechado no passado.
+    const dataCicloGiga = fech[0] && fech[0].ate_o_dia;
     const itensGiga = [
       { label: 'Ativação', qtd: ativacao }, { label: 'Mudança de Cômodo', qtd: mc },
       { label: 'Mudança de Endereço', qtd: me }, { label: 'Reparos', qtd: reparos }, { label: 'Upgrade', qtd: upgrade },
-    ].map(i => { const preco = precoGigaPorTipo(i.label); return preco !== null ? { ...i, preco, valor: i.qtd * preco } : { ...i, preco: null, valor: null }; });
+    ].map(i => { const preco = precoGigaPorTipo(i.label, dataCicloGiga); return preco !== null ? { ...i, preco, valor: i.qtd * preco } : { ...i, preco: null, valor: null }; });
     const totalQtdGiga = itensGiga.reduce((a,i)=>a+i.qtd,0), totalValorGiga = itensGiga.reduce((a,i)=>a+(i.valor||0),0);
 
     // Lucro = o que a GIGA paga − nossas despesas. Usamos a coluna LUCROS da
@@ -5676,7 +5711,7 @@ function valorOrdensDoPeriodo(tecnico, inicio, fim, apto) {
   DB.producao.forEach(p => {
     if (!isConcluido(p.status) || !inRange(p.data, inicio, fim)) return;
     if (normalizeHeader(p.recurso) !== normalizeHeader(tecnico)) return;
-    const l = linhaValorOrdem(p.tipo_atividade);
+    const l = linhaValorOrdem(p.tipo_atividade, p.data);
     if (l) valor += apto ? l.d26 : l.normal;
   });
   return valor;
@@ -6072,7 +6107,9 @@ function renderProduction() {
         {l:'Concluídas', v:concluidos.length}, {l:'Não concluídas', v:naoConcluidos.length}, {l:'Canceladas', v:cancelados.length},
       ], [{header:'Status', get:r=>r.l}, {header:'Quantidade', get:r=>r.v}], { totalRow:['Total', baseRows.length] }),
       tipo: () => {
-        const itens = byTipo.map(t => { const preco = precoGigaPorTipo(t.label); return { ...t, valor: preco!==null ? t.value*preco : null }; });
+        // vigência pelo FIM do período filtrado — não é por ordem porque byTipo
+        // já vem agregado por tipo (sem data individual disponível aqui).
+        const itens = byTipo.map(t => { const preco = precoGigaPorTipo(t.label, e); return { ...t, valor: preco!==null ? t.value*preco : null }; });
         return secaoTabela('Ordens por Tipo de Atividade', itens, [
           {header:'Tipo', get:r=>r.label}, {header:'Contagem', get:r=>r.value},
           {header:'Valor GIGA', get:r=>r.valor!==null?formatCurrency(r.valor):'-'},
@@ -10480,7 +10517,8 @@ function renderFinance() {
     const precosHtml = `<div class="panel" style="margin-bottom:1.5rem">
         <h3>Valores por Serviço</h3>
         <p style="font-size:12px;color:var(--text-muted);margin:-8px 0 12px">
-          Valores de contrato, fixos no sistema. "Normal" e "26 dias+" são as duas faixas de pagamento ao técnico (26 dias ou mais trabalhados no ciclo).
+          Valores de contrato vigentes desde ${formatDate(VALORES_ORDENS_HISTORICO[VALORES_ORDENS_HISTORICO.length-1].vigenciaDesde)}. "Normal" e "26 dias+" são as duas faixas de pagamento ao técnico (26 dias ou mais trabalhados no ciclo).
+          Ordens de meses anteriores ao reajuste continuam usando o valor da GIGA que valia na época — os totais desta tela usam sempre a vigência certa por período.
         </p>
         <div class="table-wrap"><table class="data-table"><thead><tr>
           <th rowspan="2">Serviço</th><th rowspan="2">Valor pago pela GIGA</th><th colspan="2" style="text-align:center">JH → Técnico</th>
@@ -11538,11 +11576,15 @@ function renderPainelBI() {
     // painel não acompanha o filtro de cidade (o resto da tela continua
     // acompanhando) — por isso o aviso no rodapé do painel.
     const somaFech = k => fech.reduce((a, f) => a + (f[k] || 0), 0);
+    // preço pela vigência do CICLO (mesmo motivo do Relatório de Eficiência:
+    // esse painel usa o fechamento oficial, fechado por ciclo — não pode
+    // deixar um reajuste de contrato mudar sozinho um ciclo já fechado).
+    const dataCicloGigaBI = fech[0] && fech[0].ate_o_dia;
     const itensGiga = [
       { label: 'Ativação', qtd: somaFech('ativacao') }, { label: 'Reparos', qtd: somaFech('reparos') },
       { label: 'Mudança de Endereço', qtd: somaFech('me') }, { label: 'Mudança de Cômodo', qtd: somaFech('mc') },
       { label: 'Upgrade/Downgrade', qtd: somaFech('upgrade') },
-    ].map(i => { const preco = precoGigaPorTipo(i.label); return preco !== null ? { ...i, preco, valor: i.qtd * preco } : { ...i, preco: null, valor: null }; });
+    ].map(i => { const preco = precoGigaPorTipo(i.label, dataCicloGigaBI); return preco !== null ? { ...i, preco, valor: i.qtd * preco } : { ...i, preco: null, valor: null }; });
     const totalQtdGiga = itensGiga.reduce((a,i)=>a+i.qtd,0), totalValorGiga = itensGiga.reduce((a,i)=>a+(i.valor||0),0);
 
     // ---------- IFI / IRR — mesma regra da tela Ofensor ----------
