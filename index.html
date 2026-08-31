@@ -770,6 +770,25 @@
   :root:not([data-theme="light"]) .mapa-cidades .leaflet-control-attribution a { color: var(--text-secondary); }
   .leaflet-tooltip { font-size: 12.5px; line-height: 1.5; }
   .mapa-legenda { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-size: 12.5px; }
+  /* marcador de bairro do renderMapaOrdensAbertas (divIcon — precisa de CSS
+     próprio porque é HTML puro, não um <path> do Leaflet). Some com o
+     quadradinho/borda branca padrão do divIcon, sobra só o círculo. */
+  .mapa-cluster-icone { background: transparent; border: none; }
+  .mapa-cluster-marca {
+    display: flex; align-items: center; justify-content: center; border-radius: 50%;
+    border: 2.5px solid #fff; color: #fff; font-weight: 800; font-size: 12.5px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.4); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+  }
+  /* conteúdo do popup do mapa (fundo sempre claro — é o padrão do Leaflet,
+     não segue o tema do site — por isso cor fixa, igual o resto do popup) */
+  .mapa-popup-cabecalho { font-size: 13px; color: #1e293b; margin-bottom: 8px; }
+  .mapa-popup-lista { max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+  .mapa-popup-item { border-bottom: 1px solid #e5e7eb; padding-bottom: 7px; }
+  .mapa-popup-item:last-child { border-bottom: none; padding-bottom: 0; }
+  .mapa-popup-item-linha1 { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12.5px; color: #1e293b; }
+  .mapa-popup-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; border: 1px solid; }
+  .mapa-popup-item-linha2 { font-size: 11.5px; color: #64748b; margin-top: 2px; }
+  .mapa-popup-revisita { font-size: 11px; color: #ef4444; font-weight: 700; margin-top: 4px; }
   .grouped-bars-svg rect { transition: opacity .15s ease; cursor: pointer; }
   .grouped-bars-svg rect:hover { opacity: .75; }
 
@@ -3897,24 +3916,37 @@ function renderMapaBairros(elId, rankingBairros) {
       .bindPopup(`<b>${esc(b.bairro)}</b> — ${esc(b.cidade)}<br>Concluídas: ${b.concluida}<br>Canceladas: ${b.cancelada}<br>Não concluídas: ${b.naoConcluida}<br><b>Total: ${b.total}</b>`);
   });
 }
-// Mapa de O.S individuais (Parcial do Dia) — diferente do renderMapaBairros
-// (que agrupa e soma por bairro): aqui cada ORDEM é um ponto. Como só temos a
-// coordenada do BAIRRO (não do endereço exato de cada casa), várias O.S do
-// mesmo bairro cairiam todas empilhadas no mesmo pixel — cada ponto ganha um
-// pequeno deslocamento em espiral (determinístico, pelo índice dentro do
-// bairro) só pra dar pra ver e clicar em cada um separado.
 // Cor por status no mapa — mesma paleta de COR_SITUACAO (usada nas tabelas da
 // PCR/Parcial do Dia), mas em hex literal: o marcador do Leaflet é um <path>
-// SVG desenhado via JS, e "var(--sucesso)" não é garantia de resolver igual
-// num atributo de cor fora do CSS da página, então usa o mesmo tom do tema
-// escuro direto (o mapa já tem cara de tema escuro por causa do filtro do
-// tile).
+// SVG (ou um divIcon HTML) desenhado via JS, e "var(--sucesso)" não é garantia
+// de resolver igual num atributo/style fora do CSS da página, então usa o
+// mesmo tom do tema escuro direto (o mapa já tem cara de tema escuro por
+// causa do filtro do tile).
 // "diferencie mais as cores": 6 tons bem distintos entre si (verde, laranja,
 // azul, amarelo, roxo, cinza) — nenhum deles é vermelho de propósito, porque
 // o contorno de "já visitada" já usa vermelho, e um preenchimento vermelho
 // junto ia confundir com esse aviso.
 const MAPA_CORES_STATUS = { pendente: '#facc15', em_rota: '#fb923c', iniciado: '#38bdf8', concluido: '#22c55e', nao_concluido: '#a855f7', cancelado: '#64748b' };
 const MAPA_STATUS_LABEL = { concluido: 'Concluído', nao_concluido: 'Não Concluído', cancelado: 'Cancelado', em_rota: 'Em Rota', iniciado: 'Iniciado', pendente: 'Pendente' };
+// Prioridade de status pra escolher a cor do CÍRCULO DO BAIRRO (que agora
+// representa várias O.S de status misto): o bairro só fica verde quando TUDO
+// dentro dele já foi concluído — enquanto sobrar qualquer coisa pendente/em
+// rota/iniciada/não concluída, é essa cor que aparece, pra quem bate o olho
+// no mapa já ver onde ainda falta atuar.
+const MAPA_PRIORIDADE_STATUS = ['pendente', 'em_rota', 'iniciado', 'nao_concluido', 'cancelado', 'concluido'];
+function statusDominanteBairro(grupo) {
+  for (const st of MAPA_PRIORIDADE_STATUS) {
+    if (grupo.some(o => classifyStatusGranular(o.status) === st)) return st;
+  }
+  return 'concluido';
+}
+// Mapa de O.S do dia (Parcial do Dia) — agrupado por BAIRRO, não mais 1
+// marcador por O.S: com muita ordem no mesmo bairro os pontos empilhados
+// (mesmo espalhados em espiral) viravam uma poeira ilegível de tanto marcador
+// sobreposto. Agora é 1 círculo por bairro, do tamanho proporcional à
+// quantidade de ordens ali (igual o renderMapaBairros), com o total escrito
+// dentro — e o clique abre a lista de TODAS as ordens daquele bairro, cada
+// uma com um badge do status e um aviso pra quem é revisita.
 function renderMapaOrdensAbertas(elId, ordens) {
   const el = document.getElementById(elId);
   if (!el) return;
@@ -3933,30 +3965,42 @@ function renderMapaOrdensAbertas(elId, ordens) {
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 18,
   }).addTo(map);
-  // agrupa por coordenada (= por bairro) só pra saber o índice de cada O.S.
-  // dentro do grupo, e então espalha em espiral ao redor do ponto do bairro —
-  // ~111km por grau de latitude, então um raio de 220m em graus é ~0.002
-  const porCoord = {};
-  comCoord.forEach(o => { const k = o.coord.join(','); (porCoord[k] = porCoord[k] || []).push(o); });
-  Object.values(porCoord).forEach(grupo => {
-    grupo.forEach((o, i) => {
-      const [lat0, lon0] = o.coord;
-      let lat = lat0, lon = lon0;
-      if (grupo.length > 1) {
-        const ang = (i / grupo.length) * 2 * Math.PI;
-        const raioGraus = 0.0015 + Math.floor(i / 8) * 0.0015;
-        lat += Math.sin(ang) * raioGraus;
-        lon += Math.cos(ang) * raioGraus / Math.cos(lat0 * Math.PI / 180);
-      }
-      // cor de PREENCHIMENTO = status atual (mesma paleta de COR_SITUACAO, usada
-      // no resto do sistema); revisita (já visitada, dada improdutiva, voltou pro
-      // campo) ganha um CONTORNO vermelho grosso por cima, sem esconder o status.
-      const corPreenchimento = MAPA_CORES_STATUS[classifyStatusGranular(o.status)] || '#94a3b8';
-      const corBorda = o.revisita ? '#ef4444' : corPreenchimento;
-      L.circleMarker([lat, lon], { radius: 7, color: corBorda, weight: o.revisita ? 3 : 2, fillColor: corPreenchimento, fillOpacity: 0.8 })
-        .addTo(map)
-        .bindPopup(`<b>O.S ${esc(o.os) || '-'}</b> — ${esc(o.bairro)}, ${esc(o.cidade)}<br>Cliente: ${esc(o.cliente) || '-'}<br>Técnico: ${esc(o.recurso) || '-'}<br>Tipo: ${esc(o.tipo_atividade) || '-'}<br>Status: ${esc(o.status) || '-'}${o.motivo ? `<br>Motivo: ${esc(o.motivo)}` : ''}${o.revisita ? `<br><b style="color:#ef4444">Já visitada — voltou pro campo</b>${o.motivoImprodutiva ? `<br>Motivo da 1ª tentativa: ${esc(o.motivoImprodutiva)}` : ''}` : ''}`);
+  const porBairro = {};
+  comCoord.forEach(o => { const k = o.coord.join(','); (porBairro[k] = porBairro[k] || []).push(o); });
+  const grupos = Object.values(porBairro);
+  const maxTotal = Math.max(...grupos.map(g => g.length), 1);
+  // do MENOR pro MAIOR: o bairro de mais ordens fica desenhado por cima, em
+  // vez de escondido atrás de um vizinho pequeno (mesma ideia do renderMapaBairros).
+  grupos.sort((a, b) => a.length - b.length).forEach(grupo => {
+    const [lat, lon] = grupo[0].coord;
+    const ratio = grupo.length / maxTotal;
+    const diametro = Math.round(26 + Math.sqrt(ratio) * 34); // área ∝ total de O.S
+    const dominante = statusDominanteBairro(grupo);
+    const cor = MAPA_CORES_STATUS[dominante];
+    const temRevisita = grupo.some(o => o.revisita);
+    const icone = L.divIcon({
+      className: 'mapa-cluster-icone',
+      html: `<div class="mapa-cluster-marca" style="width:${diametro}px;height:${diametro}px;background:${cor};${temRevisita ? 'border-color:#ef4444' : ''}">${grupo.length}</div>`,
+      iconSize: [diametro, diametro],
+      iconAnchor: [diametro / 2, diametro / 2],
     });
+    // lista completa das O.S do bairro, cada uma com código/cliente e um
+    // badge de status — pedido do cliente ("popup detalhado listando todas as
+    // ordens... badge visual claro... indicador pra quem é revisita").
+    const itens = grupo.map(o => {
+      const st = classifyStatusGranular(o.status);
+      const corSt = MAPA_CORES_STATUS[st] || '#94a3b8';
+      return `<div class="mapa-popup-item">
+        <div class="mapa-popup-item-linha1"><b>O.S ${esc(o.os) || '-'}</b><span class="mapa-popup-badge" style="background:${corSt}22;color:${corSt};border-color:${corSt}55">${esc(MAPA_STATUS_LABEL[st] || o.status || '-')}</span></div>
+        <div class="mapa-popup-item-linha2">${esc(o.cliente) || 'Cliente não informado'} · ${esc(o.recurso) || 'sem técnico'} · ${esc(o.tipo_atividade) || '-'}</div>
+        ${o.motivo ? `<div class="mapa-popup-item-linha2">Motivo: ${esc(o.motivo)}</div>` : ''}
+        ${o.revisita ? `<div class="mapa-popup-revisita">⚠ Já visitada, dada improdutiva — voltou pro campo${o.motivoImprodutiva ? ` (${esc(o.motivoImprodutiva)})` : ''}</div>` : ''}
+      </div>`;
+    }).join('');
+    L.marker([lat, lon], { icon: icone })
+      .addTo(map)
+      .bindPopup(`<div class="mapa-popup-cabecalho"><b>${esc(grupo[0].bairro)}</b> — ${esc(grupo[0].cidade)} · ${grupo.length} orde${grupo.length === 1 ? 'm' : 'ns'}</div>
+        <div class="mapa-popup-lista">${itens}</div>`, { maxWidth: 300, minWidth: 240 });
   });
 }
 // Diagnóstico em texto corrido da tela de Produção. NÃO calcula regra de
