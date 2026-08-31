@@ -9958,6 +9958,11 @@ function renderPleito(tipo) {
     const justificadas = linhas.filter(l => l.statusPleito === 'Justificada').length;
     const semMotivo = linhas.length - justificadas;
     const pctEficiencia = linhas.length ? (justificadas / linhas.length) * 100 : 0;
+    // A TABELA mostra só as "não concluídas" de verdade — O.S. que têm uma
+    // tentativa improdutiva registrada (é isso que vira pleito). "Sem motivo"
+    // não tem o que listar linha a linha (não tem tentativa nenhuma pra
+    // mostrar); continua contando nos cards acima, só não aparece na tabela.
+    const linhasTabela = linhas.filter(l => l.statusPleito === 'Justificada');
     body.innerHTML = `
       <div class="cards-grid">
         ${metricCard('Total de O.S. Fora do Prazo', linhas.length)}
@@ -9965,43 +9970,37 @@ function renderPleito(tipo) {
         ${metricCard('Total Sem Motivo', semMotivo, semMotivo > 0)}
         ${metricCard('% Eficiência do Pleito', pctEficiencia.toFixed(1) + '%')}
       </div>
+      ${!linhasTabela.length ? '<div class="panel"><div class="empty">Nenhuma O.S com tentativa improdutiva registrada nesse período/cidades (todas estão "sem motivo").</div></div>' : `
       <div class="toolbar" style="margin-bottom:0">
-        <div class="field"><label>Status do Pleito</label><select id="pl-status-filtro">
-          <option value="">Todos</option><option value="Justificada">Justificada</option><option value="Sem motivo">Sem motivo</option>
-        </select></div>
         <div class="field"><label>Buscar (O.S ou bairro)</label><input type="text" id="pl-busca" placeholder="Ex.: 11398099 ou Boqueirão"></div>
         <button class="btn-secundario" id="pl-exportar" style="padding:9px 14px;align-self:flex-end">⤓ Exportar Pleito (Excel)</button>
       </div>
-      <p style="font-size:12px;color:var(--text-muted);margin:10px 0" id="pl-contagem">${linhas.length} O.S fora do prazo no filtro.</p>
+      <p style="font-size:12px;color:var(--text-muted);margin:10px 0" id="pl-contagem">${linhasTabela.length} O.S com justificativa no filtro.</p>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="pl-tabela"><thead><tr>
         <th>O.S</th><th>Cliente</th><th>Endereço</th><th>Bairro</th><th>Cidade</th><th>Técnico</th>
-        <th>Data de Abertura</th><th>Data de Baixa</th><th>Status da Baixa</th>
-        <th>Data 1ª Visita Improdutiva</th><th>Motivo da 1ª Improdutividade</th><th>Status do Pleito</th>
+        <th>Data de Abertura</th><th>Data 1ª Visita Improdutiva</th><th>Motivo da 1ª Improdutividade</th>
+        <th>Data de Baixa</th><th>Status da Baixa</th>
       </tr></thead><tbody>
-        ${linhas.map(l => `<tr data-status-pleito="${esc(l.statusPleito)}" data-busca="${esc((l.os + ' ' + l.bairro).toLowerCase())}">
+        ${linhasTabela.map(l => `<tr data-busca="${esc((l.os + ' ' + l.bairro).toLowerCase())}">
           <td>${esc(l.os)}</td><td>${esc(l.cliente) || '-'}</td><td>${esc(l.endereco) || '-'}</td><td>${esc(l.bairro) || '-'}</td>
           <td>${esc(l.cidade)}</td><td>${esc(l.recurso)}</td>
-          <td>${esc(l.dataAbertura) || '-'}</td><td>${l.dataBaixa ? formatDate(l.dataBaixa) : '-'}</td>
-          <td>${esc(l.statusBaixa) || '-'}</td>
+          <td>${esc(l.dataAbertura) || '-'}</td>
           <td>${l.dataPrimeiraVisita ? formatDate(l.dataPrimeiraVisita) : '-'}</td><td>${esc(l.motivo) || '-'}</td>
-          <td><span class="badge ${l.statusPleito === 'Justificada' ? 'ok' : 'warn'}">${esc(l.statusPleito)}</span></td>
+          <td>${l.dataBaixa ? formatDate(l.dataBaixa) : '-'}</td><td>${esc(l.statusBaixa) || '-'}</td>
         </tr>`).join('')}
-      </tbody></table></div>`;
+      </tbody></table></div>`}`;
 
+    if (!linhasTabela.length) return;
     function aplicarFiltrosTabela() {
-      const statusSel = document.getElementById('pl-status-filtro').value;
       const busca = document.getElementById('pl-busca').value.toLowerCase().trim();
       let visiveis = 0;
       document.querySelectorAll('#pl-tabela tbody tr').forEach(tr => {
-        const okStatus = !statusSel || tr.dataset.statusPleito === statusSel;
-        const okBusca = !busca || tr.dataset.busca.includes(busca);
-        const mostra = okStatus && okBusca;
+        const mostra = !busca || tr.dataset.busca.includes(busca);
         tr.style.display = mostra ? '' : 'none';
         if (mostra) visiveis++;
       });
-      document.getElementById('pl-contagem').textContent = `${visiveis} de ${linhas.length} O.S no filtro.`;
+      document.getElementById('pl-contagem').textContent = `${visiveis} de ${linhasTabela.length} O.S no filtro.`;
     }
-    document.getElementById('pl-status-filtro').addEventListener('change', aplicarFiltrosTabela);
     document.getElementById('pl-busca').addEventListener('input', aplicarFiltrosTabela);
     document.getElementById('pl-exportar').addEventListener('click', () => {
       exportarTabelaVisivel(document.getElementById('pl-tabela'), `pleito_${tipo}_${s}_a_${e}`);
