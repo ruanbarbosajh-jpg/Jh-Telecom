@@ -5369,7 +5369,6 @@ function renderDashboard() {
     const sum = k => fech.reduce((a,f)=>a+(f[k]||0), 0);
     const valorOrdens = sum('valor_ordens');           // valor interno das ordens (métrica de produção)
     const valorPagoGiga = sum('valor_pago_giga');       // o que a GIGA realmente paga no ciclo
-    const totalLiquido = sum('total_liquido');     // já com descontos de IFI/IRR
     const despesas = sum('despesas');
     const lucro = sum('lucros');
     const gasolina = sum('gasolina');
@@ -5411,16 +5410,6 @@ function renderDashboard() {
     // planilha (já vem pronta e bate com VALOR PAGO GIGA − DESPESAS); só cai no
     // cálculo manual se a coluna vier vazia.
     const lucroCalc = lucro || (valorPagoGiga - despesas);
-    // "Total pago aos técnicos" = total líquido do fechamento (o que sai para eles).
-    // Quando a folha de pagamento está importada, ela é a fonte mais precisa.
-    // Só os ciclos de folha que encostam no período da tela. Sem isso, o card
-    // somava TODOS os ciclos já importados e ficava do lado de um "Lucro" que é
-    // só do período — dois números da mesma linha falando de recortes diferentes.
-    const folhaDoPeriodo = DB.folhaPagamento.filter(f => periodoFolhaNoRecorte(f.periodo, s, e));
-    const baseFolha = folhaDoPeriodo.length ? folhaDoPeriodo : (DB.folhaPagamento.length ? [] : null);
-    const totalPagoTecnicos = baseFolha === null || !baseFolha.length
-      ? totalLiquido
-      : baseFolha.reduce((a,f)=>a+(f.total_receber||0),0);
 
     // ---- variação vs. ciclo ANTERIOR (só apresentação: usa os mesmos
     // números do fechamento, nenhum cálculo de negócio novo) ----
@@ -5454,7 +5443,6 @@ function renderDashboard() {
       <div class="cards-grid wide">
         ${metricCard('Valor Pago pela GIGA', formatCurrency(valorPagoGiga), false, {accent:true, nivel:'heroi', variacao: varGiga})}
         ${metricCard('Lucro', formatCurrency(lucroCalc), lucroCalc<0, {nivel:'heroi', sub:'GIGA − despesas', variacao: varLucro})}
-        ${metricCard('Total pago aos técnicos', formatCurrency(totalPagoTecnicos), false, {nivel:'primario', sub: DB.folhaPagamento.length ? 'da folha de pagamento' : 'total líquido do fechamento'})}
         ${metricCard('Despesas totais', formatCurrency(despesas), false, {nivel:'primario'})}
         ${metricCard('Eficiência média', eficiencia.toFixed(1)+'%', eficiencia<70, {nivel:'primario'})}
       </div>
@@ -5509,7 +5497,6 @@ function renderDashboard() {
     wirePdfExportPanel('Relatório de Eficiência', {
       resumo: () => secaoTabela('Resumo Financeiro', [
         { l:'Total a Receber da GIGA', v: formatCurrency(valorPagoGiga) },
-        { l:'Total pago aos técnicos', v: formatCurrency(totalPagoTecnicos) },
         { l:'Despesas totais', v: formatCurrency(despesas) },
         { l:'Lucro', v: formatCurrency(lucroCalc) },
         { l:'Eficiência média', v: eficiencia.toFixed(1)+'%' },
