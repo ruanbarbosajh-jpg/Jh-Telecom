@@ -6843,13 +6843,13 @@ function exportarTabelaVisivel(tabela, nomeArquivo, ordemColunas) {
 // dentro — o mesmo problema do filtro por coluna (textContent junta todas as
 // opções). Aqui os dados já vêm prontos (linhas montadas a partir do estado,
 // não lidos da tabela na tela).
-function exportarQuadroPresenca(nomeArquivo, cabecalho, linhas) {
+function exportarQuadroPresenca(nomeArquivo, cabecalho, linhas, nomeAba = 'Presença') {
   const dados = [cabecalho, ...linhas];
   if (typeof XLSX !== 'undefined' && XLSX.utils) {
     const ws = XLSX.utils.aoa_to_sheet(dados);
     ws['!cols'] = cabecalho.map((c, i) => ({ wch: Math.min(40, Math.max(String(c).length + 2, ...linhas.map(l => String(l[i] || '').length + 2))) }));
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Presença');
+    XLSX.utils.book_append_sheet(wb, ws, nomeAba);
     XLSX.writeFile(wb, nomeArquivo + '.xlsx');
     return;
   }
@@ -9958,11 +9958,12 @@ function renderPleito(tipo) {
     const justificadas = linhas.filter(l => l.statusPleito === 'Justificada').length;
     const semMotivo = linhas.length - justificadas;
     const pctEficiencia = linhas.length ? (justificadas / linhas.length) * 100 : 0;
-    // A TABELA mostra só as "não concluídas" de verdade — O.S. que têm uma
-    // tentativa improdutiva registrada (é isso que vira pleito). "Sem motivo"
-    // não tem o que listar linha a linha (não tem tentativa nenhuma pra
-    // mostrar); continua contando nos cards acima, só não aparece na tabela.
-    const linhasTabela = linhas.filter(l => l.statusPleito === 'Justificada');
+    // Pedido do cliente: volta a mostrar TODA O.S. fora do prazo na tabela
+    // (não só as que têm tentativa) — agora com uma coluna deixando claro se
+    // é Justificado ou Não Justificado. Regra (confirmada com o cliente):
+    // O.S. baixada SEM ter a 1ª tentativa "não concluído" registrada = não
+    // tem justificativa.
+    const rotuloJustificado = l => l.statusPleito === 'Justificada' ? 'Justificado' : 'Não Justificado';
     body.innerHTML = `
       <div class="cards-grid">
         ${metricCard('Total de O.S. Fora do Prazo', linhas.length)}
@@ -9970,40 +9971,57 @@ function renderPleito(tipo) {
         ${metricCard('Total Sem Motivo', semMotivo, semMotivo > 0)}
         ${metricCard('% Eficiência do Pleito', pctEficiencia.toFixed(1) + '%')}
       </div>
-      ${!linhasTabela.length ? '<div class="panel"><div class="empty">Nenhuma O.S com tentativa improdutiva registrada nesse período/cidades (todas estão "sem motivo").</div></div>' : `
       <div class="toolbar" style="margin-bottom:0">
+        <div class="field"><label>Justificativa</label><select id="pl-status-filtro">
+          <option value="">Todos</option><option value="Justificado">Justificado</option><option value="Não Justificado">Não Justificado</option>
+        </select></div>
         <div class="field"><label>Buscar (O.S ou bairro)</label><input type="text" id="pl-busca" placeholder="Ex.: 11398099 ou Boqueirão"></div>
         <button class="btn-secundario" id="pl-exportar" style="padding:9px 14px;align-self:flex-end">⤓ Exportar Pleito (Excel)</button>
       </div>
-      <p style="font-size:12px;color:var(--text-muted);margin:10px 0" id="pl-contagem">${linhasTabela.length} O.S com justificativa no filtro.</p>
+      <p style="font-size:12px;color:var(--text-muted);margin:10px 0" id="pl-contagem">${linhas.length} O.S fora do prazo no filtro.</p>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="pl-tabela"><thead><tr>
         <th>O.S</th><th>Cliente</th><th>Endereço</th><th>Bairro</th><th>Cidade</th><th>Técnico</th>
         <th>Data de Abertura</th><th>Data 1ª Visita Improdutiva</th><th>Motivo da 1ª Improdutividade</th>
-        <th>Data de Baixa</th><th>Status da Baixa</th>
+        <th>Data de Baixa</th><th>Status da Baixa</th><th>Justificativa</th>
       </tr></thead><tbody>
-        ${linhasTabela.map(l => `<tr data-busca="${esc((l.os + ' ' + l.bairro).toLowerCase())}">
+        ${linhas.map(l => `<tr data-justificativa="${esc(rotuloJustificado(l))}" data-busca="${esc((l.os + ' ' + l.bairro).toLowerCase())}">
           <td>${esc(l.os)}</td><td>${esc(l.cliente) || '-'}</td><td>${esc(l.endereco) || '-'}</td><td>${esc(l.bairro) || '-'}</td>
           <td>${esc(l.cidade)}</td><td>${esc(l.recurso)}</td>
           <td>${esc(l.dataAbertura) || '-'}</td>
           <td>${l.dataPrimeiraVisita ? formatDate(l.dataPrimeiraVisita) : '-'}</td><td>${esc(l.motivo) || '-'}</td>
           <td>${l.dataBaixa ? formatDate(l.dataBaixa) : '-'}</td><td>${esc(l.statusBaixa) || '-'}</td>
+          <td><span class="badge ${l.statusPleito === 'Justificada' ? 'ok' : 'warn'}">${esc(rotuloJustificado(l))}</span></td>
         </tr>`).join('')}
-      </tbody></table></div>`}`;
+      </tbody></table></div>`;
 
-    if (!linhasTabela.length) return;
     function aplicarFiltrosTabela() {
+      const statusSel = document.getElementById('pl-status-filtro').value;
       const busca = document.getElementById('pl-busca').value.toLowerCase().trim();
       let visiveis = 0;
       document.querySelectorAll('#pl-tabela tbody tr').forEach(tr => {
-        const mostra = !busca || tr.dataset.busca.includes(busca);
+        const okStatus = !statusSel || tr.dataset.justificativa === statusSel;
+        const okBusca = !busca || tr.dataset.busca.includes(busca);
+        const mostra = okStatus && okBusca;
         tr.style.display = mostra ? '' : 'none';
         if (mostra) visiveis++;
       });
-      document.getElementById('pl-contagem').textContent = `${visiveis} de ${linhasTabela.length} O.S no filtro.`;
+      document.getElementById('pl-contagem').textContent = `${visiveis} de ${linhas.length} O.S no filtro.`;
     }
+    document.getElementById('pl-status-filtro').addEventListener('change', aplicarFiltrosTabela);
     document.getElementById('pl-busca').addEventListener('input', aplicarFiltrosTabela);
+    // Exporta SEMPRE todas as linhas do período/cidades filtrados (pedido do
+    // cliente: "quero que tenha todas as linhas"), não só as que estão
+    // visíveis com busca/filtro de justificativa aplicados na tela — por
+    // isso não usa exportarTabelaVisivel (que só lê <tr> sem display:none).
+    const CAB_PLEITO = ['O.S', 'Cliente', 'Endereço', 'Bairro', 'Cidade', 'Técnico', 'Data de Abertura',
+      'Data 1ª Visita Improdutiva', 'Motivo da 1ª Improdutividade', 'Data de Baixa', 'Status da Baixa', 'Justificativa'];
     document.getElementById('pl-exportar').addEventListener('click', () => {
-      exportarTabelaVisivel(document.getElementById('pl-tabela'), `pleito_${tipo}_${s}_a_${e}`);
+      const linhasExcel = linhas.map(l => [
+        l.os, l.cliente || '-', l.endereco || '-', l.bairro || '-', l.cidade, l.recurso,
+        l.dataAbertura || '-', l.dataPrimeiraVisita ? formatDate(l.dataPrimeiraVisita) : '-', l.motivo || '-',
+        l.dataBaixa ? formatDate(l.dataBaixa) : '-', l.statusBaixa || '-', rotuloJustificado(l),
+      ]);
+      exportarQuadroPresenca(`pleito_${tipo}_${s}_a_${e}`, CAB_PLEITO, linhasExcel, 'Pleito');
     });
   }
 }
