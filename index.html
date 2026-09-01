@@ -1735,11 +1735,20 @@ const ROUTE_PERMISSIONS = {
        'relatoriosdia', 'fleet', 'finance', 'folha', 'cmpproducao', 'cmpifiirr', 'cmpprazo',
        'comparisons', 'relatorios', 'import', 'retornosgiga'],
   gestao: ['dashboard', 'finance', 'folha', 'toll', 'comparisons', 'import', 'parcialdia', 'bi', 'retornosgiga'],
-  // Escritório: acompanha PRAZO (reparo 24h, ativações 36h, ofensores de prazo,
-  // PCR e Parcial do Dia) e QUALIDADE (IFI/IRR). Fica de fora de produção, frota,
-  // pedágio, financeiro, folha, comparativos e do Resumo Geral - Operação.
-  escritorio: ['dashboard', 'production', 'acomtec', 'fleet', 'toll',
-               'finance', 'folha', 'cmpproducao', 'cmpprazo', 'cmpifiirr', 'comparisons',
+  // Escritório (revisado 01/09/2026, pedido do cliente):
+  //   • PRAZO: tudo (reparo 24h, ativações 36h, ofensores, PCR, Parcial do Dia)
+  //     MENOS as duas telas de Pleito — a contestação com a GIGA é da gestão.
+  //   • QUALIDADE (IFI/IRR): tudo.
+  //   • PRESENÇA (técnicos e escritório): vê, mas não edita — quem edita é
+  //     controlado por NOME (podeEditarPresenca / podeEditarPresencaEscritorio),
+  //     e nenhum nome do Escritório está nessas listas.
+  //   • PRODUÇÃO: entra na tela, mas só na seção "Ordens do Período —
+  //     Detalhamento" (ver podeVerProducaoCompleta).
+  //   • COMPARATIVOS: só o de Prazo.
+  //   • Fica de fora de frota, pedágio, financeiro, folha e Resumo Geral.
+  escritorio: ['dashboard', 'acomtec', 'fleet', 'toll',
+               'finance', 'folha', 'cmpproducao', 'cmpifiirr', 'comparisons',
+               'pleitoreparo', 'pleitoativacao',
                'relatorios', 'import', 'bi', 'retornosgiga'],
   // Almoxarifado: só Produção, os dois retornos (Ofensor e Detalhe) e a Folha
   // de Pagamento. É lista de BLOQUEIO, então tudo que não está aqui ele vê —
@@ -1765,6 +1774,11 @@ function ehAnalista() { return !!currentUser && currentUser.role === 'analista';
 // de consulta. O valor fica salvo no Supabase e vale para todos, então não
 // pode ser mexido por quem só acompanha.
 function podeEditarMO() { return !!currentUser && currentUser.role !== 'escritorio'; }
+// Produção: o Escritório entra na tela, mas só enxerga a seção "Ordens do
+// Período — Detalhamento" (pedido do cliente, 01/09/2026). Fica de fora dos
+// cards do topo, dos gráficos, do ranking de técnicos, da Tabela de Bônus, da
+// evolução e do painel de PDF — são números de gestão, não de consulta do dia.
+function podeVerProducaoCompleta() { return !!currentUser && currentUser.role !== 'escritorio'; }
 // Folha de Pagamento — a edição é dividida em DOIS grupos de campos, com donos
 // diferentes (pedido do cliente). Não dá pra resolver com uma permissão só:
 //
@@ -1799,7 +1813,9 @@ function podeAcessar(role, route) {
   // TÉCNICOS — ficam de fora, junto com Gestão e RH. Por isso não dá pra
   // resolver isso só com ROUTE_PERMISSIONS (que bloqueia por PERFIL inteiro,
   // não por pessoa dentro do mesmo perfil).
-  if (route === 'presencaescritorio') return podeEditarPresencaEscritorio();
+  // O Escritório é a exceção: VÊ o quadro (somente leitura, pedido do cliente
+  // 01/09/2026) sem entrar na lista de quem edita acima.
+  if (route === 'presencaescritorio') return podeEditarPresencaEscritorio() || perfilValido(role) === 'escritorio';
   const bloqueadas = ROUTE_PERMISSIONS[perfilValido(role)];
   return !bloqueadas || !bloqueadas.includes(route);
 }
@@ -6013,7 +6029,12 @@ function renderProduction() {
       serieConcluidas: evolucao ? serieDoPeriodo(evolucao.caixas, concluidos, r => r.data) : [],
     });
 
+    // Escritório só vê a seção "Ordens do Período — Detalhamento" (ver
+    // podeVerProducaoCompleta). Os gráficos e a Tabela de Bônus nem entram no
+    // HTML — os helpers de gráfico já saem fora quando o elemento não existe.
+    const prodCompleta = podeVerProducaoCompleta();
     body.innerHTML = `
+      ${prodCompleta ? `
       <div class="cards-grid">
         ${metricCard('Total de ordens', baseRows.length, false, {sub:'OS únicas — se a mesma OS aparece 2x na planilha, conta 1 vez'})}
         ${metricCard('Concluídas', concluidos.length)}
@@ -6049,16 +6070,19 @@ function renderProduction() {
         </div>
         <div id="bon-tabela">${renderBonusTable(fechDoPeriodo, prodConcluida, { inicio: retIni, fim: retFim })}</div>
       </div>
+      ` : ''}
       <div class="section-heading">Ordens do Período — Detalhamento</div>
       <p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">${rows.length} registro(s) exibido(s). Retornos IFI/IRR aparecem nas páginas Ofensor e Detalhe de Retornos.</p>
       <div class="cards-grid" id="prod-det-cards" style="margin-bottom:1rem"></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="prod-tab-periodo"><thead><tr><th>Data</th><th>Técnico</th><th>Cidade</th><th>Tipo</th><th>Status</th><th>Motivo da Baixa</th><th>OS</th><th>Contrato</th></tr></thead><tbody>
       ${rows.map(r=>`<tr><td>${formatDate(r.data)}</td><td>${esc(r.recurso)}</td><td>${esc(r.cidade)}</td><td>${esc(r.tipo_atividade)}</td><td>${statusBadge(r.status)}</td><td>${esc(r.motivo) || '-'}</td><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td></tr>`).join('')}
       </tbody></table></div>
+      ${prodCompleta ? `
       <div class="panel" style="margin-bottom:1.5rem">
         <h3>Evolução dos Serviços no Período${evolucao ? ` <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(por ${evolucao.granularidade}${statusFilter ? ' — filtro de status aplicado' : ''})</span>` : ''}</h3>
         <div id="c-evolucao"></div>
       </div>
+      ` : ''}
       <div id="pdf-export-area"></div>`;
 
     // ---- cards de Concluída/Não concluída/Cancelada SÓ da tabela "Ordens do
@@ -6169,6 +6193,10 @@ function renderProduction() {
       }
     }
 
+    // o PDF daqui exporta status/tipo/cidades/técnicos/bônus — tudo que o
+    // Escritório não vê nesta tela; sem esse if ele baixaria pelo PDF o que
+    // não aparece em tela.
+    if (!prodCompleta) return;
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'status', label: 'Ordens por status' },
       { id: 'tipo', label: 'Ordens por tipo de atividade' },
