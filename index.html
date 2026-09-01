@@ -4789,7 +4789,31 @@ function importSheet(sheetName, rows) {
   DB.importsLog.unshift(logEntry);
   const syncPromise = syncBatchToSupabase(target, insertedObjs);
   logImportToSupabase({ ...logEntry, imported_by: currentUser ? (currentUser.nome || currentUser.login) : null });
-  return { target, inserted, errors, syncPromise };
+
+  // A aba "PRAZO INFORMADO AT-ME (PLEITO)" é a ÚNICA fonte de prazo de ATIVAÇÃO
+  // e MUDANÇA DE ENDEREÇO: a "BASE DE DADOS" só traz Reparo Corretivo, e a faixa
+  // "ATÉ 36hrs" só existe nessa aba. Então ela precisa alimentar DUAS tabelas:
+  // `pleito` (é a lista que a GIGA aponta como fora do prazo, pra contestação) e
+  // `prazo`, que é de onde a tela "Prazo Ativações (36h)" lê. Quando a aba ganhou
+  // o sufixo "(PLEITO)" no nome, passou a cair só no Pleito e a tela de 36h ficou
+  // permanentemente vazia — com a planilha importada e tudo.
+  // O merge em `prazo` é por O.S (upsertRowByDate), então reimportar não duplica.
+  let segundoDestino = null;
+  if (target === 'pleito' && sheetNorm.includes('at me')
+      && best.maps.prazo && Object.keys(best.maps.prazo).length >= 4) {
+    const objsPrazo = [];
+    let inseridasPrazo = 0;
+    for (const row of dataRows) {
+      try { objsPrazo.push(insertRow('prazo', best.maps.prazo, row, extra)); inseridasPrazo++; }
+      catch (err) { /* mesma tolerância do laço principal */ }
+    }
+    const logPrazo = { sheet_name: `${sheetName} → prazo`, target_table: 'prazo', row_count: inseridasPrazo, imported_at: new Date().toLocaleString('pt-BR') };
+    DB.importsLog.unshift(logPrazo);
+    syncBatchToSupabase('prazo', objsPrazo);
+    logImportToSupabase({ ...logPrazo, imported_by: currentUser ? (currentUser.nome || currentUser.login) : null });
+    segundoDestino = { target: 'prazo', inserted: inseridasPrazo };
+  }
+  return { target, inserted, errors, syncPromise, segundoDestino };
 }
 async function importWorkbook(arrayBuffer) {
   const workbook = XLSX.read(arrayBuffer, { type: 'array' });
@@ -10053,7 +10077,12 @@ function pleitoRowsBrutas(tipo, s, e, cidades) {
 }
 function renderPleito(tipo) {
   const rotuloAba = tipo === 'reparo' ? 'REPARO' : 'AT-ME';
-  const { start, end } = defaultMonthPeriod();
+  // mesmo motivo das telas de Prazo: abrindo no mês do calendário, no dia 1º a
+  // tela nascia vazia ("nenhuma O.S fora do prazo") mesmo com a planilha
+  // importada. Usa o mesmo critério de serviço de pleitoRowsBrutas pra escolher
+  // o mês, senão o Pleito de Reparo poderia abrir num mês que só tem AT-ME.
+  const ehDoServicoPleito = l => tipo === 'reparo' ? ehServicoReparo(l.tipo_atividade) : ehPrazoDeAtivacao(l, true);
+  const { start, end } = mesPadraoComDados(getAvailableMonths(DB.pleito.filter(ehDoServicoPleito)));
   document.getElementById('content').innerHTML = `${periodToolbar(start, end, `
     ${multiCityField('pl-cidades', 'Cidades', { preset: CIDADES_COBRADAS_PRAZO })}
   `)}<div id="pl-body"></div>`;
