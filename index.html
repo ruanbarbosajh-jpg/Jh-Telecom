@@ -1060,6 +1060,36 @@
   /* célula numérica: alinhada à direita e com dígitos de largura fixa, pra
      coluna de dinheiro ficar reta */
   table.data-table th.num, table.data-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* Fechamento por técnico: tudo centralizado, menos o nome (1ª coluna), que
+     fica à esquerda pra leitura — pedido do cliente. */
+  /* precisa da especificidade de .data-table.dash-tab + .num pra vencer a regra
+     de .num acima, que alinha à direita */
+  table.data-table.dash-tab th, table.data-table.dash-tab td,
+  table.data-table.dash-tab th.num, table.data-table.dash-tab td.num { text-align: center; }
+  table.data-table.dash-tab th:first-child,
+  table.data-table.dash-tab td:first-child { text-align: left; white-space: nowrap; }
+  table.dash-tab thead tr.total-row td {
+    font-weight: 800; background: var(--total-bg); color: var(--text-primary);
+    border-bottom: 2px solid var(--accent); position: sticky; top: 0;
+  }
+  /* trilha do repasse: ordens + aluguel − descontos = a receber */
+  .dash-repasse {
+    display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px; margin-bottom: 22px;
+  }
+  .dash-repasse > div {
+    flex: 1 1 150px; background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: var(--r-md); padding: 14px 16px; display: flex; flex-direction: column; gap: 4px;
+  }
+  .dash-repasse .r { font-size: var(--fs-xs); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+  .dash-repasse .v { font-size: 19px; font-weight: 800; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  .dash-repasse .v.neg { color: var(--danger); }
+  .dash-repasse .fim { border-color: var(--success); border-width: 2px; }
+  .dash-repasse .fim .v { color: var(--success); }
+  .dash-repasse .op {
+    flex: 0 0 auto; background: none; border: none; padding: 0 2px; align-items: center;
+    justify-content: center; font-size: 21px; font-weight: 800; color: var(--text-muted);
+  }
+  @media (max-width: 700px) { .dash-repasse .op { display: none; } }
   .dash-dinheiro { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px; }
   .dash-fin {
     position: relative; overflow: hidden; padding: 22px 24px; border-radius: var(--r-md);
@@ -4980,6 +5010,11 @@ function insertRow(target, map, row, extra) {
     }
     case 'folhaPagamento': {
       const tecnico = s('tecnico');
+      // A última linha da aba é o TOTAL da equipe ("37 TÉCNICOS", "40 TECNICOS")
+      // e vinha entrando como se fosse mais um técnico — com isso todo somatório
+      // da folha saía DOBRADO (descontos R$ 24.896,66 em vez de R$ 12.448,33).
+      // Linha de total tem o nome no formato "<número> TÉCNICO(S)".
+      if (/^\d+\s*t[ée]cnicos?$/i.test(normalizeHeader(tecnico))) return null;
       // a planilha às vezes não tem coluna de período — se não tiver, usamos o
       // que foi perguntado uma vez no início da importação (ver importSheet).
       // Nunca fica em '' nem null — ver SEM_PERIODO_FOLHA.
@@ -5116,7 +5151,9 @@ function importSheet(sheetName, rows) {
   let inserted = 0, errors = 0;
   const insertedObjs = [];
   for (const row of dataRows) {
-    try { const obj = insertRow(target, map, row, extra); insertedObjs.push(obj); inserted++; }
+    // insertRow devolve null quando a linha foi DESCARTADA de propósito (ex.: a
+    // linha de total da Folha) — não conta como inserida nem vai pro Supabase.
+    try { const obj = insertRow(target, map, row, extra); if (obj) { insertedObjs.push(obj); inserted++; } }
     catch (err) { errors++; } // não deixa 1 linha ruim travar a importação da aba inteira
   }
   const logEntry = { sheet_name: sheetName, target_table: target, row_count: inserted, imported_at: new Date().toLocaleString('pt-BR') };
@@ -5941,7 +5978,30 @@ function renderDashboard() {
     // a coluna DESPESAS da planilha já inclui o aluguel do próprio, mas não o
     // da locadora — por isso soma só a parte da JH.
     const despesasTotal = despesas + aluguelLocadora;
-    const lucroTotal = valorPagoGiga - despesasTotal;
+
+    // ---- REPASSE AOS TÉCNICOS (vem da Folha de Pagamento) ----
+    // O que o técnico recebe não é o valor das ordens puro: soma o aluguel do
+    // carro próprio e desconta IFI/IRR, equipamento, multa, vale etc.
+    const folhaCiclo = DB.folhaPagamento.filter(f => periodoFolhaNoRecorte(f.periodo, s, e));
+    const folhaDesc = folhaCiclo.reduce((a, f) => a + (f.total_descontos || 0), 0);
+    const folhaReceber = folhaCiclo.reduce((a, f) => a + (f.total_receber || 0), 0);
+    const temFolha = folhaCiclo.length > 0;
+    const descPorTecnico = {};
+    folhaCiclo.forEach(f => { descPorTecnico[normalizeHeader(f.tecnico)] = f; });
+
+    // ---- RECEITA / DESPESA / LUCRO ----
+    // Quando a planilha de COMPARAÇÃO estiver importada, ela manda: é a visão
+    // da empresa inteira (inclui folha do escritório, imposto, aluguel da base,
+    // internet, água, energia…), coisas que o fechamento por técnico não tem.
+    // Sem ela, cai no fechamento (GIGA − despesas dos técnicos).
+    const rotuloPeriodo = `${formatDate(s)} a ${formatDate(e)}`;
+    const cmp = DB.comparativoFinanceiro;
+    const cmpTem = !!(cmp && cmp.receitaOrdens && cmp.receitaOrdens[rotuloPeriodo] !== undefined);
+    const receitaFinal  = cmpTem ? cmp.receitaOrdens[rotuloPeriodo]  : valorPagoGiga;
+    const despesaFinal  = cmpTem ? cmp.totalDespesas[rotuloPeriodo]  : despesasTotal;
+    const lucroFinal    = cmpTem ? cmp.lucro[rotuloPeriodo]          : (valorPagoGiga - despesasTotal);
+    const fonteFin = cmpTem ? 'planilha de Comparação' : 'fechamento por técnico';
+    const lucroTotal = lucroFinal;
 
     // ---- variação vs. ciclo ANTERIOR (só apresentação: usa os mesmos
     // números do fechamento, nenhum cálculo de negócio novo) ----
@@ -5969,7 +6029,14 @@ function renderDashboard() {
     if (!alertas.length) alertas.push({ tipo:'ok', texto:'Nenhum indicador fora da meta neste ciclo' });
 
     // ---- PRIORIDADE 1: dinheiro e operação (ordem pedida pelo cliente) ----
-    const semProducao = fech.filter(f => !(f.total_geral || 0)).length;
+    // Técnico sem NENHUMA ordem e sem dia trabalhado sai da tabela (pedido do
+    // cliente): ele é desligado/afastado que ainda carrega despesa, e no meio
+    // da lista só polui. Continua contando em Despesas e Lucro — a linha some
+    // da tabela, o dinheiro dele não.
+    const ativos = [...fech]
+      .filter(f => (f.total_geral || 0) > 0 || (f.dias_trabalhados || 0) > 0)
+      .sort((a, b) => (b.total_geral || 0) - (a.total_geral || 0));
+    const semProducao = fech.length - ativos.length;
     const margem = valorPagoGiga ? (lucroTotal / valorPagoGiga) * 100 : 0;
     // composição da despesa: o que a planilha separa + o aluguel da locadora
     const pagoTecnicos = sum('total_liquido');
@@ -5995,22 +6062,38 @@ function renderDashboard() {
       <div class="section-heading">Resultado do ciclo</div>
       <div class="dash-dinheiro">
         <div class="dash-fin receita">
-          <span class="rot">Receita — Valor pago pela GIGA</span>
-          <span class="val">${formatCurrency(valorPagoGiga)}</span>
-          <span class="pe">${varGiga ? `${varGiga.pct >= 0 ? '▲' : '▼'} <b>${Math.abs(varGiga.pct).toFixed(1)}%</b> vs. ciclo anterior` : `<b>${totalOrdens.toLocaleString('pt-BR')}</b> ordens no ciclo`}</span>
+          <span class="rot">Receita — pago pela GIGA</span>
+          <span class="val">${formatCurrency(receitaFinal)}</span>
+          <span class="pe"><b>${totalOrdens.toLocaleString('pt-BR')}</b> ordens no ciclo${varGiga ? ` · ${varGiga.pct >= 0 ? '▲' : '▼'} ${Math.abs(varGiga.pct).toFixed(1)}% vs. anterior` : ''}</span>
         </div>
         <div class="dash-fin despesa">
           <span class="rot">Despesa total</span>
-          <span class="val">${formatCurrency(despesasTotal)}</span>
+          <span class="val">${formatCurrency(despesaFinal)}</span>
           <div class="dash-barra">${fatias.map(f => `<i style="width:${(f.v / somaFatias) * 100}%;background:${f.cor}"></i>`).join('')}</div>
           <div class="dash-legenda">${fatias.map(f => `<span><i style="background:${f.cor}"></i>${esc(f.rot)} ${formatCurrency(f.v)}</span>`).join('')}</div>
         </div>
         <div class="dash-fin lucro">
           <span class="rot">Lucro</span>
-          <span class="val">${formatCurrency(lucroTotal)}</span>
+          <span class="val">${formatCurrency(lucroFinal)}</span>
           <span class="pe">margem de <b>${margem.toFixed(1)}%</b> sobre a receita</span>
         </div>
       </div>
+      <p style="margin:-6px 0 20px;font-size:var(--fs-sm);color:var(--text-muted)">
+        Receita, despesa e lucro pela <b>${esc(fonteFin)}</b>${cmpTem
+          ? ' — inclui folha do escritório, imposto, aluguel da base e demais custos da empresa, que não aparecem no fechamento por técnico.'
+          : '. Importe a planilha COMPARATIVO para ver o resultado da empresa inteira.'}
+      </p>
+      ${temFolha ? `
+      <div class="section-heading">Repasse aos técnicos (Folha de Pagamento)</div>
+      <div class="dash-repasse">
+        <div><span class="r">Valor das ordens</span><span class="v">${formatCurrency(sum('valor_ordens'))}</span></div>
+        <div class="op">+</div>
+        <div><span class="r">Aluguel — carro próprio</span><span class="v">${formatCurrency(aluguelProprio)}</span></div>
+        <div class="op">−</div>
+        <div><span class="r">Descontos</span><span class="v neg">${formatCurrency(folhaDesc)}</span></div>
+        <div class="op">=</div>
+        <div class="fim"><span class="r">Total a receber</span><span class="v">${formatCurrency(folhaReceber)}</span></div>
+      </div>` : ''}
       <div class="section-heading">Valores do contrato aplicados neste ciclo</div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table">
         <thead><tr><th>Serviço</th><th class="num">GIGA paga à JH</th><th class="num">JH paga ao técnico</th>
@@ -6029,48 +6112,70 @@ function renderDashboard() {
           <td class="num">${formatCurrency(valorPagoGiga)}</td></tr></tfoot>
       </table></div>
       <div class="section-heading">Fechamento por técnico</div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="dash-tab-tecnicos">
-        <thead><tr>
-          <th>Técnico</th><th class="num">Produção</th><th class="num">GIGA paga</th>
-          <th class="num">JH paga ao técnico</th><th>Carro</th><th class="num">Aluguel</th><th class="num">Gasolina</th>
-        </tr></thead>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table dash-tab" id="dash-tab-tecnicos">
+        <thead>
+          <tr>
+            <th>Técnico</th><th class="num">Dias</th>
+            <th class="num">Ativação</th><th class="num">M. Cômodo</th><th class="num">M. Endereço</th>
+            <th class="num">Reparo</th><th class="num">Upgrade</th><th class="num">Total</th>
+            <th class="num">GIGA paga</th><th class="num">JH paga</th>
+            ${temFolha ? '<th class="num">Descontos</th><th class="num">A receber</th>' : ''}
+            <th class="num">Carro</th><th class="num">Aluguel</th><th class="num">Gasolina</th>
+          </tr>
+          <tr class="total-row">
+            <td>${ativos.length} técnicos</td>
+            <td class="num">${ativos.reduce((a,f)=>a+(f.dias_trabalhados||0),0)}</td>
+            <td class="num">${ativacao.toLocaleString('pt-BR')}</td>
+            <td class="num">${mc.toLocaleString('pt-BR')}</td>
+            <td class="num">${me.toLocaleString('pt-BR')}</td>
+            <td class="num">${reparos.toLocaleString('pt-BR')}</td>
+            <td class="num">${upgrade.toLocaleString('pt-BR')}</td>
+            <td class="num">${totalOrdens.toLocaleString('pt-BR')}</td>
+            <td class="num">${formatCurrency(valorPagoGiga)}</td>
+            <td class="num">${formatCurrency(pagoTecnicos)}</td>
+            ${temFolha ? `<td class="num">${formatCurrency(folhaDesc)}</td><td class="num">${formatCurrency(folhaReceber)}</td>` : ''}
+            <td class="num">${nFrotaPropria}P · ${nFrotaJH}JH</td>
+            <td class="num">${formatCurrency(aluguelTotal)}</td>
+            <td class="num">${formatCurrency(gasolina)}</td>
+          </tr>
+        </thead>
         <tbody>
-          ${[...fech].sort((a,b) => (b.total_geral||0) - (a.total_geral||0)).map(f => {
+          ${ativos.map(f => {
             const propria = ehFrotaPropria(f);
             const alu = propria ? (f.aluguel_carro || 0) : (ehFrotaJH(f) ? ALUGUEL_JH : 0);
-            const rotulo = propria ? 'Próprio' : (ehFrotaJH(f) ? 'JH' : '—');
+            const rot = propria ? 'Próprio' : (ehFrotaJH(f) ? 'JH' : '—');
             const cor = propria ? 'var(--accent)' : (ehFrotaJH(f) ? '#a78bfa' : 'var(--text-muted)');
-            const nota = propria ? 'pago ao técnico' : (ehFrotaJH(f) ? 'pago à locadora' : '');
+            const fp = descPorTecnico[normalizeHeader(f.tecnico)];
             return `<tr>
               <td>${esc(f.tecnico)}</td>
-              <td class="num">${(f.total_geral||0).toLocaleString('pt-BR')}</td>
+              <td class="num">${f.dias_trabalhados || 0}</td>
+              <td class="num">${(f.ativacao||0).toLocaleString('pt-BR')}</td>
+              <td class="num">${(f.mc||0).toLocaleString('pt-BR')}</td>
+              <td class="num">${(f.me||0).toLocaleString('pt-BR')}</td>
+              <td class="num">${(f.reparos||0).toLocaleString('pt-BR')}</td>
+              <td class="num">${(f.upgrade||0).toLocaleString('pt-BR')}</td>
+              <td class="num"><b>${(f.total_geral||0).toLocaleString('pt-BR')}</b></td>
               <td class="num">${formatCurrency(f.valor_pago_giga||0)}</td>
               <td class="num">${formatCurrency(f.total_liquido||0)}</td>
-              <td><span style="color:${cor};font-weight:700">${rotulo}</span></td>
-              <td class="num" title="${nota}">${alu ? formatCurrency(alu) : '—'}</td>
+              ${temFolha ? `<td class="num" style="color:var(--danger)">${fp && fp.total_descontos ? formatCurrency(fp.total_descontos) : '—'}</td>
+                <td class="num"><b>${fp ? formatCurrency(fp.total_receber||0) : '—'}</b></td>` : ''}
+              <td class="num"><span style="color:${cor};font-weight:700">${rot}</span></td>
+              <td class="num">${alu ? formatCurrency(alu) : '—'}</td>
               <td class="num">${formatCurrency(f.gasolina||0)}</td></tr>`;
           }).join('')}
         </tbody>
-        <tfoot><tr class="total-row">
-          <td>${fech.length} técnico(s)</td>
-          <td class="num">${totalOrdens.toLocaleString('pt-BR')}</td>
-          <td class="num">${formatCurrency(valorPagoGiga)}</td>
-          <td class="num">${formatCurrency(pagoTecnicos)}</td>
-          <td>${nFrotaPropria} próprio · ${nFrotaJH} JH</td>
-          <td class="num">${formatCurrency(aluguelTotal)}</td>
-          <td class="num">${formatCurrency(gasolina)}</td>
-        </tr></tfoot>
       </table></div>
       <p style="font-size:var(--fs-sm);color:var(--text-muted);margin:-8px 0 22px">
         <b>Carro próprio:</b> o técnico roda com o veículo dele e o aluguel entra como provento, somando no que ele recebe.
         <b>Carro JH:</b> a empresa aluga da locadora por ${formatCurrency(ALUGUEL_JH)} no ciclo — é despesa da JH e não entra no saldo do técnico.
+        ${semProducao ? `<br>${semProducao} técnico(s) sem nenhuma ordem e sem dia trabalhado ficaram fora da tabela.` : ''}
       </p>
       <div class="dash-oper">
         <div class="dash-op">
-          <div class="topo"><span class="rot">Técnicos</span><span class="val">${technicians}</span></div>
+          <div class="topo"><span class="rot">Técnicos ativos</span><span class="val">${ativos.length}</span></div>
           <div class="dash-split">
-            <div><div class="n">${technicians - semProducao}</div><div class="t">com produção</div></div>
-            <div><div class="n">${semProducao}</div><div class="t">sem produção</div></div>
+            <div><div class="n">${ativos.reduce((x,f)=>x+(f.dias_trabalhados||0),0)}</div><div class="t">dias trabalhados</div></div>
+            <div><div class="n">${ativos.length ? (ativos.reduce((x,f)=>x+(f.dias_trabalhados||0),0)/ativos.length).toFixed(1) : 0}</div><div class="t">média por técnico</div></div>
           </div>
         </div>
         <div class="dash-op">
