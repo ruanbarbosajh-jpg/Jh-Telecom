@@ -2917,6 +2917,24 @@ function defaultMonthPeriod() {
   const iso = d => d.toISOString().slice(0,10);
   return { start: iso(start), end: iso(end) };
 }
+// As telas de mês abrem no mês do CALENDÁRIO (defaultMonthPeriod). No dia 1º —
+// ou em qualquer mês que ainda não foi importado — isso deixa a tela vazia e
+// parece que a importação falhou: em 01/09/2026 o Prazo abria em setembro
+// enquanto a planilha ia só até 31/08, e a tela dizia "nenhuma linha cai nesse
+// período" com 20 mil linhas salvas. É o mesmo problema que o Relatório de
+// Eficiência já resolve abrindo no ciclo mais recente COM dados.
+// `meses` é o retorno de getAvailableMonths (mais recente primeiro): se o mês
+// corrente não está lá, cai no mês mais recente que tem dado.
+function mesPadraoComDados(meses) {
+  const { start, end } = defaultMonthPeriod();
+  if (!meses || !meses.length) return { start, end };
+  if (meses.some(m => m.value === start.slice(0, 7))) return { start, end };
+  const [y, m] = meses[0].value.split('-').map(Number);
+  const pad = n => String(n).padStart(2, '0');
+  // new Date(y, m, 0).getDate() = quantos dias tem o mês m (1-based), sem passar
+  // por toISOString (que joga a data pro dia anterior dependendo do fuso).
+  return { start: `${y}-${pad(m)}-01`, end: `${y}-${pad(m)}-${new Date(y, m, 0).getDate()}` };
+}
 function inRange(dateStr, start, end) { return dateStr && dateStr >= start && dateStr <= end; }
 function isConcluido(status) {
   const s = (status || '').toLowerCase();
@@ -8101,9 +8119,9 @@ function montarPrazoAtivacaoDoDia(dia, cidades, incluirME) {
     </div>`}`;
 }
 function renderPrazoAtivacao() {
-  const { start, end } = defaultMonthPeriod();
   const base = DB.prazo.filter(p => ehPrazoDeAtivacao(p, true));
   const mesesDisponiveis = getAvailableMonths(base);
+  const { start, end } = mesPadraoComDados(mesesDisponiveis);
   const diasCsv = [...new Set(DB.pcr.map(r => r.data))].sort().reverse();
   document.getElementById('content').innerHTML = `<div class="toolbar">
     <input type="hidden" id="f-start" value="${start}"><input type="hidden" id="f-end" value="${end}">
@@ -9639,8 +9657,8 @@ function renderGestaoPresencaEscritorio() {
 }
 
 function renderPrazo() {
-  const { start, end } = defaultMonthPeriod();
   const mesesDisponiveis = getAvailableMonths(DB.prazo);
+  const { start, end } = mesPadraoComDados(mesesDisponiveis);
   const diasCsvPrazo = [...new Set(DB.pcr.map(r => r.data))].sort().reverse();
   // Aqui o acompanhamento é sempre por MÊS FECHADO (a planilha do escritório tem
   // uma aba por mês), então a tela não mostra "de/até" — só a lista de meses.
