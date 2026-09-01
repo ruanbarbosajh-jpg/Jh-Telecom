@@ -1317,8 +1317,8 @@ const SUPABASE_TABLES = {
   presencaTecnicos:{ table: 'presenca_tecnicos',  conflict: 'tecnico' },
   presenca:        { table: 'presenca',           conflict: 'tecnico,data' },
   presencaLog:     { table: 'presenca_log',        conflict: 'id' },
-  // Gestão Presença — ESCRITÓRIO: mesma ideia, só que pra Thaís/Rebeca/Vitória
-  // e as atendentes, com turno de horário no lugar de P/F simples e mais uma
+  // Gestão Presença — ESCRITÓRIO: mesma ideia, só que pra Thaís/Rebeca e as
+  // atendentes, com turno de horário no lugar de P/F simples e mais uma
   // tabela extra (folgas: quem tá devendo/já foi pago o dia trabalhado no fds).
   presencaEscritorioPessoas: { table: 'presenca_escritorio_pessoas', conflict: 'pessoa' },
   presencaEscritorio:        { table: 'presenca_escritorio',         conflict: 'pessoa,data' },
@@ -1675,7 +1675,10 @@ const USERS = [
   { login: 'MATHEUS', senha: 'Matheus26', nome: 'Matheus', role: 'admin' },
   { login: 'THAIS', senha: 'Thais26', nome: 'Thaís', role: 'admin' },
   { login: 'REBECA', senha: 'Rebeca26', nome: 'Rebeca', role: 'admin' },
-  { login: 'VITORIA', senha: 'Vitoria26', nome: 'Vitória', role: 'admin' },
+  // Vitória saiu do sistema em 01/09/2026 (pedido do cliente). A conta dela
+  // ainda existe no Supabase (vitoria@jhtelecom.com.br) — some do login porque
+  // não está mais nesta lista nem em NOMES_POR_PERFIL; para apagar de vez é
+  // preciso remover a conta no painel do Supabase.
 ];
 // Nomes específicos do perfil Supervisor/Coordenador — o e-mail é a conta de
 // verdade no Supabase (uma por pessoa); "login" é a chave usada no modo
@@ -1687,7 +1690,6 @@ const NOMES_POR_PERFIL = {
     { nome: 'Matheus',   login: 'MATHEUS',   email: 'matheus@jhtelecom.com.br' },
     { nome: 'Thaís',     login: 'THAIS',     email: 'thais@jhtelecom.com.br' },
     { nome: 'Rebeca',    login: 'REBECA',    email: 'rebeca@jhtelecom.com.br' },
-    { nome: 'Vitória',   login: 'VITORIA',   email: 'vitoria@jhtelecom.com.br' },
   ],
 };
 // Mostra/esconde e preenche o seletor de nome quando o perfil escolhido tem
@@ -1723,17 +1725,30 @@ const ROUTE_PERMISSIONS = {
   // de todo o Financeiro (tela + comparativo) e da Folha de Pagamento — pedido do cliente.
   // 'retornosgiga' (conferência da planilha de retornos da GIGA) é EXCLUSIVA do
   // Analista — está bloqueada em todos os outros perfis, igual à 'import'.
-  admin: ['import', 'parcialdia', 'bi', 'dashboard', 'toll', 'finance', 'comparisons', 'folha', 'retornosgiga'],
+  // Supervisor/Coordenador (revisado 01/09/2026, pedido do cliente):
+  //   • Produção e Acompanhamento Técnico.
+  //   • IFI/IRR e PRAZO inteiro — inclusive a Parcial do Dia, que era bloqueada
+  //     ("acompanham pela PCR") e voltou a ser liberada — MENOS o Pleito.
+  //   • Frota continua liberada; Pedágio e Comparativo Financeiro, não.
+  //   • Presença: Matheus e Sebastião editam a de TÉCNICOS; Thaís e Rebeca
+  //     editam a do ESCRITÓRIO. Cada dupla só olha a tela da outra (ver
+  //     NOMES_PRESENCA_EDITAM / NOMES_ESCRITORIO_EDITAM e podeAcessar).
+  admin: ['import', 'bi', 'dashboard', 'toll', 'finance', 'comparisons', 'folha',
+          'pleitoreparo', 'pleitoativacao', 'retornosgiga'],
   // RH: "no momento" (28/08/2026, pedido do cliente) só enxerga Pedágio —
   // lista de bloqueio com TODAS as outras rotas, de propósito. Se voltar a
   // ter acesso mais amplo depois, é só tirar rota daqui (era ['dashboard',
   // 'acomtec', 'parcialdia', 'import', 'bi', 'prazo', 'prazoativacao',
   // 'retornosgiga'] antes dessa restrição).
-  rh: ['dashboard', 'production', 'acomtec', 'bi', 'presenca', 'presencaescritorio',
-       'ofensor', 'table', 'prazo', 'prazoativacao', 'parcialdia', 'pcr', 'ofensoresprazo',
-       'pleitoreparo', 'pleitoativacao',
-       'relatoriosdia', 'fleet', 'finance', 'folha', 'cmpproducao', 'cmpifiirr', 'cmpprazo',
-       'comparisons', 'relatorios', 'import', 'retornosgiga'],
+  // RH (revisado 01/09/2026, pedido do cliente): volta a ter acesso amplo —
+  // Produção, Acompanhamento Técnico, IFI/IRR, PRAZO inteiro menos o Pleito,
+  // Financeiro, Frota, Pedágio e TODOS os comparativos. Presença (técnicos e
+  // escritório) ele VÊ mas não edita — a edição é por nome, e nenhum nome do RH
+  // está em NOMES_PRESENCA_EDITAM / NOMES_ESCRITORIO_EDITAM.
+  // A Folha de Pagamento continua liberada de propósito: é o RH quem lança dias
+  // trabalhados e bônus (podeEditarFolhaPagamento).
+  rh: ['dashboard', 'bi', 'pleitoreparo', 'pleitoativacao',
+       'relatoriosdia', 'relatorios', 'import', 'retornosgiga'],
   gestao: ['dashboard', 'finance', 'folha', 'toll', 'comparisons', 'import', 'parcialdia', 'bi', 'retornosgiga'],
   // Escritório (revisado 01/09/2026, pedido do cliente):
   //   • PRAZO: tudo (reparo 24h, ativações 36h, ofensores, PCR, Parcial do Dia)
@@ -1750,14 +1765,14 @@ const ROUTE_PERMISSIONS = {
                'finance', 'folha', 'cmpproducao', 'cmpifiirr', 'comparisons',
                'pleitoreparo', 'pleitoativacao',
                'relatorios', 'import', 'bi', 'retornosgiga'],
-  // Almoxarifado: só Produção, os dois retornos (Ofensor e Detalhe) e a Folha
-  // de Pagamento. É lista de BLOQUEIO, então tudo que não está aqui ele vê —
-  // por isso rota nova precisa ser somada aqui também.
-  almox: ['dashboard', 'acomtec', 'bi', 'presenca', 'presencaescritorio',
-          'prazo', 'prazoativacao', 'parcialdia', 'pcr', 'ofensoresprazo',
-          'pleitoreparo', 'pleitoativacao',
-          'relatoriosdia', 'fleet', 'toll', 'finance', 'retornosgiga',
-          'cmpproducao', 'cmpifiirr', 'cmpprazo', 'comparisons', 'relatorios', 'import'],
+  // Almoxarifado (revisado 01/09/2026, pedido do cliente): "acessa tudo que o
+  // RH acessa, MENOS o Financeiro" — por isso esta lista é a do RH + 'finance'.
+  // Se mexer nas permissões do RH, mexa aqui junto.
+  // A Folha continua liberada: é onde ele lança desconto de material e parcelas
+  // (podeEditarFolhaMaterial) — ele não mexe em dias/bônus, isso é do RH.
+  almox: ['dashboard', 'bi', 'pleitoreparo', 'pleitoativacao',
+          'relatoriosdia', 'relatorios', 'import', 'retornosgiga',
+          'finance'],
 };
 // Perfis que o sistema conhece. Perfil que não esteja aqui (erro de digitação
 // na tabela "perfis" do Supabase, perfil novo criado sem ajustar o sistema)
@@ -1802,21 +1817,28 @@ const NOMES_PRESENCA_EDITAM = ['Matheus', 'Sebastião'];
 function podeEditarPresenca() { return !!currentUser && (currentUser.role === 'analista' || NOMES_PRESENCA_EDITAM.includes(currentUser.nome)); }
 function podeExcluirTecnicoPresenca() { return !!currentUser && currentUser.role === 'analista'; }
 // Presença do Escritório é tela separada, com dono diferente: só Thaís,
-// Rebeca, Vitória e o Analista mexem (nem Matheus/Sebastião, que só cuidam
-// do quadro de técnicos) — pedido do cliente.
-const NOMES_ESCRITORIO_EDITAM = ['Thaís', 'Rebeca', 'Vitória'];
+// Rebeca e o Analista MEXEM. Matheus e Sebastião — que têm o mesmo perfil
+// "admin", só que cuidam do quadro de TÉCNICOS — enxergam em modo leitura
+// (pedido do cliente 01/09/2026), assim como o Escritório.
+// Espelho disso na outra tela: Matheus e Sebastião editam a Presença dos
+// TÉCNICOS (NOMES_PRESENCA_EDITAM) e Thaís/Rebeca só olham.
+const NOMES_ESCRITORIO_EDITAM = ['Thaís', 'Rebeca'];
+// Perfis que ENXERGAM o quadro do escritório sem editar. Gestão fica de fora.
+const PERFIS_VEEM_PRESENCA_ESCRITORIO = ['escritorio', 'admin', 'rh', 'almox'];
 function podeEditarPresencaEscritorio() { return !!currentUser && (currentUser.role === 'analista' || NOMES_ESCRITORIO_EDITAM.includes(currentUser.nome)); }
 function podeAcessar(role, route) {
-  // Presença — Escritório é mais restrita que o resto do sistema: só enxerga
-  // a aba quem edita (Analista, Thaís, Rebeca, Vitória). Mesmo Matheus e
-  // Sebastião — que têm o mesmo perfil "admin" só que cuidam do quadro de
-  // TÉCNICOS — ficam de fora, junto com Gestão e RH. Por isso não dá pra
-  // resolver isso só com ROUTE_PERMISSIONS (que bloqueia por PERFIL inteiro,
-  // não por pessoa dentro do mesmo perfil).
-  // O Escritório é a exceção: VÊ o quadro (somente leitura, pedido do cliente
-  // 01/09/2026) sem entrar na lista de quem edita acima.
-  if (route === 'presencaescritorio') return podeEditarPresencaEscritorio() || perfilValido(role) === 'escritorio';
-  const bloqueadas = ROUTE_PERMISSIONS[perfilValido(role)];
+  // Presença — Escritório separa VER de EDITAR, coisa que ROUTE_PERMISSIONS não
+  // faz (ele bloqueia por PERFIL inteiro, não por pessoa dentro do perfil):
+  //   EDITAM  → Analista, Thaís e Rebeca (NOMES_ESCRITORIO_EDITAM)
+  //   VEEM    → os acima + Supervisor/Coordenador (Matheus e Sebastião),
+  //             Escritório, RH e Almoxarifado, em modo leitura
+  //             (pedido do cliente 01/09/2026)
+  //   FORA    → Gestão
+  const perfil = perfilValido(role);
+  if (route === 'presencaescritorio') {
+    return podeEditarPresencaEscritorio() || PERFIS_VEEM_PRESENCA_ESCRITORIO.includes(perfil);
+  }
+  const bloqueadas = ROUTE_PERMISSIONS[perfil];
   return !bloqueadas || !bloqueadas.includes(route);
 }
 
@@ -1847,7 +1869,7 @@ const DB = {
   prazoDuplicados: [],
   // Gestão Presença: quadro de técnicos, status por dia e log de alterações.
   presencaTecnicos: [], presenca: [], presencaLog: [],
-  // Gestão Presença — Escritório: mesma ideia, pra Thaís/Rebeca/Vitória e as
+  // Gestão Presença — Escritório: mesma ideia, pra Thaís/Rebeca e as
   // atendentes, mais o log de folgas (quem tá devendo folga do fds trabalhado).
   presencaEscritorioPessoas: [], presencaEscritorio: [], presencaEscritorioLog: [], presencaEscritorioFolgas: [],
 };
