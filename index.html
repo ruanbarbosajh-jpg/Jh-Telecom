@@ -1050,6 +1050,16 @@
      Ordem pedida pelo cliente (01/09/2026): primeiro o dinheiro (receita,
      despesa, lucro) e a operação (técnicos, produção, gasolina, aluguel);
      indicadores e eficiência descem para o bloco secundário. */
+  /* título fixo do ciclo (o Dashboard não tem filtro de período) */
+  .dash-cabecalho { margin: 4px 0 20px; }
+  .dash-cabecalho h2 {
+    margin: 0 0 4px; font-size: clamp(19px, 2.6vw, 26px); font-weight: 800;
+    letter-spacing: -.015em; color: var(--text-primary);
+  }
+  .dash-cabecalho p { margin: 0; font-size: var(--fs-sm); color: var(--text-secondary); }
+  /* célula numérica: alinhada à direita e com dígitos de largura fixa, pra
+     coluna de dinheiro ficar reta */
+  table.data-table th.num, table.data-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .dash-dinheiro { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px; }
   .dash-fin {
     position: relative; overflow: hidden; padding: 22px 24px; border-radius: var(--r-md);
@@ -1250,13 +1260,10 @@
     </div>
     <div id="tr-campo-perfil">
       <label>Perfil</label>
+      <!-- mesma lista reduzida do login (ver #li-user) -->
       <select id="tr-user">
-        <option value="SUPERCOOR">Supervisor/Coordenador</option>
         <option value="ANALISTA">Analista</option>
         <option value="GESTAO">Gestão</option>
-        <option value="RH">RH</option>
-        <option value="ALMOX">Almoxarifado</option>
-        <option value="ESCRITORIO">Escritório</option>
       </select>
     </div>
     <div id="tr-campo-nome" style="display:none">
@@ -1341,13 +1348,13 @@
     <form id="login-form">
       <div id="li-campo-perfil">
         <label>Perfil</label>
+        <!-- Só Analista e Gestão ficam visíveis no momento (pedido do cliente,
+             01/09/2026). Os outros perfis continuam existindo no sistema — em
+             USERS, CONTAS_POR_PERFIL e ROUTE_PERMISSIONS — é só devolver a
+             <option> aqui quando forem liberados de novo. -->
         <select id="li-user">
-          <option value="SUPERCOOR">Supervisor/Coordenador</option>
           <option value="ANALISTA">Analista</option>
           <option value="GESTAO">Gestão</option>
-          <option value="RH">RH</option>
-          <option value="ALMOX">Almoxarifado</option>
-          <option value="ESCRITORIO">Escritório</option>
         </select>
       </div>
       <div id="li-campo-nome" style="display:none">
@@ -1819,7 +1826,7 @@ if (supa) {
 const USERS = [
   { login: 'SUPERCOOR', senha: '2026JH', nome: 'Supervisor/Coordenador', role: 'admin' },
   { login: 'ANALISTA', senha: '0525', nome: 'Analista', role: 'analista' },
-  { login: 'GESTAO', senha: 'JH26', nome: 'Gestão', role: 'gestao' },
+  { login: 'GESTAO', senha: 'jh2026', nome: 'Gestão', role: 'gestao' },
   { login: 'RH', senha: 'rh2026', nome: 'RH', role: 'rh' },
   // Almoxarifado: perfil novo, enxerga Produção, os retornos IFI/IRR e a Folha
   // de Pagamento. Na Folha ele NÃO mexe em dias/bônus (isso é RH e Analista) —
@@ -3407,16 +3414,27 @@ function ehServicoReparo(tipo) {
 function ehServicoAtivacao(tipo) {
   return /ativa/.test(normalizeHeader(tipo));
 }
-// Denominador dos indicadores de qualidade, na regra da planilha:
-// % IFI = retornos IFI ÷ ATIVAÇÕES concluídas; % IRR = retornos IRR ÷ REPAROS
-// concluídos. Três telas dividiam os dois pelo total de ordens concluídas
-// (reparo + ativação + M.E + upgrade juntos), o que diluía o indicador e podia
-// mostrar "dentro da meta" uma cidade que estava fora.
+// Mudança de Endereço entra na base do IFI junto com a Ativação — as duas são
+// instalação, e o retorno de instalação pode vir de qualquer uma das duas.
+function ehBaseDoIfi(tipo) {
+  const t = normalizeHeader(tipo);
+  return /ativa/.test(t) || /mudan.*endereco/.test(t);
+}
+// Denominador dos indicadores de qualidade (regra confirmada com o cliente em
+// 01/09/2026):
+//   % IFI = retornos IFI ÷ (ATIVAÇÃO + MUDANÇA DE ENDEREÇO) concluídas
+//   % IRR = retornos IRR ÷ REPAROS concluídos
+// A base do IFI era só ATIVAÇÃO, e por isso o sistema divergia da Folha de
+// Pagamento em 13 técnicos do ciclo 21/07-20/08 — em 3 deles isso mudava o
+// bônus (ex.: Anderson Lopes Garcia, 1 retorno IFI: 1/17 = 5,88% e ficava FORA,
+// quando o certo é 1/45 = 2,22% e ele está APTO). Antes disso, três telas
+// dividiam os dois indicadores pelo total de ordens concluídas, o que diluía
+// ainda mais e escondia cidade fora da meta.
 function basesIfiIrr(linhas) {
   let ativacoes = 0, reparos = 0;
   linhas.forEach(p => {
     if (!isConcluido(p.status)) return;
-    if (ehServicoAtivacao(p.tipo_atividade)) ativacoes++;
+    if (ehBaseDoIfi(p.tipo_atividade)) ativacoes++;
     else if (ehServicoReparo(p.tipo_atividade)) reparos++;
   });
   return { ativacoes, reparos };
@@ -4572,7 +4590,17 @@ const SCHEMAS = {
     total_geral: ['total geral'], valor_ordens: ['valor ordens'], dias_trabalhados: ['dias trabalhados'],
     qtd_irr: ['qtd irr'], ind_irr: ['indicador irr'], desc_irr: ['desc irr'],
     qtd_ifi: ['qtd ifi'], ind_ifi: ['indicador ifi'], desc_ifi: ['desc ifi'],
-    status: ['status'], gasolina: ['gasolina'], aluguel_carro: ['aluguel carro'],
+    // A coluna do aluguel foi renomeada na planilha (01/09/2026): era
+    // "ALUGUEL CARRO" com R$ 2.400 rateado igual pra todo mundo, virou
+    // "VALOR ALUGUEL CARRO" com o valor REAL de cada técnico — e só quem usa
+    // carro próprio recebe (é provento na Folha). Como o casamento de coluna é
+    // por nome exato, sem este apelido novo o aluguel entrava ZERADO e as
+    // Despesas/Lucro da tela saíam erradas. Mais específico primeiro.
+    status: ['status'], gasolina: ['gasolina'],
+    aluguel_carro: ['valor aluguel carro', 'aluguel carro'],
+    // FROTA (PRÓPRIO / JH) e DIAS ALUGUEL passaram a existir no fechamento —
+    // antes essa informação só existia na Folha de Pagamento.
+    frota: ['frota'], dias_aluguel: ['dias aluguel'],
     total_liquido: ['total liquido','total líquido'],
     ind_giga: ['indicador giga'], ind_giga_jh: ['indicador giga jh'],
     valor_pago_giga: ['valor pago giga','valor giga','valor pago pela giga'],
@@ -4790,6 +4818,7 @@ function insertRow(target, map, row, extra) {
         qtd_irr: n('qtd_irr'), ind_irr: n('ind_irr'), desc_irr: n('desc_irr'),
         qtd_ifi: n('qtd_ifi'), ind_ifi: n('ind_ifi'), desc_ifi: n('desc_ifi'),
         status: s('status'), gasolina: money('gasolina'), aluguel_carro: money('aluguel_carro'),
+        frota: s('frota'), dias_aluguel: n('dias_aluguel'),
         total_liquido: money('total_liquido'), ind_giga: n('ind_giga'), ind_giga_jh: n('ind_giga_jh'),
         valor_pago_giga: money('valor_pago_giga'), despesas: money('despesas'), lucros: money('lucros'),
         eficiencia: n('eficiencia'),
@@ -5792,12 +5821,23 @@ function renderDashboard() {
   // é gerada. Abrir sempre no ciclo de hoje deixava a tela vazia no dia 21 —
   // parecia que a importação não tinha funcionado. Se o ciclo atual não tem
   // nada, abre no ciclo mais recente que TEM.
-  const { start, end } = ciclosDoFechamento().atual;
-  document.getElementById('content').innerHTML = `${periodToolbar(start,end,`
-    <div class="field"><label>Comparar Técnico A</label><input type="text" id="dash-tech-a" placeholder="Nome do técnico" list="tech-list"></div>
-    <div class="field"><label>Comparar Técnico B</label><input type="text" id="dash-tech-b" placeholder="Nome do técnico" list="tech-list"></div>
-  `)}<div id="dash-body"></div>`;
-  document.getElementById('f-apply').addEventListener('click', load);
+  // Sem filtro de período (pedido do cliente, 01/09/2026): o Dashboard é o
+  // fechamento de UM ciclo, e o ciclo aparece no título. Pega sempre o mais
+  // recente que TENHA dado — no dia 21 o ciclo corrente ainda está vazio e a
+  // tela nasceria em branco. Os campos de data continuam existindo escondidos
+  // porque o resto da máquina (guardarFiltros, exportações) lê deles.
+  const ciclos = ciclosDoFechamento().lista;
+  const comDado = ciclos.find(c => DB.fechamento.some(f => f.inicio === c.start && f.ate_o_dia === c.end));
+  const { start, end } = comDado || ciclosDoFechamento().atual;
+  const curto = iso => { const [a, m, d] = String(iso).split('-'); return `${d}.${m}`; };
+  document.getElementById('content').innerHTML = `
+    <input type="hidden" id="f-start" value="${start}"><input type="hidden" id="f-end" value="${end}">
+    <input type="hidden" id="dash-tech-a" value=""><input type="hidden" id="dash-tech-b" value="">
+    <div class="dash-cabecalho">
+      <h2>Relatório de fechamento ${curto(start)} a ${curto(end)}</h2>
+      <p>Observação: os novos valores aplicados</p>
+    </div>
+    <div id="dash-body"></div>`;
   load();
   function load() {
     const s = document.getElementById('f-start').value, e = document.getElementById('f-end').value;
@@ -5843,7 +5883,6 @@ function renderDashboard() {
     const despesas = sum('despesas');
     const lucro = sum('lucros');
     const gasolina = sum('gasolina');
-    const aluguelCarro = sum('aluguel_carro');
     const descIfi = sum('desc_ifi'), descIrr = sum('desc_irr');
     const qtdIfi = sum('qtd_ifi'), qtdIrr = sum('qtd_irr');
     const totalOrdens = sum('total_geral');
@@ -5882,6 +5921,28 @@ function renderDashboard() {
     // cálculo manual se a coluna vier vazia.
     const lucroCalc = lucro || (valorPagoGiga - despesas);
 
+    // ---- ALUGUEL DE CARRO — duas naturezas diferentes (cliente, 01/09/2026):
+    //   FROTA = PRÓPRIO  -> o técnico roda com o carro dele e RECEBE o aluguel:
+    //                       é provento, entra no saldo dele (valor real da planilha).
+    //   FROTA = JH       -> o carro é alugado pela JH direto da locadora por
+    //                       R$ 2.400 no ciclo: é DESPESA da empresa e NÃO entra
+    //                       no saldo do técnico.
+    // A planilha só traz o valor do próprio (JH vem zerado), então o custo dos
+    // carros da JH é somado aqui — sem isso a despesa sai R$ 57.600 menor.
+    const ALUGUEL_JH = 2400;
+    const ehFrotaPropria = f => /propri/i.test(normalizeHeader(f.frota));
+    const ehFrotaJH = f => f.frota && !ehFrotaPropria(f);
+    const nFrotaPropria = fech.filter(ehFrotaPropria).length;
+    const nFrotaJH = fech.filter(ehFrotaJH).length;
+    const temFrota = (nFrotaPropria + nFrotaJH) > 0;
+    const aluguelProprio = fech.reduce((a, f) => a + (ehFrotaPropria(f) ? (f.aluguel_carro || 0) : 0), 0);
+    const aluguelLocadora = nFrotaJH * ALUGUEL_JH;
+    const aluguelTotal = aluguelProprio + aluguelLocadora;
+    // a coluna DESPESAS da planilha já inclui o aluguel do próprio, mas não o
+    // da locadora — por isso soma só a parte da JH.
+    const despesasTotal = despesas + aluguelLocadora;
+    const lucroTotal = valorPagoGiga - despesasTotal;
+
     // ---- variação vs. ciclo ANTERIOR (só apresentação: usa os mesmos
     // números do fechamento, nenhum cálculo de negócio novo) ----
     const listaCiclos = ciclosDoFechamento().lista;
@@ -5896,39 +5957,33 @@ function renderDashboard() {
       return { pct: ((atual - ant) / Math.abs(ant)) * 100, invertido: !!invertido };
     };
     const varGiga = varDe(valorPagoGiga, 'valor_pago_giga');
-    const varLucro = varDe(lucroCalc, 'lucros');
 
     // ---- faixa de alertas: lê indicadores que a tela JÁ calcula ----
     const alertas = [];
     if (eficiencia < 70) alertas.push({ tipo:'ruim', texto:`Eficiência média ${eficiencia.toFixed(1)}% (meta 70%)` });
     if (ifi > 2.50) alertas.push({ tipo:'ruim', texto:`% IFI ${ifi.toFixed(2)}% (meta 2,50%)`, rota:'ofensor' });
     if (irr > 4.50) alertas.push({ tipo:'ruim', texto:`% IRR ${irr.toFixed(2)}% (meta 4,50%)`, rota:'ofensor' });
-    if (lucroCalc < 0) alertas.push({ tipo:'ruim', texto:'Lucro negativo no ciclo' });
+    if (lucroTotal < 0) alertas.push({ tipo:'ruim', texto:'Lucro negativo no ciclo' });
     const forasBonus = fech.filter(f => f.status && !/^apto/i.test(String(f.status).trim())).length;
     if (forasBonus) alertas.push({ tipo:'atencao', texto:`${forasBonus} técnico(s) fora do bônus`, rota:'production' });
     if (!alertas.length) alertas.push({ tipo:'ok', texto:'Nenhum indicador fora da meta neste ciclo' });
 
     // ---- PRIORIDADE 1: dinheiro e operação (ordem pedida pelo cliente) ----
-    // "Aluguel próprio ou não" não existe no fechamento (lá todo mundo tem o
-    // mesmo valor rateado) — quem sabe disso é a coluna FROTA da Folha de
-    // Pagamento (PRÓPRIO x JH). Por isso cruza com a folha do mesmo ciclo;
-    // se a folha não estiver importada, o cartão avisa em vez de inventar.
-    const folhaCiclo = DB.folhaPagamento.filter(f => periodoFolhaNoRecorte(f.periodo, s, e));
-    const frotaPropria = folhaCiclo.filter(f => /propri/i.test(normalizeHeader(f.frota))).length;
-    const frotaEmpresa = folhaCiclo.filter(f => f.frota && !/propri/i.test(normalizeHeader(f.frota))).length;
-    const temFrota = folhaCiclo.length > 0 && (frotaPropria + frotaEmpresa) > 0;
     const semProducao = fech.filter(f => !(f.total_geral || 0)).length;
-    const margem = valorPagoGiga ? (lucroCalc / valorPagoGiga) * 100 : 0;
-    // composição da despesa: o que a planilha já separa + o resto
+    const margem = valorPagoGiga ? (lucroTotal / valorPagoGiga) * 100 : 0;
+    // composição da despesa: o que a planilha separa + o aluguel da locadora
     const pagoTecnicos = sum('total_liquido');
-    const outrosCustos = Math.max(0, despesas - gasolina - aluguelCarro - pagoTecnicos);
+    const retornos = Math.max(0, despesas - gasolina - aluguelProprio - pagoTecnicos);
     const fatias = [
-      { rot: 'Pago aos técnicos', v: pagoTecnicos, cor: 'var(--accent)' },
-      { rot: 'Aluguel de carro',  v: aluguelCarro, cor: '#a78bfa' },
-      { rot: 'Gasolina',          v: gasolina,     cor: '#fb923c' },
-      { rot: 'Retornos IFI/IRR',  v: outrosCustos, cor: 'var(--danger)' },
+      { rot: 'Pago aos técnicos', v: pagoTecnicos,    cor: 'var(--accent)' },
+      { rot: 'Aluguel — locadora (JH)', v: aluguelLocadora, cor: '#a78bfa' },
+      { rot: 'Aluguel — carro próprio', v: aluguelProprio,  cor: '#c4b5fd' },
+      { rot: 'Gasolina',          v: gasolina,        cor: '#fb923c' },
+      { rot: 'Retornos IFI/IRR',  v: retornos,        cor: 'var(--danger)' },
     ].filter(f => f.v > 0);
     const somaFatias = fatias.reduce((a, f) => a + f.v, 0) || 1;
+    // tabela de preços do contrato vigente no ciclo (o "novos valores" do topo)
+    const precoCiclo = valoresVigentesEm(e);
     const tipos = [
       { rot: 'Reparos', v: reparos }, { rot: 'Ativação', v: ativacao },
       { rot: 'M. Endereço', v: me }, { rot: 'Upgrade', v: upgrade }, { rot: 'M. Cômodo', v: mc },
@@ -5946,16 +6001,70 @@ function renderDashboard() {
         </div>
         <div class="dash-fin despesa">
           <span class="rot">Despesa total</span>
-          <span class="val">${formatCurrency(despesas)}</span>
+          <span class="val">${formatCurrency(despesasTotal)}</span>
           <div class="dash-barra">${fatias.map(f => `<i style="width:${(f.v / somaFatias) * 100}%;background:${f.cor}"></i>`).join('')}</div>
           <div class="dash-legenda">${fatias.map(f => `<span><i style="background:${f.cor}"></i>${esc(f.rot)} ${formatCurrency(f.v)}</span>`).join('')}</div>
         </div>
         <div class="dash-fin lucro">
           <span class="rot">Lucro</span>
-          <span class="val">${formatCurrency(lucroCalc)}</span>
-          <span class="pe">margem de <b>${margem.toFixed(1)}%</b> sobre a receita${varLucro ? ` · ${varLucro.pct >= 0 ? '▲' : '▼'} <b>${Math.abs(varLucro.pct).toFixed(1)}%</b> vs. anterior` : ''}</span>
+          <span class="val">${formatCurrency(lucroTotal)}</span>
+          <span class="pe">margem de <b>${margem.toFixed(1)}%</b> sobre a receita</span>
         </div>
       </div>
+      <div class="section-heading">Valores do contrato aplicados neste ciclo</div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table">
+        <thead><tr><th>Serviço</th><th class="num">GIGA paga à JH</th><th class="num">JH paga ao técnico</th>
+          <th class="num">Técnico com 26 dias</th><th class="num">Qtd. no ciclo</th><th class="num">Total GIGA</th></tr></thead>
+        <tbody>
+          ${precoCiclo.map((v, i) => {
+            const q = [ativacao, reparos, me, mc, upgrade][i] || 0;
+            return `<tr><td>${esc(v.label)}</td><td class="num">${formatCurrency(v.giga)}</td>
+              <td class="num">${formatCurrency(v.normal)}</td><td class="num">${formatCurrency(v.d26)}</td>
+              <td class="num">${q.toLocaleString('pt-BR')}</td>
+              <td class="num">${formatCurrency(q * v.giga)}</td></tr>`;
+          }).join('')}
+        </tbody>
+        <tfoot><tr class="total-row"><td>Total</td><td class="num"></td><td class="num"></td><td class="num"></td>
+          <td class="num">${totalOrdens.toLocaleString('pt-BR')}</td>
+          <td class="num">${formatCurrency(valorPagoGiga)}</td></tr></tfoot>
+      </table></div>
+      <div class="section-heading">Fechamento por técnico</div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="dash-tab-tecnicos">
+        <thead><tr>
+          <th>Técnico</th><th class="num">Produção</th><th class="num">GIGA paga</th>
+          <th class="num">JH paga ao técnico</th><th>Carro</th><th class="num">Aluguel</th><th class="num">Gasolina</th>
+        </tr></thead>
+        <tbody>
+          ${[...fech].sort((a,b) => (b.total_geral||0) - (a.total_geral||0)).map(f => {
+            const propria = ehFrotaPropria(f);
+            const alu = propria ? (f.aluguel_carro || 0) : (ehFrotaJH(f) ? ALUGUEL_JH : 0);
+            const rotulo = propria ? 'Próprio' : (ehFrotaJH(f) ? 'JH' : '—');
+            const cor = propria ? 'var(--accent)' : (ehFrotaJH(f) ? '#a78bfa' : 'var(--text-muted)');
+            const nota = propria ? 'pago ao técnico' : (ehFrotaJH(f) ? 'pago à locadora' : '');
+            return `<tr>
+              <td>${esc(f.tecnico)}</td>
+              <td class="num">${(f.total_geral||0).toLocaleString('pt-BR')}</td>
+              <td class="num">${formatCurrency(f.valor_pago_giga||0)}</td>
+              <td class="num">${formatCurrency(f.total_liquido||0)}</td>
+              <td><span style="color:${cor};font-weight:700">${rotulo}</span></td>
+              <td class="num" title="${nota}">${alu ? formatCurrency(alu) : '—'}</td>
+              <td class="num">${formatCurrency(f.gasolina||0)}</td></tr>`;
+          }).join('')}
+        </tbody>
+        <tfoot><tr class="total-row">
+          <td>${fech.length} técnico(s)</td>
+          <td class="num">${totalOrdens.toLocaleString('pt-BR')}</td>
+          <td class="num">${formatCurrency(valorPagoGiga)}</td>
+          <td class="num">${formatCurrency(pagoTecnicos)}</td>
+          <td>${nFrotaPropria} próprio · ${nFrotaJH} JH</td>
+          <td class="num">${formatCurrency(aluguelTotal)}</td>
+          <td class="num">${formatCurrency(gasolina)}</td>
+        </tr></tfoot>
+      </table></div>
+      <p style="font-size:var(--fs-sm);color:var(--text-muted);margin:-8px 0 22px">
+        <b>Carro próprio:</b> o técnico roda com o veículo dele e o aluguel entra como provento, somando no que ele recebe.
+        <b>Carro JH:</b> a empresa aluga da locadora por ${formatCurrency(ALUGUEL_JH)} no ciclo — é despesa da JH e não entra no saldo do técnico.
+      </p>
       <div class="dash-oper">
         <div class="dash-op">
           <div class="topo"><span class="rot">Técnicos</span><span class="val">${technicians}</span></div>
@@ -5979,13 +6088,13 @@ function renderDashboard() {
           </div>
         </div>
         <div class="dash-op">
-          <div class="topo"><span class="rot">Aluguel de carro</span><span class="val dim">${formatCurrency(aluguelCarro)}</span></div>
+          <div class="topo"><span class="rot">Aluguel de carro</span><span class="val dim">${formatCurrency(aluguelTotal)}</span></div>
           ${temFrota
             ? `<div class="dash-split">
-                 <div><div class="n">${frotaEmpresa}</div><div class="t">carro da JH</div></div>
-                 <div><div class="n">${frotaPropria}</div><div class="t">carro próprio</div></div>
+                 <div><div class="n">${formatCurrency(aluguelLocadora)}</div><div class="t">${nFrotaJH} da JH — locadora</div></div>
+                 <div><div class="n">${formatCurrency(aluguelProprio)}</div><div class="t">${nFrotaPropria} próprio — ao técnico</div></div>
                </div>`
-            : `<div style="font-size:var(--fs-sm);color:var(--text-muted)">Importe a Folha de Pagamento deste ciclo para ver a divisão entre carro próprio e da JH.</div>`}
+            : `<div style="font-size:var(--fs-sm);color:var(--text-muted)">A planilha deste ciclo não trouxe a coluna FROTA, então não dá pra separar carro próprio do carro da JH.</div>`}
         </div>
       </div>
       ${painelValorGiga(itensGiga, { nota: 'Contagem da aba RELATORIO (fechamento do ciclo) × valor de contrato por serviço.' })}
@@ -6026,8 +6135,8 @@ function renderDashboard() {
     wirePdfExportPanel('Relatório de Eficiência', {
       resumo: () => secaoTabela('Resumo Financeiro', [
         { l:'Total a Receber da GIGA', v: formatCurrency(valorPagoGiga) },
-        { l:'Despesas totais', v: formatCurrency(despesas) },
-        { l:'Lucro', v: formatCurrency(lucroCalc) },
+        { l:'Despesas totais', v: formatCurrency(despesasTotal) },
+        { l:'Lucro', v: formatCurrency(lucroTotal) },
         { l:'Eficiência média', v: eficiencia.toFixed(1)+'%' },
       ], [ {header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v} ]),
       producao: () => {
@@ -6210,13 +6319,17 @@ function baseDoTecnico(tecnico, ini, fim) {
   // sem janela definida não dá pra escolher ciclo: sem isso o sistema pegava o
   // primeiro fechamento do técnico (podia ser de outro mês) e o % saía absurdo
   const f = (ini && fim) ? DB.fechamento.find(x => mesmo(x.tecnico) && overlaps(x.inicio, x.ate_o_dia, ini, fim)) : null;
-  if (f && (f.ativacao || f.reparos)) return { ativacao: f.ativacao || 0, reparos: f.reparos || 0 };
+  // a base do IFI é ATIVAÇÃO + MUDANÇA DE ENDEREÇO (ver ehBaseDoIfi) — no
+  // fechamento isso são as colunas ATIVAÇÃO e M.E somadas
+  if (f && (f.ativacao || f.me || f.reparos)) {
+    return { ativacao: (f.ativacao || 0) + (f.me || 0), reparos: f.reparos || 0 };
+  }
   let ativacao = 0, reparos = 0;
   DB.producao.forEach(p => {
     if (!isConcluido(p.status) || !mesmo(p.recurso)) return;
     if (ini && fim && !inRange(p.data, ini, fim)) return;
-    const t = normalizeHeader(p.tipo_atividade);
-    if (/ativa/.test(t)) ativacao++; else if (/reparo/.test(t)) reparos++;
+    if (ehBaseDoIfi(p.tipo_atividade)) ativacao++;
+    else if (ehServicoReparo(p.tipo_atividade)) reparos++;
   });
   return { ativacao, reparos };
 }
@@ -6353,16 +6466,20 @@ function renderBonusTable(fech, prodRows, retornos) {
   const contagemRet = usaPeriodoRet ? contarRetornosPorOfensor(retornos.inicio, retornos.fim) : null;
 
   const rows = fech.map(f => {
-    // % IFI = IFI ÷ ativações do técnico; % IRR = IRR ÷ reparos (mesma conta
-    // das colunas INDICADOR da planilha)
+    // % IFI = IFI ÷ (ATIVAÇÃO + MUDANÇA DE ENDEREÇO); % IRR = IRR ÷ REPAROS.
+    // Regra confirmada com o cliente em 01/09/2026 — a coluna INDICADOR IFI da
+    // planilha divide só por ATIVAÇÃO, e por isso marcava FORA quem está APTO
+    // (Anderson Lopes Garcia: 1/17 = 5,88% na planilha, 1/45 = 2,22% na conta
+    // certa). Aqui o % é RECALCULADO em cima da base correta, em vez de aceitar
+    // a coluna da planilha; a quantidade de retornos continua vindo dela.
+    const baseIfiFech = (f.ativacao || 0) + (f.me || 0);
     let qtdIfi = f.qtd_ifi ?? 0, qtdIrr = f.qtd_irr ?? 0;
-    let ifiP = toPct(f.ind_ifi), irrP = toPct(f.ind_irr);
     if (usaPeriodoRet) {
       const c = contagemRet[f.tecnico] || { ifi: 0, irr: 0 };
       qtdIfi = c.ifi; qtdIrr = c.irr;
-      ifiP = f.ativacao ? (c.ifi / f.ativacao) * 100 : 0;
-      irrP = f.reparos ? (c.irr / f.reparos) * 100 : 0;
     }
+    const ifiP = baseIfiFech ? (qtdIfi / baseIfiFech) * 100 : 0;
+    const irrP = f.reparos ? (qtdIrr / f.reparos) * 100 : 0;
     const diasCalc = diasPorTecnico[f.tecnico] ? diasPorTecnico[f.tecnico].size : 0;
     const dias = diasCalc || f.dias_trabalhados || 0;
     const okIfi = ifiP <= BONUS_IFI_MAX, okIrr = irrP <= BONUS_IRR_MAX, okDias = dias >= BONUS_DIAS_MIN;
@@ -6376,8 +6493,8 @@ function renderBonusTable(fech, prodRows, retornos) {
 
   const aptos = rows.filter(r=>r.apto).length;
   const fonteRet = usaPeriodoRet
-    ? `Retornos contados de <b>${formatDate(retornos.inicio)}</b> a <b>${formatDate(retornos.fim)}</b> (data da baixa), atribuídos ao técnico ofensor. % IFI = IFI ÷ ativações · % IRR = IRR ÷ reparos.`
-    : 'Quantidades e percentuais como vieram fechados na planilha RELATORIO.';
+    ? `Retornos contados de <b>${formatDate(retornos.inicio)}</b> a <b>${formatDate(retornos.fim)}</b> (data da baixa), atribuídos ao técnico ofensor. % IFI = IFI ÷ (ativações + mudanças de endereço) · % IRR = IRR ÷ reparos.`
+    : 'Quantidades da planilha RELATORIO; os percentuais são recalculados aqui — % IFI ÷ (ativações + mudanças de endereço), regra confirmada em 01/09/2026.';
   return `<p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">Critérios: IFI ≤ ${BONUS_IFI_MAX}% · IRR ≤ ${BONUS_IRR_MAX}% · mínimo de ${BONUS_DIAS_MIN} dias com ordem baixada. <b>${aptos} de ${rows.length}</b> aptos.<br>${fonteRet}</p>
   <div class="table-wrap"><table class="data-table"><thead><tr>
     <th>Técnico</th><th>Ordens</th><th>Dias trabalhados</th><th>Qtd. IFI</th><th>% IFI</th><th>Qtd. IRR</th><th>% IRR</th><th>Bônus</th><th>Motivo</th>
