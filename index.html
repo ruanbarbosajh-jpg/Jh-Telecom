@@ -1115,6 +1115,29 @@
   .dash-oper { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
   @media (max-width: 1150px) { .dash-oper { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 560px)  { .dash-oper { grid-template-columns: 1fr; } }
+  /* resumo financeiro do ciclo (Despesas/Receitas) — primeira coisa que
+     aparece no Dashboard, pedido do cliente pra bater o olho e já entender.
+     Linhas de categoria alternam fundo, TOTAL/RECEITA/LUCRO se destacam. */
+  .dash-resumo-wrap { margin: 0 0 26px; }
+  table.dash-resumo { width: 100%; border-collapse: collapse; }
+  table.dash-resumo th {
+    background: var(--accent-solid); color: #fff; text-align: left;
+    padding: 14px 20px; font-size: var(--fs-lg); font-weight: 700;
+  }
+  table.dash-resumo th.num { text-align: right; }
+  table.dash-resumo td { padding: 11px 20px; border-top: 1px solid var(--border); font-size: var(--fs-md); }
+  table.dash-resumo td.num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+  table.dash-resumo td.vazio { color: var(--text-muted); }
+  table.dash-resumo td:first-child { font-weight: 700; color: var(--accent); }
+  table.dash-resumo tbody tr:nth-child(even) { background: var(--accent-bg); }
+  table.dash-resumo tr.linha-total td { background: var(--total-bg); border-top: 2px solid var(--border); font-weight: 800; font-size: var(--fs-lg); }
+  table.dash-resumo tr.linha-receita td { background: var(--total-bg); font-weight: 800; font-size: var(--fs-lg); }
+  table.dash-resumo tr.linha-lucro td { background: var(--success-bg); color: var(--success); font-weight: 800; font-size: var(--fs-xl); }
+  table.dash-resumo tr.linha-lucro td:first-child { color: var(--success); }
+  @media (max-width: 640px) {
+    table.dash-resumo th, table.dash-resumo td { padding: 9px 12px; font-size: var(--fs-sm); }
+    table.dash-resumo tr.linha-lucro td { font-size: var(--fs-md); }
+  }
   .dash-op {
     background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--r-md);
     padding: 17px 19px; display: flex; flex-direction: column; gap: 9px;
@@ -1853,32 +1876,28 @@ if (supa) {
 // Perfis do modo OFFLINE (arquivo aberto direto do computador, sem internet /
 // sem Supabase). Com o Supabase ligado, quem manda é o login de verdade
 // (Supabase Auth) — essas senhas não valem mais nada nesse caso.
+// Contas do modo OFFLINE (arquivo aberto do disco, sem Supabase).
+// ATENÇÃO: aqui NÃO existe senha. Guardar senha em texto no HTML publicado
+// deixava as 11 contas legíveis por qualquer um em "ver código-fonte" —
+// achado da auditoria de 01/09/2026, e o cliente pediu para tirar.
+// Quem valida senha é o Supabase; sem ele o sistema entra em modo LEITURA
+// pelo perfil escolhido, sem conferir credencial (não há o que proteger:
+// nesse modo não existe dado nenhum carregado até alguém importar planilha).
 const USERS = [
-  { login: 'SUPERCOOR', senha: '2026JH', nome: 'Supervisor/Coordenador', role: 'admin' },
-  { login: 'ANALISTA', senha: '0525', nome: 'Analista', role: 'analista' },
-  { login: 'GESTAO', senha: 'jh2026', nome: 'Gestão', role: 'gestao' },
-  { login: 'RH', senha: 'rh2026', nome: 'RH', role: 'rh' },
-  // Almoxarifado: perfil novo, enxerga Produção, os retornos IFI/IRR e a Folha
-  // de Pagamento. Na Folha ele NÃO mexe em dias/bônus (isso é RH e Analista) —
-  // só nos descontos de material e parcelas. Ver podeEditarFolhaPagamento /
-  // podeEditarFolhaMaterial.
-  { login: 'ALMOX', senha: '202626', nome: 'Almoxarifado', role: 'almox' },
-  // Escritório entra sem senha (senha vazia) — é um perfil de consulta, só
-  // enxerga Prazo/PCR e IFI-IRR. Como o login é feito PELA SENHA, esse é o
-  // único caso em que a escolha do campo "Perfil" precisa ser respeitada.
-  { login: 'ESCRITORIO', senha: '', nome: 'Escritório', role: 'escritorio' },
-  // As 5 pessoas que usam o perfil Supervisor/Coordenador — cada uma com login
-  // e senha PRÓPRIOS (pedido do cliente, pra saber exatamente quem mexeu em
-  // quê na Gestão de Presença). Modo offline casa pela senha; com Supabase
-  // ligado, cada uma é uma conta de verdade — ver sql/PASSO-4-gestao-presenca.sql.
-  { login: 'SEBASTIAO', senha: 'Sebastiao26', nome: 'Sebastião', role: 'admin' },
-  { login: 'MATHEUS', senha: 'Matheus26', nome: 'Matheus', role: 'admin' },
-  { login: 'THAIS', senha: 'Thais26', nome: 'Thaís', role: 'admin' },
-  { login: 'REBECA', senha: 'Rebeca26', nome: 'Rebeca', role: 'admin' },
-  // Vitória saiu do sistema em 01/09/2026 (pedido do cliente). A conta dela
-  // ainda existe no Supabase (vitoria@jhtelecom.com.br) — some do login porque
-  // não está mais nesta lista nem em NOMES_POR_PERFIL; para apagar de vez é
-  // preciso remover a conta no painel do Supabase.
+  { login: 'ANALISTA', nome: 'Analista', role: 'analista' },
+  { login: 'GESTAO', nome: 'Gestão', role: 'gestao' },
+  // Perfis existentes, hoje fora do seletor de login (ver #li-user):
+  { login: 'SUPERCOOR', nome: 'Supervisor/Coordenador', role: 'admin' },
+  { login: 'RH', nome: 'RH', role: 'rh' },
+  { login: 'ALMOX', nome: 'Almoxarifado', role: 'almox' },
+  { login: 'ESCRITORIO', nome: 'Escritório', role: 'escritorio' },
+  // As pessoas do perfil Supervisor/Coordenador — cada uma é uma conta de
+  // verdade no Supabase (ver sql/PASSO-4-gestao-presenca.sql); o nome importa
+  // aqui só pra saber quem mexeu na Gestão de Presença.
+  { login: 'SEBASTIAO', nome: 'Sebastião', role: 'admin' },
+  { login: 'MATHEUS', nome: 'Matheus', role: 'admin' },
+  { login: 'THAIS', nome: 'Thaís', role: 'admin' },
+  { login: 'REBECA', nome: 'Rebeca', role: 'admin' },
 ];
 // Nomes específicos do perfil Supervisor/Coordenador — o e-mail é a conta de
 // verdade no Supabase (uma por pessoa); "login" é a chave usada no modo
@@ -1949,7 +1968,11 @@ const ROUTE_PERMISSIONS = {
   // trabalhados e bônus (podeEditarFolhaPagamento).
   rh: ['dashboard', 'bi', 'pleitoreparo', 'pleitoativacao',
        'relatoriosdia', 'relatorios', 'import', 'retornosgiga'],
-  gestao: ['dashboard', 'finance', 'folha', 'toll', 'comparisons', 'import', 'parcialdia', 'bi', 'retornosgiga'],
+  // Gestão (01/09/2026, pedido do cliente): SÓ o Dashboard. Como esta é uma
+  // lista de BLOQUEIO, a regra é "tudo menos 'dashboard' e 'inicio'" — e é
+  // montada a partir de PAGES pra que rota nova já nasça bloqueada pra ela,
+  // em vez de aparecer por esquecimento.
+  gestao: null, // preenchida logo abaixo, depois que PAGES existe
   // Escritório (revisado 01/09/2026, pedido do cliente):
   //   • PRAZO: tudo (reparo 24h, ativações 36h, ofensores, PCR, Parcial do Dia)
   //     MENOS as duas telas de Pleito — a contestação com a GIGA é da gestão.
@@ -2515,17 +2538,20 @@ function emailDoLogin(idPerfil, idNome) {
   }
   return CONTAS_POR_PERFIL[perfil];
 }
-// Mesma ideia no modo offline: se o perfil tem nomes, casa por NOME + senha
-// (senão a senha de qualquer um dos 5 entraria como "a primeira que bater").
-function usuarioOffline(idPerfil, idNome, senha) {
+// Modo offline (sem Supabase): escolhe o usuário pelo PERFIL selecionado — não
+// há conferência de senha, porque não existe mais senha guardada no arquivo
+// (ver USERS). Aqui não há o que proteger: sem Supabase o sistema abre vazio,
+// e só passa a ter dado depois que alguém importar uma planilha do próprio
+// computador. Quem valida credencial de verdade é o Supabase.
+function usuarioOffline(idPerfil, idNome) {
   const perfil = document.getElementById(idPerfil).value;
   const nomes = NOMES_POR_PERFIL[perfil];
   if (nomes) {
     const nomeEl = document.getElementById(idNome);
-    const escolhido = nomes.find(n => n.nome === (nomeEl ? nomeEl.value : ''));
-    return escolhido ? USERS.find(u => u.login === escolhido.login && u.senha === senha) : null;
+    const escolhido = nomes.find(n => n.nome === (nomeEl ? nomeEl.value : '')) || nomes[0];
+    return USERS.find(u => u.login === escolhido.login) || null;
   }
-  return senha === '' ? USERS.find(u => u.login === 'ESCRITORIO') : USERS.find(u => u.senha === senha);
+  return USERS.find(u => u.login === perfil) || null;
 }
 async function confirmarTrocaUsuario() {
   const senha = document.getElementById('tr-password').value;
@@ -2547,12 +2573,11 @@ async function confirmarTrocaUsuario() {
     applySidebarPermissions();
     fecharTrocaUsuario();
     recolherMenuLateralNoLogin();
-    recolherMenuLateralNoLogin();
-  navigate(getFirstAllowedRoute(user.role));
+    navigate(getFirstAllowedRoute(user.role));
     return;
   }
-  const user = senha === '' ? USERS.find(u => u.login === 'ESCRITORIO') : USERS.find(u => u.senha === senha);
-  if (!user) { erro.textContent = 'Senha inválida.'; return; }
+  const user = usuarioOffline('tr-user', 'tr-nome');
+  if (!user) { erro.textContent = 'Perfil não encontrado.'; return; }
   currentUser = user;
   document.getElementById('user-name').innerHTML = `<b>${user.nome}</b>${ROLE_LABEL[user.role]||user.role}`;
   applySidebarPermissions();
@@ -2669,9 +2694,12 @@ async function doLogin() {
     return;
   }
 
-  // ---- modo offline (sem Supabase): senha local do perfil (ou nome+senha) ----
-  const user = usuarioOffline('li-user', 'li-nome', senha);
-  if (!user) { errorEl.textContent = 'Senha inválida.'; return; }
+  // ---- modo offline (sem Supabase): entra pelo PERFIL escolhido ----
+  // Não confere senha: ela não existe mais no arquivo (ver USERS). Só acontece
+  // quando o Supabase não responde ou o HTML é aberto direto do disco — e aí o
+  // sistema abre vazio, sem nenhum dado, até alguém importar planilha.
+  const user = usuarioOffline('li-user', 'li-nome');
+  if (!user) { errorEl.textContent = 'Perfil não encontrado.'; return; }
   document.getElementById('li-user').value = user.login;
   btn.disabled = true; btn.textContent = 'Entrando...';
   await abrirSistema(user);
@@ -5326,6 +5354,14 @@ function renderInicio() {
   pinta();
 }
 
+// A Gestão só enxerga o Menu Inicial e o Dashboard. Montado a partir de PAGES
+// (logo abaixo da declaração dela) pra que qualquer rota nova entre bloqueada
+// por padrão — o contrário de listar o que ela não pode e esquecer de somar.
+function trancarGestaoSoNoDashboard() {
+  const liberadas = ['inicio', 'dashboard'];
+  ROUTE_PERMISSIONS.gestao = Object.keys(PAGES).filter(r => !liberadas.includes(r));
+}
+
 // ===================== ROTEADOR =====================
 const PAGES = {
   // Menu Inicial é a PRIMEIRA rota de propósito: getFirstAllowedRoute() cai
@@ -5359,6 +5395,7 @@ const PAGES = {
   relatorios: { title: 'Relatórios', render: renderRelatorios },
   import: { title: 'Importar Excel', render: renderImport },
 };
+trancarGestaoSoNoDashboard();
 document.getElementById('sidebar-nav').addEventListener('click', e => {
   const a = e.target.closest('a[data-route]');
   if (a) navigate(a.dataset.route);
@@ -5494,8 +5531,10 @@ function ativarTogglesDeSecao(raiz) {
   // de QUALQUER um dos dois tipos, senão a faixa do DIA "engolia" a faixa do
   // MÊS ao ocultar.
   const ehTitulo = el => el.classList.contains('section-heading') || el.classList.contains('faixa-secao');
+  // 'sem-toggle' desliga o botao "ocultar" — o Dashboard usa isso: e um
+  // painel executivo, o conteudo tem que estar sempre a vista.
   alvo.querySelectorAll('.section-heading, .faixa-secao').forEach(h => {
-    if (h.querySelector('.secao-toggle')) return;
+    if (h.querySelector('.secao-toggle') || h.classList.contains('sem-toggle')) return;
     // "faixa-secao" já é flex por CSS; só "section-heading" precisa do ajuste.
     if (h.classList.contains('section-heading') && !h.style.display) {
       h.style.display = 'flex'; h.style.alignItems = 'center'; h.style.gap = '12px'; h.style.flexWrap = 'wrap';
@@ -5511,6 +5550,7 @@ function ativarTogglesDeSecao(raiz) {
   // esconde tudo que vem depois do <h3>, mantendo o título do painel visível.
   alvo.querySelectorAll('.panel').forEach(p => {
     if (p.querySelector('.secao-toggle') || !p.querySelector('table')) return;
+    if (p.classList.contains('sem-toggle')) return;
     const h3 = p.querySelector(':scope > h3');
     if (!h3) return;
     if (!h3.style.display) { h3.style.display = 'flex'; h3.style.alignItems = 'center'; h3.style.gap = '12px'; h3.style.flexWrap = 'wrap'; }
@@ -6037,6 +6077,59 @@ function renderDashboard() {
       .filter(f => (f.total_geral || 0) > 0 || (f.dias_trabalhados || 0) > 0)
       .sort((a, b) => (b.total_geral || 0) - (a.total_geral || 0));
     const semProducao = fech.length - ativos.length;
+    // uma linha da tabela de fechamento (serve para as três tabelas de frota)
+    const linhaTec = f => {
+      const propria = ehFrotaPropria(f);
+      const alu = propria ? (f.aluguel_carro || 0) : (ehFrotaJH(f) ? ALUGUEL_JH : 0);
+      const fp = descPorTecnico[normalizeHeader(f.tecnico)];
+      return `<tr>
+        <td>${esc(f.tecnico)}</td>
+        <td class="num">${f.dias_trabalhados || 0}</td>
+        <td class="num">${(f.ativacao||0).toLocaleString('pt-BR')}</td>
+        <td class="num">${(f.mc||0).toLocaleString('pt-BR')}</td>
+        <td class="num">${(f.me||0).toLocaleString('pt-BR')}</td>
+        <td class="num">${(f.reparos||0).toLocaleString('pt-BR')}</td>
+        <td class="num">${(f.upgrade||0).toLocaleString('pt-BR')}</td>
+        <td class="num"><b>${(f.total_geral||0).toLocaleString('pt-BR')}</b></td>
+        <td class="num">${formatCurrency(f.valor_pago_giga||0)}</td>
+        <td class="num">${formatCurrency(f.total_liquido||0)}</td>
+        ${temFolha ? `<td class="num" style="color:var(--danger)">${fp && fp.total_descontos ? formatCurrency(fp.total_descontos) : '—'}</td>
+          <td class="num"><b>${fp ? formatCurrency(fp.total_receber||0) : '—'}</b></td>` : ''}
+        <td class="num">${alu ? formatCurrency(alu) : '—'}</td>
+        <td class="num">${formatCurrency(f.gasolina||0)}</td></tr>`;
+    };
+    // tabela de um grupo de frota, com os TOTAIS no TOPO (pedido do cliente)
+    const tabelaFrota = (lista, titulo, nota) => {
+      if (!lista.length) return '';
+      const S = k => lista.reduce((a, f) => a + (f[k] || 0), 0);
+      const alu = lista.reduce((a, f) => a + (ehFrotaPropria(f) ? (f.aluguel_carro||0) : (ehFrotaJH(f) ? ALUGUEL_JH : 0)), 0);
+      const somaFolha = campo => lista.reduce((a, f) => {
+        const x = descPorTecnico[normalizeHeader(f.tecnico)];
+        return a + (x ? (x[campo] || 0) : 0);
+      }, 0);
+      return `<div class="section-heading sem-toggle">${esc(titulo)}<span class="sec-nota">${esc(nota)}</span></div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table dash-tab">
+        <thead>
+          <tr><th>Técnico</th><th class="num">Dias</th><th class="num">Ativação</th><th class="num">M. Cômodo</th>
+            <th class="num">M. Endereço</th><th class="num">Reparo</th><th class="num">Upgrade</th><th class="num">Total</th>
+            <th class="num">GIGA paga</th><th class="num">JH paga</th>
+            ${temFolha ? '<th class="num">Descontos</th><th class="num">A receber</th>' : ''}
+            <th class="num">Aluguel</th><th class="num">Gasolina</th></tr>
+          <tr class="total-row">
+            <td>${lista.length} técnicos</td><td class="num">${S('dias_trabalhados')}</td>
+            <td class="num">${S('ativacao').toLocaleString('pt-BR')}</td><td class="num">${S('mc').toLocaleString('pt-BR')}</td>
+            <td class="num">${S('me').toLocaleString('pt-BR')}</td><td class="num">${S('reparos').toLocaleString('pt-BR')}</td>
+            <td class="num">${S('upgrade').toLocaleString('pt-BR')}</td><td class="num">${S('total_geral').toLocaleString('pt-BR')}</td>
+            <td class="num">${formatCurrency(S('valor_pago_giga'))}</td><td class="num">${formatCurrency(S('total_liquido'))}</td>
+            ${temFolha ? `<td class="num">${formatCurrency(somaFolha('total_descontos'))}</td><td class="num">${formatCurrency(somaFolha('total_receber'))}</td>` : ''}
+            <td class="num">${formatCurrency(alu)}</td><td class="num">${formatCurrency(S('gasolina'))}</td></tr>
+        </thead>
+        <tbody>${lista.map(linhaTec).join('')}</tbody>
+      </table></div>`;
+    };
+    const tecProprios = ativos.filter(ehFrotaPropria);
+    const tecJH = ativos.filter(ehFrotaJH);
+    const tecSemFrota = ativos.filter(f => !f.frota);
     const margem = valorPagoGiga ? (lucroTotal / valorPagoGiga) * 100 : 0;
     // composição da despesa: o que a planilha separa + o aluguel da locadora
     const pagoTecnicos = sum('total_liquido');
@@ -6056,10 +6149,29 @@ function renderDashboard() {
       { rot: 'M. Endereço', v: me }, { rot: 'Upgrade', v: upgrade }, { rot: 'M. Cômodo', v: mc },
     ].sort((a, b) => b.v - a.v);
     const maxTipo = Math.max(...tipos.map(t => t.v), 1);
+    // resumo Despesas/Receitas do ciclo, categoria por categoria — igual à
+    // planilha COMPARATIVO, pedido do cliente pra ficar bem no topo da tela.
+    // Só existe quando a planilha COMPARATIVO foi importada (é dela que vem
+    // a quebra por categoria); sem ela o restante do Dashboard já avisa.
+    const linhasResumo = cmpTem
+      ? Object.keys(cmp.porCategoria).map(cat => ({ rot: cat, v: cmp.porCategoria[cat][rotuloPeriodo] }))
+      : [];
+    const resumoFinanceiro = !cmpTem ? '' : `
+      <div class="section-heading sem-toggle">Resumo financeiro do ciclo</div>
+      <div class="table-wrap dash-resumo-wrap"><table class="dash-resumo">
+        <thead><tr><th>Despesas / Receitas</th><th class="num">${esc(rotuloPeriodo)}</th></tr></thead>
+        <tbody>
+          ${linhasResumo.map(l => `<tr><td>${esc(l.rot)}</td><td class="num${l.v === undefined ? ' vazio' : ''}">${l.v !== undefined ? formatCurrency(l.v) : '—'}</td></tr>`).join('')}
+          <tr class="linha-total"><td>TOTAL DESPESAS</td><td class="num">${formatCurrency(despesaFinal)}</td></tr>
+          <tr class="linha-receita"><td>RECEITA DAS ORDENS</td><td class="num">${formatCurrency(receitaFinal)}</td></tr>
+          <tr class="linha-lucro"><td>LUCRO</td><td class="num">${formatCurrency(lucroFinal)}</td></tr>
+        </tbody>
+      </table></div>`;
 
     body.innerHTML = `
+      ${resumoFinanceiro}
       ${faixaAlertas(alertas)}
-      <div class="section-heading">Resultado do ciclo</div>
+      <div class="section-heading sem-toggle">Resultado do ciclo</div>
       <div class="dash-dinheiro">
         <div class="dash-fin receita">
           <span class="rot">Receita — pago pela GIGA</span>
@@ -6084,7 +6196,7 @@ function renderDashboard() {
           : '. Importe a planilha COMPARATIVO para ver o resultado da empresa inteira.'}
       </p>
       ${temFolha ? `
-      <div class="section-heading">Repasse aos técnicos (Folha de Pagamento)</div>
+      <div class="section-heading sem-toggle">Repasse aos técnicos (Folha de Pagamento)</div>
       <div class="dash-repasse">
         <div><span class="r">Valor das ordens</span><span class="v">${formatCurrency(sum('valor_ordens'))}</span></div>
         <div class="op">+</div>
@@ -6094,82 +6206,6 @@ function renderDashboard() {
         <div class="op">=</div>
         <div class="fim"><span class="r">Total a receber</span><span class="v">${formatCurrency(folhaReceber)}</span></div>
       </div>` : ''}
-      <div class="section-heading">Valores do contrato aplicados neste ciclo</div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table">
-        <thead><tr><th>Serviço</th><th class="num">GIGA paga à JH</th><th class="num">JH paga ao técnico</th>
-          <th class="num">Técnico com 26 dias</th><th class="num">Qtd. no ciclo</th><th class="num">Total GIGA</th></tr></thead>
-        <tbody>
-          ${precoCiclo.map((v, i) => {
-            const q = [ativacao, reparos, me, mc, upgrade][i] || 0;
-            return `<tr><td>${esc(v.label)}</td><td class="num">${formatCurrency(v.giga)}</td>
-              <td class="num">${formatCurrency(v.normal)}</td><td class="num">${formatCurrency(v.d26)}</td>
-              <td class="num">${q.toLocaleString('pt-BR')}</td>
-              <td class="num">${formatCurrency(q * v.giga)}</td></tr>`;
-          }).join('')}
-        </tbody>
-        <tfoot><tr class="total-row"><td>Total</td><td class="num"></td><td class="num"></td><td class="num"></td>
-          <td class="num">${totalOrdens.toLocaleString('pt-BR')}</td>
-          <td class="num">${formatCurrency(valorPagoGiga)}</td></tr></tfoot>
-      </table></div>
-      <div class="section-heading">Fechamento por técnico</div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table dash-tab" id="dash-tab-tecnicos">
-        <thead>
-          <tr>
-            <th>Técnico</th><th class="num">Dias</th>
-            <th class="num">Ativação</th><th class="num">M. Cômodo</th><th class="num">M. Endereço</th>
-            <th class="num">Reparo</th><th class="num">Upgrade</th><th class="num">Total</th>
-            <th class="num">GIGA paga</th><th class="num">JH paga</th>
-            ${temFolha ? '<th class="num">Descontos</th><th class="num">A receber</th>' : ''}
-            <th class="num">Carro</th><th class="num">Aluguel</th><th class="num">Gasolina</th>
-          </tr>
-          <tr class="total-row">
-            <td>${ativos.length} técnicos</td>
-            <td class="num">${ativos.reduce((a,f)=>a+(f.dias_trabalhados||0),0)}</td>
-            <td class="num">${ativacao.toLocaleString('pt-BR')}</td>
-            <td class="num">${mc.toLocaleString('pt-BR')}</td>
-            <td class="num">${me.toLocaleString('pt-BR')}</td>
-            <td class="num">${reparos.toLocaleString('pt-BR')}</td>
-            <td class="num">${upgrade.toLocaleString('pt-BR')}</td>
-            <td class="num">${totalOrdens.toLocaleString('pt-BR')}</td>
-            <td class="num">${formatCurrency(valorPagoGiga)}</td>
-            <td class="num">${formatCurrency(pagoTecnicos)}</td>
-            ${temFolha ? `<td class="num">${formatCurrency(folhaDesc)}</td><td class="num">${formatCurrency(folhaReceber)}</td>` : ''}
-            <td class="num">${nFrotaPropria}P · ${nFrotaJH}JH</td>
-            <td class="num">${formatCurrency(aluguelTotal)}</td>
-            <td class="num">${formatCurrency(gasolina)}</td>
-          </tr>
-        </thead>
-        <tbody>
-          ${ativos.map(f => {
-            const propria = ehFrotaPropria(f);
-            const alu = propria ? (f.aluguel_carro || 0) : (ehFrotaJH(f) ? ALUGUEL_JH : 0);
-            const rot = propria ? 'Próprio' : (ehFrotaJH(f) ? 'JH' : '—');
-            const cor = propria ? 'var(--accent)' : (ehFrotaJH(f) ? '#a78bfa' : 'var(--text-muted)');
-            const fp = descPorTecnico[normalizeHeader(f.tecnico)];
-            return `<tr>
-              <td>${esc(f.tecnico)}</td>
-              <td class="num">${f.dias_trabalhados || 0}</td>
-              <td class="num">${(f.ativacao||0).toLocaleString('pt-BR')}</td>
-              <td class="num">${(f.mc||0).toLocaleString('pt-BR')}</td>
-              <td class="num">${(f.me||0).toLocaleString('pt-BR')}</td>
-              <td class="num">${(f.reparos||0).toLocaleString('pt-BR')}</td>
-              <td class="num">${(f.upgrade||0).toLocaleString('pt-BR')}</td>
-              <td class="num"><b>${(f.total_geral||0).toLocaleString('pt-BR')}</b></td>
-              <td class="num">${formatCurrency(f.valor_pago_giga||0)}</td>
-              <td class="num">${formatCurrency(f.total_liquido||0)}</td>
-              ${temFolha ? `<td class="num" style="color:var(--danger)">${fp && fp.total_descontos ? formatCurrency(fp.total_descontos) : '—'}</td>
-                <td class="num"><b>${fp ? formatCurrency(fp.total_receber||0) : '—'}</b></td>` : ''}
-              <td class="num"><span style="color:${cor};font-weight:700">${rot}</span></td>
-              <td class="num">${alu ? formatCurrency(alu) : '—'}</td>
-              <td class="num">${formatCurrency(f.gasolina||0)}</td></tr>`;
-          }).join('')}
-        </tbody>
-      </table></div>
-      <p style="font-size:var(--fs-sm);color:var(--text-muted);margin:-8px 0 22px">
-        <b>Carro próprio:</b> o técnico roda com o veículo dele e o aluguel entra como provento, somando no que ele recebe.
-        <b>Carro JH:</b> a empresa aluga da locadora por ${formatCurrency(ALUGUEL_JH)} no ciclo — é despesa da JH e não entra no saldo do técnico.
-        ${semProducao ? `<br>${semProducao} técnico(s) sem nenhuma ordem e sem dia trabalhado ficaram fora da tabela.` : ''}
-      </p>
       <div class="dash-oper">
         <div class="dash-op">
           <div class="topo"><span class="rot">Técnicos ativos</span><span class="val">${ativos.length}</span></div>
@@ -6202,8 +6238,33 @@ function renderDashboard() {
             : `<div style="font-size:var(--fs-sm);color:var(--text-muted)">A planilha deste ciclo não trouxe a coluna FROTA, então não dá pra separar carro próprio do carro da JH.</div>`}
         </div>
       </div>
+      <div class="section-heading sem-toggle">Valores do contrato aplicados neste ciclo</div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table">
+        <thead><tr><th>Serviço</th><th class="num">GIGA paga à JH</th><th class="num">JH paga ao técnico</th>
+          <th class="num">Técnico com 26 dias</th><th class="num">Qtd. no ciclo</th><th class="num">Total GIGA</th></tr></thead>
+        <tbody>
+          ${precoCiclo.map((v, i) => {
+            const q = [ativacao, reparos, me, mc, upgrade][i] || 0;
+            return `<tr><td>${esc(v.label)}</td><td class="num">${formatCurrency(v.giga)}</td>
+              <td class="num">${formatCurrency(v.normal)}</td><td class="num">${formatCurrency(v.d26)}</td>
+              <td class="num">${q.toLocaleString('pt-BR')}</td>
+              <td class="num">${formatCurrency(q * v.giga)}</td></tr>`;
+          }).join('')}
+        </tbody>
+        <tfoot><tr class="total-row"><td>Total</td><td class="num"></td><td class="num"></td><td class="num"></td>
+          <td class="num">${totalOrdens.toLocaleString('pt-BR')}</td>
+          <td class="num">${formatCurrency(valorPagoGiga)}</td></tr></tfoot>
+      </table></div>
       ${painelValorGiga(itensGiga, { nota: 'Contagem da aba RELATORIO (fechamento do ciclo) × valor de contrato por serviço.' })}
-      <div class="section-heading">Indicadores e eficiência</div>
+      ${tabelaFrota(tecProprios, 'Fechamento — carros próprios', 'aluguel é provento do técnico')}
+      ${tabelaFrota(tecJH, 'Fechamento — carros da JH', 'aluguel é despesa da JH, pago à locadora')}
+      ${tabelaFrota(tecSemFrota, 'Fechamento — sem frota informada', '')}
+      <p style="font-size:var(--fs-sm);color:var(--text-muted);margin:-8px 0 22px">
+        <b>Carro próprio:</b> o técnico roda com o veículo dele e o aluguel entra como provento, somando no que ele recebe.
+        <b>Carro JH:</b> a empresa aluga da locadora por ${formatCurrency(ALUGUEL_JH)} no ciclo — é despesa da JH e não entra no saldo do técnico.
+        ${semProducao ? `<br>${semProducao} técnico(s) sem nenhuma ordem e sem dia trabalhado ficaram fora da tabela.` : ''}
+      </p>
+      <div class="section-heading sem-toggle">Indicadores e eficiência</div>
       <div class="panels-grid thirds">
         ${gaugePanel('% IFI médio', ifi, 2.50, {lowerIsBetter:true, decimals:2})}
         ${gaugePanel('% IRR médio', irr, 4.50, {lowerIsBetter:true, decimals:2})}
@@ -6215,14 +6276,14 @@ function renderDashboard() {
         ${metricCard('Desconto IFI', formatCurrency(descIfi), descIfi>0, {nivel:'compacto'})}
         ${metricCard('Desconto IRR', formatCurrency(descIrr), descIrr>0, {nivel:'compacto'})}
       </div>
-      <div class="section-heading">Ranking de técnicos</div>
+      <div class="section-heading sem-toggle">Ranking de técnicos</div>
       <div class="panels-grid">
         <div class="panel"><h3>Top técnicos (valor das ordens)</h3><div id="c-receita"></div></div>
         <div class="panel"><h3>Melhor eficiência</h3><div id="c-ef-melhor"></div></div>
       </div>
       <div class="panel" style="margin-bottom:1.5rem"><h3>Pior eficiência</h3><div id="c-ef-pior"></div></div>
       ${renderDashboardTechCompare(fech, toPct)}
-      <div class="section-heading">Relatório Geral completo (linha a linha)</div>
+      <div class="section-heading sem-toggle">Relatório Geral completo (linha a linha)</div>
       <div class="panel" style="margin-bottom:1.5rem">${renderRelatorioGeralCompleto(fech)}</div>
       <div id="pdf-export-area"></div>
     `;
