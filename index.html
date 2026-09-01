@@ -1111,15 +1111,34 @@
   .dash-op .rot { font-size: var(--fs-xs); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); }
   .dash-op .val { font-size: 27px; font-weight: 800; letter-spacing: -.02em; color: var(--text-primary); line-height: 1; }
   .dash-op .val.dim { font-size: 21px; }
+  /* card único de operação: técnicos, gasolina e aluguel lado a lado, com
+     divisória entre eles (pedido do cliente, 01/09/2026 — antes eram 3 cards) */
+  .dash-op.dash-uno { flex-direction: row; gap: 0; padding: 0; }
+  .dash-uno .op-bloco {
+    flex: 1 1 0; display: flex; flex-direction: column; gap: 6px;
+    padding: 18px 22px; border-left: 1px solid var(--border);
+  }
+  .dash-uno .op-bloco:first-child { border-left: none; }
+  .dash-uno .op-bloco .val { font-size: 30px; }
+  .dash-uno .op-bloco .sub { font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.45; }
+  .dash-uno .op-bloco .sub b { color: var(--text-primary); font-weight: 700; font-variant-numeric: tabular-nums; }
+  /* fica dentro da grade .dash-oper, então precisa atravessar as colunas */
+  .dash-obs {
+    grid-column: 1 / -1; margin: 0; padding: 11px 16px; border-radius: var(--r-sm);
+    background: var(--warn-bg); border: 1px solid var(--warn-borda);
+    font-size: var(--fs-sm); color: var(--warn-text); line-height: 1.5;
+  }
+  .dash-obs b { font-weight: 800; }
+  @media (max-width: 760px) {
+    .dash-op.dash-uno { flex-direction: column; }
+    .dash-uno .op-bloco { border-left: none; border-top: 1px solid var(--border); }
+    .dash-uno .op-bloco:first-child { border-top: none; }
+  }
   .dash-quebra { display: flex; flex-direction: column; gap: 5px; }
   .dash-quebra .l { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; font-size: var(--fs-sm); color: var(--text-secondary); }
   .dash-quebra .l b { color: var(--text-primary); font-weight: 700; font-variant-numeric: tabular-nums; }
   .dash-quebra .tr { grid-column: 1 / -1; height: 5px; border-radius: 999px; background: var(--track-bg); overflow: hidden; }
   .dash-quebra .tr i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
-  .dash-split { display: flex; gap: 8px; }
-  .dash-split > div { flex: 1; background: var(--total-bg); border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px; }
-  .dash-split .n { font-size: 19px; font-weight: 800; color: var(--text-primary); line-height: 1.1; }
-  .dash-split .t { font-size: var(--fs-xs); color: var(--text-muted); font-weight: 600; }
   @media (max-width: 820px) { .dash-dinheiro { grid-template-columns: 1fr; } }
 
   /* ===================== MENU INICIAL (tela de entrada) =====================
@@ -5972,13 +5991,18 @@ function renderDashboard() {
     // A planilha só traz o valor do próprio (JH vem zerado), então o custo dos
     // carros da JH é somado aqui — sem isso a despesa sai R$ 57.600 menor.
     const ALUGUEL_JH = 2400;
+    // Quantos carros a JH tem ALUGADOS da locadora — número de contrato, não
+    // sai da planilha: o carro parado continua sendo pago mas não tem técnico,
+    // então nunca aparece no fechamento. Informado pelo cliente (01/09/2026):
+    // 27 alugados, 3 parados, 24 rodando com técnico.
+    const CARROS_JH_ALUGADOS = 27;
+    const CARROS_JH_PARADOS = 3;
     const ehFrotaPropria = f => /propri/i.test(normalizeHeader(f.frota));
     const ehFrotaJH = f => f.frota && !ehFrotaPropria(f);
     const nFrotaPropria = fech.filter(ehFrotaPropria).length;
     const nFrotaJH = fech.filter(ehFrotaJH).length;
-    const temFrota = (nFrotaPropria + nFrotaJH) > 0;
     const aluguelProprio = fech.reduce((a, f) => a + (ehFrotaPropria(f) ? (f.aluguel_carro || 0) : 0), 0);
-    const aluguelLocadora = nFrotaJH * ALUGUEL_JH;
+    const aluguelLocadora = CARROS_JH_ALUGADOS * ALUGUEL_JH;
     const aluguelTotal = aluguelProprio + aluguelLocadora;
     // a coluna DESPESAS da planilha já inclui o aluguel do próprio, mas não o
     // da locadora — por isso soma só a parte da JH.
@@ -6156,29 +6180,28 @@ function renderDashboard() {
       </p>
       ${resumoFinanceiro}
       <div class="dash-oper">
-        <div class="dash-op">
-          <div class="topo"><span class="rot">Técnicos ativos</span><span class="val">${ativos.length}</span></div>
-          <div class="dash-split">
-            <div><div class="n">${ativos.reduce((x,f)=>x+(f.dias_trabalhados||0),0)}</div><div class="t">dias trabalhados</div></div>
-            <div><div class="n">${ativos.length ? (ativos.reduce((x,f)=>x+(f.dias_trabalhados||0),0)/ativos.length).toFixed(1) : 0}</div><div class="t">média por técnico</div></div>
+        <div class="dash-op largo dash-uno">
+          <div class="op-bloco">
+            <span class="rot">Técnicos ativos</span>
+            <span class="val">${ativos.length}</span>
+            <span class="sub">média de <b>${ativos.length ? (ativos.reduce((x,f)=>x+(f.dias_trabalhados||0),0)/ativos.length).toFixed(1).replace('.', ',') : 0}</b> dias por técnico</span>
+          </div>
+          <div class="op-bloco">
+            <span class="rot">Gasolina</span>
+            <span class="val">${formatCurrency(gasolina)}</span>
+            <span class="sub">média de <b>${formatCurrency(technicians ? gasolina / technicians : 0)}</b> por técnico</span>
+          </div>
+          <div class="op-bloco">
+            <span class="rot">Aluguel de carro</span>
+            <span class="val">${formatCurrency(aluguelTotal)}</span>
+            <span class="sub"><b>${CARROS_JH_ALUGADOS} carros × ${formatCurrency(ALUGUEL_JH)}</b> = ${formatCurrency(aluguelLocadora)} — locadora</span>
+            <span class="sub"><b>${formatCurrency(aluguelProprio)}</b> — carros próprios, pagos ao técnico${nFrotaPropria ? ` (${nFrotaPropria})` : ''}</span>
           </div>
         </div>
-        <div class="dash-op">
-          <div class="topo"><span class="rot">Gasolina</span><span class="val dim">${formatCurrency(gasolina)}</span></div>
-          <div class="dash-split">
-            <div><div class="n">${formatCurrency(technicians ? gasolina / technicians : 0)}</div><div class="t">por técnico</div></div>
-            <div><div class="n">${totalOrdens ? formatCurrency(gasolina / totalOrdens) : '—'}</div><div class="t">por ordem</div></div>
-          </div>
-        </div>
-        <div class="dash-op">
-          <div class="topo"><span class="rot">Aluguel de carro</span><span class="val dim">${formatCurrency(aluguelTotal)}</span></div>
-          ${temFrota
-            ? `<div class="dash-split">
-                 <div><div class="n">${formatCurrency(aluguelLocadora)}</div><div class="t">${nFrotaJH} da JH — locadora</div></div>
-                 <div><div class="n">${formatCurrency(aluguelProprio)}</div><div class="t">${nFrotaPropria} próprio — ao técnico</div></div>
-               </div>`
-            : `<div style="font-size:var(--fs-sm);color:var(--text-muted)">A planilha deste ciclo não trouxe a coluna FROTA, então não dá pra separar carro próprio do carro da JH.</div>`}
-        </div>
+        <p class="dash-obs">
+          <b>${CARROS_JH_PARADOS} carros parados</b> no ciclo — por isso, dos ${CARROS_JH_ALUGADOS} alugados,
+          só ${CARROS_JH_ALUGADOS - CARROS_JH_PARADOS} estão rodando com técnico. O aluguel é pago nos ${CARROS_JH_ALUGADOS} de qualquer forma.
+        </p>
         <div class="dash-op largo">
           <div class="topo"><span class="rot">Produção por tipo de serviço</span><span class="val">${totalOrdens.toLocaleString('pt-BR')}</span></div>
           <div class="dash-quebra">
