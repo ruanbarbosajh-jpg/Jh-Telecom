@@ -1615,11 +1615,27 @@ const SEM_PERIODO_FOLHA = '(sem período informado)';
 // Linhas antigas (periodo null/'' vindas do banco antes do SEM_PERIODO_FOLHA)
 // entram no mesmo balde das novas linhas-sentinela, senão as duas formas de
 // "sem período" nunca se juntam e continuam aparecendo como duplicata na tela.
+// A ÚLTIMA linha da aba FOLHA é o total da equipe ("39 TÉCNICOS", "40 TECNICOS"),
+// não uma pessoa. Ela carrega os TOTAIS, então entrar como técnico DOBRA todo
+// somatório da folha. Achado real em produção (01/09/2026): descontos
+// R$ 24.896,66 em vez de R$ 12.448,33 e aluguel R$ 17.466,20 em vez de
+// R$ 8.733,10 — os dois exatamente o dobro.
+function ehLinhaDeTotalDaFolha(tecnico) {
+  return /^\d+\s*t[ée]cnicos?$/i.test(normalizeHeader(tecnico));
+}
 function deduplicarFolhaPagamento(rows) {
   const porChave = new Map();
   rows.forEach(r => {
+    // A guarda também roda AQUI, na carga, e não só na importação: quem
+    // importou antes dela existir tem a linha de total gravada no banco, e
+    // sem isso a tela continuaria dobrando até alguém limpar o Postgres
+    // (ver sql/PASSO-14-limpar-linha-total-folha.sql).
+    if (ehLinhaDeTotalDaFolha(r.tecnico)) return;
     const periodoChave = (!r.periodo || r.periodo === SEM_PERIODO_FOLHA) ? '' : r.periodo;
-    const chave = `${r.tecnico}|${periodoChave}`;
+    // chave pelo nome NORMALIZADO: a mesma pessoa gravada como "CARLOS ANDRÉ"
+    // numa importação e "Carlos André" na outra virava duas linhas distintas
+    // e somava duas vezes
+    const chave = `${normalizeHeader(r.tecnico)}|${periodoChave}`;
     const atual = porChave.get(chave);
     if (!atual || (r.total_ordens || 0) > (atual.total_ordens || 0)) porChave.set(chave, r);
   });
@@ -5055,9 +5071,9 @@ function insertRow(target, map, row, extra) {
       const tecnico = s('tecnico');
       // A última linha da aba é o TOTAL da equipe ("37 TÉCNICOS", "40 TECNICOS")
       // e vinha entrando como se fosse mais um técnico — com isso todo somatório
-      // da folha saía DOBRADO (descontos R$ 24.896,66 em vez de R$ 12.448,33).
-      // Linha de total tem o nome no formato "<número> TÉCNICO(S)".
-      if (/^\d+\s*t[ée]cnicos?$/i.test(normalizeHeader(tecnico))) return null;
+      // da folha saía DOBRADO. Mesma regra usada na carga, ver
+      // ehLinhaDeTotalDaFolha / deduplicarFolhaPagamento.
+      if (ehLinhaDeTotalDaFolha(tecnico)) return null;
       // a planilha às vezes não tem coluna de período — se não tiver, usamos o
       // que foi perguntado uma vez no início da importação (ver importSheet).
       // Nunca fica em '' nem null — ver SEM_PERIODO_FOLHA.
@@ -6136,7 +6152,7 @@ function renderDashboard() {
         <td class="num">${(f.upgrade||0).toLocaleString('pt-BR')}</td>
         <td class="num"><b>${(f.total_geral||0).toLocaleString('pt-BR')}</b></td>
         <td class="num">${formatCurrency(f.valor_pago_giga||0)}</td>
-        <td class="num">${formatCurrency(f.total_liquido||0)}</td>
+        <td class="num">${formatCurrency(f.valor_ordens||0)}</td>
         ${temFolha ? `<td class="num" style="color:var(--danger)">${fp && fp.total_descontos ? formatCurrency(fp.total_descontos) : '—'}</td>
           <td class="num"><b>${fp ? formatCurrency(fp.total_receber||0) : '—'}</b></td>` : ''}
         <td class="num">${alu ? formatCurrency(alu) : '—'}</td>
@@ -6157,7 +6173,7 @@ function renderDashboard() {
           <tr><th>Técnico</th><th class="num">Dias</th><th class="num">Ativação</th><th class="num">M. Cômodo</th>
             <th class="num">M. Endereço</th><th class="num">Reparo</th><th class="num">Upgrade</th><th class="num">Total</th>
             <th class="num" title="O que a GIGA paga à JH pelas ordens desse técnico (coluna VALOR PAGO GIGA)">GIGA → JH</th>
-            <th class="num" title="O que a JH paga ao técnico, já sem os descontos de IFI e IRR (coluna TOTAL LÍQUIDO = VALOR ORDENS − DESC. IFI − DESC. IRR)">JH → técnico</th>
+            <th class="num" title="O que as ordens do técnico renderam para ele, antes de qualquer desconto (coluna VALOR ORDENS) — é o mesmo número do ranking. Os descontos vêm na coluna ao lado.">JH → técnico</th>
             ${temFolha ? '<th class="num">Descontos</th><th class="num">A receber</th>' : ''}
             <th class="num">Aluguel</th><th class="num">Gasolina</th></tr>
           <tr class="total-row">
@@ -6165,7 +6181,7 @@ function renderDashboard() {
             <td class="num">${S('ativacao').toLocaleString('pt-BR')}</td><td class="num">${S('mc').toLocaleString('pt-BR')}</td>
             <td class="num">${S('me').toLocaleString('pt-BR')}</td><td class="num">${S('reparos').toLocaleString('pt-BR')}</td>
             <td class="num">${S('upgrade').toLocaleString('pt-BR')}</td><td class="num">${S('total_geral').toLocaleString('pt-BR')}</td>
-            <td class="num">${formatCurrency(S('valor_pago_giga'))}</td><td class="num">${formatCurrency(S('total_liquido'))}</td>
+            <td class="num">${formatCurrency(S('valor_pago_giga'))}</td><td class="num">${formatCurrency(S('valor_ordens'))}</td>
             ${temFolha ? `<td class="num">${formatCurrency(somaFolha('total_descontos'))}</td><td class="num">${formatCurrency(somaFolha('total_receber'))}</td>` : ''}
             <td class="num">${formatCurrency(alu)}</td><td class="num">${formatCurrency(S('gasolina'))}</td></tr>
         </thead>
@@ -6293,13 +6309,6 @@ function renderDashboard() {
       </p>
       ${temFolha && folhaDesc > 0 ? `
       <div class="section-heading sem-toggle">Descontos da folha<span class="sec-nota">por que o técnico recebe menos que o valor das ordens</span></div>
-      <p style="font-size:var(--fs-md);color:var(--text-secondary);margin:-6px 0 14px;line-height:1.6">
-        As ordens do ciclo renderam <b style="color:var(--text-primary)">${formatCurrency(folhaOrdens)}</b>${folhaAluguel > 0
-          ? `, mais <b style="color:var(--text-primary)">${formatCurrency(folhaAluguel)}</b> de aluguel de carro próprio` : ''}.
-        Depois de <b style="color:var(--danger)">${formatCurrency(folhaDesc)}</b> em descontos,
-        o total pago aos técnicos foi <b style="color:var(--success)">${formatCurrency(folhaReceber)}</b>
-        — ${nComDesconto} de ${folhaCiclo.length} técnicos tiveram algum desconto.
-      </p>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table dash-tab">
         <thead><tr><th>Motivo do desconto</th><th class="num">Valor</th>
           <th class="num">% dos descontos</th><th class="num">Técnicos atingidos</th></tr></thead>
