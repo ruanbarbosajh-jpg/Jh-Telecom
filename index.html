@@ -6105,14 +6105,34 @@ function renderDashboard() {
       { c: 'desc_combustivel',  rot: 'Combustível' },
       { c: 'desc_fiscalizacao', rot: 'Fiscalização' },
     ];
+    // O "Retorno IRR" sai da linha IRR da planilha de COMPARAÇÃO, e não da soma
+    // da folha (pedido do cliente, 02/09/2026). Motivo: os dois números
+    // apareciam na MESMA tela sem bater — o Resumo financeiro logo acima
+    // mostrava R$ 3.986,50 e esta tabela R$ 4.063,50. A Comparação é o valor
+    // contábil fechado do ciclo, então ela manda. Só o IRR: o cliente pediu
+    // explicitamente "somente" esse. Sem a planilha importada, continua a soma
+    // da folha, como antes.
+    const rotuloCiclo = `${formatDate(s)} a ${formatDate(e)}`;
+    const cmpCat = DB.comparativoFinanceiro && DB.comparativoFinanceiro.porCategoria;
+    const valorDaComparacao = nome => {
+      if (!cmpCat) return undefined;
+      const par = Object.entries(cmpCat).find(([k]) => normalizeHeader(k) === nome);
+      return par ? par[1][rotuloCiclo] : undefined;
+    };
+    const irrComparacao = valorDaComparacao('irr');
     const descontos = CAMPOS_DESCONTO
-      .map(d => ({ ...d, v: somaNaFolha(d.c), n: folhaCiclo.filter(f => (f[d.c] || 0) > 0).length }))
+      .map(d => {
+        const daFolha = somaNaFolha(d.c);
+        const v = (d.c === 'desc_irr' && irrComparacao !== undefined) ? irrComparacao : daFolha;
+        return { ...d, v, daFolha, n: folhaCiclo.filter(f => (f[d.c] || 0) > 0).length };
+      })
       .filter(d => d.v > 0)
       .sort((a, b) => b.v - a.v);
-    const folhaOrdens  = somaNaFolha('valor_total_ordens');
-    const folhaAluguel = somaNaFolha('valor_aluguel');
-    const folhaDesc    = somaNaFolha('total_descontos');
-    const folhaReceber = somaNaFolha('total_receber');
+    // o total acompanha a troca do IRR, senão as partes deixariam de somar o
+    // total e a diferença cairia toda em "Outros lançamentos", que é justamente
+    // a linha que serve pra denunciar desconto em coluna desconhecida
+    const ajusteIrr = irrComparacao !== undefined ? irrComparacao - somaNaFolha('desc_irr') : 0;
+    const folhaDesc = somaNaFolha('total_descontos') + ajusteIrr;
     // o que a planilha totaliza menos o que as colunas de motivo explicam —
     // se sobrar, é desconto lançado em coluna que o sistema ainda não conhece
     const descOutros = folhaDesc - descontos.reduce((a, d) => a + d.v, 0);
@@ -6337,11 +6357,11 @@ function renderDashboard() {
         <tbody>
           ${descontos.map(d => `<tr><td>${esc(d.rot)}</td>
             <td class="num" style="color:var(--danger);font-weight:700">${formatCurrency(d.v)}</td>
-            <td class="num">${(d.v / folhaDesc * 100).toFixed(1).replace('.', ',')}%</td>
+            <td class="num">${formatPct(d.v / folhaDesc * 100)}</td>
             <td class="num">${d.n}</td></tr>`).join('')}
           ${descOutros > 0.01 ? `<tr><td>Outros lançamentos</td>
             <td class="num" style="color:var(--danger);font-weight:700">${formatCurrency(descOutros)}</td>
-            <td class="num">${(descOutros / folhaDesc * 100).toFixed(1).replace('.', ',')}%</td>
+            <td class="num">${formatPct(descOutros / folhaDesc * 100)}</td>
             <td class="num">—</td></tr>` : ''}
         </tbody>
         <tfoot><tr class="total-row"><td>Total dos descontos</td>
