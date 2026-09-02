@@ -371,10 +371,13 @@
      aquilo era tela de prazo. Puxado pro ciano escuro pra diferenciar sem
      clarear — o cliente já tinha pedido "escuro mesmo" no tema escuro.
      São fixos de propósito, como o banner sempre foi: não seguem o tema. */
+  /* Matiz ~208° (azul). A primeira tentativa foi em ~199°, que puxava pro
+     ciano/verde — o cliente pediu mais azul. Continua longe do indigo ~227°
+     do resto do sistema, que é o ponto de diferenciar a área. */
   :root {
-    --pz-1: #041d2b; --pz-2: #0a3d55; --pz-3: #0e5673;  /* gradiente do banner */
-    --pz-solido: #082c3c;   /* cabeçalho/rodapé da tabela e pílula do mês */
-    --pz-sub: #8ed3ef;      /* subtítulo dentro do banner */
+    --pz-1: #04203f; --pz-2: #0a4478; --pz-3: #0f5a96;  /* gradiente do banner */
+    --pz-solido: #0a3055;   /* cabeçalho/rodapé da tabela e pílula do mês */
+    --pz-sub: #9ec9f5;      /* subtítulo dentro do banner */
   }
   .pzcard { border-radius: 22px; overflow: hidden; border: 1px solid var(--border); margin-bottom: 1.5rem; background: var(--card-bg); }
   .pzcard-top { display: flex; align-items: stretch; gap: 20px; flex-wrap: wrap; background: var(--card-bg); padding: 16px 28px 16px 0; }
@@ -2793,6 +2796,19 @@ function formatCurrency(v) { return (v || 0).toLocaleString('pt-BR', { style: 'c
 // meio de valores em R$ formatados com vírgula (achado em 01/09/2026: 75
 // ocorrências só no Dashboard).
 function formatPct(v, casas = 1) { return Number(v || 0).toFixed(casas).replace('.', ',') + '%'; }
+// "#22c55e" + 0.16 -> "rgba(34, 197, 94, 0.16)".
+// Existe por causa do "Gerar imagem": o html2canvas 1.4.1 não entende
+// color-mix(), o Chrome resolve para color(srgb …) e a captura morre com
+// "unsupported color function". Como o elemento fica direto sobre o cartão,
+// rgba com a mesma proporção dá o MESMO resultado na tela.
+function corComAlfa(hex, alfa) {
+  const m = String(hex).trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!m) return hex;
+  let h = m[1];
+  if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  const [r, g, b] = [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16));
+  return `rgba(${r}, ${g}, ${b}, ${alfa})`;
+}
 // ---------- TABELA DE VALORES POR SERVIÇO (fixa) ----------
 // Decisão do cliente: esses valores NÃO vêm mais de planilha. São de contrato,
 // mudam muito raramente, e vinham de uma aba ("VALORES ORDENS") com layout
@@ -7528,7 +7544,7 @@ function renderCartaoPrazo(opts) {
         </div>
       </div>
       <div class="pzcard-badge">
-        <span class="pzcard-badge-icon" style="color:${corGeral};background:color-mix(in srgb, ${corGeral} 16%, var(--card-bg))"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <span class="pzcard-badge-icon" style="color:${corGeral};background:${corComAlfa(corGeral, 0.16)}"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>
         </svg></span>
         <div>
@@ -7718,6 +7734,29 @@ function esc(v) {
 // contorno sem lib. html2canvas lê o DOM de verdade (sem esse bloqueio).
 // `aoTerminar` (opcional) roda depois da captura — usado por
 // ativarBotoesImagem pra desfazer um wrapper temporário (ver mais abaixo).
+// Reescreve color(srgb r g b [/ a]) como rgb()/rgba() nos elementos do clone
+// que o html2canvas vai desenhar. É o formato que o Chrome devolve quando o
+// CSS usa color-mix(); a lib não sabe ler e derruba a captura toda.
+function normalizarCoresModernas(raiz) {
+  if (!raiz) return;
+  const PROPS = ['color', 'backgroundColor', 'borderTopColor', 'borderRightColor',
+    'borderBottomColor', 'borderLeftColor', 'outlineColor', 'fill', 'stroke'];
+  const paraRgb = v => {
+    const m = String(v || '').match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)/i);
+    if (!m) return null;
+    const [r, g, b] = [1, 2, 3].map(i => Math.round(parseFloat(m[i]) * 255));
+    const a = m[4] !== undefined ? parseFloat(m[4]) : 1;
+    return a < 1 ? `rgba(${r}, ${g}, ${b}, ${a})` : `rgb(${r}, ${g}, ${b})`;
+  };
+  [raiz, ...raiz.querySelectorAll('*')].forEach(el => {
+    let cs;
+    try { cs = getComputedStyle(el); } catch (e) { return; }
+    PROPS.forEach(p => { const novo = paraRgb(cs[p]); if (novo) el.style[p] = novo; });
+    // drop-shadow com color-mix (ver .gauge-arc-fill) não tem como converter:
+    // sai o filtro, que é só brilho — a forma continua igual na imagem
+    if (/color\(|color-mix/i.test(cs.filter || '')) el.style.filter = 'none';
+  });
+}
 function capturarElementoComoImagem(elemento, nomeArquivo, aoTerminar) {
   const limpar = () => { if (aoTerminar) aoTerminar(); };
   if (!elemento) { limpar(); return; }
@@ -7729,6 +7768,11 @@ function capturarElementoComoImagem(elemento, nomeArquivo, aoTerminar) {
     scale: window.devicePixelRatio > 1 ? 2 : 1,
     useCORS: true,
     ignoreElements: el => el.classList && (el.classList.contains('secao-toggle') || el.classList.contains('gerar-imagem-btn')),
+    // A lib é de 2022 e não conhece as funções de cor novas: o Chrome resolve
+    // color-mix() para color(srgb …) e ela aborta a captura inteira com
+    // "unsupported color function". Aqui o CLONE (nunca a tela de verdade) tem
+    // esses valores reescritos como rgb() antes de desenhar.
+    onclone: (doc, clone) => normalizarCoresModernas(clone),
   }).then(cv => {
     limpar();
     cv.toBlob(blob => {
@@ -7739,7 +7783,14 @@ function capturarElementoComoImagem(elemento, nomeArquivo, aoTerminar) {
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
-  }).catch(() => { limpar(); toast('Não consegui gerar a imagem — tente de novo.', 'aviso'); });
+  }).catch(err => {
+    limpar();
+    // o erro era engolido por completo, então "tente de novo" era o único
+    // sintoma de uma falha que NUNCA ia passar tentando de novo
+    console.error('[gerar imagem] falhou:', err);
+    toast(ehAnalista() ? `Não consegui gerar a imagem: ${String(err && err.message || err).slice(0, 90)}`
+                       : 'Não consegui gerar a imagem — tente de novo.', 'aviso');
+  });
 }
 // Liga o botão "🖼 Gerar imagem" de cada renderCartaoPrazo (DIA e MÊS) — um
 // só wiring serve pros dois, porque os dois usam o mesmo atributo/data-id.
