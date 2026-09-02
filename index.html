@@ -807,6 +807,9 @@
     border: 2.5px solid #fff; color: #fff; font-weight: 800; font-size: 12.5px;
     box-shadow: 0 2px 8px rgba(0,0,0,.4); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
   }
+  /* bairro com ordem já visitada: além do vermelho, um halo pra ele saltar
+     mesmo quando é um marcador pequeno perdido no meio dos outros */
+  .mapa-cluster-marca.revisita { box-shadow: 0 0 0 4px rgba(239,68,68,.35), 0 2px 10px rgba(0,0,0,.5); }
   /* conteúdo do popup do mapa (fundo sempre claro — é o padrão do Leaflet,
      não segue o tema do site — por isso cor fixa, igual o resto do popup) */
   .mapa-popup-cabecalho { font-size: 13px; color: #1e293b; margin-bottom: 8px; }
@@ -4489,6 +4492,12 @@ function renderMapaBairros(elId, rankingBairros) {
 // o contorno de "já visitada" já usa vermelho, e um preenchimento vermelho
 // junto ia confundir com esse aviso.
 const MAPA_CORES_STATUS = { pendente: '#facc15', em_rota: '#fb923c', iniciado: '#38bdf8', concluido: '#22c55e', nao_concluido: '#a855f7', cancelado: '#64748b' };
+// Bairro que tem alguma ordem JÁ VISITADA fica VERMELHO por inteiro (pedido do
+// cliente, 02/09/2026). Antes era só um contorno vermelho de 2,5px, que sumia
+// no meio de dezenas de marcadores — dava pra passar o olho no mapa e não ver.
+// Vermelho ganha do status: nenhuma cor de MAPA_CORES_STATUS é vermelha, de
+// propósito, então vermelho no mapa só pode querer dizer "voltou pro campo".
+const MAPA_COR_REVISITA = '#ef4444';
 const MAPA_STATUS_LABEL = { concluido: 'Concluído', nao_concluido: 'Não Concluído', cancelado: 'Cancelado', em_rota: 'Em Rota', iniciado: 'Iniciado', pendente: 'Pendente' };
 // Prioridade de status pra escolher a cor do CÍRCULO DO BAIRRO (que agora
 // representa várias O.S de status misto): o bairro só fica verde quando TUDO
@@ -4538,11 +4547,12 @@ function renderMapaOrdensAbertas(elId, ordens) {
     const ratio = grupo.length / maxTotal;
     const diametro = Math.round(26 + Math.sqrt(ratio) * 34); // área ∝ total de O.S
     const dominante = statusDominanteBairro(grupo);
-    const cor = MAPA_CORES_STATUS[dominante];
     const temRevisita = grupo.some(o => o.revisita);
+    // vermelho manda: o status do bairro continua no popup, ordem por ordem
+    const cor = temRevisita ? MAPA_COR_REVISITA : MAPA_CORES_STATUS[dominante];
     const icone = L.divIcon({
       className: 'mapa-cluster-icone',
-      html: `<div class="mapa-cluster-marca" style="width:${diametro}px;height:${diametro}px;background:${cor};${temRevisita ? 'border-color:#ef4444' : ''}">${grupo.length}</div>`,
+      html: `<div class="mapa-cluster-marca${temRevisita ? ' revisita' : ''}" style="width:${diametro}px;height:${diametro}px;background:${cor}">${grupo.length}</div>`,
       iconSize: [diametro, diametro],
       iconAnchor: [diametro / 2, diametro / 2],
     });
@@ -9753,7 +9763,7 @@ function renderParcialDoDia() {
         <div id="pd-mapa" class="mapa-cidades"></div>
         <div class="mapa-legenda" id="pd-mapa-legenda">
           ${MAPA_BUCKETS.map(b => `<label class="legend-item" style="cursor:pointer"><input type="checkbox" class="pd-mapa-status-check" value="${b}" checked style="margin-right:4px"><span class="legend-dot" style="background:${MAPA_CORES_STATUS[b]}"></span>${MAPA_STATUS_LABEL[b]}</label>`).join('')}
-          <label class="legend-item" style="cursor:pointer"><input type="checkbox" id="pd-mapa-revisita-check" checked style="margin-right:4px"><span class="legend-dot" style="background:transparent;border:2.5px solid #ef4444"></span>Já visitada, dada improdutiva — voltou pro campo</label>
+          <label class="legend-item" style="cursor:pointer"><input type="checkbox" id="pd-mapa-revisita-check" checked style="margin-right:4px"><span class="legend-dot" style="background:${MAPA_COR_REVISITA}"></span>Já visitada, dada improdutiva — voltou pro campo <b style="color:${MAPA_COR_REVISITA}">(bairro fica vermelho)</b></label>
         </div>
       </div>`}
 
