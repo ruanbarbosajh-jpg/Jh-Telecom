@@ -1986,6 +1986,16 @@ if (supa) {
   // continua valendo, então não sobrescrevemos mais com o aviso técnico
   if (hint) hint.textContent = 'Produção e eficiência por técnico, acompanhamento de prazos (SLA de 24h), IFI/IRR e retornos, parcial do dia por cidade, frota, pedágio, financeiro e folha de pagamento — tudo alimentado pelas planilhas da operação.';
   if (banner) banner.style.display = 'none';
+} else if (!ehArquivoLocal()) {
+  // Página servida por http/https e o Supabase NÃO carregou: isso é falha, não
+  // um modo de uso. Avisa já na abertura, em vez de deixar a pessoa digitar a
+  // senha pra só então descobrir (o bloqueio em si está no doLogin).
+  const hint = document.getElementById('login-hint');
+  if (hint) {
+    hint.innerHTML = '<b style="color:var(--danger)">Sem conexão com o servidor.</b> '
+      + 'O login está bloqueado por segurança — recarregue a página (F5). '
+      + 'Se continuar, avise o Analista.';
+  }
 }
 
 // ===================== USUÁRIOS DE DEMONSTRAÇÃO =====================
@@ -2083,11 +2093,15 @@ const ROUTE_PERMISSIONS = {
   // A Folha de Pagamento continua liberada de propósito: é o RH quem lança dias
   // trabalhados e bônus (podeEditarFolhaPagamento).
   rh: ['dashboard', 'relatoriosdia', 'relatorios', 'import', 'retornosgiga'],
-  // Gestão (01/09/2026, pedido do cliente): SÓ o Dashboard. Como esta é uma
-  // lista de BLOQUEIO, a regra é "tudo menos 'dashboard' e 'inicio'" — e é
-  // montada a partir de PAGES pra que rota nova já nasça bloqueada pra ela,
-  // em vez de aparecer por esquecimento.
-  gestao: null, // preenchida logo abaixo, depois que PAGES existe
+  // Gestão (02/09/2026, pedido do cliente): MESMO acesso do Analista. Como o
+  // Analista não tem entrada aqui — lista de bloqueio vazia é o que dá acesso
+  // total —, a Gestão também não tem. Em 01/09 ela esteve restrita só ao
+  // Dashboard (via trancarGestaoSoNoDashboard, removida); se um dia voltar a
+  // ser restrita, o jeito certo é montar a lista a partir de PAGES, pra rota
+  // nova nascer bloqueada em vez de aparecer por esquecimento.
+  // ATENÇÃO: com isso ela também enxerga "Importar Excel". O que continua
+  // exclusivo do Analista são os avisos técnicos e a edição que passa por
+  // ehAnalista(), que compara o papel direto e não olha esta lista.
   // Escritório (revisado 01/09/2026, pedido do cliente):
   //   • PRAZO: tudo (reparo 24h, ativações 36h, ofensores, PCR, Parcial do Dia)
   //     (as telas de Pleito foram removidas em 02/09/2026).
@@ -2160,7 +2174,12 @@ function podeExcluirTecnicoPresenca() { return !!currentUser && currentUser.role
 // TÉCNICOS (NOMES_PRESENCA_EDITAM) e Thaís/Rebeca só olham.
 const NOMES_ESCRITORIO_EDITAM = ['Thaís', 'Rebeca'];
 // Perfis que ENXERGAM o quadro do escritório sem editar. Gestão fica de fora.
-const PERFIS_VEEM_PRESENCA_ESCRITORIO = ['escritorio', 'admin', 'rh', 'almox'];
+// 'gestao' entrou em 02/09/2026: o cliente pediu que a Gestão tenha o mesmo
+// acesso do Analista, e esta tela é a única que não passa por ROUTE_PERMISSIONS
+// — sem incluir aqui, ela ficaria com 23 telas contra as 24 dele. VER, não
+// editar: quem edita continua sendo Analista, Thaís e Rebeca, por NOME
+// (podeEditarPresencaEscritorio).
+const PERFIS_VEEM_PRESENCA_ESCRITORIO = ['escritorio', 'admin', 'rh', 'almox', 'gestao'];
 function podeEditarPresencaEscritorio() { return !!currentUser && (currentUser.role === 'analista' || NOMES_ESCRITORIO_EDITAM.includes(currentUser.nome)); }
 function podeAcessar(role, route) {
   // Presença — Escritório separa VER de EDITAR, coisa que ROUTE_PERMISSIONS não
@@ -2734,6 +2753,14 @@ async function confirmarTrocaUsuario() {
 // "perfis"; se a conta ainda não estiver lá, entra como Escritório (o perfil que
 // menos enxerga) em vez de dar acesso total por engano.
 const USA_AUTH = !!supa;
+// "O arquivo foi aberto direto do disco?" — file:// (e o about:blank de alguns
+// visualizadores). É o único cenário em que entrar sem senha é aceitável: não
+// existe servidor, não existe dado, e é o uso documentado de mandar o HTML
+// solto pra alguém abrir. Num site publicado, ficar sem Supabase é FALHA, não
+// um modo de operação — ver doLogin().
+function ehArquivoLocal() {
+  return location.protocol === 'file:' || location.protocol === 'about:';
+}
 // Cada PERFIL da tela de login corresponde a uma conta fixa do Supabase. A
 // pessoa continua escolhendo "Analista" e digitando a senha, como sempre foi —
 // o e-mail é só o endereço interno da conta, ninguém precisa saber de cor.
@@ -2837,9 +2864,20 @@ async function doLogin() {
   }
 
   // ---- modo offline (sem Supabase): entra pelo PERFIL escolhido ----
-  // Não confere senha: ela não existe mais no arquivo (ver USERS). Só acontece
-  // quando o Supabase não responde ou o HTML é aberto direto do disco — e aí o
-  // sistema abre vazio, sem nenhum dado, até alguém importar planilha.
+  // Não confere senha: ela não existe mais no arquivo (ver USERS).
+  //
+  // E é por isso que este caminho NÃO pode valer num site publicado. Se a
+  // página veio de http/https, o Supabase deveria ter carregado; não ter
+  // carregado significa CDN fora do ar ou bloqueada — e cair aqui entregaria
+  // o sistema inteiro a quem escolher "Analista" na lista, sem senha nenhuma.
+  // Basta bloquear o script do Supabase no navegador pra virar chave mestra.
+  // Só o arquivo aberto do disco (file://) segue no modo sem senha, que é o
+  // uso documentado de "abrir o HTML direto" — ali não há servidor nem dado.
+  if (!ehArquivoLocal()) {
+    errorEl.innerHTML = 'Não deu para falar com o servidor, então o login está bloqueado por segurança.<br>'
+      + 'Recarregue a página (F5). Se continuar, avise o Analista — pode ser a biblioteca de login bloqueada na rede.';
+    return;
+  }
   const user = usuarioOffline('li-user', 'li-nome');
   if (!user) { errorEl.textContent = 'Perfil não encontrado.'; return; }
   document.getElementById('li-user').value = user.login;
@@ -5528,17 +5566,6 @@ function renderInicio() {
   pinta();
 }
 
-// A Gestão só enxerga o Menu Inicial e o Dashboard. Montado a partir de PAGES
-// (logo abaixo da declaração dela) pra que qualquer rota nova entre bloqueada
-// por padrão — o contrário de listar o que ela não pode e esquecer de somar.
-function trancarGestaoSoNoDashboard() {
-  // SÓ o Dashboard (cliente, 01/09/2026) — nem o Menu Inicial, que é liberado
-  // pra todo mundo. Sem 'inicio' liberado, getFirstAllowedRoute() cai direto
-  // no dashboard, então o login da Gestão já abre na tela certa e o menu
-  // lateral fica com um item só.
-  const liberadas = ['dashboard'];
-  ROUTE_PERMISSIONS.gestao = Object.keys(PAGES).filter(r => !liberadas.includes(r));
-}
 
 // ===================== ROTEADOR =====================
 const PAGES = {
@@ -5570,7 +5597,6 @@ const PAGES = {
   relatorios: { title: 'Relatórios', render: renderRelatorios },
   import: { title: 'Importar Excel', render: renderImport },
 };
-trancarGestaoSoNoDashboard();
 document.getElementById('sidebar-nav').addEventListener('click', e => {
   const a = e.target.closest('a[data-route]');
   if (a) navigate(a.dataset.route);
