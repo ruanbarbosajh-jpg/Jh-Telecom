@@ -1091,8 +1091,9 @@
   .dash-fin.despesa { --linha: var(--danger); }
   .dash-fin.lucro   { --linha: var(--success); }
   .dash-fin .rot { font-size: var(--fs-xs); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--text-muted); }
-  /* o número é o que a diretoria olha primeiro — bem maior que o resto */
-  .dash-fin .val { font-size: clamp(28px, 3.9vw, 46px); font-weight: 800; letter-spacing: -.025em; color: var(--linha); line-height: 1.04; }
+  /* o número é o que a diretoria olha primeiro — maior que o resto, mas sem
+     exagero (46px estourava visualmente ao lado dos cartões de operação) */
+  .dash-fin .val { font-size: clamp(26px, 3.1vw, 37px); font-weight: 800; letter-spacing: -.025em; color: var(--linha); line-height: 1.04; }
   .dash-fin .pe  { font-size: var(--fs-sm); color: var(--text-secondary); }
   .dash-fin .pe b { color: var(--text-primary); font-weight: 700; }
   /* linha de operação */
@@ -1104,10 +1105,17 @@
      pra coluna da direita não esticar até a altura da tabela. */
   .dash-duas {
     display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr);
-    gap: 16px; align-items: start; margin-bottom: 22px;
+    gap: 16px; align-items: stretch; margin-bottom: 22px;
   }
-  .dash-duas-esq > * { margin-bottom: 0 !important; }
+  /* só o ÚLTIMO filho perde a margem de baixo — antes o seletor pegava todos
+     e comia os 10px que separam o título "Resumo financeiro do ciclo" da
+     tabela, deixando o título grudado nela */
+  .dash-duas-esq > *:last-child { margin-bottom: 0 !important; }
+  /* os cartões esticam para acompanhar a altura da tabela ao lado, em vez de
+     terminarem no meio e deixarem um vão vazio embaixo */
   .dash-duas-dir { display: flex; flex-direction: column; gap: 14px; }
+  .dash-duas-dir .dash-op.dash-uno { flex: 1 1 auto; }
+  .dash-duas-dir .op-bloco { justify-content: center; }
   /* Só enquanto as duas colunas existem: aí os blocos ficam ENFILEIRADOS na
      coluna da direita, um debaixo do outro (sem isso o auto-fit abria 2
      colunas e sobrava um bloco sozinho na 2ª linha). Quando o layout empilha,
@@ -5803,6 +5811,8 @@ function metricCard(label, value, negative, opts = {}) {
 // Faixa de alertas do topo: transforma em UMA linha o que hoje só dá pra
 // descobrir rolando a tela inteira. Não calcula nada novo — só lê os números
 // que a própria tela já produziu. itens: [{texto, tipo:'ruim'|'atencao'|'ok', rota}]
+// SEM USO no momento: saiu do Dashboard a pedido do cliente (01/09/2026).
+// Mantida porque serve pra qualquer tela — é só chamar e depois wireFaixaAlertas.
 function faixaAlertas(itens) {
   const validos = (itens || []).filter(Boolean);
   if (!validos.length) return '';
@@ -5970,15 +5980,11 @@ function renderDashboard() {
     // os indicadores da planilha vêm em fração (0,0166 = 1,66%)
     const toPct = v => Math.abs(v||0) <= 5 ? (v||0)*100 : (v||0); // fração até 500% — cobre eficiência acima de 100%
     const media = k => fech.length ? fech.reduce((a,f)=>a+toPct(f[k]),0)/fech.length : 0;
-    const eficiencia = media('eficiencia');
     const ifi = media('ind_ifi'), irr = media('ind_irr');
 
     // ---- rankings ----
     const topReceita = [...fech].sort((a,b)=>b.valor_ordens-a.valor_ordens)
       .map(f=>({label:f.tecnico, value:f.valor_ordens, display:formatCurrency(f.valor_ordens)}));
-    const porEficiencia = [...fech].sort((a,b)=>toPct(b.eficiencia)-toPct(a.eficiencia));
-    const melhorEf = porEficiencia.map(f=>({label:f.tecnico, value:toPct(f.eficiencia), display:toPct(f.eficiencia).toFixed(1)+'%', color:'#22c55e'}));
-    const piorEf = [...porEficiencia].reverse().map(f=>({label:f.tecnico, value:toPct(f.eficiencia), display:toPct(f.eficiencia).toFixed(1)+'%', color:'#ef4444'}));
     const topTechnicians = [...fech].sort((a,b)=>b.valor_ordens-a.valor_ordens).slice(0,10);
 
     // Valor pago pela GIGA por tipo de serviço (preço fixo × contagem) — usa
@@ -6092,15 +6098,8 @@ function renderDashboard() {
     };
     const varGiga = varDe(valorPagoGiga, 'valor_pago_giga');
 
-    // ---- faixa de alertas: lê indicadores que a tela JÁ calcula ----
-    const alertas = [];
-    if (eficiencia < 70) alertas.push({ tipo:'ruim', texto:`Eficiência média ${eficiencia.toFixed(1)}% (meta 70%)` });
-    if (ifi > 2.50) alertas.push({ tipo:'ruim', texto:`% IFI ${ifi.toFixed(2)}% (meta 2,50%)`, rota:'ofensor' });
-    if (irr > 4.50) alertas.push({ tipo:'ruim', texto:`% IRR ${irr.toFixed(2)}% (meta 4,50%)`, rota:'ofensor' });
-    if (lucroTotal < 0) alertas.push({ tipo:'ruim', texto:'Lucro negativo no ciclo' });
-    const forasBonus = fech.filter(f => f.status && !/^apto/i.test(String(f.status).trim())).length;
-    if (forasBonus) alertas.push({ tipo:'atencao', texto:`${forasBonus} técnico(s) fora do bônus`, rota:'production' });
-    if (!alertas.length) alertas.push({ tipo:'ok', texto:'Nenhum indicador fora da meta neste ciclo' });
+    // A faixa "Pontos de atenção" saiu daqui a pedido do cliente (01/09/2026).
+    // Os mesmos limites continuam valendo nos medidores de IFI/IRR mais abaixo.
 
     // ---- PRIORIDADE 1: dinheiro e operação (ordem pedida pelo cliente) ----
     // Técnico sem NENHUMA ordem e sem dia trabalhado sai da tabela (pedido do
@@ -6199,7 +6198,6 @@ function renderDashboard() {
       </table></div>`;
 
     body.innerHTML = `
-      ${faixaAlertas(alertas)}
       <div class="section-heading sem-toggle">Resultado do ciclo</div>
       <div class="dash-dinheiro">
         <div class="dash-fin receita">
@@ -6304,11 +6302,10 @@ function renderDashboard() {
           <td class="num" style="color:var(--danger)">${formatCurrency(folhaDesc)}</td>
           <td class="num">100,0%</td><td class="num">${nComDesconto}</td></tr></tfoot>
       </table></div>` : ''}
-      <div class="section-heading sem-toggle">Indicadores e eficiência</div>
-      <div class="panels-grid thirds">
+      <div class="section-heading sem-toggle">Indicadores de qualidade<span class="sec-nota">IFI e IRR contra a meta do contrato</span></div>
+      <div class="panels-grid">
         ${gaugePanel('% IFI médio', ifi, 2.50, {lowerIsBetter:true, decimals:2})}
         ${gaugePanel('% IRR médio', irr, 4.50, {lowerIsBetter:true, decimals:2})}
-        ${gaugePanel('Eficiência média', eficiencia, 70, {decimals:1})}
       </div>
       <div class="cards-grid">
         ${metricCard('Qtd. IFI', qtdIfi, false, {nivel:'compacto'})}
@@ -6317,24 +6314,17 @@ function renderDashboard() {
         ${metricCard('Desconto IRR', formatCurrency(descIrr), descIrr>0, {nivel:'compacto'})}
       </div>
       <div class="section-heading sem-toggle">Ranking de técnicos</div>
-      <div class="panels-grid">
-        <div class="panel"><h3>Top técnicos (valor das ordens)</h3><div id="c-receita"></div></div>
-        <div class="panel"><h3>Melhor eficiência</h3><div id="c-ef-melhor"></div></div>
-      </div>
-      <div class="panel" style="margin-bottom:1.5rem"><h3>Pior eficiência</h3><div id="c-ef-pior"></div></div>
+      <div class="panel" style="margin-bottom:1.5rem"><h3>Top técnicos (valor das ordens)</h3><div id="c-receita"></div></div>
       ${renderDashboardTechCompare(fech, toPct)}
       <div class="section-heading sem-toggle">Relatório Geral completo (linha a linha)</div>
       <div class="panel" style="margin-bottom:1.5rem">${renderRelatorioGeralCompleto(fech)}</div>
       <div id="pdf-export-area"></div>
     `;
-    wireFaixaAlertas(body);
     // produção por tipo de serviço — barras, com a contagem no fim de cada uma
     barsChart('dash-prod-tipo', tipos.map(t => ({
       label: t.rot, value: t.v, display: t.v.toLocaleString('pt-BR'),
     })));
     barsChartTopN('c-receita', topReceita, {defaultN:10});
-    barsChartTopN('c-ef-melhor', melhorEf, {defaultN:5});
-    barsChartTopN('c-ef-pior', piorEf, {defaultN:5});
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'resumo', label: 'Resumo financeiro (GIGA, despesas, lucro)' },
@@ -6347,7 +6337,6 @@ function renderDashboard() {
         { l:'Total a Receber da GIGA', v: formatCurrency(valorPagoGiga) },
         { l:'Despesas totais', v: formatCurrency(despesasTotal) },
         { l:'Lucro', v: formatCurrency(lucroTotal) },
-        { l:'Eficiência média', v: eficiencia.toFixed(1)+'%' },
       ], [ {header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v} ]),
       producao: () => {
         return secaoTabela('Produção do Ciclo — Valor pago pela GIGA', itensGiga, [
@@ -6357,7 +6346,7 @@ function renderDashboard() {
       },
       ranking: () => secaoTabela('Ranking de Técnicos', topTechnicians, [
         {header:'Técnico', get:r=>r.tecnico}, {header:'Ordens', get:r=>r.total_geral},
-        {header:'Valor Ordens', get:r=>formatCurrency(r.valor_ordens)}, {header:'Eficiência', get:r=>toPct(r.eficiencia).toFixed(1)+'%'},
+        {header:'Valor Ordens', get:r=>formatCurrency(r.valor_ordens)},
       ]),
       completo: () => secaoTabela('Relatório Geral Completo', fech, [
         {header:'Técnico', get:r=>r.tecnico}, {header:'Total Ordens', get:r=>r.total_geral},
@@ -6411,8 +6400,6 @@ function renderRelatorioGeralCompleto(fech) {
   const toPct = v => Math.abs(v||0) <= 5 ? (v||0)*100 : (v||0); // fração até 500% — cobre eficiência acima de 100%
   // APTO verde, FORA (ou qualquer outro que não seja apto) vermelho
   const statusCell = r => `<span style="color:${/apto/i.test(r.status)&&!/inapto/i.test(r.status)?'var(--success)':'var(--danger)'};font-weight:700">${r.status||'-'}</span>`;
-  // eficiência abaixo de 70% fica vermelha, senão verde
-  const eficienciaCell = r => { const v = toPct(r.eficiencia); return `<span style="color:${v<70?'var(--danger)':'var(--success)'};font-weight:700">${v.toFixed(2)}%</span>`; };
   // Lucro: quem está ABAIXO DA MÉDIA da equipe no ciclo fica vermelho, quem
   // está na média ou acima fica verde — dá pra bater o olho e ver quem está
   // puxando o resultado pra baixo sem precisar comparar linha a linha.
@@ -6431,7 +6418,7 @@ function renderRelatorioGeralCompleto(fech) {
     ['Qtd IFI', r=>r.qtd_ifi], ['Ind. IFI', r=>toPct(r.ind_ifi).toFixed(2)+'%'], ['Desc. IFI', r=>formatCurrency(r.desc_ifi)],
     ['Status', statusCell], ['Gasolina', r=>formatCurrency(r.gasolina)], ['Aluguel Carro', r=>formatCurrency(r.aluguel_carro)],
     ['Total Líquido', r=>formatCurrency(r.total_liquido)], ['Despesas', r=>formatCurrency(r.despesas)],
-    ['Lucros', lucroCell], ['Eficiência', eficienciaCell],
+    ['Lucros', lucroCell],
   ];
   return `<div class="table-wrap"><table class="data-table"><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>
     ${fech.map(r=>`<tr>${cols.map(c=>`<td>${c[1](r) ?? ''}</td>`).join('')}</tr>`).join('')}
