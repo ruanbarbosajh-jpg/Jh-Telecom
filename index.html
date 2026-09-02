@@ -799,6 +799,14 @@
   .warning-box { background: var(--warn-bg); border: 1px solid var(--warn-borda); color: var(--warn-text); border-radius: 8px; padding: 10px 14px; margin-top: 12px; font-size: 13px; }
   .demo-banner { background: var(--warn-bg); border-bottom: 1px solid var(--warn-borda); color: var(--warn-text); font-size: 12px; padding: 6px 16px; text-align: center; }
   .section-heading { font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); margin: 6px 0 10px; padding-left: 2px; }
+  /* explicação curta ao lado do título da seção (ex.: "aluguel é provento do
+     técnico"). Sem isso o texto colava no título, sem espaço nem separação. */
+  .section-heading .sec-nota {
+    margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--border);
+    font-weight: 600; text-transform: none; letter-spacing: normal;
+    font-size: var(--fs-sm); color: var(--text-secondary);
+  }
+  .section-heading .sec-nota:empty { display: none; }
   .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
   .panel-head h3 { min-width: 0; }
   /* painel de exportação de PDF — grid responsivo, nunca empilha um card em cima do outro */
@@ -1051,12 +1059,13 @@
      despesa, lucro) e a operação (técnicos, produção, gasolina, aluguel);
      indicadores e eficiência descem para o bloco secundário. */
   /* título fixo do ciclo (o Dashboard não tem filtro de período) */
-  .dash-cabecalho { margin: 4px 0 20px; }
+  .dash-cabecalho { margin: 4px 0 22px; }
   .dash-cabecalho h2 {
-    margin: 0 0 4px; font-size: clamp(19px, 2.6vw, 26px); font-weight: 800;
-    letter-spacing: -.015em; color: var(--text-primary);
+    margin: 0 0 5px; font-size: clamp(24px, 3.2vw, 34px); font-weight: 800;
+    letter-spacing: -.02em; color: var(--text-primary);
   }
-  .dash-cabecalho p { margin: 0; font-size: var(--fs-sm); color: var(--text-secondary); }
+  .dash-cabecalho p { margin: 0; font-size: var(--fs-md); color: var(--text-secondary); }
+  .dash-cabecalho p b { color: var(--text-primary); font-weight: 700; }
   /* célula numérica: alinhada à direita e com dígitos de largura fixa, pra
      coluna de dinheiro ficar reta */
   table.data-table th.num, table.data-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -1082,27 +1091,35 @@
   .dash-fin.despesa { --linha: var(--danger); }
   .dash-fin.lucro   { --linha: var(--success); }
   .dash-fin .rot { font-size: var(--fs-xs); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--text-muted); }
-  .dash-fin .val { font-size: clamp(24px, 3.2vw, 38px); font-weight: 800; letter-spacing: -.02em; color: var(--linha); line-height: 1.06; }
+  /* o número é o que a diretoria olha primeiro — bem maior que o resto */
+  .dash-fin .val { font-size: clamp(28px, 3.9vw, 46px); font-weight: 800; letter-spacing: -.025em; color: var(--linha); line-height: 1.04; }
   .dash-fin .pe  { font-size: var(--fs-sm); color: var(--text-secondary); }
   .dash-fin .pe b { color: var(--text-primary); font-weight: 700; }
   /* linha de operação */
   /* são sempre 4 cartões (técnicos, produção, gasolina, aluguel) — com
      auto-fit o grid abria 6 trilhas em tela larga e sobrava buraco à direita */
-  /* 3 cartões estreitos (técnicos, gasolina, aluguel) + Produção ocupando a
-     linha inteira: são 5 tipos de serviço, e espremidos em 1/4 da largura as
-     barras ficavam ilegíveis (pedido do cliente, 01/09/2026). */
-  .dash-oper { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 22px; }
-  .dash-op.largo { grid-column: 1 / -1; }
-  /* na linha inteira os 5 tipos ficam lado a lado, não empilhados */
-  .dash-op.largo .dash-quebra { flex-direction: row; gap: 24px; }
-  .dash-op.largo .dash-quebra .l { flex: 1 1 0; align-content: start; }
-  .dash-op.largo .dash-quebra .l b { font-size: var(--fs-lg); }
-  @media (max-width: 1150px) { .dash-oper { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 760px) {
-    .dash-oper { grid-template-columns: 1fr; }
-    .dash-op.largo .dash-quebra { flex-direction: column; gap: 5px; }
-    .dash-op.largo .dash-quebra .l b { font-size: var(--fs-sm); }
+  /* Tabela do resumo à esquerda, cartões enfileirados à direita (pedido do
+     cliente, 01/09/2026). A tabela tem ~17 linhas e sobrava uma faixa branca
+     enorme ao lado dela; os cartões aproveitam esse espaço. align-items:start
+     pra coluna da direita não esticar até a altura da tabela. */
+  .dash-duas {
+    display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr);
+    gap: 16px; align-items: start; margin-bottom: 22px;
   }
+  .dash-duas-esq > * { margin-bottom: 0 !important; }
+  .dash-duas-dir { display: flex; flex-direction: column; gap: 14px; }
+  /* Só enquanto as duas colunas existem: aí os blocos ficam ENFILEIRADOS na
+     coluna da direita, um debaixo do outro (sem isso o auto-fit abria 2
+     colunas e sobrava um bloco sozinho na 2ª linha). Quando o layout empilha,
+     a regra sai de cena e o auto-fit volta a espalhar os blocos na horizontal
+     — senão viravam 3 faixas de 950px com um número no meio.
+     Precisa das 3 classes: .dash-op.dash-uno vem depois no arquivo e ganharia
+     no desempate por ordem se a especificidade fosse igual. */
+  @media (min-width: 1101px) {
+    .dash-duas-dir .dash-op.dash-uno { grid-template-columns: 1fr; }
+  }
+  /* abaixo disso a tabela fica estreita demais e os cartões passam pra baixo */
+  @media (max-width: 1100px) { .dash-duas { grid-template-columns: 1fr; } }
   .dash-op {
     background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--r-md);
     padding: 17px 19px; display: flex; flex-direction: column; gap: 9px;
@@ -1112,33 +1129,29 @@
   .dash-op .val { font-size: 27px; font-weight: 800; letter-spacing: -.02em; color: var(--text-primary); line-height: 1; }
   .dash-op .val.dim { font-size: 21px; }
   /* card único de operação: técnicos, gasolina e aluguel lado a lado, com
-     divisória entre eles (pedido do cliente, 01/09/2026 — antes eram 3 cards) */
-  .dash-op.dash-uno { flex-direction: row; gap: 0; padding: 0; }
-  .dash-uno .op-bloco {
-    flex: 1 1 0; display: flex; flex-direction: column; gap: 6px;
-    padding: 18px 22px; border-left: 1px solid var(--border);
+     divisória entre eles (pedido do cliente, 01/09/2026 — antes eram 3 cards).
+     Grid com auto-fit em vez de largura fixa: com 3 colunas fixas, num tablet
+     de 768px cada bloco caía pra ~105px e o texto quebrava em 3 linhas. Assim
+     o próprio bloco decide quando passar pra linha de baixo, sem breakpoint
+     chutado. O gap de 1px sobre o fundo da borda faz as divisórias — funciona
+     igual quando os blocos quebram de linha, o que border-left não fazia. */
+  .dash-op.dash-uno {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1px; padding: 0; background: var(--border); overflow: hidden;
   }
-  .dash-uno .op-bloco:first-child { border-left: none; }
-  .dash-uno .op-bloco .val { font-size: 30px; }
+  .dash-uno .op-bloco {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 18px 22px; background: var(--card-bg);
+  }
+  .dash-uno .op-bloco .val { font-size: clamp(26px, 2.9vw, 36px); }
   .dash-uno .op-bloco .sub { font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.45; }
   .dash-uno .op-bloco .sub b { color: var(--text-primary); font-weight: 700; font-variant-numeric: tabular-nums; }
-  /* fica dentro da grade .dash-oper, então precisa atravessar as colunas */
   .dash-obs {
-    grid-column: 1 / -1; margin: 0; padding: 11px 16px; border-radius: var(--r-sm);
+    margin: 0; padding: 11px 16px; border-radius: var(--r-sm);
     background: var(--warn-bg); border: 1px solid var(--warn-borda);
     font-size: var(--fs-sm); color: var(--warn-text); line-height: 1.5;
   }
   .dash-obs b { font-weight: 800; }
-  @media (max-width: 760px) {
-    .dash-op.dash-uno { flex-direction: column; }
-    .dash-uno .op-bloco { border-left: none; border-top: 1px solid var(--border); }
-    .dash-uno .op-bloco:first-child { border-top: none; }
-  }
-  .dash-quebra { display: flex; flex-direction: column; gap: 5px; }
-  .dash-quebra .l { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; font-size: var(--fs-sm); color: var(--text-secondary); }
-  .dash-quebra .l b { color: var(--text-primary); font-weight: 700; font-variant-numeric: tabular-nums; }
-  .dash-quebra .tr { grid-column: 1 / -1; height: 5px; border-radius: 999px; background: var(--track-bg); overflow: hidden; }
-  .dash-quebra .tr i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
   @media (max-width: 820px) { .dash-dinheiro { grid-template-columns: 1fr; } }
 
   /* ===================== MENU INICIAL (tela de entrada) =====================
@@ -2797,10 +2810,13 @@ function precoGigaPorTipo(tipoAtividade, dataISO) {
 // total numa cor diferente do resto da tabela.
 function painelValorGiga(itensGiga, opts = {}) {
   const totalQtd = itensGiga.reduce((a,i)=>a+i.qtd,0), totalValor = itensGiga.reduce((a,i)=>a+(i.valor||0),0);
+  // centralizado só onde o chamador pedir (Dashboard) — as outras telas
+  // continuam com o alinhamento padrão da data-table
+  const cls = opts.centralizar ? 'data-table dash-tab' : 'data-table';
   return `<div class="panel" style="margin-bottom:1.5rem">
     <h3>Valor das Ordens — pago pela GIGA</h3>
     ${opts.nota ? `<p style="font-size:12px;color:var(--text-muted);margin:-8px 0 12px">${opts.nota}</p>` : ''}
-    <div class="table-wrap"><table class="data-table"><thead><tr>
+    <div class="table-wrap"><table class="${cls}"><thead><tr>
       <th>Tipo</th><th>Contagem</th><th>Valor Unitário</th><th>Valor GIGA</th>
     </tr></thead><tbody>
       ${itensGiga.map(i=>`<tr><td class="cat-cell">${i.label}</td><td>${i.qtd.toLocaleString('pt-BR')}</td><td>${i.preco!==null?formatCurrency(i.preco):'-'}</td><td>${i.valor!==null?formatCurrency(i.valor):'-'}</td></tr>`).join('')}
@@ -5895,8 +5911,9 @@ function renderDashboard() {
     <input type="hidden" id="f-start" value="${start}"><input type="hidden" id="f-end" value="${end}">
     <input type="hidden" id="dash-tech-a" value=""><input type="hidden" id="dash-tech-b" value="">
     <div class="dash-cabecalho">
-      <h2>Relatório de fechamento ${curto(start)} a ${curto(end)}</h2>
-      <p>Observação: os novos valores aplicados</p>
+      <h2>Painel de Gestão</h2>
+      <p>Fechamento do ciclo <b>${formatDate(start)}</b> a <b>${formatDate(end)}</b>
+         · já com os valores de contrato reajustados</p>
     </div>
     <div id="dash-body"></div>`;
   load();
@@ -6016,6 +6033,35 @@ function renderDashboard() {
     const temFolha = folhaCiclo.length > 0;
     const descPorTecnico = {};
     folhaCiclo.forEach(f => { descPorTecnico[normalizeHeader(f.tecnico)] = f; });
+    // ---- DETALHAMENTO DOS DESCONTOS (pedido do cliente) ----
+    // A folha desconta por vários motivos diferentes; o técnico só vê o total.
+    // Aqui abre motivo por motivo, pra gestão saber DE ONDE veio a diferença
+    // entre o que as ordens renderam e o que de fato foi pago.
+    const somaNaFolha = campo => folhaCiclo.reduce((a, f) => a + (f[campo] || 0), 0);
+    const CAMPOS_DESCONTO = [
+      { c: 'desc_irr',          rot: 'Retorno IRR' },
+      { c: 'desc_ifi',          rot: 'Retorno IFI' },
+      { c: 'desc_miscelanea',   rot: 'Miscelânea' },
+      { c: 'desc_equipamento',  rot: 'Equipamento' },
+      { c: 'desc_ferramentas',  rot: 'Ferramentas' },
+      { c: 'desc_multa',        rot: 'Multa' },
+      { c: 'desc_mecanica',     rot: 'Mecânica' },
+      { c: 'desc_vale',         rot: 'Vale' },
+      { c: 'desc_combustivel',  rot: 'Combustível' },
+      { c: 'desc_fiscalizacao', rot: 'Fiscalização' },
+    ];
+    const descontos = CAMPOS_DESCONTO
+      .map(d => ({ ...d, v: somaNaFolha(d.c), n: folhaCiclo.filter(f => (f[d.c] || 0) > 0).length }))
+      .filter(d => d.v > 0)
+      .sort((a, b) => b.v - a.v);
+    const folhaOrdens  = somaNaFolha('valor_total_ordens');
+    const folhaAluguel = somaNaFolha('valor_aluguel');
+    const folhaDesc    = somaNaFolha('total_descontos');
+    const folhaReceber = somaNaFolha('total_receber');
+    // o que a planilha totaliza menos o que as colunas de motivo explicam —
+    // se sobrar, é desconto lançado em coluna que o sistema ainda não conhece
+    const descOutros = folhaDesc - descontos.reduce((a, d) => a + d.v, 0);
+    const nComDesconto = folhaCiclo.filter(f => (f.total_descontos || 0) > 0).length;
 
     // ---- RECEITA / DESPESA / LUCRO ----
     // Quando a planilha de COMPARAÇÃO estiver importada, ela manda: é a visão
@@ -6104,7 +6150,7 @@ function renderDashboard() {
             ${temFolha ? '<th class="num">Descontos</th><th class="num">A receber</th>' : ''}
             <th class="num">Aluguel</th><th class="num">Gasolina</th></tr>
           <tr class="total-row">
-            <td>${lista.length} técnicos</td><td class="num">${S('dias_trabalhados')}</td>
+            <td>${lista.length} técnicos</td><td class="num">—</td>
             <td class="num">${S('ativacao').toLocaleString('pt-BR')}</td><td class="num">${S('mc').toLocaleString('pt-BR')}</td>
             <td class="num">${S('me').toLocaleString('pt-BR')}</td><td class="num">${S('reparos').toLocaleString('pt-BR')}</td>
             <td class="num">${S('upgrade').toLocaleString('pt-BR')}</td><td class="num">${S('total_geral').toLocaleString('pt-BR')}</td>
@@ -6129,7 +6175,6 @@ function renderDashboard() {
       { rot: 'Reparos', v: reparos }, { rot: 'Ativação', v: ativacao },
       { rot: 'M. Endereço', v: me }, { rot: 'Upgrade', v: upgrade }, { rot: 'M. Cômodo', v: mc },
     ].sort((a, b) => b.v - a.v);
-    const maxTipo = Math.max(...tipos.map(t => t.v), 1);
     // resumo Despesas/Receitas do ciclo, categoria por categoria — igual à
     // planilha COMPARATIVO, pedido do cliente pra ficar bem no topo da tela.
     // Só existe quando a planilha COMPARATIVO foi importada (é dela que vem
@@ -6178,40 +6223,38 @@ function renderDashboard() {
           ? ' — inclui folha do escritório, imposto, aluguel da base e demais custos da empresa, que não aparecem no fechamento por técnico.'
           : '. Importe a planilha COMPARATIVO para ver o resultado da empresa inteira.'}
       </p>
-      ${resumoFinanceiro}
-      <div class="dash-oper">
-        <div class="dash-op largo dash-uno">
-          <div class="op-bloco">
-            <span class="rot">Técnicos ativos</span>
-            <span class="val">${ativos.length}</span>
-            <span class="sub">média de <b>${ativos.length ? (ativos.reduce((x,f)=>x+(f.dias_trabalhados||0),0)/ativos.length).toFixed(1).replace('.', ',') : 0}</b> dias por técnico</span>
+      <div class="dash-duas">
+        <div class="dash-duas-esq">${resumoFinanceiro}</div>
+        <div class="dash-duas-dir">
+          <div class="dash-op dash-uno">
+            <div class="op-bloco">
+              <span class="rot">Técnicos ativos</span>
+              <span class="val">${ativos.length}</span>
+              <span class="sub">média de <b>${ativos.length ? (ativos.reduce((x,f)=>x+(f.dias_trabalhados||0),0)/ativos.length).toFixed(1).replace('.', ',') : 0}</b> dias por técnico</span>
+            </div>
+            <div class="op-bloco">
+              <span class="rot">Gasolina</span>
+              <span class="val">${formatCurrency(gasolina)}</span>
+              <span class="sub">média de <b>${formatCurrency(technicians ? gasolina / technicians : 0)}</b> por técnico</span>
+            </div>
+            <div class="op-bloco">
+              <span class="rot">Aluguel de carro</span>
+              <span class="val">${formatCurrency(aluguelTotal)}</span>
+              <span class="sub"><b>${CARROS_JH_ALUGADOS} carros × ${formatCurrency(ALUGUEL_JH)}</b> = ${formatCurrency(aluguelLocadora)} — locadora</span>
+              <span class="sub"><b>${formatCurrency(aluguelProprio)}</b> — carros próprios, pagos ao técnico${nFrotaPropria ? ` (${nFrotaPropria})` : ''}</span>
+            </div>
           </div>
-          <div class="op-bloco">
-            <span class="rot">Gasolina</span>
-            <span class="val">${formatCurrency(gasolina)}</span>
-            <span class="sub">média de <b>${formatCurrency(technicians ? gasolina / technicians : 0)}</b> por técnico</span>
-          </div>
-          <div class="op-bloco">
-            <span class="rot">Aluguel de carro</span>
-            <span class="val">${formatCurrency(aluguelTotal)}</span>
-            <span class="sub"><b>${CARROS_JH_ALUGADOS} carros × ${formatCurrency(ALUGUEL_JH)}</b> = ${formatCurrency(aluguelLocadora)} — locadora</span>
-            <span class="sub"><b>${formatCurrency(aluguelProprio)}</b> — carros próprios, pagos ao técnico${nFrotaPropria ? ` (${nFrotaPropria})` : ''}</span>
-          </div>
-        </div>
-        <p class="dash-obs">
-          <b>${CARROS_JH_PARADOS} carros parados</b> no ciclo — por isso, dos ${CARROS_JH_ALUGADOS} alugados,
-          só ${CARROS_JH_ALUGADOS - CARROS_JH_PARADOS} estão rodando com técnico. O aluguel é pago nos ${CARROS_JH_ALUGADOS} de qualquer forma.
-        </p>
-        <div class="dash-op largo">
-          <div class="topo"><span class="rot">Produção por tipo de serviço</span><span class="val">${totalOrdens.toLocaleString('pt-BR')}</span></div>
-          <div class="dash-quebra">
-            ${tipos.map(t => `<div class="l"><span>${esc(t.rot)}</span><b>${t.v.toLocaleString('pt-BR')}</b>
-              <span class="tr"><i style="width:${(t.v / maxTipo) * 100}%"></i></span></div>`).join('')}
-          </div>
+          <p class="dash-obs">
+            <b>${CARROS_JH_PARADOS} carros parados</b> no ciclo — por isso, dos ${CARROS_JH_ALUGADOS} alugados,
+            só ${CARROS_JH_ALUGADOS - CARROS_JH_PARADOS} estão rodando com técnico. O aluguel é pago nos ${CARROS_JH_ALUGADOS} de qualquer forma.
+          </p>
         </div>
       </div>
+      <div class="section-heading sem-toggle">Produção por tipo de serviço<span class="sec-nota">${totalOrdens.toLocaleString('pt-BR')} ordens concluídas no ciclo</span></div>
+      <div class="panel" style="margin-bottom:1.5rem"><div id="dash-prod-tipo"></div></div>
+      ${painelValorGiga(itensGiga, { centralizar: true, nota: 'Contagem da aba RELATORIO (fechamento do ciclo) × valor de contrato por serviço.' })}
       <div class="section-heading sem-toggle">Valores do contrato aplicados neste ciclo</div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table">
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table dash-tab">
         <thead><tr><th>Serviço</th><th class="num">GIGA paga à JH</th><th class="num">JH paga ao técnico</th>
           <th class="num">Técnico com 26 dias</th><th class="num">Qtd. no ciclo</th><th class="num">Total GIGA</th></tr></thead>
         <tbody>
@@ -6227,7 +6270,6 @@ function renderDashboard() {
           <td class="num">${totalOrdens.toLocaleString('pt-BR')}</td>
           <td class="num">${formatCurrency(valorPagoGiga)}</td></tr></tfoot>
       </table></div>
-      ${painelValorGiga(itensGiga, { nota: 'Contagem da aba RELATORIO (fechamento do ciclo) × valor de contrato por serviço.' })}
       ${tabelaFrota(tecProprios, 'Fechamento — carros próprios', 'aluguel é provento do técnico')}
       ${tabelaFrota(tecJH, 'Fechamento — carros da JH', 'aluguel é despesa da JH, pago à locadora')}
       ${tabelaFrota(tecSemFrota, 'Fechamento — sem frota informada', '')}
@@ -6236,6 +6278,32 @@ function renderDashboard() {
         <b>Carro JH:</b> a empresa aluga da locadora por ${formatCurrency(ALUGUEL_JH)} no ciclo — é despesa da JH e não entra no saldo do técnico.
         ${semProducao ? `<br>${semProducao} técnico(s) sem nenhuma ordem e sem dia trabalhado ficaram fora da tabela.` : ''}
       </p>
+      ${temFolha && folhaDesc > 0 ? `
+      <div class="section-heading sem-toggle">Descontos da folha<span class="sec-nota">por que o técnico recebe menos que o valor das ordens</span></div>
+      <p style="font-size:var(--fs-md);color:var(--text-secondary);margin:-6px 0 14px;line-height:1.6">
+        As ordens do ciclo renderam <b style="color:var(--text-primary)">${formatCurrency(folhaOrdens)}</b>${folhaAluguel > 0
+          ? `, mais <b style="color:var(--text-primary)">${formatCurrency(folhaAluguel)}</b> de aluguel de carro próprio` : ''}.
+        Depois de <b style="color:var(--danger)">${formatCurrency(folhaDesc)}</b> em descontos,
+        o total pago aos técnicos foi <b style="color:var(--success)">${formatCurrency(folhaReceber)}</b>
+        — ${nComDesconto} de ${folhaCiclo.length} técnicos tiveram algum desconto.
+      </p>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table dash-tab">
+        <thead><tr><th>Motivo do desconto</th><th class="num">Valor</th>
+          <th class="num">% dos descontos</th><th class="num">Técnicos atingidos</th></tr></thead>
+        <tbody>
+          ${descontos.map(d => `<tr><td>${esc(d.rot)}</td>
+            <td class="num" style="color:var(--danger);font-weight:700">${formatCurrency(d.v)}</td>
+            <td class="num">${(d.v / folhaDesc * 100).toFixed(1).replace('.', ',')}%</td>
+            <td class="num">${d.n}</td></tr>`).join('')}
+          ${descOutros > 0.01 ? `<tr><td>Outros lançamentos</td>
+            <td class="num" style="color:var(--danger);font-weight:700">${formatCurrency(descOutros)}</td>
+            <td class="num">${(descOutros / folhaDesc * 100).toFixed(1).replace('.', ',')}%</td>
+            <td class="num">—</td></tr>` : ''}
+        </tbody>
+        <tfoot><tr class="total-row"><td>Total dos descontos</td>
+          <td class="num" style="color:var(--danger)">${formatCurrency(folhaDesc)}</td>
+          <td class="num">100,0%</td><td class="num">${nComDesconto}</td></tr></tfoot>
+      </table></div>` : ''}
       <div class="section-heading sem-toggle">Indicadores e eficiência</div>
       <div class="panels-grid thirds">
         ${gaugePanel('% IFI médio', ifi, 2.50, {lowerIsBetter:true, decimals:2})}
@@ -6260,6 +6328,10 @@ function renderDashboard() {
       <div id="pdf-export-area"></div>
     `;
     wireFaixaAlertas(body);
+    // produção por tipo de serviço — barras, com a contagem no fim de cada uma
+    barsChart('dash-prod-tipo', tipos.map(t => ({
+      label: t.rot, value: t.v, display: t.v.toLocaleString('pt-BR'),
+    })));
     barsChartTopN('c-receita', topReceita, {defaultN:10});
     barsChartTopN('c-ef-melhor', melhorEf, {defaultN:5});
     barsChartTopN('c-ef-pior', piorEf, {defaultN:5});
