@@ -2572,6 +2572,18 @@ function applySidebarPermissions() {
   document.querySelectorAll('.sidebar-nav a[data-route]').forEach(a => {
     a.style.display = podeAcessar(currentUser.role, a.dataset.route) ? '' : 'none';
   });
+  // O "Menu Inicial" saiu do menu lateral e virou botão do topo — como não é
+  // mais um a[data-route], ficou de fora da varredura acima e aparecia até pra
+  // quem não pode abrir a tela (a Gestão via o botão; clicar caía de volta no
+  // Dashboard, mas o botão morto no topo confunde).
+  const btnInicial = document.getElementById('btn-menu-inicial');
+  if (btnInicial) btnInicial.style.display = podeAcessar(currentUser.role, 'inicio') ? '' : 'none';
+  // Mesma ideia no "Alterar usuário": sem Supabase o sistema não confere senha
+  // nenhuma (as senhas saíram do código a pedido do cliente), então trocar de
+  // perfil vira escada — da Gestão dava pra virar Analista e abrir tudo. Só
+  // aparece quando existe autenticação de verdade pra barrar.
+  const btnTrocar = document.getElementById('btn-trocar-usuario');
+  if (btnTrocar) btnTrocar.style.display = USA_AUTH ? '' : 'none';
 }
 // Splash "JH TELECOM — carregando 0 a 100%". Sobe sozinho até 90% (pra dar
 // sensação de progresso mesmo sem saber quanto falta) e a função devolvida
@@ -2695,6 +2707,15 @@ async function confirmarTrocaUsuario() {
     fecharTrocaUsuario();
     recolherMenuLateralNoLogin();
     navigate(getFirstAllowedRoute(user.role));
+    return;
+  }
+  // SEM Supabase não existe conferência de senha (as senhas saíram do código a
+  // pedido do cliente, 01/09/2026). Trocar de perfil aqui seria escada de
+  // privilégio: entrando como Gestão, que só vê o Dashboard, dava pra virar
+  // Analista e abrir as 24 telas sem digitar nada. Nesse modo a troca fica
+  // fechada — pra usar outro perfil, sai e entra de novo.
+  if (!USA_AUTH) {
+    erro.textContent = 'Sem conexão com o servidor não dá para trocar de perfil aqui. Saia e entre de novo.';
     return;
   }
   const user = usuarioOffline('tr-user', 'tr-nome');
