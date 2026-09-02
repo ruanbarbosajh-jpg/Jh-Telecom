@@ -2468,6 +2468,14 @@ document.getElementById('login-form').addEventListener('submit', e => { e.preven
 });
 let currentUser = null;
 const ROLE_LABEL = { admin: 'Administrador', analista: 'Analista', gestao: 'Gestão', rh: 'RH', almox: 'Almoxarifado', escritorio: 'Escritório' };
+// Nome em cima, perfil embaixo — mas só quando são textos DIFERENTES.
+// Para Gestão, Analista, RH, Almoxarifado e Escritório o nome da conta é o
+// próprio nome do perfil, e o canto da tela escrevia "Gestão Gestão".
+function rotuloUsuario(user) {
+  const perfil = ROLE_LABEL[user.role] || user.role;
+  const repetido = normalizeHeader(user.nome) === normalizeHeader(perfil);
+  return `<b>${esc(user.nome)}</b>${repetido ? '' : esc(perfil)}`;
+}
 function getFirstAllowedRoute(role) {
   // o Menu Inicial é liberado pra todo perfil, então na prática todo login
   // cai aqui; o resto do encadeamento fica como reserva.
@@ -2597,7 +2605,7 @@ async function confirmarTrocaUsuario() {
     const user = await perfilDoUsuario(r.data.user);
     currentUser = user;
     document.getElementById('tr-password').value = '';
-    document.getElementById('user-name').innerHTML = `<b>${user.nome}</b>${ROLE_LABEL[user.role]||user.role}`;
+    document.getElementById('user-name').innerHTML = rotuloUsuario(user);
     applySidebarPermissions();
     fecharTrocaUsuario();
     recolherMenuLateralNoLogin();
@@ -2607,7 +2615,7 @@ async function confirmarTrocaUsuario() {
   const user = usuarioOffline('tr-user', 'tr-nome');
   if (!user) { erro.textContent = 'Perfil não encontrado.'; return; }
   currentUser = user;
-  document.getElementById('user-name').innerHTML = `<b>${user.nome}</b>${ROLE_LABEL[user.role]||user.role}`;
+  document.getElementById('user-name').innerHTML = rotuloUsuario(user);
   applySidebarPermissions();
   fecharTrocaUsuario();
   recolherMenuLateralNoLogin();
@@ -2675,7 +2683,7 @@ async function abrirSistema(user) {
       Object.fromEntries(Object.keys(SUPABASE_TABLES).map(k => [k, (DB[k]||[]).length])));
   }
   await pararSplash();
-  document.getElementById('user-name').innerHTML = `<b>${user.nome}</b>${ROLE_LABEL[user.role]||user.role}`;
+  document.getElementById('user-name').innerHTML = rotuloUsuario(user);
   document.getElementById('app-shell').classList.add('active');
   applySidebarPermissions();
   recolherMenuLateralNoLogin();
@@ -2770,6 +2778,11 @@ window.addEventListener('beforeunload', () => guardarFiltros(ROTA_ATUAL.nome));
 
 // ===================== HELPERS =====================
 function formatCurrency(v) { return (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
+// Porcentagem no padrão brasileiro: "15,8%" e não "15,8%". toFixed() sempre
+// devolve ponto, então a tela inteira estava escrevendo decimal em inglês no
+// meio de valores em R$ formatados com vírgula (achado em 01/09/2026: 75
+// ocorrências só no Dashboard).
+function formatPct(v, casas = 1) { return Number(v || 0).toFixed(casas).replace('.', ',') + '%'; }
 // ---------- TABELA DE VALORES POR SERVIÇO (fixa) ----------
 // Decisão do cliente: esses valores NÃO vêm mais de planilha. São de contrato,
 // mudam muito raramente, e vinham de uma aba ("VALORES ORDENS") com layout
@@ -3886,7 +3899,7 @@ function donutChart(elId, items, opts = {}) {
     </div>
     <div class="donut-legend">${items.map((i,idx) => {
       const pct = ((i.value/total)*100);
-      return `<div class="legend-item"><span class="legend-dot" style="background:${i.color||corCategorica(idx)}"></span>${i.label}<b>${i.display !== undefined ? i.display : i.value}</b><span class="legend-pct">${pct.toFixed(1)}%</span></div>`;
+      return `<div class="legend-item"><span class="legend-dot" style="background:${i.color||corCategorica(idx)}"></span>${i.label}<b>${i.display !== undefined ? i.display : i.value}</b><span class="legend-pct">${formatPct(pct)}</span></div>`;
     }).join('')}</div>
   </div>`;
 }
@@ -4524,7 +4537,7 @@ function diagnosticoProducao(d) {
   if (!total) return '';
   const n = v => v.toLocaleString('pt-BR');
   // decimal com VÍRGULA: o resto da frase já usa separador de milhar pt-BR,
-  // misturar "1.234 ordens" com "46.3%" na mesma linha fica esquisito
+  // misturar "1.234 ordens" com "46,3%" na mesma linha fica esquisito
   const pctBR = v => (total ? v / total * 100 : 0).toFixed(1).replace('.', ',');
   const b = v => `<b>${v}</b>`;
   // concordância: "1 concluída", não "1 concluídas"
@@ -5831,7 +5844,7 @@ function metricCard(label, value, negative, opts = {}) {
     const p = opts.variacao.pct;
     const bom = opts.variacao.invertido ? p < 0 : p >= 0;
     variacao = `<div class="mc-var" style="color:${bom ? 'var(--success)' : 'var(--danger)'}">
-      ${p >= 0 ? '▲' : '▼'} ${Math.abs(p).toFixed(1)}%<span>${opts.variacao.rotulo || 'vs. período anterior'}</span></div>`;
+      ${p >= 0 ? '▲' : '▼'} ${formatPct(Math.abs(p))}<span>${opts.variacao.rotulo || 'vs. período anterior'}</span></div>`;
   }
   return `<div class="metric-card${opts.accent?' accent':''}${nivel}"><div class="label">${icon}${label}</div><div class="value${classe}">${value}</div>${variacao}${sub}</div>`;
 }
@@ -5889,7 +5902,7 @@ function gaugePanel(title, valuePct, target, opts = {}) {
   // acha o ponto do texto (considerando a largura estimada dele) mais próximo
   // do topo do arco (pico em CX) — é aí que a folga precisa ser calculada,
   // senão o texto pode "crescer" de volta em direção ao pico e encostar nele.
-  const metaLabelText = ang !== null ? `Meta ${target.toFixed(1)}%` : '';
+  const metaLabelText = ang !== null ? `Meta ${formatPct(target)}` : '';
   const textLen = metaLabelText.length * 5.2;
   const spanMin = metaAnchor === 'end' ? lx - textLen : metaAnchor === 'start' ? lx : lx - textLen/2;
   const spanMax = metaAnchor === 'end' ? lx : metaAnchor === 'start' ? lx + textLen : lx + textLen/2;
@@ -5912,10 +5925,10 @@ function gaugePanel(title, valuePct, target, opts = {}) {
         <path d="${arcPath}" fill="none" stroke="${cor}" stroke-width="${STROKE}" stroke-linecap="round" class="gauge-arc-fill"
               style="color:${cor};--gauge-empty:${semi};--gauge-final:${semi*(1-frac)}" stroke-dasharray="${semi}"/>
         ${ang !== null ? `<line x1="${tx1}" y1="${ty1}" x2="${tx2}" y2="${ty2}" stroke="${corMeta}" stroke-width="3.5" stroke-linecap="round"/>
-        <text x="${lx}" y="${ly}" text-anchor="${metaAnchor}" style="fill:${corMeta}" class="gauge-arc-meta-label">META ${target.toFixed(1)}%</text>` : ''}
+        <text x="${lx}" y="${ly}" text-anchor="${metaAnchor}" style="fill:${corMeta}" class="gauge-arc-meta-label">META ${formatPct(target)}</text>` : ''}
         <text x="${CX-R}" y="${CY+22}" text-anchor="middle" class="gauge-arc-tick">0%</text>
-        <text x="${CX+R}" y="${CY+22}" text-anchor="middle" class="gauge-arc-tick">${max.toFixed(0)}%</text>
-        <text x="${CX}" y="${CY+14}" text-anchor="middle" class="gauge-arc-value">${valuePct.toFixed(decimals)}%</text>
+        <text x="${CX+R}" y="${CY+22}" text-anchor="middle" class="gauge-arc-tick">${formatPct(max, 0)}</text>
+        <text x="${CX}" y="${CY+14}" text-anchor="middle" class="gauge-arc-value">${formatPct(valuePct, decimals)}</text>
       </svg>
     </div>
   </div>`;
@@ -6006,8 +6019,17 @@ function renderDashboard() {
 
     // os indicadores da planilha vêm em fração (0,0166 = 1,66%)
     const toPct = v => Math.abs(v||0) <= 5 ? (v||0)*100 : (v||0); // fração até 500% — cobre eficiência acima de 100%
-    const media = k => fech.length ? fech.reduce((a,f)=>a+toPct(f[k]),0)/fech.length : 0;
-    const ifi = media('ind_ifi'), irr = media('ind_irr');
+    // ---- % IFI e % IRR do CICLO ----
+    // Regra do contrato: IFI ÷ (ativações + mudanças de endereço) e
+    // IRR ÷ reparos — retornos sobre a BASE, não média das % dos técnicos.
+    // A média simples estava mentindo feio: dá o mesmo peso a quem fez 232
+    // ordens e a quem fez 12, então um técnico com 12 ordens e 1 retorno
+    // (IRR 85,71%) puxava tudo. No ciclo 21/07–20/08 a tela mostrava
+    // IFI 2,56% e IRR 7,11% — as duas metas "estouradas" — quando os
+    // números reais são 1,27% e 3,93%, as duas DENTRO da meta.
+    const baseIfiCiclo = ativacao + me;
+    const ifi = baseIfiCiclo ? (qtdIfi / baseIfiCiclo) * 100 : 0;
+    const irr = reparos ? (qtdIrr / reparos) * 100 : 0;
 
     // ---- rankings ----
     const topReceita = [...fech].sort((a,b)=>b.valor_ordens-a.valor_ordens)
@@ -6231,7 +6253,7 @@ function renderDashboard() {
         <div class="dash-fin receita">
           <span class="rot">Receita — pago pela GIGA</span>
           <span class="val">${formatCurrency(receitaFinal)}</span>
-          <span class="pe"><b>${totalOrdens.toLocaleString('pt-BR')}</b> ordens no ciclo${varGiga ? ` · ${varGiga.pct >= 0 ? '▲' : '▼'} ${Math.abs(varGiga.pct).toFixed(1)}% vs. anterior` : ''}</span>
+          <span class="pe"><b>${totalOrdens.toLocaleString('pt-BR')}</b> ordens no ciclo${varGiga ? ` · ${varGiga.pct >= 0 ? '▲' : '▼'} ${formatPct(Math.abs(varGiga.pct))} vs. anterior` : ''}</span>
         </div>
         <div class="dash-fin despesa">
           <span class="rot">Despesa total</span>
@@ -6241,7 +6263,7 @@ function renderDashboard() {
         <div class="dash-fin lucro">
           <span class="rot">Lucro</span>
           <span class="val">${formatCurrency(lucroFinal)}</span>
-          <span class="pe">margem de <b>${margem.toFixed(1)}%</b> sobre a receita</span>
+          <span class="pe">margem de <b>${formatPct(margem)}</b> sobre a receita</span>
         </div>
       </div>
       <p style="margin:-6px 0 20px;font-size:var(--fs-sm);color:var(--text-muted)">
@@ -6326,11 +6348,17 @@ function renderDashboard() {
           <td class="num" style="color:var(--danger)">${formatCurrency(folhaDesc)}</td>
           <td class="num">100,0%</td><td class="num">${nComDesconto}</td></tr></tfoot>
       </table></div>` : ''}
-      <div class="section-heading sem-toggle">Indicadores de qualidade<span class="sec-nota">IFI e IRR contra a meta do contrato</span></div>
+      <div class="section-heading sem-toggle">Indicadores de qualidade<span class="sec-nota">retornos sobre a base do ciclo, contra a meta do contrato</span></div>
       <div class="panels-grid">
-        ${gaugePanel('% IFI médio', ifi, 2.50, {lowerIsBetter:true, decimals:2})}
-        ${gaugePanel('% IRR médio', irr, 4.50, {lowerIsBetter:true, decimals:2})}
+        ${gaugePanel('% IFI', ifi, 2.50, {lowerIsBetter:true, decimals:2})}
+        ${gaugePanel('% IRR', irr, 4.50, {lowerIsBetter:true, decimals:2})}
       </div>
+      <p style="font-size:var(--fs-sm);color:var(--text-muted);margin:-6px 0 14px;line-height:1.55">
+        <b>% IFI</b> = ${qtdIfi.toLocaleString('pt-BR')} retornos ÷ ${baseIfiCiclo.toLocaleString('pt-BR')} ativações e mudanças de endereço.
+        <b>% IRR</b> = ${qtdIrr.toLocaleString('pt-BR')} retornos ÷ ${reparos.toLocaleString('pt-BR')} reparos.
+        É o índice do ciclo inteiro, não a média das porcentagens de cada técnico —
+        essa média dá o mesmo peso a quem fez 200 ordens e a quem fez 10.
+      </p>
       <div class="cards-grid">
         ${metricCard('Qtd. IFI', qtdIfi, false, {nivel:'compacto'})}
         ${metricCard('Qtd. IRR', qtdIrr, false, {nivel:'compacto'})}
@@ -6385,7 +6413,7 @@ function renderDashboard() {
         {header:'Técnico', get:r=>r.tecnico}, {header:'Total Ordens', get:r=>r.total_geral},
         {header:'Valor Ordens', get:r=>formatCurrency(r.valor_ordens)}, {header:'Gasolina', get:r=>formatCurrency(r.gasolina)},
         {header:'Despesas', get:r=>formatCurrency(r.despesas)}, {header:'Lucro', get:r=>formatCurrency(r.lucros)},
-        {header:'Eficiência', get:r=>toPct(r.eficiencia).toFixed(1)+'%'},
+        {header:'Eficiência', get:r=>formatPct(toPct(r.eficiencia))},
       ]),
     });
   }
@@ -6404,11 +6432,11 @@ function renderDashboardTechCompare(fech, toPct) {
     {label:'Total de Ordens', get:d=>d.total_geral, raw:d=>d.total_geral, invert:false},
     {label:'Valor das Ordens', get:d=>formatCurrency(d.valor_ordens), raw:d=>d.valor_ordens, invert:false},
     {label:'Dias Trabalhados', get:d=>d.dias_trabalhados, raw:d=>d.dias_trabalhados, invert:false},
-    {label:'Eficiência', get:d=>toPct(d.eficiencia).toFixed(1)+'%', raw:d=>toPct(d.eficiencia), invert:false},
+    {label:'Eficiência', get:d=>formatPct(toPct(d.eficiencia)), raw:d=>toPct(d.eficiencia), invert:false},
     {label:'Qtd. IFI', get:d=>d.qtd_ifi, raw:d=>d.qtd_ifi, invert:true},
-    {label:'% IFI', get:d=>toPct(d.ind_ifi).toFixed(2)+'%', raw:d=>toPct(d.ind_ifi), invert:true},
+    {label:'% IFI', get:d=>formatPct(toPct(d.ind_ifi), 2), raw:d=>toPct(d.ind_ifi), invert:true},
     {label:'Qtd. IRR', get:d=>d.qtd_irr, raw:d=>d.qtd_irr, invert:true},
-    {label:'% IRR', get:d=>toPct(d.ind_irr).toFixed(2)+'%', raw:d=>toPct(d.ind_irr), invert:true},
+    {label:'% IRR', get:d=>formatPct(toPct(d.ind_irr), 2), raw:d=>toPct(d.ind_irr), invert:true},
     {label:'Gasolina', get:d=>formatCurrency(d.gasolina), raw:d=>d.gasolina, invert:true},
     {label:'Despesas', get:d=>formatCurrency(d.despesas), raw:d=>d.despesas, invert:true},
     {label:'Lucro', get:d=>formatCurrency(d.lucros), raw:d=>d.lucros, invert:false},
@@ -6447,8 +6475,8 @@ function renderRelatorioGeralCompleto(fech) {
     ['Técnico', r=>r.tecnico], ['Início', r=>formatDate(r.inicio)], ['Até o dia', r=>formatDate(r.ate_o_dia)],
     ['Ativação', r=>r.ativacao], ['M.Cômodo', r=>r.mc], ['M.Endereço', r=>r.me], ['Reparos', r=>r.reparos], ['Upgrade', r=>r.upgrade],
     ['Total Geral', r=>r.total_geral], ['Valor Ordens', r=>formatCurrency(r.valor_ordens)], ['Dias Trab.', r=>r.dias_trabalhados],
-    ['Qtd IRR', r=>r.qtd_irr], ['Ind. IRR', r=>toPct(r.ind_irr).toFixed(2)+'%'], ['Desc. IRR', r=>formatCurrency(r.desc_irr)],
-    ['Qtd IFI', r=>r.qtd_ifi], ['Ind. IFI', r=>toPct(r.ind_ifi).toFixed(2)+'%'], ['Desc. IFI', r=>formatCurrency(r.desc_ifi)],
+    ['Qtd IRR', r=>r.qtd_irr], ['Ind. IRR', r=>formatPct(toPct(r.ind_irr), 2)], ['Desc. IRR', r=>formatCurrency(r.desc_irr)],
+    ['Qtd IFI', r=>r.qtd_ifi], ['Ind. IFI', r=>formatPct(toPct(r.ind_ifi), 2)], ['Desc. IFI', r=>formatCurrency(r.desc_ifi)],
     ['Status', statusCell], ['Gasolina', r=>formatCurrency(r.gasolina)], ['Aluguel Carro', r=>formatCurrency(r.aluguel_carro)],
     ['Total Líquido', r=>formatCurrency(r.total_liquido)], ['Despesas', r=>formatCurrency(r.despesas)],
     ['Lucros', lucroCell],
@@ -6461,7 +6489,7 @@ function renderTopTechniciansTable(rows) {
   if (!rows.length) return '<div class="empty">Sem dados no período. Importe a aba RELATORIO.</div>';
   const toPct = v => Math.abs(v||0) <= 5 ? (v||0)*100 : (v||0); // fração até 500% — cobre eficiência acima de 100%
   return `<div class="table-wrap"><table class="data-table"><thead><tr><th>Técnico</th><th>Ordens</th><th>Valor ordens</th><th>Gasolina</th><th>Despesas</th><th>Lucro</th><th>Eficiência</th></tr></thead><tbody>
-    ${rows.map(r=>`<tr><td>${r.tecnico}</td><td>${r.total_geral}</td><td>${formatCurrency(r.valor_ordens)}</td><td>${formatCurrency(r.gasolina)}</td><td>${formatCurrency(r.despesas)}</td><td>${formatCurrency(r.lucros)}</td><td>${toPct(r.eficiencia).toFixed(1)}%</td></tr>`).join('')}
+    ${rows.map(r=>`<tr><td>${r.tecnico}</td><td>${r.total_geral}</td><td>${formatCurrency(r.valor_ordens)}</td><td>${formatCurrency(r.gasolina)}</td><td>${formatCurrency(r.despesas)}</td><td>${formatCurrency(r.lucros)}</td><td>${formatPct(toPct(r.eficiencia), 1)}</td></tr>`).join('')}
   </tbody></table></div>`;
 }
 // Tabela de bônus: o técnico só recebe se estiver DENTRO dos indicadores
@@ -6733,9 +6761,9 @@ function renderBonusTable(fech, prodRows, retornos) {
       <td>${r.tecnico}</td><td>${r.total_geral}</td>
       <td><span class="badge ${r.okDias?'ok':'warn'}">${r.dias}</span></td>
       <td>${r.qtdIfi}</td>
-      <td><span class="badge ${r.okIfi?'ok':'warn'}">${r.ifiP.toFixed(2)}%</span></td>
+      <td><span class="badge ${r.okIfi?'ok':'warn'}">${formatPct(r.ifiP, 2)}</span></td>
       <td>${r.qtdIrr}</td>
-      <td><span class="badge ${r.okIrr?'ok':'warn'}">${r.irrP.toFixed(2)}%</span></td>
+      <td><span class="badge ${r.okIrr?'ok':'warn'}">${formatPct(r.irrP, 2)}</span></td>
       <td><span class="badge ${r.apto?'ok':'warn'}">${r.apto?'APTO':'INAPTO'}</span></td>
       <td style="white-space:normal;font-size:12px;color:var(--text-secondary)">${r.motivo}</td>
     </tr>`).join('')}
@@ -6858,7 +6886,7 @@ function renderProduction() {
         ${metricCard('Concluídas', concluidos.length)}
         ${metricCard('Não concluídas', naoConcluidos.length)}
         ${metricCard('Canceladas', cancelados.length, cancelados.length>0)}
-        ${metricCard('% Concluído', pctConcluido.toFixed(1)+'%')}
+        ${metricCard('% Concluído', formatPct(pctConcluido, 1))}
       </div>
       ${diagnostico}
       <div class="panels-grid">
@@ -7000,7 +7028,7 @@ function renderProduction() {
             <div class="table-wrap"><table class="data-table"><thead><tr>
               <th>Cidade</th><th>Ordens</th><th>% do total</th>
             </tr></thead><tbody>
-              ${lista.map(c=>`<tr><td class="cat-cell">${esc(c.cidade)}</td><td>${c.qtd}</td><td>${((c.qtd/totalOs)*100).toFixed(1)}%</td></tr>`).join('')}
+              ${lista.map(c=>`<tr><td class="cat-cell">${esc(c.cidade)}</td><td>${c.qtd}</td><td>${formatPct(((c.qtd/totalOs)*100), 1)}</td></tr>`).join('')}
               <tr class="total-row"><td class="cat-cell" style="color:var(--accent)">TOTAL</td><td style="color:var(--accent)">${totalOs}</td><td style="color:var(--accent)">100%</td></tr>
             </tbody></table></div>
           </div>`;
@@ -7043,8 +7071,8 @@ function renderProduction() {
       ]),
       bonus: () => secaoTabela('Tabela de Bônus', DB.fechamento.filter(f => overlaps(f.inicio, f.ate_o_dia, s, e)), [
         {header:'Técnico', get:r=>r.tecnico}, {header:'Dias Trabalhados', get:r=>r.dias_trabalhados},
-        {header:'Qtd IFI', get:r=>r.qtd_ifi}, {header:'% IFI', get:r=>toPct(r.ind_ifi).toFixed(2)+'%'},
-        {header:'Qtd IRR', get:r=>r.qtd_irr}, {header:'% IRR', get:r=>toPct(r.ind_irr).toFixed(2)+'%'},
+        {header:'Qtd IFI', get:r=>r.qtd_ifi}, {header:'% IFI', get:r=>formatPct(toPct(r.ind_ifi), 2)},
+        {header:'Qtd IRR', get:r=>r.qtd_irr}, {header:'% IRR', get:r=>formatPct(toPct(r.ind_irr), 2)},
         {header:'Status', get:r=>r.status},
       ]),
     });
@@ -7145,7 +7173,7 @@ function renderAcomTec() {
             <td style="color:var(--text-muted)">${i+1}</td>
             <td class="cat-cell">${esc(m.motivo)}</td>
             <td style="font-weight:700">${m.total}</td>
-            <td>${((m.total/total)*100).toFixed(1)}%</td>
+            <td>${formatPct(((m.total/total)*100), 1)}</td>
             <td style="white-space:normal;font-size:12px;color:var(--text-secondary)">${esc(topDe(m.porTipo))}</td>
             <td style="white-space:normal;font-size:12px;color:var(--text-secondary)">${esc(topDe(m.porTecnico))}</td>
           </tr>`).join('')}
@@ -7343,7 +7371,7 @@ function renderOfensor() {
     ]);
     wirePdfExportPanel('Ofensor — IFI / IRR', {
       resumo: () => secaoTabela('Resumo IFI / IRR', [
-        {l:'Qtd. IFI', v:qtdIfi}, {l:'Qtd. IRR', v:qtdIrr}, {l:'% IFI', v:pctIfi.toFixed(2)+'%'}, {l:'% IRR', v:pctIrr.toFixed(2)+'%'}, {l:'Total de retornos', v:rows.length},
+        {l:'Qtd. IFI', v:qtdIfi}, {l:'Qtd. IRR', v:qtdIrr}, {l:'% IFI', v:formatPct(pctIfi, 2)}, {l:'% IRR', v:formatPct(pctIrr, 2)}, {l:'Total de retornos', v:rows.length},
       ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
       ofensor: () => secaoTabela('Ranking de Ofensores', byOfensor, [{header:'Ofensor', get:r=>r.label}, {header:'Retornos', get:r=>r.value}]),
       cidade: () => secaoTabela('Ranking por Cidade', byCity, [{header:'Cidade', get:r=>r.label}, {header:'Retornos', get:r=>r.value}]),
@@ -7433,7 +7461,7 @@ function destaqueGeralPrazo(rotulo, dentro, total, meta, detalhe) {
   return `<div class="destaque-prazo" style="border-color:${cor}">
     <div>
       <div class="dp-rotulo">${rotulo}</div>
-      <div class="dp-num" style="${estiloPctMeta(pct, meta)}">${total ? pct.toFixed(2) + '%' : '—'}</div>
+      <div class="dp-num" style="${estiloPctMeta(pct, meta)}">${total ? formatPct(pct, 2) : '—'}</div>
     </div>
     <div class="dp-txt">${detalhe}<br>meta ${meta}% — <b style="${estiloPctMeta(pct, meta)}">${total ? (pct >= meta ? 'meta batida' : 'abaixo da meta') : 'sem ordens no filtro'}</b></div>
   </div>`;
@@ -7450,7 +7478,7 @@ function renderCartaoPrazo(opts) {
   const corGeral = pct >= meta ? '#22c55e' : '#ef4444';
   const pctPill = c => {
     const p = c.total ? (c.ate24 / c.total) * 100 : 0;
-    return `<span class="pzcard-pct-pill ${p >= meta ? 'ok' : 'warn'}">${c.total ? p.toFixed(2) + '%' : '-'}</span>`;
+    return `<span class="pzcard-pct-pill ${p >= meta ? 'ok' : 'warn'}">${c.total ? formatPct(p, 2) : '-'}</span>`;
   };
   return `
     <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
@@ -7475,7 +7503,7 @@ function renderCartaoPrazo(opts) {
         </svg></span>
         <div>
           <div class="pzcard-badge-label">${esc(badgeLabel)}</div>
-          <div class="pzcard-badge-value" style="color:${corGeral}">${total ? pct.toFixed(2) + '%' : '—'}</div>
+          <div class="pzcard-badge-value" style="color:${corGeral}">${total ? formatPct(pct, 2) : '—'}</div>
         </div>
       </div>
     </div>
@@ -8950,7 +8978,7 @@ function montarPrazoAtivacaoDoDia(dia, cidades, incluirME) {
   const tot = lista.reduce((a,c)=>{ a.ate36+=c.ate36; a.ate48+=c.ate48; a.maior48+=c.maior48; a.total+=c.total; return a; },
     {ate36:0,ate48:0,maior48:0,total:0});
   const pctDe = l => l.total ? (l.ate36/l.total)*100 : 0;
-  const cel = l => `<span class="badge ${pctDe(l)>=PRAZO_ATIVACAO_META?'ok':'warn'}">${pctDe(l).toFixed(2)}%</span>`;
+  const cel = l => `<span class="badge ${pctDe(l)>=PRAZO_ATIVACAO_META?'ok':'warn'}">${formatPct(pctDe(l), 2)}</span>`;
 
   const agora = new Date();
   const abertas = doDia
@@ -8967,7 +8995,7 @@ function montarPrazoAtivacaoDoDia(dia, cidades, incluirME) {
       ${metricCard('Ativações no dia', doDia.length)}
       ${metricCard('Encerradas (com tempo medido)', encerradas.length)}
       ${metricCard('Dentro de 36h', dentro)}
-      ${metricCard('% no prazo do dia', encerradas.length ? pct.toFixed(2)+'%' : '-', encerradas.length ? pct < PRAZO_ATIVACAO_META : false)}
+      ${metricCard('% no prazo do dia', encerradas.length ? formatPct(pct, 2) : '-', encerradas.length ? pct < PRAZO_ATIVACAO_META : false)}
     </div>
     ${!encerradas.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma ativação encerrada nesse dia — sem tempo medido ainda.</div></div>' : `
     <div class="panel" style="margin-bottom:1.5rem">
@@ -9081,7 +9109,7 @@ function renderPrazoAtivacao() {
     const tot = lista.reduce((a,c)=>{ a.ate36+=c.ate36; a.ate48+=c.ate48; a.maior48+=c.maior48; a.outlier+=c.outlier; a.total+=c.total; return a; },
       {cidade:'TOTAL',ate36:0,ate48:0,maior48:0,outlier:0,total:0});
     const pctDe = l => l.total ? (l.ate36/l.total)*100 : 0;
-    const cel = l => `<span class="badge ${pctDe(l)>=PRAZO_ATIVACAO_META?'ok':'warn'}">${pctDe(l).toFixed(2)}%</span>`;
+    const cel = l => `<span class="badge ${pctDe(l)>=PRAZO_ATIVACAO_META?'ok':'warn'}">${formatPct(pctDe(l), 2)}</span>`;
 
     const porTecnico = {};
     rows.forEach(r => {
@@ -9115,7 +9143,7 @@ function renderPrazoAtivacao() {
         ${metricCard('Total de ordens', rows.length)}
         ${metricCard('Até 36h', dentro36)}
         ${metricCard('Fora do prazo', rows.length - dentro36, (rows.length - dentro36) > 0)}
-        ${metricCard('% no prazo', pct.toFixed(2)+'%', pct < PRAZO_ATIVACAO_META)}
+        ${metricCard('% no prazo', formatPct(pct, 2), pct < PRAZO_ATIVACAO_META)}
       </div>
       <div class="panels-grid">
         ${gaugePanel('PRAZO ATIVAÇÃO 36hrs — meta de ' + PRAZO_ATIVACAO_META + '%', pct, PRAZO_ATIVACAO_META, {decimals:2})}
@@ -9139,7 +9167,7 @@ function renderPrazoAtivacao() {
         </tr></thead><tbody>
           ${listaTec.map(t=>`<tr><td class="cat-cell">${t.tecnico}</td><td style="color:var(--success);font-weight:700">${t.ate36}</td>
             <td style="${t.fora?'color:var(--danger);font-weight:700':''}">${t.fora}</td><td>${t.total}</td>
-            <td><span class="badge ${(t.ate36/t.total)*100>=PRAZO_ATIVACAO_META?'ok':'warn'}">${((t.ate36/t.total)*100).toFixed(2)}%</span></td></tr>`).join('')}
+            <td><span class="badge ${(t.ate36/t.total)*100>=PRAZO_ATIVACAO_META?'ok':'warn'}">${formatPct(((t.ate36/t.total)*100), 2)}</span></td></tr>`).join('')}
         </tbody></table></div>
       </div>
       <div id="pdf-export-area"></div>`;
@@ -9154,17 +9182,17 @@ function renderPrazoAtivacao() {
     wirePdfExportPanel('Prazo de Ativação (36h)', {
       resumo: () => secaoTabela('Resumo do Prazo de Ativação', [
         { l:'Total de ordens', v:rows.length }, { l:'Até 36h', v:dentro36 },
-        { l:'Fora do prazo', v:rows.length - dentro36 }, { l:'% no prazo', v:pct.toFixed(2)+'%' },
+        { l:'Fora do prazo', v:rows.length - dentro36 }, { l:'% no prazo', v:formatPct(pct, 2) },
       ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
       cidade: () => secaoTabela('Prazo de Ativação por Cidade', lista, [
         {header:'Cidade', get:r=>r.cidade}, {header:'Até 36hrs', get:r=>r.ate36}, {header:'Até 48hrs', get:r=>r.ate48},
         {header:'Maior que 48hrs', get:r=>r.maior48}, {header:'Outliers', get:r=>r.outlier},
-        {header:'Total', get:r=>r.total}, {header:'% no Prazo', get:r=>pctDe(r).toFixed(2)+'%'},
-      ], { totalRow:['TOTAL', tot.ate36, tot.ate48, tot.maior48, tot.outlier, tot.total, pctDe(tot).toFixed(2)+'%'] }),
+        {header:'Total', get:r=>r.total}, {header:'% no Prazo', get:r=>formatPct(pctDe(r), 2)},
+      ], { totalRow:['TOTAL', tot.ate36, tot.ate48, tot.maior48, tot.outlier, tot.total, formatPct(pctDe(tot), 2)] }),
       tecnico: () => secaoTabela('Prazo de Ativação por Técnico', listaTec, [
         {header:'Técnico', get:r=>r.tecnico}, {header:'Até 36hrs', get:r=>r.ate36},
         {header:'Fora do prazo', get:r=>r.fora}, {header:'Total', get:r=>r.total},
-        {header:'% no Prazo', get:r=>((r.ate36/r.total)*100).toFixed(2)+'%'},
+        {header:'% no Prazo', get:r=>formatPct(((r.ate36/r.total)*100), 2)},
       ]),
     });
   }
@@ -9481,9 +9509,9 @@ function renderParcialDoDia() {
       </tr></thead><tbody>
         ${statusTable.map(l=>{
           const efet = efetividade(l);
-          return `<tr><td class="cat-cell">${l.label}</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="color:#38bdf8;font-weight:700">${efet.toFixed(0)}%</td></tr>`;
+          return `<tr><td class="cat-cell">${l.label}</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="color:#38bdf8;font-weight:700">${formatPct(efet, 0)}</td></tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="color:#38bdf8">${efetividade(totalStatus).toFixed(0)}%</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="color:#38bdf8">${formatPct(efetividade(totalStatus), 0)}</td></tr>
       </tbody></table></div>
 
       <div class="section-heading">Status Detalhado por Cidade</div>
@@ -9492,9 +9520,9 @@ function renderParcialDoDia() {
       </tr></thead><tbody>
         ${statusPorCidadeTable.map(l=>{
           const efet = efetividade(l);
-          return `<tr><td class="cat-cell">${l.label}</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="color:#38bdf8;font-weight:700">${efet.toFixed(0)}%</td></tr>`;
+          return `<tr><td class="cat-cell">${l.label}</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="color:#38bdf8;font-weight:700">${formatPct(efet, 0)}</td></tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="color:#38bdf8">${efetividade(totalStatus).toFixed(0)}%</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="color:#38bdf8">${formatPct(efetividade(totalStatus), 0)}</td></tr>
       </tbody></table></div>
 
       <div class="section-heading">Status Detalhado por Técnico</div>
@@ -9503,9 +9531,9 @@ function renderParcialDoDia() {
       </tr></thead><tbody>
         ${statusPorTecnicoTable.map(l=>{
           const efet = efetividade(l);
-          return `<tr><td class="cat-cell">${esc(l.label)}</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="color:#38bdf8;font-weight:700">${efet.toFixed(0)}%</td></tr>`;
+          return `<tr><td class="cat-cell">${esc(l.label)}</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="color:#38bdf8;font-weight:700">${formatPct(efet, 0)}</td></tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${totalStatusTecnico[b]}</td>`).join('')}<td>${totalStatusTecnico.total}</td><td style="color:#38bdf8">${efetividade(totalStatusTecnico).toFixed(0)}%</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b)}">${totalStatusTecnico[b]}</td>`).join('')}<td>${totalStatusTecnico.total}</td><td style="color:#38bdf8">${formatPct(efetividade(totalStatusTecnico), 0)}</td></tr>
       </tbody></table></div>
 
       ${!servicosDoDia.length ? '' : `
@@ -10660,7 +10688,7 @@ function renderPrazo() {
         ${metricCard('Total Concluído', rows.length)}
         ${metricCard('Até 24h', within24)}
         ${metricCard('Fora do prazo', rows.length - within24, (rows.length-within24)>0)}
-        ${metricCard('% no prazo', pct.toFixed(2)+'%', pct<TARGET)}
+        ${metricCard('% no prazo', formatPct(pct, 2), pct<TARGET)}
       </div>
       <div class="panels-grid">
         ${gaugePanel('PRAZO GERAL 24hrs — meta de 85% de reparos até 24h', pct, TARGET, {decimals:2})}
@@ -10680,13 +10708,13 @@ function renderPrazo() {
     ]);
     wirePdfExportPanel('Prazo', {
       resumo: () => secaoTabela('Resumo Geral do Prazo', [
-        {l:'Total Concluído', v:rows.length}, {l:'Até 24h', v:within24}, {l:'Fora do prazo', v:rows.length-within24}, {l:'% no prazo', v:pct.toFixed(2)+'%'},
+        {l:'Total Concluído', v:rows.length}, {l:'Até 24h', v:within24}, {l:'Fora do prazo', v:rows.length-within24}, {l:'% no prazo', v:formatPct(pct, 2)},
       ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
       cidade: () => secaoTabela('Acompanhamento de Prazos por Cidade', byCity, [
         {header:'Cidade', get:r=>r.cidade}, {header:'Até 24h', get:r=>r.ate24}, {header:'Até 48h', get:r=>r.ate48},
         {header:'Maior que 48h', get:r=>r.maior48}, {header:'Outliers', get:r=>r.outlier}, {header:'Total', get:r=>r.total},
-        {header:'% no prazo', get:r=>((r.ate24/r.total)*100).toFixed(2)+'%'},
-      ], { totalRow: ['TOTAL', totals.ate24, totals.ate48, totals.maior48, totals.outlier, totals.total, ((totals.ate24/totals.total)*100).toFixed(2)+'%'] }),
+        {header:'% no prazo', get:r=>formatPct(((r.ate24/r.total)*100), 2)},
+      ], { totalRow: ['TOTAL', totals.ate24, totals.ate48, totals.maior48, totals.outlier, totals.total, formatPct(((totals.ate24/totals.total)*100), 2)] }),
     });
   }
 }
@@ -10734,15 +10762,15 @@ function renderOfensoresPrazo() {
     const todasCidades = new Set([...Object.keys(byCityFora), ...Object.keys(byCityDentro)]);
     const listFora = [...todosTechs].map(t => {
       const fora = byTechFora[t]||0, dentro = byTechDentro[t]||0, total = fora+dentro;
-      return { label:t, value:fora, display: total ? `${fora} (${((fora/total)*100).toFixed(0)}%)` : String(fora) };
+      return { label:t, value:fora, display: total ? `${fora} (${formatPct(((fora/total)*100), 0)})` : String(fora) };
     }).filter(i=>i.value>0).sort((a,b)=>b.value-a.value);
     const listDentro = [...todosTechs].map(t => {
       const fora = byTechFora[t]||0, dentro = byTechDentro[t]||0, total = fora+dentro;
-      return { label:t, value:dentro, display: total ? `${dentro} (${((dentro/total)*100).toFixed(0)}%)` : String(dentro) };
+      return { label:t, value:dentro, display: total ? `${dentro} (${formatPct(((dentro/total)*100), 0)})` : String(dentro) };
     }).filter(i=>i.value>0).sort((a,b)=>b.value-a.value);
     const listCityFora = [...todasCidades].map(c => {
       const fora = byCityFora[c]||0, dentro = byCityDentro[c]||0, total = fora+dentro;
-      return { label:c, value:fora, display: total ? `${fora} (${((fora/total)*100).toFixed(0)}%)` : String(fora) };
+      return { label:c, value:fora, display: total ? `${fora} (${formatPct(((fora/total)*100), 0)})` : String(fora) };
     }).filter(i=>i.value>0).sort((a,b)=>b.value-a.value);
 
     // ---- Ofensores por período (manhã/tarde) ----
@@ -10988,7 +11016,7 @@ function renderPleito(tipo) {
         ${metricCard('Total de O.S. Fora do Prazo', linhas.length)}
         ${metricCard('Total Justificadas', justificadas)}
         ${metricCard('Total Sem Motivo', semMotivo, semMotivo > 0)}
-        ${metricCard('% Eficiência do Pleito', pctEficiencia.toFixed(1) + '%')}
+        ${metricCard('% Eficiência do Pleito', formatPct(pctEficiencia, 1))}
       </div>
       ${!linhas.length ? '' : `
       <div class="section-heading">O.S fora do prazo — com ou sem justificativa</div>
@@ -11673,7 +11701,7 @@ function diffBadge(x,y,invert) {
   if (x===0) return y>0 ? `<span style="color:${invert?'var(--danger)':'var(--success)'}">▲ novo</span>` : '-';
   const pct=((y-x)/Math.abs(x))*100; const sign=pct>=0?'+':''; const arrow=pct>=0?'▲':'▼';
   const bom = invert ? pct<0 : pct>=0;
-  return `<span style="color:${bom?'var(--success)':'var(--danger)'}">${arrow} ${sign}${pct.toFixed(1)}%</span>`;
+  return `<span style="color:${bom?'var(--success)':'var(--danger)'}">${arrow} ${sign}${formatPct(pct, 1)}</span>`;
 }
 function diffMoney(x,y,invert) {
   const d = y-x; const sign = d>=0?'+':''; const arrow = d>=0?'▲':'▼';
@@ -11785,27 +11813,27 @@ function renderCmpIfiIrr() {
     const a = summary(sa,ea,f), b = summary(sb,eb,f);
     const labelA = periodLabel(sa,ea), labelB = periodLabel(sb,eb);
     document.getElementById('cmp-body').innerHTML = `
-      <div class="cards-grid">${metricCard('% IFI ('+labelB+')', b.pctIfi.toFixed(1)+'%')}${metricCard('% IRR ('+labelB+')', b.pctIrr.toFixed(1)+'%')}${metricCard('Qtd. IFI ('+labelB+')', b.qtdIfi)}${metricCard('Qtd. IRR ('+labelB+')', b.qtdIrr)}</div>
+      <div class="cards-grid">${metricCard('% IFI ('+labelB+')', formatPct(b.pctIfi, 1))}${metricCard('% IRR ('+labelB+')', formatPct(b.pctIrr, 1))}${metricCard('Qtd. IFI ('+labelB+')', b.qtdIfi)}${metricCard('Qtd. IRR ('+labelB+')', b.qtdIrr)}</div>
       <div class="section-heading">Detalhamento de Retornos IFI / IRR</div>
       <div class="table-wrap"><table class="data-table"><thead><tr>
         <th>Indicador</th><th>Qtd. ${labelA}</th><th>Qtd. ${labelB}</th><th>Variação</th><th>Variação (%)</th>
       </tr></thead><tbody>
         <tr><td class="cat-cell">Qtd. IFI</td><td>${a.qtdIfi}</td><td>${b.qtdIfi}</td><td>${diffQty(a.qtdIfi,b.qtdIfi,true)}</td><td>${diffBadge(a.qtdIfi,b.qtdIfi,true)}</td></tr>
         <tr><td class="cat-cell">Qtd. IRR</td><td>${a.qtdIrr}</td><td>${b.qtdIrr}</td><td>${diffQty(a.qtdIrr,b.qtdIrr,true)}</td><td>${diffBadge(a.qtdIrr,b.qtdIrr,true)}</td></tr>
-        <tr><td class="cat-cell">% IFI</td><td>${a.pctIfi.toFixed(2)}%</td><td>${b.pctIfi.toFixed(2)}%</td><td>-</td><td>${diffBadge(a.pctIfi,b.pctIfi,true)}</td></tr>
-        <tr><td class="cat-cell">% IRR</td><td>${a.pctIrr.toFixed(2)}%</td><td>${b.pctIrr.toFixed(2)}%</td><td>-</td><td>${diffBadge(a.pctIrr,b.pctIrr,true)}</td></tr>
+        <tr><td class="cat-cell">% IFI</td><td>${formatPct(a.pctIfi, 2)}</td><td>${formatPct(b.pctIfi, 2)}</td><td>-</td><td>${diffBadge(a.pctIfi,b.pctIfi,true)}</td></tr>
+        <tr><td class="cat-cell">% IRR</td><td>${formatPct(a.pctIrr, 2)}</td><td>${formatPct(b.pctIrr, 2)}</td><td>-</td><td>${diffBadge(a.pctIrr,b.pctIrr,true)}</td></tr>
       </tbody></table></div>
       ${renderTechCompare(f, sa, ea, sb, eb, summary, [
         {label:'Qtd. IFI', get:d=>d.qtdIfi, raw:d=>d.qtdIfi, invert:true},
         {label:'Qtd. IRR', get:d=>d.qtdIrr, raw:d=>d.qtdIrr, invert:true},
-        {label:'% IFI', get:d=>d.pctIfi.toFixed(2)+'%', raw:d=>d.pctIfi, invert:true},
-        {label:'% IRR', get:d=>d.pctIrr.toFixed(2)+'%', raw:d=>d.pctIrr, invert:true},
+        {label:'% IFI', get:d=>formatPct(d.pctIfi, 2), raw:d=>d.pctIfi, invert:true},
+        {label:'% IRR', get:d=>formatPct(d.pctIrr, 2), raw:d=>d.pctIrr, invert:true},
       ])}
       ${renderCityCompare(f, sa, ea, sb, eb, summary, [
         {label:'Qtd. IFI', get:d=>d.qtdIfi, raw:d=>d.qtdIfi, invert:true},
         {label:'Qtd. IRR', get:d=>d.qtdIrr, raw:d=>d.qtdIrr, invert:true},
-        {label:'% IFI', get:d=>d.pctIfi.toFixed(2)+'%', raw:d=>d.pctIfi, invert:true},
-        {label:'% IRR', get:d=>d.pctIrr.toFixed(2)+'%', raw:d=>d.pctIrr, invert:true},
+        {label:'% IFI', get:d=>formatPct(d.pctIfi, 2), raw:d=>d.pctIfi, invert:true},
+        {label:'% IRR', get:d=>formatPct(d.pctIrr, 2), raw:d=>d.pctIrr, invert:true},
       ])}
       <div id="pdf-export-area"></div>`;
 
@@ -11815,7 +11843,7 @@ function renderCmpIfiIrr() {
     wirePdfExportPanel('Comparativo de IFI / IRR', {
       detalhe: () => secaoTabela(`Detalhamento — ${labelA} × ${labelB}`, [
         {l:'Qtd. IFI', va:a.qtdIfi, vb:b.qtdIfi}, {l:'Qtd. IRR', va:a.qtdIrr, vb:b.qtdIrr},
-        {l:'% IFI', va:a.pctIfi.toFixed(2)+'%', vb:b.pctIfi.toFixed(2)+'%'}, {l:'% IRR', va:a.pctIrr.toFixed(2)+'%', vb:b.pctIrr.toFixed(2)+'%'},
+        {l:'% IFI', va:formatPct(a.pctIfi, 2), vb:formatPct(b.pctIfi, 2)}, {l:'% IRR', va:formatPct(a.pctIrr, 2), vb:formatPct(b.pctIrr, 2)},
       ], [{header:'Indicador', get:r=>r.l}, {header:labelA, get:r=>r.va}, {header:labelB, get:r=>r.vb}]),
     });
   }
@@ -11850,16 +11878,16 @@ function renderCmpPrazo() {
     const sb = document.getElementById('b-start').value, eb = document.getElementById('b-end').value;
     const a = summary(sa,ea,f), b = summary(sb,eb,f);
     const labelA = periodLabel(sa,ea), labelB = periodLabel(sb,eb);
-    const pctBucket = (v,total) => total ? ((v/total)*100).toFixed(2)+'%' : '0.00%';
+    const pctBucket = (v,total) => total ? formatPct(((v/total)*100), 2) : '0,00%';
     document.getElementById('cmp-body').innerHTML = `
-      <div class="cards-grid">${metricCard('% no prazo ('+labelB+')', b.pct.toFixed(2)+'%', b.pct<85)}${metricCard('Total concluído ('+labelB+')', b.total)}${metricCard('Até 24h ('+labelB+')', b.dentro24)}</div>
+      <div class="cards-grid">${metricCard('% no prazo ('+labelB+')', formatPct(b.pct, 2), b.pct<85)}${metricCard('Total concluído ('+labelB+')', b.total)}${metricCard('Até 24h ('+labelB+')', b.dentro24)}</div>
       <div class="section-heading">% no Prazo</div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
         <th>Indicador</th><th>${labelA}</th><th>${labelB}</th><th>Variação</th><th>Variação (%)</th>
       </tr></thead><tbody>
         <tr><td class="cat-cell">Total concluído</td><td>${a.total}</td><td>${b.total}</td><td>${diffQty(a.total,b.total)}</td><td>${diffBadge(a.total,b.total)}</td></tr>
         <tr><td class="cat-cell">Até 24h</td><td>${a.dentro24}</td><td>${b.dentro24}</td><td>${diffQty(a.dentro24,b.dentro24)}</td><td>${diffBadge(a.dentro24,b.dentro24)}</td></tr>
-        <tr class="total-row"><td class="cat-cell">% no prazo</td><td style="${prazoPctStyle(a.pct)}">${a.pct.toFixed(2)}%</td><td style="${prazoPctStyle(b.pct)}">${b.pct.toFixed(2)}%</td><td>-</td><td>${diffBadge(a.pct,b.pct)}</td></tr>
+        <tr class="total-row"><td class="cat-cell">% no prazo</td><td style="${prazoPctStyle(a.pct)}">${formatPct(a.pct, 2)}</td><td style="${prazoPctStyle(b.pct)}">${formatPct(b.pct, 2)}</td><td>-</td><td>${diffBadge(a.pct,b.pct)}</td></tr>
       </tbody></table></div>
       <div class="section-heading">Distribuição por Faixa</div>
       <div class="table-wrap"><table class="data-table"><thead><tr>
@@ -11874,7 +11902,7 @@ function renderCmpPrazo() {
       ${renderCityCompare(f, sa, ea, sb, eb, summary, [
         {label:'Total concluído', get:d=>d.total, raw:d=>d.total},
         {label:'Até 24h', get:d=>d.dentro24, raw:d=>d.dentro24},
-        {label:'% no prazo', get:d=>d.pct.toFixed(2)+'%', raw:d=>d.pct},
+        {label:'% no prazo', get:d=>formatPct(d.pct, 2), raw:d=>d.pct},
       ])}
       <div id="pdf-export-area"></div>`;
 
@@ -11885,7 +11913,7 @@ function renderCmpPrazo() {
     wirePdfExportPanel('Comparativo de Prazo', {
       detalhe: () => secaoTabela(`% no Prazo — ${labelA} × ${labelB}`, [
         {l:'Total concluído', va:a.total, vb:b.total}, {l:'Até 24h', va:a.dentro24, vb:b.dentro24},
-        {l:'% no prazo', va:a.pct.toFixed(2)+'%', vb:b.pct.toFixed(2)+'%'},
+        {l:'% no prazo', va:formatPct(a.pct, 2), vb:formatPct(b.pct, 2)},
       ], [{header:'Indicador', get:r=>r.l}, {header:labelA, get:r=>r.va}, {header:labelB, get:r=>r.vb}]),
       faixa: () => secaoTabela(`Distribuição por Faixa — ${labelA} × ${labelB}`, [
         {l:'Até 24h', va:a.buckets.ate24, vb:b.buckets.ate24},
@@ -12171,7 +12199,7 @@ function renderFolhaPagamento() {
       descontos: () => secaoTabela('Descontos por Tipo', descList, [{header:'Tipo', get:r=>r.label}, {header:'Valor', get:r=>formatCurrency(r.value)}]),
       completa: () => secaoTabela('Folha de Pagamento Completa', ranking, [
         {header:'Técnico', get:r=>r.tecnico}, {header:'Ordens', get:r=>r.total_ordens}, {header:'Valor Ordens', get:r=>formatCurrency(r.valor_total_ordens)},
-        {header:'% IFI', get:r=>pct(r.ifi_pct, r).toFixed(2)+'%'}, {header:'% IRR', get:r=>pct(r.irr_pct, r).toFixed(2)+'%'},
+        {header:'% IFI', get:r=>formatPct(pct(r.ifi_pct, r), 2)}, {header:'% IRR', get:r=>formatPct(pct(r.irr_pct, r), 2)},
         {header:'Total Descontos', get:r=>formatCurrency(r.total_descontos)}, {header:'Total a Receber', get:r=>formatCurrency(r.total_receber)},
       ], { totalRow: ['TOTAL', totalOrdens, '', '', '', formatCurrency(totalDescontos), formatCurrency(totalReceber)] }),
     });
@@ -12262,8 +12290,8 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
         </select>`
       : `<span class="badge ${/apto/i.test(r.bonus)&&!/inapto/i.test(r.bonus)?'ok':'warn'}">${r.bonus||'-'}</span>`],
     ['Qtd IFI', r=>r.qtd_ifi], ['Qtd IRR', r=>r.qtd_irr],
-    ['% IFI', r=>`<span class="badge ${pct(r.ifi_pct, r)<=IFI_TARGET?'ok':'warn'}">${pct(r.ifi_pct, r).toFixed(2)}%</span>`],
-    ['% IRR', r=>`<span class="badge ${pct(r.irr_pct, r)<=IRR_TARGET?'ok':'warn'}">${pct(r.irr_pct, r).toFixed(2)}%</span>`],
+    ['% IFI', r=>`<span class="badge ${pct(r.ifi_pct, r)<=IFI_TARGET?'ok':'warn'}">${formatPct(pct(r.ifi_pct, r), 2)}</span>`],
+    ['% IRR', r=>`<span class="badge ${pct(r.irr_pct, r)<=IRR_TARGET?'ok':'warn'}">${formatPct(pct(r.irr_pct, r), 2)}</span>`],
     ['Frota', r=>r.frota], ['Dias Aluguel', r=>r.dias_aluguel], ['Valor Aluguel', r=>money(r.valor_aluguel)],
     ['Empréstimo', r=>money(r.emprestimo)],
     ['Desc. IFI', r=>money(r.desc_ifi)], ['Desc. IRR', r=>money(r.desc_irr)],
@@ -12345,11 +12373,11 @@ function renderComparisonsFromPivot() {
       const corD = pctD<=0?'var(--success)':'var(--danger)', corR = pctR>=0?'var(--success)':'var(--danger)', corL = pctL>=0?'var(--success)':'var(--danger)';
       narrativa = `<p style="font-size:13px;color:var(--text-secondary);line-height:1.7;margin-top:14px">
         Comparando <b>${ultimo}</b> com <b>${penultimo}</b>: a receita das ordens
-        <span style="color:${corR};font-weight:700">${seta(pctR)} ${pctR>=0?'subiu':'caiu'} ${Math.abs(pctR).toFixed(1)}%</span>,
+        <span style="color:${corR};font-weight:700">${seta(pctR)} ${pctR>=0?'subiu':'caiu'} ${formatPct(Math.abs(pctR), 1)}</span>,
         as despesas totais
-        <span style="color:${corD};font-weight:700">${seta(pctD)} ${pctD>=0?'subiram':'caíram'} ${Math.abs(pctD).toFixed(1)}%</span>
+        <span style="color:${corD};font-weight:700">${seta(pctD)} ${pctD>=0?'subiram':'caíram'} ${formatPct(Math.abs(pctD), 1)}</span>
         e o lucro
-        <span style="color:${corL};font-weight:700">${seta(pctL)} ${pctL>=0?'subiu':'caiu'} ${Math.abs(pctL).toFixed(1)}%</span>
+        <span style="color:${corL};font-weight:700">${seta(pctL)} ${pctL>=0?'subiu':'caiu'} ${formatPct(Math.abs(pctL), 1)}</span>
         em relação ao período anterior.
       </p>`;
     }
@@ -12476,11 +12504,11 @@ function renderComparisonsFromBase() {
       const corD = pctD<=0?'var(--success)':'var(--danger)', corR = pctR>=0?'var(--success)':'var(--danger)', corL = pctL>=0?'var(--success)':'var(--danger)';
       narrativa = `<p style="font-size:13px;color:var(--text-secondary);line-height:1.7;margin-top:14px">
         Comparando <b>${ultimo.periodo}</b> com <b>${penultimo.periodo}</b>: a receita
-        <span style="color:${corR};font-weight:700">${seta(pctR)} ${pctR>=0?'subiu':'caiu'} ${Math.abs(pctR).toFixed(1)}%</span>,
+        <span style="color:${corR};font-weight:700">${seta(pctR)} ${pctR>=0?'subiu':'caiu'} ${formatPct(Math.abs(pctR), 1)}</span>,
         as despesas totais
-        <span style="color:${corD};font-weight:700">${seta(pctD)} ${pctD>=0?'subiram':'caíram'} ${Math.abs(pctD).toFixed(1)}%</span>
+        <span style="color:${corD};font-weight:700">${seta(pctD)} ${pctD>=0?'subiram':'caíram'} ${formatPct(Math.abs(pctD), 1)}</span>
         e o lucro
-        <span style="color:${corL};font-weight:700">${seta(pctL)} ${pctL>=0?'subiu':'caiu'} ${Math.abs(pctL).toFixed(1)}%</span>
+        <span style="color:${corL};font-weight:700">${seta(pctL)} ${pctL>=0?'subiu':'caiu'} ${formatPct(Math.abs(pctL), 1)}</span>
         em relação ao período anterior.
       </p>`;
     }
@@ -12768,8 +12796,8 @@ function renderPainelBI() {
         ${metricCard('Lucro', formatCurrency(lucroFech), lucroFech < 0)}
         ${metricCard('Despesas', formatCurrency(despesasFech))}
         ${metricCard('Ordens Concluídas', prodConcluida.length)}
-        ${ringStatCard('Eficiência média', eficienciaMedia.toFixed(1) + '%', eficienciaMedia, { color: 'var(--accent)', sub: eficienciaMedia >= 100 ? 'acima de 100%' : '' })}
-        ${ringStatCard('Margem de Lucro', margemLucro.toFixed(1) + '%', margemLucro, { color: margemLucro >= 0 ? 'var(--success)' : 'var(--danger)' })}
+        ${ringStatCard('Eficiência média', formatPct(eficienciaMedia, 1), eficienciaMedia, { color: 'var(--accent)', sub: eficienciaMedia >= 100 ? 'acima de 100%' : '' })}
+        ${ringStatCard('Margem de Lucro', formatPct(margemLucro, 1), margemLucro, { color: margemLucro >= 0 ? 'var(--success)' : 'var(--danger)' })}
       </div>
 
       <div class="section-heading">Qualidade & Prazo — cidades selecionadas</div>
@@ -12803,7 +12831,7 @@ function renderPainelBI() {
             <td style="color:var(--accent);font-weight:600">${formatCurrency(c.giga)}</td>
             <td style="color:var(--danger);font-weight:600">${formatCurrency(c.despesas)}</td>
             <td style="color:${c.lucro < 0 ? 'var(--danger)' : 'var(--success)'};font-weight:700">${formatCurrency(c.lucro)}</td>
-            <td>${c.giga ? ((c.lucro / c.giga) * 100).toFixed(1) + '%' : '-'}</td>
+            <td>${c.giga ? formatPct(((c.lucro / c.giga) * 100), 1) : '-'}</td>
           </tr>`).join('')}
           <tr class="total-row">
             <td class="cat-cell" style="color:var(--accent)">TOTAL</td>
@@ -12850,8 +12878,8 @@ function renderPainelBI() {
         <th>Cidade</th><th>Ordens Concluídas</th><th>Ativação</th><th>Reparo</th><th>% Prazo Reparo (24h)</th><th>% Prazo Ativação (36h)</th>
       </tr></thead><tbody>
         ${ranking.map(r => `<tr><td class="cat-cell">${r.cidade}</td><td>${r.ordens}</td><td>${r.ativacao}</td><td>${r.reparo}</td>
-          <td>${r.pctPrazo === null ? '-' : `<span class="badge ${r.pctPrazo >= PRAZO_META ? 'ok' : 'warn'}">${r.pctPrazo.toFixed(1)}%</span>`}</td>
-          <td>${r.pctPrazoAtiv === null ? '-' : `<span class="badge ${r.pctPrazoAtiv >= PRAZO_ATIVACAO_META ? 'ok' : 'warn'}">${r.pctPrazoAtiv.toFixed(1)}%</span>`}</td></tr>`).join('')}
+          <td>${r.pctPrazo === null ? '-' : `<span class="badge ${r.pctPrazo >= PRAZO_META ? 'ok' : 'warn'}">${formatPct(r.pctPrazo, 1)}</span>`}</td>
+          <td>${r.pctPrazoAtiv === null ? '-' : `<span class="badge ${r.pctPrazoAtiv >= PRAZO_ATIVACAO_META ? 'ok' : 'warn'}">${formatPct(r.pctPrazoAtiv, 1)}</span>`}</td></tr>`).join('')}
       </tbody></table></div>
 
       <div class="section-heading">Cidades e Bairros Atendidos</div>
@@ -13217,8 +13245,8 @@ function renderRelatoriosDia() {
       const pctF = l => l.total ? (l.ate24/l.total)*100 : 0;
       if (totFaixa.total) blocos.push({ id: 'faixa', titulo: 'Prazo Geral do Dia — por Faixa', sub: formatDate(dia),
         colunas: ['Cidades','Até 24hrs','Até 48hrs','Maior que 48hrs','Outliers','Total','% no Prazo'],
-        linhas: listaFaixa.map(l => ({ celulas: [l.cidade, l.ate24, l.ate48, l.maior48, l.outlier, l.total, pctF(l).toFixed(2)+'%'] })),
-        total: ['TOTAL', totFaixa.ate24, totFaixa.ate48, totFaixa.maior48, totFaixa.outlier, totFaixa.total, pctF(totFaixa).toFixed(2)+'%'] });
+        linhas: listaFaixa.map(l => ({ celulas: [l.cidade, l.ate24, l.ate48, l.maior48, l.outlier, l.total, formatPct(pctF(l), 2)] })),
+        total: ['TOTAL', totFaixa.ate24, totFaixa.ate48, totFaixa.maior48, totFaixa.outlier, totFaixa.total, formatPct(pctF(totFaixa), 2)] });
 
       // Vencendo agora (reparo em aberto)
       const agora = new Date();
@@ -13261,8 +13289,8 @@ function renderRelatoriosDia() {
         const rotuloMes = (meses.find(x => x.value === mes) || {}).label || mes;
         blocos.push({ id: 'mes', titulo: 'Acompanhamento de Prazos por Cidade (mês)', sub: rotuloMes,
           colunas: ['Cidades','Até 24hrs','Até 48hrs','Maior que 48hrs','Outliers','Total','% no Prazo'],
-          linhas: lista.map(l => ({ celulas: [l.cidade, l.ate24, l.ate48, l.maior48, l.outlier, l.total, pctM(l).toFixed(2)+'%'] })),
-          total: ['TOTAL', tot.ate24, tot.ate48, tot.maior48, tot.outlier, tot.total, pctM(tot).toFixed(2)+'%'] });
+          linhas: lista.map(l => ({ celulas: [l.cidade, l.ate24, l.ate48, l.maior48, l.outlier, l.total, formatPct(pctM(l), 2)] })),
+          total: ['TOTAL', tot.ate24, tot.ate48, tot.maior48, tot.outlier, tot.total, formatPct(pctM(tot), 2)] });
 
         const porTec = {};
         rowsMes.forEach(r => {
@@ -13274,7 +13302,7 @@ function renderRelatoriosDia() {
         const listaTec = Object.values(porTec).sort((a,b)=>b.fora-a.fora);
         blocos.push({ id: 'mestec', titulo: 'Prazo por Técnico (mês)', sub: rotuloMes,
           colunas: ['Técnico','Até 24h','Fora do prazo','Total','% no Prazo'],
-          linhas: listaTec.map(t => ({ celulas: [t.tec, t.ate24, t.fora, t.total, t.total ? ((t.ate24/t.total)*100).toFixed(2)+'%' : '-'] })) });
+          linhas: listaTec.map(t => ({ celulas: [t.tec, t.ate24, t.fora, t.total, t.total ? formatPct(((t.ate24/t.total)*100), 2) : '-'] })) });
       }
     }
 
@@ -13476,12 +13504,12 @@ const REPORT_SECTIONS = [
           columns: [
             {header:'Cidade', get:r=>r.cidade}, {header:'Até 24h', get:r=>r.ate24}, {header:'Até 48h', get:r=>r.ate48},
             {header:'Maior que 48h', get:r=>r.maior48}, {header:'Outliers', get:r=>r.outlier}, {header:'Total Concluído', get:r=>r.total},
-            {header:'SLA (%)', get:r=>sla(r).toFixed(2)+'%'},
+            {header:'SLA (%)', get:r=>formatPct(sla(r), 2)},
           ],
-          totalRow: ['TOTAL REGIONAL', tot.ate24, tot.ate48, tot.maior48, tot.outlier, tot.total, sla(tot).toFixed(2)+'%'],
+          totalRow: ['TOTAL REGIONAL', tot.ate24, tot.ate48, tot.maior48, tot.outlier, tot.total, formatPct(sla(tot), 2)],
         }],
         graficos: [{ titulo:'SLA (%) por Cidade — meta 85%', tipo:'bars',
-          items: list.map(c=>({label:c.cidade, value:sla(c), display:sla(c).toFixed(2)+'%', color: sla(c)>=85?'#22c55e':'#ef4444'})) }],
+          items: list.map(c=>({label:c.cidade, value:sla(c), display:formatPct(sla(c), 2), color: sla(c)>=85?'#22c55e':'#ef4444'})) }],
       };
     },
   },
@@ -13568,7 +13596,7 @@ const REPORT_SECTIONS = [
             {header:'Cidade', get:r=>r.cidade}, {header:'IFI (Instal.)', get:r=>r.ifi}, {header:'IRR (Reinc.)', get:r=>r.irr}, {header:'Total', get:r=>`${r.total} O.S.`},
           ], totalRow: ['TOTAL', tot.ifi, tot.irr, `${tot.total} O.S.`] },
           { titulo:'Indicadores Regionais', rows: [
-            {l:'% IFI (meta ≤ 2,50%)', v:pctIfi.toFixed(2)+'%'}, {l:'% IRR (meta ≤ 4,50%)', v:pctIrr.toFixed(2)+'%'}, {l:'Total IFI + IRR', v:`${tot.total} O.S.`},
+            {l:'% IFI (meta ≤ 2,50%)', v:formatPct(pctIfi, 2)}, {l:'% IRR (meta ≤ 4,50%)', v:formatPct(pctIrr, 2)}, {l:'Total IFI + IRR', v:`${tot.total} O.S.`},
           ], columns: [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}] },
         ],
         graficos: [{ titulo:'Total IFI + IRR por Cidade', tipo:'bars', cor:'#38bdf8', items: list.map(c=>({label:c.cidade, value:c.total})) }],
