@@ -366,6 +366,19 @@
      cartão segue o tema do site normalmente (pedido do cliente: "no tema
      escuro, deixa escuro mesmo"). O print de referência que ele manda era só
      tirado no tema claro; não é pra ficar branco fixo com o site no escuro. */
+  /* Tabela de bônus ao vivo (Acompanhamento Técnico) — o selo de APTO/INAPTO
+     é o que a pessoa procura na linha, então tem peso e fundo próprio. */
+  table.bonus-vivo .bv-ok   { color: var(--success); font-weight: 800; }
+  table.bonus-vivo .bv-ruim { color: var(--danger);  font-weight: 800; }
+  table.bonus-vivo .bv-faltam {
+    display: block; font-size: var(--fs-xs); color: var(--warn-text); font-weight: 600; margin-top: 2px;
+  }
+  .bv-status {
+    display: inline-block; padding: 4px 14px; border-radius: var(--r-pill);
+    font-size: var(--fs-xs); font-weight: 800; letter-spacing: .06em;
+  }
+  .bv-status.apto   { background: var(--success-bg); color: var(--success); }
+  .bv-status.inapto { background: var(--danger-bg);  color: var(--danger); }
   /* Cor da área PRAZO (a mesma do Menu Inicial, .area-prazo = #38bdf8): o
      banner era azul-marinho, igual ao resto do sistema, e nada dizia que
      aquilo era tela de prazo. Puxado pro ciano escuro pra diferenciar sem
@@ -6757,6 +6770,102 @@ function gerarPeriodoFolha(inicio, fim) {
   const syncPromise = syncBatchToSupabase('folhaPagamento', linhas);
   return { periodo, total: linhas.length, syncPromise };
 }
+// Tabela de bônus AO VIVO (Acompanhamento Técnico, pedido do cliente 02/09/2026).
+//
+// A tabela de bônus que já existia (renderBonusTable, na Produção) sai do
+// FECHAMENTO — só existe depois que o ciclo acaba e a planilha RELATORIO é
+// importada. Esta aqui calcula tudo na hora, direto da PRODUÇÃO do período,
+// então acompanha a importação do dia e o técnico sabe onde está ANTES de o
+// mês fechar, que é o ponto: dá tempo de reagir.
+//
+// As regras são as MESMAS da folha, sem exceção:
+//   % IFI = retornos IFI ÷ (ativações + mudanças de endereço) concluídas
+//   % IRR = retornos IRR ÷ reparos concluídos
+//   dia trabalhado = dia DISTINTO com ao menos uma ordem concluída baixada
+//   APTO = IFI ≤ 2,50% E IRR ≤ 4,50% E dias ≥ 26
+// Os retornos são atribuídos ao OFENSOR (contarRetornosPorOfensor), não a quem
+// executou a visita de retorno.
+function renderBonusAoVivo(inicio, fim, filtroTecnico) {
+  const porTecnico = {};
+  DB.producao.forEach(p => {
+    if (!isConcluido(p.status) || !inRange(p.data, inicio, fim)) return;
+    if (!ehRecursoTecnico(p.recurso)) return;
+    const t = String(p.recurso).trim();
+    const o = porTecnico[t] || (porTecnico[t] = { ativacaoMe: 0, reparos: 0, dias: new Set(), total: 0 });
+    o.total++;
+    if (p.data) o.dias.add(p.data);
+    if (ehBaseDoIfi(p.tipo_atividade)) o.ativacaoMe++;
+    else if (ehServicoReparo(p.tipo_atividade)) o.reparos++;
+  });
+  const retornos = contarRetornosPorOfensor(inicio, fim);
+  const achaRetorno = t => {
+    const alvo = normalizeHeader(t);
+    const par = Object.entries(retornos).find(([k]) => normalizeHeader(k) === alvo);
+    return par ? par[1] : { ifi: 0, irr: 0 };
+  };
+
+  let linhas = Object.entries(porTecnico).map(([tecnico, o]) => {
+    const r = achaRetorno(tecnico);
+    const dias = o.dias.size;
+    // sem base, o percentual não existe — 0 aqui significa "ainda não deu pra
+    // medir", não "está ótimo"; por isso o critério só reprova com base > 0
+    const ifiP = o.ativacaoMe ? (r.ifi / o.ativacaoMe) * 100 : 0;
+    const irrP = o.reparos ? (r.irr / o.reparos) * 100 : 0;
+    const okIfi = ifiP <= BONUS_IFI_MAX, okIrr = irrP <= BONUS_IRR_MAX, okDias = dias >= BONUS_DIAS_MIN;
+    const apto = okIfi && okIrr && okDias;
+    const faltam = BONUS_DIAS_MIN - dias;
+    const motivos = [];
+    if (!okIfi) motivos.push(`IFI ${formatPct(ifiP, 2)} (máx. ${formatPct(BONUS_IFI_MAX, 2)})`);
+    if (!okIrr) motivos.push(`IRR ${formatPct(irrP, 2)} (máx. ${formatPct(BONUS_IRR_MAX, 2)})`);
+    if (!okDias) motivos.push(`faltam ${faltam} dia(s) para ${BONUS_DIAS_MIN}`);
+    return { tecnico, ...o, dias, qtdIfi: r.ifi, qtdIrr: r.irr, ifiP, irrP,
+      okIfi, okIrr, okDias, apto, faltam,
+      motivo: motivos.join(' · ') || 'Dentro de todos os critérios' };
+  });
+  if (filtroTecnico) {
+    const busca = filtroTecnico.toLowerCase();
+    linhas = linhas.filter(l => l.tecnico.toLowerCase().includes(busca));
+  }
+  if (!linhas.length) return '';
+  // inaptos primeiro: é neles que dá pra agir enquanto o mês não fechou
+  linhas.sort((a, b) => (a.apto === b.apto ? b.total - a.total : (a.apto ? 1 : -1)));
+  const aptos = linhas.filter(l => l.apto).length;
+  const selo = ok => ok
+    ? '<span class="bv-ok" title="dentro da meta">✓</span>'
+    : '<span class="bv-ruim" title="acima da meta">✕</span>';
+  return `
+    <div class="panel" style="margin-bottom:1.5rem">
+      <h3>Bônus dos técnicos — situação de agora</h3>
+      <p style="font-size:var(--fs-sm);color:var(--text-muted);margin:-8px 0 12px;line-height:1.55">
+        Mesmos critérios da folha: <b>IFI ≤ ${formatPct(BONUS_IFI_MAX, 2)}</b> ·
+        <b>IRR ≤ ${formatPct(BONUS_IRR_MAX, 2)}</b> ·
+        <b>mínimo de ${BONUS_DIAS_MIN} dias</b> com ordem baixada.
+        <b style="color:var(--text-primary)">${aptos} de ${linhas.length}</b> aptos hoje.
+        Calculado na hora, da produção de <b>${formatDate(inicio)}</b> a <b>${formatDate(fim)}</b> —
+        atualiza a cada importação, sem esperar o fechamento do mês.
+        Não segue os filtros de cidade e status da tela: mudar a base mudaria o percentual.
+      </p>
+      <div class="table-wrap"><table class="data-table bonus-vivo">
+        <thead><tr>
+          <th>Técnico</th><th class="num">Ativação + M.E</th><th class="num">% IFI</th>
+          <th class="num">Reparo</th><th class="num">% IRR</th>
+          <th class="num">Dias trabalhados</th><th>Status do bônus</th>
+        </tr></thead>
+        <tbody>
+          ${linhas.map(l => `<tr title="${esc(l.motivo)}">
+            <td class="cat-cell">${esc(l.tecnico)}</td>
+            <td class="num">${l.ativacaoMe.toLocaleString('pt-BR')}</td>
+            <td class="num">${l.qtdIfi ? formatPct(l.ifiP, 2) + ' ' : ''}${selo(l.okIfi)}</td>
+            <td class="num">${l.reparos.toLocaleString('pt-BR')}</td>
+            <td class="num">${l.qtdIrr ? formatPct(l.irrP, 2) + ' ' : ''}${selo(l.okIrr)}</td>
+            <td class="num"><span class="badge ${l.okDias ? 'ok' : 'warn'}">${l.dias}</span>${
+              l.okDias ? '' : `<span class="bv-faltam">faltam ${l.faltam}</span>`}</td>
+            <td><span class="bv-status ${l.apto ? 'apto' : 'inapto'}">${l.apto ? 'APTO' : 'INAPTO'}</span></td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>`;
+}
 function renderBonusTable(fech, prodRows, retornos) {
   if (!fech.length) return '<div class="empty">Sem dados no período. Importe a aba RELATORIO.</div>';
   const toPct = v => Math.abs(v||0) <= 5 ? (v||0)*100 : (v||0); // fração até 500% — cobre eficiência acima de 100%
@@ -7205,6 +7314,7 @@ function renderAcomTec() {
         ${metricCard('🔧 Reparo Corretivo', reparo, false, {sub: total?((reparo/total)*100).toFixed(1)+'% do total':''})}
         ${metricCard('⇅ Upgrade/Downgrade', upgrade, false, {sub: total?((upgrade/total)*100).toFixed(1)+'% do total':''})}
       </div>
+      ${renderBonusAoVivo(s, e, tech)}
       <div class="panels-grid">
         <div class="panel" style="display:flex;flex-direction:column"><h3>Serviço por Técnico</h3><div id="c-tech" style="flex:1;display:flex;flex-direction:column"></div></div>
         <div class="panel"><h3>Total de Serviço por Cidade</h3><div id="c-city"></div></div>
