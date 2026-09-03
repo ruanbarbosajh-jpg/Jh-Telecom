@@ -7151,6 +7151,43 @@ async function aplicarRetornosGigaNaFolha(periodo, porTecnico) {
   const r = alteradas.length ? await syncBatchToSupabase('folhaPagamento', alteradas) : { ok: true };
   return { alteradas: alteradas.length, semLinha, sync: r };
 }
+// ---- ALUGUEL DE CARRO ----
+// Quanto a JH paga por DIA ao técnico que roda com carro próprio. Os números
+// saíram do Relatório do próprio cliente (ciclo 21/07-20/08/2026), dividindo
+// VALOR ALUGUEL CARRO por DIAS ALUGUEL:
+//   PRÓPRIO       R$ 33,33/dia  — bate exato em 5 técnicos (16, 6, 22, 25 e 1
+//                                 dia). 33,33 × 30 = R$ 1.000,00 no mês cheio.
+//   PRÓPRIO NOVO  R$ 50,00/dia  — R$ 1.500,00 no mês cheio; bate exato no
+//                                 técnico de 8 dias (8 × 50 = R$ 400,00).
+//   JH            R$ 0,00       — carro da empresa: quem paga a locadora é a
+//                                 JH, o técnico não recebe aluguel.
+// ATENÇÃO (achado ao conferir, ainda sem resposta do cliente): 6 técnicos do
+// ciclo receberam o valor CHEIO (R$ 1.000,00 / R$ 1.500,00) mesmo com 26-27
+// dias, enquanto outros com a mesma faixa de dias receberam proporcional. Ou
+// existe um mínimo de dias que fecha o mês, ou são acordos individuais. Até o
+// cliente dizer qual é a regra, aqui é sempre proporcional — e o campo
+// continua editável na tela pra corrigir caso a caso.
+const DIARIA_ALUGUEL = [
+  { re: /propri.*nov/, valor: 50.00 },   // "PRÓPRIO NOVO" antes de "PRÓPRIO"
+  { re: /propri/,      valor: 33.33 },
+  { re: /jh/,          valor: 0 },
+];
+function diariaDoAluguel(frota) {
+  const f = normalizeHeader(frota);
+  if (!f) return 0;
+  const l = DIARIA_ALUGUEL.find(x => x.re.test(f));
+  return l ? l.valor : 0;
+}
+// De que tipo é a frota do técnico: primeiro o que o fechamento daquele ciclo
+// já diz (é o número oficial), depois o cadastro da Frota.
+function frotaDoTecnico(tecnico, inicio, fim) {
+  const f = (DB.fechamento || []).find(x => normalizeHeader(x.tecnico) === normalizeHeader(tecnico)
+    && overlaps(x.inicio, x.ate_o_dia, inicio, fim));
+  if (f && f.frota) return f.frota;
+  const link = (DB.frotaLinks || []).find(x => normalizeHeader(x.motorista) === normalizeHeader(tecnico));
+  if (!link) return '';
+  return /jh/i.test(normalizeHeader(link.locadora)) ? 'JH' : 'PRÓPRIO';
+}
 // Quanto CUSTA um retorno pro técnico. Regra confirmada pelo cliente em
 // 03/09/2026: o desconto acompanha a FAIXA do próprio técnico, a mesma do
 // valor da ordem — não é valor fixo.
@@ -7321,6 +7358,22 @@ function gerarPeriodoFolha(inicio, fim) {
     const existente = existenteIdx !== undefined ? DB.folhaPagamento[existenteIdx] : null;
     const manuais = {};
     CAMPOS_MANUAIS_FOLHA.forEach(c => { manuais[c] = existente && existente[c] !== undefined && existente[c] !== null ? existente[c] : FOLHA_CAMPO_VAZIO(c); });
+    // FROTA e ALUGUEL não são digitados na folha gerada — antes nasciam
+    // vazios e a coluna ficava em branco com "Dias Aluguel 0".
+    //   FROTA        vem do fechamento (coluna FROTA da aba RELATORIO:
+    //                "JH", "PRÓPRIO" ou "PRÓPRIO NOVO"); se o ciclo ainda não
+    //                fechou, cai no cadastro da Frota (locadora "JH" = carro
+    //                da empresa, qualquer outra locadora = carro alugado).
+    //   DIAS ALUGUEL = DIAS TRABALHADOS. Conferido no Relatório do cliente:
+    //                bate em 35 de 35 linhas do ciclo 21/07-20/08.
+    //   VALOR        = dias × a diária do tipo de frota (ver DIARIA_ALUGUEL).
+    // Só preenche o que ainda não foi mexido à mão: quem já lançou o valor na
+    // tela continua mandando.
+    if (!manuais.frota) manuais.frota = frotaDoTecnico(tecnico, inicio, fim);
+    if (!manuais.dias_aluguel) manuais.dias_aluguel = diasTrab;
+    if (!manuais.valor_aluguel) {
+      manuais.valor_aluguel = +(Number(manuais.dias_aluguel) * diariaDoAluguel(manuais.frota)).toFixed(2);
+    }
     const totalDescontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(manuais[c]) || 0), 0);
     // A quebra por tipo (Ativação/Reparo/...) NÃO fica gravada aqui — a tela
     // calcula na hora, direto da Produção (ver contagemPorTipoNoPeriodo em
