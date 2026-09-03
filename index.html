@@ -743,6 +743,89 @@
   table.data-table th.col-fds-fim, table.data-table td.col-fds-fim { border-right: 2px solid var(--fds-borda); }
   table.data-table tr:hover td.col-fds { background: var(--fds-bg); }
   .table-wrap { overflow-x: auto; background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); }
+  /* ---- PRIMEIRA COLUNA FIXA (03/09/2026) ----
+     A Folha tem 47 colunas e quase 6.000px: rolando pro lado pra ver o valor
+     do Reparo, o NOME DO TÉCNICO já saiu da tela, e a linha vira um punhado
+     de números sem dono. Com .tab-col1-fixa no <table>, a primeira célula de
+     cada linha gruda na esquerda.
+     z-index: o cabeçalho já é sticky no topo (z 2); a primeira coluna do
+     CORPO fica em 3 pra passar por cima das outras células ao rolar, e o
+     CANTO (th da coluna 1) em 4, pra não ser coberto por nenhum dos dois.
+     O fundo é obrigatório: célula sticky sem fundo deixa o conteúdo de baixo
+     aparecer atravessado. */
+  table.tab-col1-fixa td:first-child,
+  table.tab-col1-fixa th:first-child { position: sticky; left: 0; }
+  table.tab-col1-fixa td:first-child { z-index: 3; background: var(--card-bg); }
+  table.tab-col1-fixa th:first-child { z-index: 4; }
+  /* A célula fixa precisa ser OPACA. A faixa zebrada é um véu translúcido
+     (rgba .035) e, numa célula sticky, translúcido deixa o resto da tabela
+     passar por baixo enquanto rola. Aqui a cor sólida vai em background-COLOR
+     e o véu por cima em background-IMAGE, no mesmo elemento: fica opaco e com
+     a mesma tonalidade da faixa.
+     A especificidade precisa passar a da regra da zebra (que tem 5 classes),
+     por isso os :not() repetidos — sem eles a zebra vence por vir depois. */
+  table.tab-col1-fixa tbody tr:nth-child(even):not(.total-row):not(.linha-subitem):not(.linha-espaco) > td:first-child {
+    background-color: var(--card-bg);
+    background-image: linear-gradient(rgba(255, 255, 255, .035), rgba(255, 255, 255, .035));
+  }
+  :root[data-theme="light"] table.tab-col1-fixa tbody tr:nth-child(even):not(.total-row):not(.linha-subitem):not(.linha-espaco) > td:first-child {
+    background-color: var(--card-bg);
+    background-image: linear-gradient(rgba(0, 0, 0, .03), rgba(0, 0, 0, .03));
+  }
+  table.tab-col1-fixa tbody tr.total-row > td:first-child { background: var(--total-bg); background-image: none; }
+  table.tab-col1-fixa tbody tr:hover > td:first-child { background: var(--row-hover); background-image: none; }
+  /* risquinho de sombra marcando onde a coluna fixa termina — sem ele não dá
+     pra perceber que o resto está deslizando por baixo */
+  table.tab-col1-fixa td:first-child::after,
+  table.tab-col1-fixa th:first-child::after {
+    content: ''; position: absolute; top: 0; right: 0; bottom: 0; width: 6px;
+    transform: translateX(100%); pointer-events: none;
+    background: linear-gradient(to right, rgba(0, 0, 0, .22), transparent);
+  }
+  /* barra de filtro acompanhando a rolagem: a Folha tem 2.300px de altura, e
+     o seletor de período ficava lá em cima, fora de alcance */
+  .toolbar.toolbar-fixa { position: sticky; top: 0; z-index: 20; }
+  /* ---- CADASTRO FINANCEIRO em grade ----
+     Antes: 5 tabelas empilhadas de 2 colunas, cada uma ocupando a largura
+     toda pra mostrar um rótulo e um número — 1.800px de rolagem pra 17
+     campos. Agora os grupos ficam lado a lado, cada um com o subtotal no
+     cabeçalho (o número que a pessoa confere enquanto digita). */
+  .fin-grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 14px; margin-bottom: 1.5rem; align-items: start; }
+  .fin-grupo { background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 16px 6px; }
+  .fin-grupo > header { display: flex; align-items: baseline; justify-content: space-between;
+    gap: 10px; padding-bottom: 8px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
+  .fin-grupo h3 { margin: 0; font-size: var(--fs-sm); font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text-secondary); }
+  .fin-subtotal { font-size: 13px; font-weight: 700; color: var(--text-primary);
+    font-variant-numeric: tabular-nums; }
+  .fin-linha { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 7px 0; border-bottom: 1px solid var(--border); }
+  .fin-grupo .fin-linha:last-of-type { border-bottom: none; }
+  .fin-linha > span { font-size: 13px; color: var(--text-primary); }
+  .fin-linha input { flex: none; }
+  /* resumo do topo (Receita / Despesas / Lucro) como 3 cartões, não linhas de
+     tabela — é o fecho, tem que dar pra bater o olho */
+  .fin-fecho { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px; margin-bottom: 1.25rem; }
+  .fin-fecho div { background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 16px; border-top: 3px solid; }
+  .fin-fecho .rot { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+  .fin-fecho .val { display: block; font-size: 22px; font-weight: 700; letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums; }
+  .fin-fecho .f-receita { border-top-color: var(--accent); }
+  .fin-fecho .f-receita .val { color: var(--accent); }
+  .fin-fecho .f-despesa { border-top-color: var(--danger); }
+  .fin-fecho .f-despesa .val { color: var(--danger); }
+  .fin-fecho .f-lucro { border-top-color: var(--success); }
+  .fin-fecho .f-lucro .val { color: var(--success); }
+  /* barra de salvar que acompanha a rolagem — com 17 campos, o botão ficava
+     lá embaixo e não dava pra saber se havia alteração pendente */
+  .fin-salvar-barra { position: sticky; bottom: 0; z-index: 10;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 16px; margin-bottom: 2rem; box-shadow: 0 -4px 14px rgba(0,0,0,.18); }
   .badge { padding: 3px 9px; border-radius: var(--r-pill); font-size: var(--fs-sm); font-weight: 600; }
   .badge { display: inline-block; }
   .badge.ok { background: var(--success-bg); color: var(--success); }
@@ -10534,7 +10617,7 @@ function renderGestaoPresenca() {
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
           ${statusKeys.map(k => `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:14px"><span style="width:10px;height:10px;border-radius:3px;background:${STATUS_PRESENCA[k].cor};display:inline-block"></span>${k} — ${STATUS_PRESENCA[k].label}</span>`).join('')}
         </div>
-        <div class="table-wrap"><table class="data-table">
+        <div class="table-wrap"><table class="data-table tab-col1-fixa">
           <thead><tr><th>Técnico</th><th>Cidade</th><th>Supervisor</th>
             ${dias.map(d => `<th style="text-align:center" class="${classeFimDeSemana(d, dias)}">${diaSemanaCurto(d)}<br>${formatDate(d).slice(0, 5)}</th>`).join('')}
             ${podeEditarPresenca() ? '<th></th>' : ''}
@@ -10970,7 +11053,7 @@ function renderGestaoPresencaEscritorio() {
       <div id="ge-metrics" style="margin-bottom:1.5rem"></div>
       <div class="panel" style="margin-bottom:1.5rem;overflow:auto">
         <div class="section-heading" style="margin-top:0">Quadro de presença — ${formatDate(dias[0])} a ${formatDate(dias[6])}</div>
-        <div class="table-wrap"><table class="data-table">
+        <div class="table-wrap"><table class="data-table tab-col1-fixa">
           <thead>
             <tr><th rowspan="2">Colaborador</th><th rowspan="2">Cargo</th><th rowspan="2">Setor</th><th rowspan="2">Horário Fixo</th>
               ${cabDia1}
@@ -12008,33 +12091,30 @@ function renderFinance() {
         data-cat="${esc(cat)}" data-centavos="${centavos}" value="${formatCurrency(centavos / 100)}"
         style="width:140px;text-align:right"${podeEditarFinanceiro() ? '' : ' readonly disabled'}>`;
     };
+    // Grade em vez de 5 tabelas empilhadas de 2 colunas: eram 1.800px de
+    // rolagem pra 17 campos, com a tabela ocupando a largura toda pra mostrar
+    // um rótulo e um número. Agora os grupos ficam lado a lado, cada um com o
+    // seu subtotal — que é o número que o usuário confere ao digitar.
     const grupoHtml = g => `
-      <div class="section-heading sem-toggle">${esc(g.grupo)}</div>
-      <div class="table-wrap" style="margin-bottom:1.25rem"><table class="data-table">
-        <thead><tr><th>Categoria</th><th style="text-align:right">Valor</th></tr></thead>
-        <tbody>${g.itens.map(cat => `<tr>
-          <td class="cat-cell">${esc(cat)}</td>
-          <td style="text-align:right">${campo(cat)}</td></tr>`).join('')}
-        </tbody></table></div>`;
+      <section class="fin-grupo">
+        <header><h3>${esc(g.grupo)}</h3><span class="fin-subtotal" data-grupo="${esc(g.grupo)}"></span></header>
+        ${g.itens.map(cat => `<label class="fin-linha">
+          <span>${esc(cat)}</span>${campo(cat)}</label>`).join('')}
+      </section>`;
 
     document.getElementById('fin-body').innerHTML = `
       <div class="section-heading sem-toggle">Receitas e Despesas<span class="sec-nota">${esc(rotulo)}</span></div>
-      <div class="table-wrap" style="margin-bottom:1.25rem"><table class="data-table">
-        <thead><tr><th>Categoria</th><th style="text-align:right">Valor</th></tr></thead>
-        <tbody>
-          <tr><td class="cat-cell">Receita das ordens</td>
-              <td style="text-align:right;color:var(--accent);font-weight:700" id="fin-receita">${formatCurrency(receita)}</td></tr>
-          <tr><td class="cat-cell">Total de Despesas</td>
-              <td style="text-align:right;color:var(--danger);font-weight:700" id="fin-despesa">${formatCurrency(0)}</td></tr>
-          <tr class="total-row"><td class="cat-cell">Lucro</td>
-              <td style="text-align:right;color:var(--success);font-weight:700" id="fin-lucro">${formatCurrency(0)}</td></tr>
-        </tbody></table></div>
-      <p style="font-size:12px;color:var(--text-muted);margin:-8px 0 18px">
+      <div class="fin-fecho">
+        <div class="f-receita"><span class="rot">Receita das ordens</span><span class="val" id="fin-receita">${formatCurrency(receita)}</span></div>
+        <div class="f-despesa"><span class="rot">Total de Despesas</span><span class="val" id="fin-despesa">${formatCurrency(0)}</span></div>
+        <div class="f-lucro"><span class="rot">Lucro</span><span class="val" id="fin-lucro">${formatCurrency(0)}</span></div>
+      </div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-6px 0 18px">
         Receita das ordens = soma de VALOR PAGO GIGA do fechamento deste ciclo (${(DB.fechamento || []).filter(f => overlaps(f.inicio, f.ate_o_dia, p.start, p.end)).length} técnico(s)).
         Total de Despesas e Lucro são calculados sozinhos conforme você digita.
       </p>
-      ${FIN_GRUPOS.map(grupoHtml).join('')}
-      ${podeEditarFinanceiro() ? `<div style="display:flex;align-items:center;gap:14px;margin-bottom:2rem">
+      <div class="fin-grade">${FIN_GRUPOS.map(grupoHtml).join('')}</div>
+      ${podeEditarFinanceiro() ? `<div class="fin-salvar-barra">
         <button class="btn" id="fin-salvar">Salvar alterações</button>
         <span id="fin-msg" style="font-size:13px;color:var(--text-muted)"></span>
       </div>` : ''}
@@ -12049,6 +12129,15 @@ function renderFinance() {
     const recalcular = () => {
       const v = lerValores();
       const despesa = FIN_CATEGORIAS.reduce((a, c) => a + (v[c] || 0), 0);
+      // subtotal no cabeçalho de cada grupo — é o número que a pessoa confere
+      // enquanto digita, sem precisar somar de cabeça as 6 linhas do bloco
+      FIN_GRUPOS.forEach(g => {
+        const el = document.querySelector(`.fin-subtotal[data-grupo="${g.grupo}"]`);
+        if (!el) return;
+        const soma = g.itens.reduce((a, c) => a + (v[c] || 0), 0);
+        el.textContent = formatCurrency(soma);
+        el.style.color = soma ? 'var(--text-primary)' : 'var(--text-muted)';
+      });
       document.getElementById('fin-despesa').textContent = formatCurrency(despesa);
       const lucro = receita - despesa;
       const elLucro = document.getElementById('fin-lucro');
@@ -12440,7 +12529,7 @@ function renderFolhaPagamento(modo) {
   const ehSemPeriodoFolha = p => !p || p === SEM_PERIODO_FOLHA;
   const periodosNomeados = [...new Set(DB.folhaPagamento.map(r=>r.periodo).filter(p => p && !ehSemPeriodoFolha(p)))];
   const temSemPeriodo = DB.folhaPagamento.some(r => ehSemPeriodoFolha(r.periodo));
-  document.getElementById('content').innerHTML = `<div class="toolbar">
+  document.getElementById('content').innerHTML = `<div class="toolbar toolbar-fixa">
     <div class="field"><label>Técnico</label><input type="text" id="f-tech" placeholder="Nome" list="tech-list"></div>
     ${DB.folhaPagamento.length ? `<div class="field"><label>Período</label><select id="f-periodo">
       <option value="">Todos os períodos</option>
@@ -13072,7 +13161,7 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     ['TOTAL DESCONTOS', r=>`<span class="folha-total-descontos" style="color:var(--danger);font-weight:700">${money(r.total_descontos)}</span>`],
     ['TOTAL A RECEBER', r=>`<span class="folha-total-receber" style="color:var(--success);font-weight:700">${money(r.total_receber)}</span>`]
   ];
-  return `<div class="table-wrap"><table class="data-table"><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>
+  return `<div class="table-wrap"><table class="data-table tab-col1-fixa"><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>
     ${rows.map(r=>`<tr>${cols.map(c=>`<td>${c[1](r) ?? ''}</td>`).join('')}</tr>`).join('')}
   </tbody></table></div>`;
 }
