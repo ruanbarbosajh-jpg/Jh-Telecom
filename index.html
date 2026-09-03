@@ -56,6 +56,11 @@
     --row-hover: #101a30; --gauge-track: rgba(255,255,255,0.12); --gauge-meta: #38bdf8; --nav-inactive: #b7c0d8; --nav-hover-bg: rgba(255,255,255,0.05);
     /* coluna de sábado/domingo nas tabelas de presença */
     --fds-bg: rgba(79,127,255,0.12); --fds-borda: rgba(79,127,255,0.45);
+    /* bloco de DESCONTOS na Folha — família do --danger, que já é a cor de
+       "isso sai do bolso do técnico". Fica bem mais fraco que o --danger-bg
+       usado em badge: aqui são ~20 colunas seguidas, e no tom do badge a
+       tabela inteira viraria um bloco vermelho. */
+    --desc-bg: rgba(239,68,68,0.07); --desc-borda: rgba(239,68,68,0.42);
 
     /* --- escala tipográfica: 7 degraus (antes eram 17 tamanhos soltos) --- */
     --fs-xs: 11px; --fs-sm: 12px; --fs-md: 14px; --fs-lg: 16px;
@@ -89,6 +94,7 @@
     --row-hover: #e9edf7; --gauge-track: rgba(20,32,64,0.14); --gauge-meta: #0369a1; --nav-inactive: #5b6684; --nav-hover-bg: rgba(20,32,64,0.06);
     --total-bg: #e4eaf6;
     --fds-bg: rgba(36,86,201,0.10); --fds-borda: rgba(36,86,201,0.40);
+    --desc-bg: rgba(200,30,30,0.055); --desc-borda: rgba(200,30,30,0.38);
     --sombra-flutuante: 0 12px 32px rgba(20,32,64,.16);
   }
   /* Números de tabela e indicador em largura fixa — sem isso as colunas de
@@ -742,6 +748,27 @@
   table.data-table th.col-fds-ini, table.data-table td.col-fds-ini { border-left: 2px solid var(--fds-borda); }
   table.data-table th.col-fds-fim, table.data-table td.col-fds-fim { border-right: 2px solid var(--fds-borda); }
   table.data-table tr:hover td.col-fds { background: var(--fds-bg); }
+  /* ---- BLOCO DE DESCONTOS na Folha (pedido do cliente 03/09/2026) ----
+     São ~20 colunas seguidas (Desc. *, Parcela * e TOTAL DESCONTOS) que TIRAM
+     dinheiro do técnico, no meio de 47 colunas que em maioria somam. Sem uma
+     marca própria elas se perdiam entre as de produção. Mesmo recurso já usado
+     no fim de semana da Presença: fundo próprio + borda só onde o grupo começa
+     e termina, pra ler como um bloco só e não como 20 colunas listradas. */
+  table.data-table th.col-desc, table.data-table td.col-desc { background: var(--desc-bg); }
+  table.data-table th.col-desc-ini, table.data-table td.col-desc-ini { border-left: 2px solid var(--desc-borda); }
+  table.data-table th.col-desc-fim, table.data-table td.col-desc-fim { border-right: 2px solid var(--desc-borda); }
+  table.data-table th.col-desc { color: var(--danger); }
+  /* o hover e a faixa zebrada não podem apagar a cor do bloco.
+     A regra da zebra no tema CLARO tem 7 classes (:root + [data-theme] + as
+     outras 5) e vence uma versão sem o :root — por isso o par abaixo, um pra
+     cada tema. Já custou o bloco ficar sem cor nas linhas pares no claro. */
+  table.data-table tr:hover td.col-desc { background: var(--desc-bg); }
+  table.data-table tbody tr:nth-child(even):not(.total-row):not(.linha-subitem):not(.linha-espaco) > td.col-desc {
+    background: var(--desc-bg);
+  }
+  :root[data-theme="light"] table.data-table tbody tr:nth-child(even):not(.total-row):not(.linha-subitem):not(.linha-espaco) > td.col-desc {
+    background: var(--desc-bg);
+  }
   .table-wrap { overflow-x: auto; background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); }
   /* ---- PRIMEIRA COLUNA FIXA (03/09/2026) ----
      A Folha tem 47 colunas e quase 6.000px: rolando pro lado pra ver o valor
@@ -13161,8 +13188,21 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     ['TOTAL DESCONTOS', r=>`<span class="folha-total-descontos" style="color:var(--danger);font-weight:700">${money(r.total_descontos)}</span>`],
     ['TOTAL A RECEBER', r=>`<span class="folha-total-receber" style="color:var(--success);font-weight:700">${money(r.total_receber)}</span>`]
   ];
-  return `<div class="table-wrap"><table class="data-table tab-col1-fixa"><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>
-    ${rows.map(r=>`<tr>${cols.map(c=>`<td>${c[1](r) ?? ''}</td>`).join('')}</tr>`).join('')}
+  // Quais colunas formam o bloco de DESCONTO: as "Desc. *", as "Parcela *"
+  // (que dizem em que parcela aquele desconto está) e o TOTAL DESCONTOS.
+  // A classe sai do próprio cabeçalho em vez de ser escrita nas ~20 entradas
+  // do array — coluna de desconto nova nasce marcada sozinha.
+  const ehColDesconto = h => /^desc\.|^parcela |^total descontos$/i.test(String(h).trim());
+  const classeCol = i => {
+    if (!ehColDesconto(cols[i][0])) return '';
+    const cls = ['col-desc'];
+    // borda só nas pontas do grupo: no meio ela viraria listra
+    if (i === 0 || !ehColDesconto(cols[i - 1][0])) cls.push('col-desc-ini');
+    if (i === cols.length - 1 || !ehColDesconto(cols[i + 1][0])) cls.push('col-desc-fim');
+    return ` class="${cls.join(' ')}"`;
+  };
+  return `<div class="table-wrap"><table class="data-table tab-col1-fixa"><thead><tr>${cols.map((c,i)=>`<th${classeCol(i)}>${c[0]}</th>`).join('')}</tr></thead><tbody>
+    ${rows.map(r=>`<tr>${cols.map((c,i)=>`<td${classeCol(i)}>${c[1](r) ?? ''}</td>`).join('')}</tr>`).join('')}
   </tbody></table></div>`;
 }
 
