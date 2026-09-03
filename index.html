@@ -3393,9 +3393,9 @@ function excelDateToISO(value) {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   const str = String(value).trim();
   let m = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
-  if (m) { let [ d, mo, y] = m; if (y.length === 2) y = '20' + y; return `${y.padStart(4,'0')}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`; }
+  if (m) { let [, d, mo, y] = m; if (y.length === 2) y = '20' + y; return `${y.padStart(4,'0')}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`; }
   m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) { const [ y, mo, d] = m; return `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`; }
+  if (m) { const [, y, mo, d] = m; return `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`; }
   return null;
 }
 // Converte hora vinda do Excel: pode ser uma fração de dia (0.4436 = 10:38),
@@ -5813,7 +5813,7 @@ function ativarFiltrosDeColuna(raiz) {
       });
     }
     function aplicar() {
-      const ativos = Object.entries(estado).filter(([ v]) => v && v.size);
+      const ativos = Object.entries(estado).filter(([, v]) => v && v.size);
       let visiveis = 0;
       linhasDados().forEach(tr => {
         const tds = tr.querySelectorAll('td');
@@ -7925,6 +7925,53 @@ function normalizarCoresModernas(raiz) {
     if (/color\(|color-mix/i.test(cs.filter || '')) el.style.filter = 'none';
   });
 }
+// O html2canvas 1.4.1 desenha o conteúdo de <input>/<select> na posição errada e
+// CORTA o texto no meio da altura: na tabela "Mão de Obra e Produção do Dia" do
+// Parcial do Dia, os números da coluna M.O (que são campos editáveis) saíam pela
+// metade na imagem, enquanto o resto da tabela — texto normal — saía certo.
+// A lib é de 2022 e não tem conserto por fora, então aqui cada campo vira um
+// <span> com o MESMO valor e o MESMO estilo, e o span a lib desenha certo.
+//
+// Só mexe no CLONE que o html2canvas monta (nunca na tela): o `raiz` que chega
+// aqui vem do onclone, já dentro do iframe da lib e já com layout calculado —
+// por isso getBoundingClientRect() vale e a caixa sai do tamanho exato que
+// estava na tela.
+//
+// Campo que não é texto fica de fora: checkbox/radio a lib já desenha certo,
+// botão vira caixa vazia, e hidden/password/file não podem virar texto visível.
+const CAMPOS_VIRAM_TEXTO = ['text', 'number', 'date', 'time', 'search', 'tel', 'url'];
+function substituirCamposPorTexto(raiz) {
+  if (!raiz) return;
+  raiz.querySelectorAll('input, select, textarea').forEach(campo => {
+    const tag = campo.tagName;
+    if (tag === 'INPUT' && !CAMPOS_VIRAM_TEXTO.includes((campo.type || 'text').toLowerCase())) return;
+    let cs;
+    try { cs = getComputedStyle(campo); } catch (e) { return; }
+    if (cs.display === 'none' || cs.visibility === 'hidden') return;
+    const texto = tag === 'SELECT'
+      ? (campo.selectedOptions && campo.selectedOptions[0] ? campo.selectedOptions[0].textContent : '')
+      : campo.value;
+    const r = campo.getBoundingClientRect();
+    const px = v => parseFloat(v) || 0;
+    // a altura da linha é a altura útil da caixa (sem padding nem borda) — é o
+    // que centraliza o número na vertical do mesmo jeito que o input fazia
+    const util = r.height - px(cs.paddingTop) - px(cs.paddingBottom) - px(cs.borderTopWidth) - px(cs.borderBottomWidth);
+    const span = document.createElement('span');
+    span.textContent = texto == null ? '' : String(texto);
+    span.style.cssText =
+      'display:inline-block;box-sizing:border-box;vertical-align:middle;overflow:hidden;white-space:nowrap;' +
+      `width:${r.width ? r.width + 'px' : cs.width};` +
+      (r.height ? `height:${r.height}px;` : '') +
+      `padding:${cs.paddingTop} ${cs.paddingRight} ${cs.paddingBottom} ${cs.paddingLeft};` +
+      (util > 0 ? `line-height:${util}px;` : '') +
+      `color:${cs.color};background:${cs.backgroundColor};` +
+      `border:${cs.borderTopWidth} ${cs.borderTopStyle} ${cs.borderTopColor};` +
+      `border-radius:${cs.borderTopLeftRadius};` +
+      `font-family:${cs.fontFamily};font-size:${cs.fontSize};font-weight:${cs.fontWeight};` +
+      `text-align:${cs.textAlign};`;
+    campo.parentNode.replaceChild(span, campo);
+  });
+}
 function capturarElementoComoImagem(elemento, nomeArquivo, aoTerminar) {
   const limpar = () => { if (aoTerminar) aoTerminar(); };
   if (!elemento) { limpar(); return; }
@@ -7940,7 +7987,7 @@ function capturarElementoComoImagem(elemento, nomeArquivo, aoTerminar) {
     // color-mix() para color(srgb …) e ela aborta a captura inteira com
     // "unsupported color function". Aqui o CLONE (nunca a tela de verdade) tem
     // esses valores reescritos como rgb() antes de desenhar.
-    onclone: (doc, clone) => normalizarCoresModernas(clone),
+    onclone: (doc, clone) => { normalizarCoresModernas(clone); substituirCamposPorTexto(clone); },
   }).then(cv => {
     limpar();
     cv.toBlob(blob => {
@@ -12144,7 +12191,7 @@ function renderFolhaPagamento() {
       'Vale': rows.reduce((a,r)=>a+r.desc_vale,0), 'Ferramentas': rows.reduce((a,r)=>a+r.desc_ferramentas,0),
       'Combustível': rows.reduce((a,r)=>a+r.desc_combustivel,0), 'Fiscalização': rows.reduce((a,r)=>a+r.desc_fiscalizacao,0),
     };
-    const descList = Object.entries(descTotals).filter(([v])=>v>0).map(([label,value])=>({label,value,display:formatCurrency(value)})).sort((a,b)=>b.value-a.value);
+    const descList = Object.entries(descTotals).filter(([,v])=>v>0).map(([label,value])=>({label,value,display:formatCurrency(value)})).sort((a,b)=>b.value-a.value);
 
     body.innerHTML = `
       <div class="section-heading">Financeiro da equipe</div>
@@ -12537,7 +12584,7 @@ function renderComparisonsFromBase() {
   function sortKey(p) {
     const m = String(p).match(/(\d{1,2})[\/\-](\d{1,2})[\/\-]?(\d{2,4})?/);
     if (!m) return 0;
-    const [ d, mo, y] = m;
+    const [, d, mo, y] = m;
     return Number((y||'2000').padStart(4,'20')) * 10000 + Number(mo)*100 + Number(d);
   }
   const periodos = [...periodosRaw].sort((a,b)=>sortKey(a)-sortKey(b));
