@@ -1607,11 +1607,18 @@ const SUPABASE_TABLES = {
   prazo:           { table: 'prazo',              conflict: 'os' },
   baseDoDia:       { table: 'base_do_dia',        conflict: 'os' },
   prazoReparoDia:  { table: 'prazo_reparo_dia',   conflict: 'os' },
-  frotaLinks:      { table: 'frota_links',        conflict: 'motorista,placa,vinculacao' },
-  frotaTroca:      { table: 'frota_troca',        conflict: 'condutor,placa_atual,vinc_atual' },
-  frotaManutencao: { table: 'frota_manutencao',   conflict: 'placa,data,servico' },
-  frotaDesvinc:    { table: 'frota_desvinc',      conflict: 'condutor,placa,desvinculado' },
-  frotaMultas:     { table: 'frota_multas',       conflict: 'condutor,placa,data_infracao' },
+  // frotaLinks/Troca/Manutencao/Desvinc/Multas: o conflito era pela data
+  // "de verdade" (vinculacao/vinc_atual/data/desvinculado/data_infracao), mas
+  // essa data às vezes vem em branco na planilha — e no Postgres NULL nunca
+  // é igual a NULL, então o ON CONFLICT não achava a linha antiga e cada
+  // reimportação duplicava. `chave` (ver SEM_DATA_FROTA em applyRow) é um
+  // texto único calculado no import que nunca fica em branco — precisa da
+  // migração sql/PASSO-17-frota-chave-unica.sql pra existir no banco.
+  frotaLinks:      { table: 'frota_links',        conflict: 'chave' },
+  frotaTroca:      { table: 'frota_troca',        conflict: 'chave' },
+  frotaManutencao: { table: 'frota_manutencao',   conflict: 'chave' },
+  frotaDesvinc:    { table: 'frota_desvinc',      conflict: 'chave' },
+  frotaMultas:     { table: 'frota_multas',       conflict: 'chave' },
   frotaRevisao:    { table: 'frota_revisao',      conflict: 'placa,data_revisao' },
   pedagio:         { table: 'pedagio',            conflict: 'data_transacao,hora,placa' },
   financeiro:      { table: 'financeiro',         conflict: 'periodo,categoria,tipo' },
@@ -5087,6 +5094,16 @@ function insertRow(target, map, row, extra) {
     return String(c).trim();
   };
   const d = v => excelDateToISO(cell(row, map[v]));
+  // Frota (links/troca/manutenção/desvinc/multas): a chave de upsert do
+  // Supabase inclui uma data que às vezes vem em branco na planilha (ex.:
+  // VINCULAÇÃO). No Postgres, NULL nunca é igual a NULL — então o ON CONFLICT
+  // não encontra a linha antiga pra essas datas em branco, e cada reimportação
+  // insere uma linha NOVA em vez de atualizar (achado real: FROTA_LITORAL.xlsx
+  // duplicando no banco a cada reimportação, para os carros sem VINCULAÇÃO
+  // preenchida). Esse texto some no lugar de uma data vazia só dentro da
+  // CHAVE — os campos que a tela mostra continuam guardando a data real (ou
+  // vazia), então nada muda na tela.
+  const SEM_DATA_FROTA = 'sem-data';
   switch (target) {
     case 'fechamento': {
       const tecnico = s('tecnico'), inicio = d('inicio'), ate_o_dia = d('ate_o_dia');
@@ -5219,22 +5236,26 @@ function insertRow(target, map, row, extra) {
     }
     case 'frotaLinks': {
       const obj = { motorista: s('motorista'), placa: s('placa'), supervisor: s('supervisor'), cidade: s('cidade'), locadora: s('locadora'), vinculacao: d('vinculacao'), observacao: s('observacao') };
-      return upsertRow(DB.frotaLinks, DB_INDEX.frotaLinks, obj.motorista && obj.placa ? `${obj.motorista}|${obj.placa}|${obj.vinculacao}` : null, obj);
+      obj.chave = obj.motorista && obj.placa ? `${obj.motorista}|${obj.placa}|${obj.vinculacao || SEM_DATA_FROTA}` : null;
+      return upsertRow(DB.frotaLinks, DB_INDEX.frotaLinks, obj.chave, obj);
       break;
     }
     case 'frotaTroca': {
       const obj = { condutor: s('condutor'), placa_anterior: s('placa_anterior'), vinc_anterior: d('vinc_anterior'), obs_checklist: s('obs_checklist'), placa_atual: s('placa_atual'), vinc_atual: d('vinc_atual'), km: n('km'), locadora: s('locadora') };
-      return upsertRow(DB.frotaTroca, DB_INDEX.frotaTroca, obj.condutor && obj.placa_atual ? `${obj.condutor}|${obj.placa_atual}|${obj.vinc_atual}` : null, obj);
+      obj.chave = obj.condutor && obj.placa_atual ? `${obj.condutor}|${obj.placa_atual}|${obj.vinc_atual || SEM_DATA_FROTA}` : null;
+      return upsertRow(DB.frotaTroca, DB_INDEX.frotaTroca, obj.chave, obj);
       break;
     }
     case 'frotaManutencao': {
       const obj = { condutor: s('condutor'), placa: s('placa'), servico: s('servico'), obs: s('obs'), data: d('data'), km: n('km') };
-      return upsertRow(DB.frotaManutencao, DB_INDEX.frotaManutencao, obj.placa && obj.data ? `${obj.placa}|${obj.data}|${obj.servico}` : null, obj);
+      obj.chave = obj.placa && obj.data ? `${obj.placa}|${obj.data}|${obj.servico}` : (obj.placa ? `${obj.placa}|${SEM_DATA_FROTA}|${obj.servico}` : null);
+      return upsertRow(DB.frotaManutencao, DB_INDEX.frotaManutencao, obj.chave, obj);
       break;
     }
     case 'frotaDesvinc': {
       const obj = { condutor: s('condutor'), placa: s('placa'), vinculacao: d('vinculacao'), desvinculado: d('desvinculado'), obs: s('obs') };
-      return upsertRow(DB.frotaDesvinc, DB_INDEX.frotaDesvinc, obj.condutor && obj.placa ? `${obj.condutor}|${obj.placa}|${obj.desvinculado}` : null, obj);
+      obj.chave = obj.condutor && obj.placa ? `${obj.condutor}|${obj.placa}|${obj.desvinculado || SEM_DATA_FROTA}` : null;
+      return upsertRow(DB.frotaDesvinc, DB_INDEX.frotaDesvinc, obj.chave, obj);
       break;
     }
     case 'frotaRevisao': {
@@ -5244,7 +5265,8 @@ function insertRow(target, map, row, extra) {
     }
     case 'frotaMultas': {
       const obj = { condutor: s('condutor'), placa: s('placa'), data_infracao: d('data_infracao'), valor_multa: money('valor_multa') };
-      return upsertRow(DB.frotaMultas, DB_INDEX.frotaMultas, obj.condutor && obj.data_infracao ? `${obj.condutor}|${obj.placa}|${obj.data_infracao}` : null, obj);
+      obj.chave = obj.condutor && obj.placa ? `${obj.condutor}|${obj.placa}|${obj.data_infracao || SEM_DATA_FROTA}` : null;
+      return upsertRow(DB.frotaMultas, DB_INDEX.frotaMultas, obj.chave, obj);
       break;
     }
     case 'pedagio': {
