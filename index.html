@@ -319,6 +319,48 @@
   input.folha-edit-moeda.tem-valor:focus { border-color: var(--warn-text); }
   /* "Parcela X" (2/3, 1/1) — texto curto, cor neutra (não é dinheiro) */
   input.folha-edit-parcela { text-align: center; }
+  /* ---- HOLERITE (extrato de serviços) ----
+     Papel A4 em pé: largura fixa em pt pra sair igual na tela, na imagem e na
+     impressão. Cores por TOKEN — o holerite é escuro no tema escuro e claro no
+     claro; "#fff" fixo aqui já apagaria a folha inteira num dos dois. */
+  .holerite {
+    max-width: 640px; margin: 0 0 1.5rem; padding: 22px 26px 18px;
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius);
+    font-size: 12px; color: var(--text-primary);
+  }
+  .hol-topo { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 2px solid var(--accent); padding-bottom: 10px; }
+  .hol-marca { font-size: 17px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; color: var(--accent); }
+  .hol-marca span { display: block; font-size: 8px; font-weight: 600; letter-spacing: .12em; color: var(--text-muted); }
+  .hol-tit { font-size: 13px; font-weight: 700; letter-spacing: .1em; color: var(--text-secondary); }
+  .hol-nome { margin: 14px 0 16px; font-size: 15px; font-weight: 700; }
+  .hol-nome span { display: block; font-size: 11px; font-weight: 500; color: var(--text-muted); margin-top: 2px; }
+  .holerite table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+  .holerite th, .holerite td { padding: 5px 8px; border: 1px solid var(--border); text-align: left; }
+  .holerite .q { text-align: center; width: 68px; }
+  .holerite .v { text-align: right; width: 118px; font-variant-numeric: tabular-nums; }
+  .holerite .p { text-align: center; width: 74px; color: var(--text-muted); }
+  .hol-ind th { background: var(--panel-2, var(--bg-page)); font-size: 11px; text-align: center; }
+  .hol-ind th:first-child { text-align: left; }
+  .hol-ind td { font-size: 11px; }
+  .hol-ind td:not(:first-child) { text-align: center; font-variant-numeric: tabular-nums; }
+  .hol-faixa { margin: 14px 0 0; padding: 5px 8px; font-size: 11px; font-weight: 700; letter-spacing: .1em; color: #fff; }
+  .hol-prov { background: #1b4d7a; }
+  .hol-desc { background: #7a2020; }
+  .hol-tab thead th { background: var(--bg-page); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-secondary); }
+  .hol-tab tbody tr.hol-total td { font-weight: 700; background: var(--bg-page); }
+  .hol-fecho { margin-top: 16px; }
+  .hol-fecho td:first-child { font-weight: 600; }
+  .hol-fecho tr.hol-total td { font-size: 13px; color: var(--success); }
+  .hol-assina { margin-top: 26px; font-size: 10px; letter-spacing: .1em; color: var(--text-muted); }
+  .hol-assina span { display: block; border-top: 1px solid var(--text-muted); width: 240px; margin-top: 30px; }
+  .hol-data { margin-top: 10px; text-align: right; font-size: 10px; color: var(--text-muted); font-style: italic; }
+  /* impressão: só o holerite vai pro papel */
+  @media print {
+    body * { visibility: hidden; }
+    #hol-area, #hol-area * { visibility: visible; }
+    #hol-area { position: absolute; left: 0; top: 0; width: 100%; }
+    .holerite { border: none; max-width: none; }
+  }
   .modal-largo { width: min(1100px, 94vw); max-height: 88vh; overflow: auto; position: relative; }
   .mt-fechar {
     position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
@@ -2170,6 +2212,12 @@ function ehAnalista() { return !!currentUser && currentUser.role === 'analista';
 // de consulta. O valor fica salvo no Supabase e vale para todos, então não
 // pode ser mexido por quem só acompanha.
 function podeEditarMO() { return !!currentUser && currentUser.role !== 'escritorio'; }
+// Cadastro financeiro (tela Financeiro): quem digita despesa do ciclo. Em
+// 03/09/2026 o cliente trancou TODO o financeiro no Analista — e a rota
+// 'finance' já está bloqueada pros outros perfis em ROUTE_PERMISSIONS. Este
+// check é a segunda tranca, na EDIÇÃO: se um dia a rota for reaberta pra
+// alguém ver, esse alguém entra em modo leitura em vez de poder gravar.
+function podeEditarFinanceiro() { return ehAnalista(); }
 // Produção: o Escritório entra na tela, mas só enxerga a seção "Ordens do
 // Período — Detalhamento" (pedido do cliente, 01/09/2026). Fica de fora dos
 // cards do topo, dos gráficos, do ranking de técnicos, da Tabela de Bônus, da
@@ -6342,11 +6390,18 @@ function renderDashboard() {
     // Sem ela, cai no fechamento (GIGA − despesas dos técnicos).
     const rotuloPeriodo = `${formatDate(s)} a ${formatDate(e)}`;
     const cmp = DB.comparativoFinanceiro;
-    const cmpTem = !!(cmp && cmp.receitaOrdens && cmp.receitaOrdens[rotuloPeriodo] !== undefined);
-    const receitaFinal  = cmpTem ? cmp.receitaOrdens[rotuloPeriodo]  : valorPagoGiga;
-    const despesaFinal  = cmpTem ? cmp.totalDespesas[rotuloPeriodo]  : despesasTotal;
-    const lucroFinal    = cmpTem ? cmp.lucro[rotuloPeriodo]          : (valorPagoGiga - despesasTotal);
-    const fonteFin = cmpTem ? 'planilha de Comparação' : 'fechamento por técnico';
+    // ORDEM DAS FONTES (03/09/2026): o CADASTRO da tela Financeiro vem primeiro.
+    // Ele é digitado por período dentro do sistema e é o que o cliente mantém
+    // atualizado; a planilha de Comparação virou só o histórico de quem ainda
+    // não foi cadastrado, e o fechamento por técnico continua sendo o último
+    // recurso (não tem folha de escritório, imposto, aluguel da base…).
+    const cadTem = temCadastroFin(rotuloPeriodo);
+    const cadDespesa = cadTem ? FIN_CATEGORIAS.reduce((a, c) => a + (despesasDoPeriodoFin(rotuloPeriodo)[c] || 0), 0) : 0;
+    const cmpTem = !cadTem && !!(cmp && cmp.receitaOrdens && cmp.receitaOrdens[rotuloPeriodo] !== undefined);
+    const receitaFinal  = cadTem ? valorPagoGiga : (cmpTem ? cmp.receitaOrdens[rotuloPeriodo]  : valorPagoGiga);
+    const despesaFinal  = cadTem ? cadDespesa    : (cmpTem ? cmp.totalDespesas[rotuloPeriodo]  : despesasTotal);
+    const lucroFinal    = receitaFinal - despesaFinal;
+    const fonteFin = cadTem ? 'cadastro do Financeiro' : (cmpTem ? 'planilha de Comparação' : 'fechamento por técnico');
     const lucroTotal = lucroFinal;
 
     // ---- variação vs. ciclo ANTERIOR (só apresentação: usa os mesmos
@@ -6441,18 +6496,20 @@ function renderDashboard() {
       { rot: 'Reparos', v: reparos }, { rot: 'Ativação', v: ativacao },
       { rot: 'M. Endereço', v: me }, { rot: 'Upgrade', v: upgrade }, { rot: 'M. Cômodo', v: mc }
     ].sort((a, b) => b.v - a.v);
-    // resumo Despesas/Receitas do ciclo, categoria por categoria — igual à
-    // planilha COMPARATIVO, pedido do cliente pra ficar bem no topo da tela.
-    // Só existe quando a planilha COMPARATIVO foi importada (é dela que vem
-    // a quebra por categoria); sem ela o restante do Dashboard já avisa.
-    const linhasResumo = cmpTem
-      ? Object.keys(cmp.porCategoria).map(cat => ({ rot: cat, v: cmp.porCategoria[cat][rotuloPeriodo] }))
-      : [];
+    // resumo Despesas/Receitas do ciclo, categoria por categoria — pedido do
+    // cliente pra ficar bem no topo da tela. A quebra vem do CADASTRO da tela
+    // Financeiro; período que ainda não foi cadastrado cai na planilha
+    // COMPARATIVO, como era antes.
+    const linhasResumo = cadTem
+      ? (() => { const d = despesasDoPeriodoFin(rotuloPeriodo); return FIN_CATEGORIAS.map(cat => ({ rot: cat, v: d[cat] })); })()
+      : cmpTem
+        ? Object.keys(cmp.porCategoria).map(cat => ({ rot: cat, v: cmp.porCategoria[cat][rotuloPeriodo] }))
+        : [];
     // Mesmo desenho da tela de Comparativos (renderComparisonsFromPivot):
     // data-table comum, categoria em .cat-cell e as três linhas de fecho em
     // .total-row, coloridas só no texto. Sem estilo próprio de propósito —
     // é a mesma tabela da planilha, então tem que parecer a mesma tabela.
-    const resumoFinanceiro = !cmpTem ? '' : `
+    const resumoFinanceiro = !linhasResumo.length ? '' : `
       <div class="section-heading sem-toggle">Resumo financeiro do ciclo</div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table">
         <thead><tr><th>Despesas / Receitas</th><th>${esc(rotuloPeriodo)}</th></tr></thead>
@@ -6484,9 +6541,9 @@ function renderDashboard() {
         </div>
       </div>
       <p style="margin:-6px 0 20px;font-size:var(--fs-sm);color:var(--text-muted)">
-        Receita, despesa e lucro pela <b>${esc(fonteFin)}</b>${cmpTem
+        Receita, despesa e lucro pela <b>${esc(fonteFin)}</b>${cadTem || cmpTem
           ? ' — inclui folha do escritório, imposto, aluguel da base e demais custos da empresa, que não aparecem no fechamento por técnico.'
-          : '. Importe a planilha COMPARATIVO para ver o resultado da empresa inteira.'}
+          : '. Cadastre as despesas deste ciclo na tela Financeiro para ver o resultado da empresa inteira.'}
       </p>
       <div class="dash-duas">
         <div class="dash-duas-esq">${resumoFinanceiro}</div>
@@ -6792,6 +6849,96 @@ function contarRetornosPorOfensor(inicio, fim) {
   });
   return conta;
 }
+// ---- Planilha de retornos que a GIGA manda ("IFI e IRR <mês>.xlsx") ----
+// Uma linha por retorno. As colunas que importam:
+//   Data      quando o RETORNO foi executado — é o que define o período
+//   IND       "IFI" ou "IRR"
+//   Executor  quem fez a ordem ANTERIOR, a que gerou o retorno  → é o OFENSOR
+//   Recurso   quem foi refazer a ordem — NÃO é quem leva o retorno
+//
+// Por que Executor e não Recurso: no arquivo de agosto/2026 os dois campos são
+// diferentes em 305 das 458 linhas, e a coluna "Dt Exec" (data da ordem
+// anterior) é anterior à "Data" em 453 linhas e nunca posterior. Ou seja, o
+// bloco Dt Exec / Executor / OS anterior / Serv Anter descreve a ordem
+// ANTERIOR — e a regra da JH é lançar o retorno no ofensor, não em quem
+// consertou (mesma regra de contarRetornosPorOfensor).
+function contarRetornosGiga(rows, inicio, fim) {
+  if (!rows || rows.length < 2) return { erro: 'Planilha vazia.' };
+  const cab = rows[0].map(normalizeHeader);
+  const col = nome => cab.indexOf(normalizeHeader(nome));
+  const iData = col('Data'), iInd = col('IND'), iExec = col('Executor');
+  if (iData < 0 || iInd < 0 || iExec < 0) {
+    return { erro: 'Não encontrei as colunas "Data", "IND" e "Executor" nessa planilha. É o arquivo de retornos que a GIGA manda?' };
+  }
+  const porTecnico = {};
+  let noPeriodo = 0, fora = 0, semOfensor = 0;
+  rows.slice(1).forEach(r => {
+    const ind = String(r[iInd] || '').trim().toUpperCase();
+    if (ind !== 'IFI' && ind !== 'IRR') return;
+    const dataISO = excelDateToISO(r[iData]);
+    if (!dataISO) return;
+    if (inicio && fim && !inRange(dataISO, inicio, fim)) { fora++; return; }
+    const ofensor = String(r[iExec] || '').trim();
+    if (!ofensor) { semOfensor++; return; }
+    noPeriodo++;
+    const k = normalizeHeader(ofensor);
+    if (!porTecnico[k]) porTecnico[k] = { nome: ofensor, ifi: 0, irr: 0 };
+    porTecnico[k][ind === 'IFI' ? 'ifi' : 'irr']++;
+  });
+  return { porTecnico, noPeriodo, fora, semOfensor };
+}
+// Joga a contagem da planilha da GIGA nas linhas da folha daquele período.
+// Só mexe em Qtd. IFI / Qtd. IRR (e no desconto que sai deles) — desconto de
+// material, parcela, frota e bônus ficam exatamente como estavam.
+async function aplicarRetornosGigaNaFolha(periodo, porTecnico) {
+  const janela = datasDoPeriodoFolha(periodo);
+  const alteradas = [], semLinha = [];
+  Object.values(porTecnico).forEach(r => {
+    const idx = DB_INDEX.folhaPagamento.get(`${r.nome}|${periodo}`);
+    let alvo = idx;
+    if (alvo === undefined) {
+      // o nome na planilha da GIGA pode vir com outra grafia/acento
+      const achou = DB.folhaPagamento.findIndex(l => l.periodo === periodo && normalizeHeader(l.tecnico) === normalizeHeader(r.nome));
+      alvo = achou >= 0 ? achou : undefined;
+    }
+    if (alvo === undefined) { semLinha.push(r.nome); return; }
+    const linha = { ...DB.folhaPagamento[alvo], qtd_ifi: r.ifi, qtd_irr: r.irr };
+    aplicarDescontoRetorno(linha, janela);
+    DB.folhaPagamento[alvo] = linha;
+    alteradas.push(linha);
+  });
+  // técnico que está na folha e NÃO apareceu na planilha: zera o retorno dele.
+  // Sem isso, quem tinha retorno num envio anterior e não tem mais ficaria
+  // pagando por um retorno que a GIGA já tirou.
+  DB.folhaPagamento.forEach((l, i) => {
+    if (l.periodo !== periodo) return;
+    if (porTecnico[normalizeHeader(l.tecnico)]) return;
+    if (!l.qtd_ifi && !l.qtd_irr) return;
+    const linha = { ...l, qtd_ifi: 0, qtd_irr: 0 };
+    aplicarDescontoRetorno(linha, janela);
+    DB.folhaPagamento[i] = linha;
+    alteradas.push(linha);
+  });
+  const r = alteradas.length ? await syncBatchToSupabase('folhaPagamento', alteradas) : { ok: true };
+  return { alteradas: alteradas.length, semLinha, sync: r };
+}
+// desc_ifi / desc_irr NÃO são digitados: é a quantidade de retornos × o valor
+// de contrato (DESCONTOS_RETORNO_FIXOS). O % e o TOTAL A RECEBER saem junto.
+// Antes isso só existia no comentário — a linha nova nascia com desconto ZERO
+// mesmo tendo retorno contado, e alguém tinha que lançar na mão.
+function aplicarDescontoRetorno(linha, janela) {
+  const preco = rot => (DESCONTOS_RETORNO_FIXOS.find(d => normalizeHeader(d.label).includes(rot)) || {}).tecnico || 0;
+  linha.desc_ifi = (Number(linha.qtd_ifi) || 0) * preco('ifi');
+  linha.desc_irr = (Number(linha.qtd_irr) || 0) * preco('irr');
+  const base = (janela && janela.inicio && janela.fim) ? baseDoTecnico(linha.tecnico, janela.inicio, janela.fim) : null;
+  if (base) {
+    linha.ifi_pct = base.ativacao ? ((Number(linha.qtd_ifi) || 0) / base.ativacao) * 100 : 0;
+    linha.irr_pct = base.reparos ? ((Number(linha.qtd_irr) || 0) / base.reparos) * 100 : 0;
+  }
+  linha.total_descontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(linha[c]) || 0), 0);
+  linha.total_receber = (Number(linha.valor_total_ordens) || 0) - linha.total_descontos;
+  return linha;
+}
 // `retornos` (opcional) = { inicio, fim } — quando vem preenchido, a quantidade
 // e o % de IFI/IRR são recalculados com os retornos baixados nesse intervalo,
 // em vez de usar os números já fechados na planilha.
@@ -6929,13 +7076,18 @@ function gerarPeriodoFolha(inicio, fim) {
     // renderFolhaCompleta). Assim funciona igual pra período gerado por este
     // botão e pra folha IMPORTADA de planilha (que nunca traz essa quebra
     // pronta) — guardar só aqui deixava a coluna sempre "-" pra quem importa.
-    return {
+    const linha = {
       tecnico, periodo, total_ordens: ordens.length, valor_total_ordens: valorOrdens,
       dias_trab: diasTrab, bonus: apto ? 'APTO' : 'INAPTO',
       qtd_ifi: ret.ifi, qtd_irr: ret.irr, ifi_pct: ifiPct, irr_pct: irrPct,
       ...manuais,
       total_descontos: totalDescontos, total_receber: valorOrdens - totalDescontos,
     };
+    // desc_ifi/desc_irr saem da CONTAGEM de retornos × valor de contrato — o
+    // comentário de CAMPOS_MATERIAL_FOLHA sempre disse isso, mas ninguém
+    // calculava: linha nova nascia com desconto ZERO mesmo tendo retorno, e
+    // alguém tinha que lançar na mão. TOTAL DESCONTOS/A RECEBER saem junto.
+    return aplicarDescontoRetorno(linha, { inicio, fim });
   });
   linhas.forEach(l => upsertRow(DB.folhaPagamento, DB_INDEX.folhaPagamento, `${l.tecnico}|${l.periodo}`, l));
   const syncPromise = syncBatchToSupabase('folhaPagamento', linhas);
@@ -11703,87 +11855,216 @@ function renderToll() {
 }
 
 // ===================== FINANCEIRO =====================
+// ===================== CADASTRO FINANCEIRO (por período) =====================
+// Antes, as despesas do ciclo só existiam se alguém importasse
+// base_dados_financeiro.xlsx (ou a aba COMAPARATIVO do COMPARATIVO.xlsx).
+// Pedido do cliente (03/09/2026): digitar isso direto no sistema, um conjunto
+// de valores por período, gravado no banco — sem depender de planilha nenhuma.
+//
+// NÃO cria tabela nova: usa a `financeiro` que já existe, cuja chave
+// (periodo, categoria, tipo) é exatamente "um valor por categoria por
+// período". Por isso período nenhum sobrescreve o outro — cada um é uma
+// chave diferente.
+//
+// Os grupos e a ordem abaixo são os da planilha do cliente (RECEITAS E
+// DESPESAS / FOLHA MÃO DE OBRA / FROTA / BASE JH / RETORNOS E IMP.).
+// Receita das Ordens NÃO entra aqui de propósito: ela vem da produção
+// (ver receitaDoPeriodoFin), então digitar seria arriscar divergir do
+// fechamento.
+const FIN_GRUPOS = [
+  { grupo: 'Folha de Mão de Obra', itens: ['Folha Técnica', 'Folha Escritório'] },
+  { grupo: 'Frota',           itens: ['Aluguel Guga', 'Locadoras', 'Carreto', 'Combustível', 'Frota - Desconto', 'Frota - Manutenção'] },
+  { grupo: 'Base JH',         itens: ['Conta de Água', 'Conta de Energia', 'Internet', 'Café da Manhã', 'Aluguel Base', 'Cesta Básica'] },
+  { grupo: 'Retornos e Imp.', itens: ['IFI', 'IRR', 'Imposto Nota'] },
+];
+const FIN_CATEGORIAS = FIN_GRUPOS.reduce((a, g) => a.concat(g.itens), []);
+// Rótulo do período — é a CHAVE no banco e o mesmo texto que o Dashboard e o
+// Comparativo já usavam ("21/07/2026 a 20/08/2026"). Mudar esse formato
+// desliga os dados antigos, então ele é único e fica aqui.
+function rotuloPeriodoFin(inicioISO, fimISO) { return `${formatDate(inicioISO)} a ${formatDate(fimISO)}`; }
+// Receita do período: soma do que a GIGA paga pelas ordens do fechamento —
+// mesmo número que o Dashboard mostra. Nunca digitada.
+function receitaDoPeriodoFin(inicioISO, fimISO) {
+  return (DB.fechamento || [])
+    .filter(f => overlaps(f.inicio, f.ate_o_dia, inicioISO, fimISO))
+    .reduce((a, f) => a + (f.valor_pago_giga || 0), 0);
+}
+// Despesas já cadastradas de um período: { 'Folha Técnica': 161824.27, ... }.
+// A busca é por nome NORMALIZADO porque dado antigo (vindo da planilha) grava
+// "FROTA -DESCONTO" enquanto o cadastro grava "Frota - Desconto" — é a mesma
+// categoria, e sem isso o valor antigo sumiria da tela.
+function despesasDoPeriodoFin(rotulo) {
+  const porNome = {};
+  (DB.financeiro || []).forEach(r => {
+    if (r.periodo !== rotulo) return;
+    if (r.tipo && /receita/i.test(r.tipo)) return;
+    porNome[normalizeHeader(r.categoria)] = Number(r.valor) || 0;
+  });
+  const out = {};
+  FIN_CATEGORIAS.forEach(cat => { out[cat] = porNome[normalizeHeader(cat)] || 0; });
+  return out;
+}
+// Existe cadastro (qualquer valor > 0) pra esse período? É o que decide se o
+// Dashboard e o Comparativo usam o cadastro ou caem na planilha antiga.
+function temCadastroFin(rotulo) {
+  const d = despesasDoPeriodoFin(rotulo);
+  return FIN_CATEGORIAS.some(c => d[c]);
+}
+// Grava as 17 categorias do período de uma vez (as zeradas também — assim
+// apagar um valor realmente apaga, em vez de deixar o número velho no banco).
+async function salvarFinanceiroDoPeriodo(inicioISO, fimISO, valores) {
+  const rotulo = rotuloPeriodoFin(inicioISO, fimISO);
+  const linhas = FIN_CATEGORIAS.map(cat => ({
+    data_inicio: inicioISO, data_fim: fimISO, tipo: 'Despesa',
+    categoria: cat, valor: Number(valores[cat]) || 0, periodo: rotulo,
+  }));
+  linhas.forEach(l => upsertRow(DB.financeiro, DB_INDEX.financeiro, `${l.periodo}|${l.categoria}|${l.tipo}`, l));
+  const r = await syncBatchToSupabase('financeiro', linhas);
+  return { ok: !r || r.ok !== false, resultado: r, linhas: linhas.length };
+}
+// Períodos que aparecem no seletor: os ciclos do fechamento importado + os que
+// já têm cadastro (um período pode ter sido cadastrado antes de a produção
+// daquele ciclo entrar no sistema).
+function periodosDoCadastroFin() {
+  const mapa = new Map();
+  ciclosDoFechamento().lista.forEach(c => mapa.set(rotuloPeriodoFin(c.start, c.end), { start: c.start, end: c.end }));
+  (DB.financeiro || []).forEach(r => {
+    if (!r.periodo || mapa.has(r.periodo)) return;
+    if (r.data_inicio && r.data_fim) mapa.set(r.periodo, { start: r.data_inicio, end: r.data_fim });
+  });
+  const atual = ciclosDoFechamento().atual;
+  const rotAtual = rotuloPeriodoFin(atual.start, atual.end);
+  if (!mapa.has(rotAtual)) mapa.set(rotAtual, { start: atual.start, end: atual.end });
+  return { lista: [...mapa.entries()].map(([rotulo, p]) => ({ rotulo, ...p }))
+                  .sort((a, b) => String(b.end).localeCompare(String(a.end))), atual: rotAtual };
+}
+
 function renderFinance() {
-  const periodos = [...new Set(DB.financeiro.map(r=>r.periodo))];
-  const { start, end } = defaultPeriod();
+  const { lista, atual } = periodosDoCadastroFin();
   document.getElementById('content').innerHTML = `<div class="toolbar">
-    <div class="field"><label>Período</label><select id="f-periodo"><option value="">Todos</option>${periodos.map(p=>`<option>${p}</option>`).join('')}</select></div>
-    <div class="field"><label>Categoria</label><input type="text" id="f-cat" placeholder="Categoria"></div>
-    <button class="btn" id="f-apply">Filtrar</button>
-  </div><div id="fin-body"></div>`;
-  document.getElementById('f-apply').addEventListener('click', load);
+    <div class="field"><label>Período</label><select id="fin-periodo">
+      ${lista.map(p => `<option value="${esc(p.rotulo)}"${p.rotulo === atual ? ' selected' : ''}>${esc(p.rotulo)}</option>`).join('')}
+    </select></div>
+    <button class="btn" id="fin-carregar">Carregar período</button>
+  </div>
+  <p style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">
+    Os valores ficam salvos por período no banco. Trocar de período aqui não altera
+    o que foi cadastrado nos outros. Receita das Ordens vem da produção do ciclo — não é digitada.
+  </p>
+  <div id="fin-body"></div>`;
+  document.getElementById('fin-carregar').addEventListener('click', load);
+  document.getElementById('fin-periodo').addEventListener('change', load);
   load();
+
   function load() {
-    const periodo = document.getElementById('f-periodo').value;
-    const cat = document.getElementById('f-cat').value.toLowerCase();
-    const rows = DB.financeiro.filter(r => (!periodo || r.periodo===periodo) && (!cat || (r.categoria||'').toLowerCase().includes(cat)));
-    const body = document.getElementById('fin-body');
+    const rotulo = document.getElementById('fin-periodo').value;
+    const p = lista.find(x => x.rotulo === rotulo) || lista[0];
+    if (!p) { document.getElementById('fin-body').innerHTML = '<div class="panel"><div class="empty">Nenhum período disponível — importe a produção primeiro.</div></div>'; return; }
+    const valores = despesasDoPeriodoFin(rotulo);
+    const receita = receitaDoPeriodoFin(p.start, p.end);
 
-    // ---- Tabela de valores por serviço (fixa — ver VALORES_ORDENS_FIXOS) ----
-    // No Financeiro o que interessa não é a CONTAGEM de ordens (isso já está no
-    // Relatório de Eficiência e no Resumo Geral), e sim quanto entra e quanto
-    // sai por ordem.
-    const cel = v => v ? formatCurrency(v) : '-';
-    const precosHtml = `<div class="panel" style="margin-bottom:1.5rem">
-        <h3>Valores por Serviço</h3>
-        <p style="font-size:12px;color:var(--text-muted);margin:-8px 0 12px">
-          Valores de contrato vigentes desde ${formatDate(VALORES_ORDENS_HISTORICO[VALORES_ORDENS_HISTORICO.length-1].vigenciaDesde)}. "Normal" e "26 dias+" são as duas faixas de pagamento ao técnico (26 dias ou mais trabalhados no ciclo).
-          Ordens de meses anteriores ao reajuste continuam usando o valor da GIGA que valia na época — os totais desta tela usam sempre a vigência certa por período.
-        </p>
-        <div class="table-wrap"><table class="data-table"><thead><tr>
-          <th rowspan="2">Serviço</th><th rowspan="2">Valor pago pela GIGA</th><th colspan="2" style="text-align:center">JH → Técnico</th>
-        </tr><tr>
-          <th>Normal</th><th>26 dias+</th>
-        </tr></thead><tbody>
-          ${VALORES_ORDENS_FIXOS.map(p=>`<tr>
-            <td class="cat-cell">${p.label}</td>
-            <td style="color:var(--accent);font-weight:700">${cel(p.giga)}</td>
-            <td>${cel(p.normal)}</td>
-            <td>${cel(p.d26)}</td>
-          </tr>`).join('')}
-        </tbody></table></div>
-        <h3 style="margin-top:18px">Descontos por Retorno</h3>
-        <div class="table-wrap"><table class="data-table"><thead><tr>
-          <th>Tipo</th><th>GIGA desconta da JH</th><th>JH desconta do técnico</th>
-        </tr></thead><tbody>
-          ${DESCONTOS_RETORNO_FIXOS.map(d=>`<tr><td class="cat-cell">${d.label}</td>
-            <td style="color:var(--danger);font-weight:700">${cel(d.giga)}</td>
-            <td style="color:var(--danger);font-weight:600">${cel(d.tecnico)}</td></tr>`).join('')}
-        </tbody></table></div>
-      </div>`;
+    // campo de dinheiro: os DÍGITOS viram centavos (mesma técnica do desconto
+    // da Folha) — não dá pra digitar "R$ 1.234,56" livre num input e esperar
+    // que o navegador aceite. data-centavos é o número de verdade.
+    const campo = cat => {
+      const centavos = Math.round((valores[cat] || 0) * 100);
+      return `<input type="text" inputmode="decimal" class="folha-edit folha-edit-moeda fin-campo"
+        data-cat="${esc(cat)}" data-centavos="${centavos}" value="${formatCurrency(centavos / 100)}"
+        style="width:140px;text-align:right"${podeEditarFinanceiro() ? '' : ' readonly disabled'}>`;
+    };
+    const grupoHtml = g => `
+      <div class="section-heading sem-toggle">${esc(g.grupo)}</div>
+      <div class="table-wrap" style="margin-bottom:1.25rem"><table class="data-table">
+        <thead><tr><th>Categoria</th><th style="text-align:right">Valor</th></tr></thead>
+        <tbody>${g.itens.map(cat => `<tr>
+          <td class="cat-cell">${esc(cat)}</td>
+          <td style="text-align:right">${campo(cat)}</td></tr>`).join('')}
+        </tbody></table></div>`;
 
-    if (!rows.length) { body.innerHTML = precosHtml + '<div class="panel"><div class="empty">Nenhum lançamento encontrado. Importe a aba "BASE" de base_dados_financeiro.xlsx.</div></div>'; return; }
-    const receita = rows.filter(r=>/receita/i.test(r.tipo)).reduce((a,r)=>a+r.valor,0);
-    const despesa = rows.filter(r=>/despesa/i.test(r.tipo)).reduce((a,r)=>a+r.valor,0);
-    const byCategory = {};
-    rows.forEach(r => { const k = r.categoria+'|'+r.tipo; if(!byCategory[k]) byCategory[k]={categoria:r.categoria,tipo:r.tipo,total:0}; byCategory[k].total+=r.valor; });
-    const despesaCats = Object.values(byCategory).filter(c=>/despesa/i.test(c.tipo)).sort((a,b)=>b.total-a.total).map(c=>({label:c.categoria,value:c.total,display:formatCurrency(c.total)}));
-    body.innerHTML = `
-      <div class="cards-grid">${metricCard('Receita', formatCurrency(receita))}${metricCard('Despesa', formatCurrency(despesa))}${metricCard('Saldo', formatCurrency(receita-despesa), (receita-despesa)<0)}</div>
-      ${precosHtml}
-      <div class="panel" style="margin-bottom:1.5rem"><h3>Despesas por categoria</h3><div id="c-cat"></div></div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr><th>Categoria</th><th>Tipo</th><th>Total</th></tr></thead><tbody>
-        ${Object.values(byCategory).sort((a,b)=>b.total-a.total).map(r=>`<tr><td>${r.categoria}</td><td>${r.tipo}</td><td>${formatCurrency(r.total)}</td></tr>`).join('')}
-      </tbody></table></div>
+    document.getElementById('fin-body').innerHTML = `
+      <div class="section-heading sem-toggle">Receitas e Despesas<span class="sec-nota">${esc(rotulo)}</span></div>
+      <div class="table-wrap" style="margin-bottom:1.25rem"><table class="data-table">
+        <thead><tr><th>Categoria</th><th style="text-align:right">Valor</th></tr></thead>
+        <tbody>
+          <tr><td class="cat-cell">Receita das ordens</td>
+              <td style="text-align:right;color:var(--accent);font-weight:700" id="fin-receita">${formatCurrency(receita)}</td></tr>
+          <tr><td class="cat-cell">Total de Despesas</td>
+              <td style="text-align:right;color:var(--danger);font-weight:700" id="fin-despesa">${formatCurrency(0)}</td></tr>
+          <tr class="total-row"><td class="cat-cell">Lucro</td>
+              <td style="text-align:right;color:var(--success);font-weight:700" id="fin-lucro">${formatCurrency(0)}</td></tr>
+        </tbody></table></div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-8px 0 18px">
+        Receita das ordens = soma de VALOR PAGO GIGA do fechamento deste ciclo (${(DB.fechamento || []).filter(f => overlaps(f.inicio, f.ate_o_dia, p.start, p.end)).length} técnico(s)).
+        Total de Despesas e Lucro são calculados sozinhos conforme você digita.
+      </p>
+      ${FIN_GRUPOS.map(grupoHtml).join('')}
+      ${podeEditarFinanceiro() ? `<div style="display:flex;align-items:center;gap:14px;margin-bottom:2rem">
+        <button class="btn" id="fin-salvar">Salvar alterações</button>
+        <span id="fin-msg" style="font-size:13px;color:var(--text-muted)"></span>
+      </div>` : ''}
       <div id="pdf-export-area"></div>`;
-    barsChartTopN('c-cat', despesaCats, {defaultN:'Todos'});
 
+    const inputs = () => [...document.querySelectorAll('.fin-campo')];
+    const lerValores = () => {
+      const v = {};
+      inputs().forEach(el => { v[el.dataset.cat] = (parseInt(el.dataset.centavos || '0', 10)) / 100; });
+      return v;
+    };
+    const recalcular = () => {
+      const v = lerValores();
+      const despesa = FIN_CATEGORIAS.reduce((a, c) => a + (v[c] || 0), 0);
+      document.getElementById('fin-despesa').textContent = formatCurrency(despesa);
+      const lucro = receita - despesa;
+      const elLucro = document.getElementById('fin-lucro');
+      elLucro.textContent = formatCurrency(lucro);
+      elLucro.style.color = lucro < 0 ? 'var(--danger)' : 'var(--success)';
+      return { despesa, lucro };
+    };
+    inputs().forEach(el => el.addEventListener('input', () => {
+      const digitos = el.value.replace(/\D/g, '');
+      const centavos = parseInt(digitos || '0', 10);
+      el.dataset.centavos = centavos;
+      el.value = formatCurrency(centavos / 100);
+      el.classList.toggle('tem-valor', centavos > 0);
+      recalcular();
+      const msg = document.getElementById('fin-msg');
+      if (msg) msg.innerHTML = '<span style="color:var(--warn-text)">Há alterações não salvas.</span>';
+    }));
+    recalcular();
+
+    const btn = document.getElementById('fin-salvar');
+    if (btn) btn.addEventListener('click', async () => {
+      const msg = document.getElementById('fin-msg');
+      btn.disabled = true; msg.textContent = 'Salvando…';
+      const r = await salvarFinanceiroDoPeriodo(p.start, p.end, lerValores());
+      btn.disabled = false;
+      if (!r.ok) {
+        const e = r.resultado && r.resultado.error;
+        msg.innerHTML = `<span style="color:var(--danger)">Não consegui salvar no servidor: ${esc((e && e.message) || 'erro desconhecido')}</span>`;
+        toast('Salvou aqui na tela, mas não gravou no servidor.', 'erro');
+        return;
+      }
+      msg.innerHTML = `<span style="color:var(--success)">Salvo em ${esc(rotulo)}.</span>`;
+      toast('Financeiro salvo.', 'ok', 2000);
+    });
+
+    // ---- painel de PDF (o mesmo de antes) ----
+    const { despesa, lucro } = recalcular();
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'resumo', label: 'Resumo (Receita/Despesa/Saldo)' },
-      { id: 'precos', label: 'Valores por serviço (GIGA e técnico)' },
+      { id: 'resumo', label: 'Resumo (Receita/Despesa/Lucro)' },
       { id: 'categorias', label: 'Detalhamento por categoria' }
     ]);
-    wirePdfExportPanel('Financeiro', {
-      resumo: () => secaoTabela('Resumo Financeiro', [
-        {l:'Receita', v:formatCurrency(receita)}, {l:'Despesa', v:formatCurrency(despesa)}, {l:'Saldo', v:formatCurrency(receita-despesa)}
-      ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
-      precos: () => secaoTabela('Valores por Serviço', VALORES_ORDENS_FIXOS, [
-        {header:'Serviço', get:r=>r.label}, {header:'Valor pago pela GIGA', get:r=>cel(r.giga)},
-        {header:'JH → Técnico (normal)', get:r=>cel(r.normal)}, {header:'JH → Técnico (26 dias+)', get:r=>cel(r.d26)}
-      ]),
-      categorias: () => secaoTabela('Despesas / Receitas — Detalhamento', Object.values(byCategory).sort((a,b)=>b.total-a.total), [
-        {header:'Categoria', get:r=>r.categoria}, {header:'Tipo', get:r=>r.tipo}, {header:'Total', get:r=>formatCurrency(r.total)}
-      ], { totalRow: ['TOTAL DESPESAS', '', formatCurrency(despesa)] }),
+    wirePdfExportPanel('Financeiro — ' + rotulo, {
+      resumo: () => secaoTabela('Resumo Financeiro — ' + rotulo, [
+        { l: 'Receita das ordens', v: formatCurrency(receita) },
+        { l: 'Total de Despesas', v: formatCurrency(despesa) },
+        { l: 'Lucro', v: formatCurrency(lucro) }
+      ], [{ header: 'Indicador', get: r => r.l }, { header: 'Valor', get: r => r.v }]),
+      categorias: () => secaoTabela('Despesas — ' + rotulo,
+        FIN_GRUPOS.reduce((a, g) => a.concat(g.itens.map(c => ({ grupo: g.grupo, cat: c, v: lerValores()[c] || 0 }))), []),
+        [{ header: 'Grupo', get: r => r.grupo }, { header: 'Categoria', get: r => r.cat },
+         { header: 'Valor', get: r => formatCurrency(r.v) }],
+        { totalRow: ['TOTAL DESPESAS', '', formatCurrency(despesa)] }),
     });
   }
 }
@@ -12143,6 +12424,22 @@ function renderFolhaPagamento() {
       <button class="btn" id="fol-gerar-btn">Gerar período</button>
       <span id="fol-gerar-msg" style="font-size:13px"></span>
     </div>
+  </div>
+  <div class="panel" style="margin-bottom:1.5rem">
+    <h3 style="margin:0 0 8px">Retornos da GIGA (IFI / IRR)</h3>
+    <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
+      Envie a planilha de retornos que a GIGA manda todo mês ("IFI e IRR ….xlsx"). O sistema conta
+      IFI e IRR por técnico e atualiza a folha do período escolhido. O retorno é lançado no
+      <b>ofensor</b> (coluna "Executor" da planilha — quem fez a ordem anterior), não em quem foi
+      refazer. O desconto de IFI/IRR é recalculado sozinho; desconto de material, parcela e bônus não são tocados.
+    </p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <div class="field" style="margin:0"><label>Período da folha</label><select id="fol-giga-periodo">
+        ${periodosNomeados.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
+      </select></div>
+      <div class="field" style="margin:0"><label>Planilha da GIGA</label><input type="file" id="fol-giga-file" accept=".xlsx,.xls"></div>
+      <span id="fol-giga-msg" style="font-size:13px"></span>
+    </div>
   </div>` : ''}
   <div id="folha-body"></div>`;
   document.getElementById('f-apply').addEventListener('click', load);
@@ -12173,6 +12470,54 @@ function renderFolhaPagamento() {
     }
     btnGerar.disabled = false;
     renderFolhaPagamento(); // reconstrói a tela pra o seletor de período já trazer o novo ciclo
+  });
+  // ---- planilha de retornos da GIGA ----
+  const inputGiga = document.getElementById('fol-giga-file');
+  if (inputGiga) inputGiga.addEventListener('change', () => {
+    const arquivo = inputGiga.files && inputGiga.files[0];
+    const msg = document.getElementById('fol-giga-msg');
+    if (!arquivo) return;
+    const periodo = document.getElementById('fol-giga-periodo').value;
+    if (!periodo) { msg.innerHTML = '<span style="color:var(--danger)">Escolha o período da folha primeiro.</span>'; inputGiga.value = ''; return; }
+    if (typeof XLSX === 'undefined') { msg.innerHTML = '<span style="color:var(--danger)">A biblioteca de planilha não carregou (sem internet?).</span>'; inputGiga.value = ''; return; }
+    const janela = datasDoPeriodoFolha(periodo);
+    msg.innerHTML = '<span style="color:var(--text-muted)">Lendo a planilha…</span>';
+    const leitor = new FileReader();
+    leitor.onload = async ev => {
+      try {
+        const wb = XLSX.read(ev.target.result, { type: 'array', cellDates: true });
+        // a aba costuma se chamar "IFI e IRR", mas usa a primeira que tiver as
+        // colunas certas — o nome da aba muda de mês pra mês
+        let conta = null;
+        for (const nome of wb.SheetNames) {
+          const linhas = XLSX.utils.sheet_to_json(wb.Sheets[nome], { header: 1, raw: true, defval: null });
+          const tentativa = contarRetornosGiga(linhas, janela.inicio, janela.fim);
+          if (!tentativa.erro) { conta = tentativa; break; }
+        }
+        if (!conta) {
+          msg.innerHTML = '<span style="color:var(--danger)">Não encontrei as colunas "Data", "IND" e "Executor" em nenhuma aba desse arquivo.</span>';
+          return;
+        }
+        if (!conta.noPeriodo) {
+          msg.innerHTML = `<span style="color:var(--warn-text)">A planilha tem retorno, mas nenhum dentro de "${esc(periodo)}" (${conta.fora} fora do período). Confira se escolheu o ciclo certo.</span>`;
+          return;
+        }
+        const r = await aplicarRetornosGigaNaFolha(periodo, conta.porTecnico);
+        const partes = [`<span style="color:var(--success)">${conta.noPeriodo} retorno(s) lançado(s) em ${r.alteradas} linha(s) de "${esc(periodo)}"</span>`];
+        if (conta.fora) partes.push(`<span style="color:var(--text-muted)">${conta.fora} fora do período (ignorados)</span>`);
+        if (r.semLinha.length) partes.push(`<span style="color:var(--warn-text)">sem linha na folha: ${esc(r.semLinha.slice(0, 4).join(', '))}${r.semLinha.length > 4 ? ` e mais ${r.semLinha.length - 4}` : ''}</span>`);
+        if (supa) partes.push(r.sync && r.sync.ok !== false
+          ? '<span style="color:var(--success)">salvo no Supabase</span>'
+          : `<span style="color:var(--danger)">não consegui salvar: ${esc((r.sync && r.sync.error && r.sync.error.message) || 'erro desconhecido')}</span>`);
+        msg.innerHTML = partes.join(' — ');
+        toast(`${conta.noPeriodo} retorno(s) da GIGA lançados.`, 'ok', 2500);
+        load();
+      } catch (e) {
+        msg.innerHTML = `<span style="color:var(--danger)">Erro ao ler a planilha: ${esc(e.message)}</span>`;
+      }
+      inputGiga.value = '';
+    };
+    leitor.readAsArrayBuffer(arquivo);
   });
   load();
   function load() {
@@ -12269,10 +12614,40 @@ function renderFolhaPagamento() {
           : 'Números como vieram na planilha da folha. Preencha as datas de "Retornos IFI/IRR" na barra de cima para recontar pelos retornos baixados num intervalo.'}
       </p>
       ${renderFolhaCompleta(ranking, pct, IFI_TARGET, IRR_TARGET)}
+      <div class="section-heading">Holerite<span class="sec-nota">extrato de serviços do técnico, no formato que vai pra assinatura</span></div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:6px">
+          <div class="field" style="margin:0"><label>Técnico</label><select id="hol-tecnico">
+            ${ranking.map(r => `<option value="${esc(r.tecnico)}|${esc(r.periodo)}">${esc(r.tecnico)}</option>`).join('')}
+          </select></div>
+          <button type="button" class="btn-export-img" id="hol-img">🖼 Gerar imagem</button>
+          <button type="button" class="btn-secundario" id="hol-print" style="padding:8px 14px">🖨 Imprimir</button>
+        </div>
+      </div>
+      <div id="hol-area"></div>
       <div id="pdf-export-area"></div>`;
     barsChartTopN('c-top', topGanham, {defaultN:8});
     barsChartTopN('c-bottom', bottomGanham, {defaultN:8});
     barsChartTopN('c-desc', descList, {color:'#0ea5e9'});
+
+    // ---- Holerite (extrato de serviços) ----
+    const selHol = document.getElementById('hol-tecnico');
+    const desenharHolerite = () => {
+      if (!selHol || !selHol.value) return;
+      const [tec, per] = selHol.value.split('|');
+      const linha = ranking.find(r => r.tecnico === tec && r.periodo === per);
+      document.getElementById('hol-area').innerHTML = linha ? holeriteTecnicoHTML(linha) : '';
+    };
+    if (selHol) {
+      selHol.addEventListener('change', desenharHolerite);
+      desenharHolerite();
+      document.getElementById('hol-img').addEventListener('click', () => {
+        const alvo = document.querySelector('#hol-area .holerite');
+        if (!alvo) return;
+        capturarElementoComoImagem(alvo, 'holerite-' + normalizeHeader(selHol.value.split('|')[0]).replace(/[^a-z0-9]+/g, '-'));
+      });
+      document.getElementById('hol-print').addEventListener('click', () => window.print());
+    }
 
     // ---- edição dos campos da folha (dias/bônus: RH+Analista; material: +Almox) ----
     // Sempre grava no registro RAW (tecnico+período) por baixo, mesmo com o
@@ -12381,6 +12756,111 @@ function renderFolhaPagamento() {
   }
 }
 // Planilha da folha renderizada por inteiro — todas as colunas importadas.
+// ===================== HOLERITE (extrato de serviços do técnico) =====================
+// Reproduz o papel que o cliente já entrega assinado: indicadores no topo,
+// PROVENTOS (quantidade e valor por tipo de serviço), DESCONTOS (com a coluna
+// de parcela) e o fecho Proventos − Descontos = A Receber.
+//
+// Todo número sai da linha da folha daquele técnico/período — nada é digitado
+// aqui. A quebra por tipo de serviço vem da Produção (mesma conta da coluna
+// "Ativação/Reparo/..." da tabela), e o valor de cada tipo usa a faixa de
+// preço que vale pro técnico no ciclo: "26 dias" quando ele está APTO ao
+// bônus, "normal" quando não está — igual valorOrdensDoPeriodo.
+function holeriteTecnicoHTML(linha) {
+  const janela = datasDoPeriodoFolha(linha.periodo);
+  const apto = String(linha.bonus || '').toUpperCase().startsWith('APTO');
+  const contagem = { ativacao: 0, reparo: 0, mudanca_endereco: 0, mudanca_comodo: 0, upgrade: 0 };
+  const valores = { ativacao: 0, reparo: 0, mudanca_endereco: 0, mudanca_comodo: 0, upgrade: 0 };
+  if (janela.inicio && janela.fim) {
+    DB.producao.forEach(p => {
+      if (!isConcluido(p.status) || !inRange(p.data, janela.inicio, janela.fim)) return;
+      if (normalizeHeader(p.recurso) !== normalizeHeader(linha.tecnico)) return;
+      const t = normalizeHeader(p.tipo_atividade);
+      const chave = /ativa/.test(t) ? 'ativacao' : /reparo/.test(t) ? 'reparo'
+        : /mudan.*endereco/.test(t) ? 'mudanca_endereco' : /mudan.*comodo/.test(t) ? 'mudanca_comodo'
+        : /upgrade|downgrade/.test(t) ? 'upgrade' : null;
+      if (!chave) return;
+      contagem[chave]++;
+      const l = linhaValorOrdem(p.tipo_atividade, p.data);
+      if (l) valores[chave] += apto ? l.d26 : l.normal;
+    });
+  }
+  const SERVICOS = [
+    ['Ativação', 'ativacao'], ['Mudança de Cômodo', 'mudanca_comodo'],
+    ['Mudança de Endereço', 'mudanca_endereco'], ['Reparo Corretivo', 'reparo'],
+    ['Upgrade/Downgrade', 'upgrade'],
+  ];
+  const n = v => Number(v) || 0;
+  const totalQtd = SERVICOS.reduce((a, [, k]) => a + contagem[k], 0);
+  const totalValor = SERVICOS.reduce((a, [, k]) => a + valores[k], 0) + n(linha.valor_aluguel) + n(linha.emprestimo);
+  // desconto: rótulo, campo do valor, campo da parcela, e a quantidade quando
+  // o desconto vem de contagem (IFI/IRR) em vez de ser lançado à mão
+  const DESCONTOS = [
+    ['Desc. IFI', 'desc_ifi', null, n(linha.qtd_ifi)],
+    ['Desc. IRR', 'desc_irr', null, n(linha.qtd_irr)],
+    ['Desc. Equipamento', 'desc_equipamento', 'parcela_equipamento', null],
+    ['Desc. Multa', 'desc_multa', 'parcela_multa', null],
+    ['Desc. Miscelânea', 'desc_miscelanea', 'parcela_miscelanea', null],
+    ['Desc. Mecânica', 'desc_mecanica', 'parcela_mecanica', null],
+    ['Desc. Ferramentas', 'desc_ferramentas', 'parcela_ferramentas', null],
+    ['Desc. Vale', 'desc_vale', 'parcela_vale', null],
+    ['Desc. Fiscalização', 'desc_fiscalizacao', 'parcela_fiscalizacao', null],
+    ['Desc. Cartão Combustível', 'desc_combustivel', 'parcela_combustivel', null],
+  ];
+  const totalDesc = DESCONTOS.reduce((a, [, campo]) => a + n(linha[campo]), 0);
+  const qtdDesc = n(linha.qtd_ifi) + n(linha.qtd_irr);
+  const aReceber = totalValor - totalDesc;
+  const precoRetorno = rot => (DESCONTOS_RETORNO_FIXOS.find(d => normalizeHeader(d.label).includes(rot)) || {}).tecnico || 0;
+  const cel = v => v ? formatCurrency(v) : '-';
+  const linhaServico = ([rot, k]) => `<tr><td>${rot}</td><td class="q">${contagem[k] || 0}</td><td class="v">${cel(valores[k])}</td></tr>`;
+  const linhaDesconto = ([rot, campo, parcela, qtd]) => `<tr>
+      <td>${rot}</td><td class="q">${qtd !== null ? qtd : ''}</td>
+      <td class="v">${cel(n(linha[campo]))}</td>
+      <td class="p">${parcela ? esc(linha[parcela] || '') : ''}</td></tr>`;
+  const mes = janela.fim ? new Date(janela.fim + 'T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) : '';
+
+  return `<div class="holerite">
+    <div class="hol-topo">
+      <div class="hol-marca">JH TELECOM<span>SOLUÇÕES EM FIBRA ÓPTICA</span></div>
+      <div class="hol-tit">EXTRATO DE SERVIÇOS</div>
+    </div>
+    <div class="hol-nome">${esc(linha.tecnico)}<span>${esc(linha.periodo)}</span></div>
+
+    <table class="hol-ind"><tbody>
+      <tr><th></th><th>IFI</th><th>IRR</th></tr>
+      <tr><td>Seu indicador</td><td>${formatPct(n(linha.ifi_pct), 1)}</td><td>${formatPct(n(linha.irr_pct), 1)}</td></tr>
+      <tr><td>Indicador solicitado</td><td>${formatPct(BONUS_IFI_MAX, 2)}</td><td>${formatPct(BONUS_IRR_MAX, 2)}</td></tr>
+      <tr><td>Desconto aplicado para cada</td><td>${formatCurrency(precoRetorno('ifi'))}</td><td>${formatCurrency(precoRetorno('irr'))}</td></tr>
+    </tbody></table>
+
+    <div class="hol-faixa hol-prov">PROVENTOS</div>
+    <table class="hol-tab"><thead><tr><th>Tipos de serviço</th><th class="q">Quant.</th><th class="v">Valores</th></tr></thead>
+      <tbody>
+        <tr><td>Dias trabalhados</td><td class="q">${n(linha.dias_trab)}</td><td class="v">-</td></tr>
+        <tr><td>Aluguel do carro</td><td class="q">${n(linha.dias_aluguel) || '-'}</td><td class="v">${cel(n(linha.valor_aluguel))}</td></tr>
+        ${SERVICOS.map(linhaServico).join('')}
+        <tr><td>Empréstimo</td><td class="q"></td><td class="v">${cel(n(linha.emprestimo))}</td></tr>
+        <tr class="hol-total"><td>Total dos proventos</td><td class="q">${totalQtd}</td><td class="v">${formatCurrency(totalValor)}</td></tr>
+      </tbody></table>
+
+    <div class="hol-faixa hol-desc">DESCONTOS</div>
+    <table class="hol-tab"><thead><tr><th>Descontos</th><th class="q">Quant.</th><th class="v">Valores</th><th class="p">Parcelas</th></tr></thead>
+      <tbody>
+        ${DESCONTOS.map(linhaDesconto).join('')}
+        <tr class="hol-total"><td>Total dos descontos</td><td class="q">${qtdDesc || ''}</td><td class="v">${formatCurrency(totalDesc)}</td><td class="p"></td></tr>
+      </tbody></table>
+
+    <table class="hol-tab hol-fecho"><tbody>
+      <tr><td>Total proventos</td><td class="v">${formatCurrency(totalValor)}</td></tr>
+      <tr><td>Total descontos</td><td class="v" style="color:var(--danger)">${formatCurrency(totalDesc)}</td></tr>
+      <tr class="hol-total"><td>Total a receber</td><td class="v">${formatCurrency(aReceber)}</td></tr>
+    </tbody></table>
+
+    <div class="hol-assina">Assinatura<span></span></div>
+    <div class="hol-data">${esc(mes)}</div>
+  </div>`;
+}
+
 function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
   if (!rows.length) return '<div class="empty">Sem dados.</div>';
   const money = v => formatCurrency(v);
@@ -12497,18 +12977,55 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
 }
 
 // ===================== COMPARATIVO FINANCEIRO =====================
+// Monta, a partir do CADASTRO da tela Financeiro, o mesmo formato de "pivot"
+// que a aba COMAPARATIVO produzia — assim a tela de Detalhamento continua
+// exatamente igual, só trocando de onde os números vêm.
+// Períodos SEM cadastro caem no pivot da planilha (histórico), pra não sumir
+// da comparação o que foi importado antes de o cadastro existir.
+function pivotDoCadastroFin() {
+  const doCadastro = periodosDoCadastroFin().lista.filter(p => temCadastroFin(p.rotulo));
+  const planilha = DB.comparativoFinanceiro;
+  const doPivot = planilha ? planilha.periodos.filter(p => !doCadastro.some(c => c.rotulo === p)) : [];
+  if (!doCadastro.length) return planilha;
+  // ordem cronológica: mais antigo à esquerda, igual à planilha
+  const periodos = [...doPivot, ...doCadastro.map(p => p.rotulo).reverse()];
+  const porCategoria = {}, totalDespesas = {}, receitaOrdens = {}, lucro = {};
+  const põe = (obj, cat, per, v) => { (obj[cat] = obj[cat] || {})[per] = v; };
+  doPivot.forEach(per => {
+    Object.keys(planilha.porCategoria).forEach(cat => {
+      const v = planilha.porCategoria[cat][per];
+      if (v !== undefined) põe(porCategoria, cat, per, v);
+    });
+    totalDespesas[per] = planilha.totalDespesas[per];
+    receitaOrdens[per] = planilha.receitaOrdens[per];
+    lucro[per] = planilha.lucro[per];
+  });
+  doCadastro.forEach(p => {
+    const d = despesasDoPeriodoFin(p.rotulo);
+    let soma = 0;
+    FIN_CATEGORIAS.forEach(cat => { põe(porCategoria, cat, p.rotulo, d[cat]); soma += d[cat] || 0; });
+    const receita = receitaDoPeriodoFin(p.start, p.end);
+    totalDespesas[p.rotulo] = soma;
+    receitaOrdens[p.rotulo] = receita;
+    lucro[p.rotulo] = receita - soma;
+  });
+  return { periodos, porCategoria, totalDespesas, receitaOrdens, lucro };
+}
 function renderComparisons() {
-  // preferência 1: a tabela pronta da aba "COMAPARATIVO" (números exatos da planilha)
-  if (DB.comparativoFinanceiro) return renderComparisonsFromPivot();
+  // preferência 1 (03/09/2026): o CADASTRO da tela Financeiro — é o que o
+  // cliente mantém atualizado dentro do sistema. Ele já vem misturado com o
+  // histórico da planilha para os períodos que ainda não foram cadastrados.
+  const doCadastro = pivotDoCadastroFin();
+  if (doCadastro) return renderComparisonsFromPivot(doCadastro);
   // preferência 2: calcular a partir da planilha Financeira (base_dados_financeiro.xlsx)
   return renderComparisonsFromBase();
 }
 
-function renderComparisonsFromPivot() {
-  const pivot = DB.comparativoFinanceiro;
+function renderComparisonsFromPivot(pivotRecebido) {
+  const pivot = pivotRecebido || DB.comparativoFinanceiro;
   const periodos = pivot.periodos;
   document.getElementById('content').innerHTML = `
-    <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">Dados importados diretamente da aba COMAPARATIVO da sua planilha.</p>
+    <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">Valores do cadastro da tela <b>Financeiro</b>. Períodos ainda não cadastrados aparecem com o que veio da planilha.</p>
     <div class="toolbar">
       ${multiSelectField('fin-periodos', 'Períodos', periodos, { allLabel: 'Todos os períodos' })}
       <button class="btn" id="f-apply">Comparar</button>
@@ -13268,6 +13785,7 @@ function renderImport() {
         // Qtd. IFI/IRR toda vez que reimporta Produção. gerarPeriodoFolha já
         // preserva desconto/parcela/frota já lançados (ver CAMPOS_MANUAIS_FOLHA).
         if (reconhecidas.some(r => r.target === 'producao') && podeEditarFolhaPagamento()) {
+          const cicloAgora = defaultPeriod();
           resultEl.innerHTML += `
             <div class="panel" style="margin-top:14px">
               <h3 style="margin:0 0 8px">Atualizar Folha de Pagamento com essa Produção</h3>
@@ -13276,30 +13794,25 @@ function renderImport() {
                 Desconto de material, parcela, frota e aluguel já lançados nesse período NÃO são apagados.
               </p>
               <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
-                <div class="field" style="margin:0"><label>De</label><input type="date" id="imp-fol-de"></div>
-                <div class="field" style="margin:0"><label>Até</label><input type="date" id="imp-fol-ate"></div>
+                <div class="field" style="margin:0"><label>De</label><input type="date" id="imp-fol-de" value="${cicloAgora.start}"></div>
+                <div class="field" style="margin:0"><label>Até</label><input type="date" id="imp-fol-ate" value="${cicloAgora.end}"></div>
                 <button class="btn" id="imp-fol-btn">Atualizar Folha</button>
                 <span id="imp-fol-msg" style="font-size:13px"></span>
               </div>
             </div>`;
+          // Pedido do cliente (03/09/2026): não ficar dependendo de alguém
+          // lembrar de clicar. Assim que a Produção entra, a folha do CICLO
+          // ATUAL (21 a 20, o mesmo defaultPeriod do resto do sistema) é
+          // atualizada sozinha. Os campos De/Até continuam aí pra refazer
+          // outro ciclo na mão quando for preciso.
+          atualizarFolhaDoCiclo(cicloAgora.start, cicloAgora.end, document.getElementById('imp-fol-msg'), true);
           const btnFol = document.getElementById('imp-fol-btn');
           btnFol.addEventListener('click', async () => {
             const ini = document.getElementById('imp-fol-de').value, fim = document.getElementById('imp-fol-ate').value;
             const msg = document.getElementById('imp-fol-msg');
             if (!ini || !fim || ini > fim) { msg.innerHTML = '<span style="color:var(--danger)">Preencha "De" e "Até" (De não pode ser depois de Até).</span>'; return; }
-            btnFol.disabled = true; msg.innerHTML = '<span style="color:var(--text-muted)">Atualizando...</span>';
-            const r = gerarPeriodoFolha(ini, fim);
-            if (!r.total) {
-              msg.innerHTML = '<span style="color:var(--warn-text)">Nenhuma ordem concluída da Produção nesse intervalo — nada foi atualizado.</span>';
-              btnFol.disabled = false; return;
-            }
-            msg.innerHTML = `<span style="color:var(--success)">${r.total} técnico(s) atualizado(s) em "${esc(r.periodo)}"</span>` + (supa ? ' — salvando...' : '');
-            if (r.syncPromise) {
-              const res = await r.syncPromise;
-              msg.innerHTML = `<span style="color:var(--success)">${r.total} técnico(s) atualizado(s) em "${esc(r.periodo)}"</span> — `
-                + (res && res.ok ? '<span style="color:var(--success)">salvo no Supabase</span>'
-                                  : `<span style="color:var(--danger)">não consegui salvar: ${esc((res&&res.error&&res.error.message)||'erro desconhecido')} — vale só nesta sessão</span>`);
-            }
+            btnFol.disabled = true;
+            await atualizarFolhaDoCiclo(ini, fim, msg, false);
             btnFol.disabled = false;
           });
         }
@@ -13312,6 +13825,31 @@ function renderImport() {
   }
 }
 
+// Regera a folha de um ciclo a partir da Produção e escreve o resultado num
+// elemento de mensagem. `automatico` só muda o texto: quando o sistema fez
+// sozinho (logo depois de importar Produção), a frase precisa dizer isso, senão
+// parece que alguém clicou. gerarPeriodoFolha preserva desconto de material,
+// parcela, frota e aluguel já lançados (CAMPOS_MANUAIS_FOLHA).
+async function atualizarFolhaDoCiclo(inicio, fim, msg, automatico) {
+  const escrever = html => { if (msg) msg.innerHTML = html; };
+  if (!DB.producao.length) { escrever('<span style="color:var(--danger)">Sem dados de Produção carregados.</span>'); return { total: 0 }; }
+  escrever('<span style="color:var(--text-muted)">Atualizando a folha…</span>');
+  const r = gerarPeriodoFolha(inicio, fim);
+  if (!r.total) {
+    escrever('<span style="color:var(--warn-text)">Nenhuma ordem concluída da Produção nesse intervalo — nada foi atualizado.</span>');
+    return r;
+  }
+  const prefixo = automatico ? 'Folha atualizada sozinha: ' : '';
+  const base = `<span style="color:var(--success)">${prefixo}${r.total} técnico(s) em "${esc(r.periodo)}"</span>`;
+  escrever(base + (supa ? ' — salvando...' : ''));
+  if (r.syncPromise) {
+    const res = await r.syncPromise;
+    escrever(base + ' — ' + (res && res.ok
+      ? '<span style="color:var(--success)">salvo no Supabase</span>'
+      : `<span style="color:var(--danger)">não consegui salvar: ${esc((res && res.error && res.error.message) || 'erro desconhecido')} — vale só nesta sessão</span>`));
+  }
+  return r;
+}
 // rótulo legível das faixas de prazo
 const FAIXA_LABEL = { ate24: 'Até 24h', ate48: 'Até 48h', maior48: 'Maior que 48h', outlier: 'Outlier' };
 // texto temporário num botão ("baixado", "12 linhas") e volta ao normal
