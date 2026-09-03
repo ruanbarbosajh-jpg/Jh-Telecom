@@ -797,7 +797,9 @@
      Extraídas do arquivo do cliente (FOLHA DE PAGAMENTO JH LT 2026.pdf), lendo
      o preenchimento real de cada célula do cabeçalho — não "parecido", é a cor
      que ele já usa:
-        #404040  produção  (nome, quantidades por tipo, dias, bônus)
+        #12509B  produção  (nome, quantidades por tipo, dias, bônus) — era o
+                 #404040 cinza do arquivo do cliente; ele pediu azul forte
+                 em 03/09/2026 porque o cinza sumia ao lado dos outros blocos
         #0B3040  valores   (o dinheiro de cada tipo, aluguel, empréstimo, % IND.)
         #104861  frota     (frota e dias de aluguel)
         #680000  descontos (Qtd IFI/IRR, Desc. * e TOTAL DOS DESCONTOS)
@@ -807,7 +809,7 @@
      variante — mesma decisão das faixas do holerite. No corpo da tabela só
      entra um véu bem fraco da mesma cor, pra ler como bloco sem virar
      um tabuleiro colorido. */
-  table.data-table th.col-g-prod   { background: #404040; color: #fff; }
+  table.data-table th.col-g-prod   { background: #12509B; color: #fff; }
   table.data-table th.col-g-valor  { background: #0B3040; color: #fff; }
   table.data-table th.col-g-frota  { background: #104861; color: #fff; }
   table.data-table th.col-g-desc   { background: #680000; color: #fff; }
@@ -7220,8 +7222,20 @@ function aplicarDescontoRetorno(linha, janela) {
     linha.irr_pct = base.reparos ? ((Number(linha.qtd_irr) || 0) / base.reparos) * 100 : 0;
   }
   linha.total_descontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(linha[c]) || 0), 0);
-  linha.total_receber = (Number(linha.valor_total_ordens) || 0) - linha.total_descontos;
+  linha.total_receber = totalReceberFolha(linha);
   return linha;
+}
+// O ALUGUEL DO CARRO É PROVENTO (confirmado pelo cliente em 03/09/2026): entra
+// no salário do técnico, por isso aumenta o total do holerite.
+// Antes a folha fazia só "ordens − descontos" e o holerite somava o aluguel —
+// os dois papéis diziam valores diferentes pro mesmo técnico (achado na
+// auditoria: R$ 2.378,00 na folha contra R$ 3.244,58 no holerite, e a
+// diferença era exatamente o aluguel). Agora os dois usam esta conta.
+// Empréstimo entra junto porque também é dinheiro que o técnico recebe — é
+// assim que ele aparece nos PROVENTOS do holerite em papel.
+function totalReceberFolha(linha) {
+  const n = v => Number(v) || 0;
+  return n(linha.valor_total_ordens) + n(linha.valor_aluguel) + n(linha.emprestimo) - n(linha.total_descontos);
 }
 // `retornos` (opcional) = { inicio, fim } — quando vem preenchido, a quantidade
 // e o % de IFI/IRR são recalculados com os retornos baixados nesse intervalo,
@@ -7273,9 +7287,12 @@ async function salvarCampoFolha(tecnico, periodo, campo, valor) {
   const idx = DB_INDEX.folhaPagamento.get(key);
   if (idx === undefined) return { ok: false, error: { message: 'Linha da folha não encontrada (tecnico/período).' } };
   const linha = { ...DB.folhaPagamento[idx], [campo]: valor };
-  if (CAMPOS_MATERIAL_FOLHA.includes(campo)) {
+  // aluguel e empréstimo também mexem no total a receber (são provento — ver
+  // totalReceberFolha), por isso entram na mesma lista de campos que forçam o
+  // recálculo do fecho da linha
+  if (CAMPOS_MATERIAL_FOLHA.includes(campo) || campo === 'valor_aluguel' || campo === 'emprestimo') {
     linha.total_descontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(linha[c]) || 0), 0);
-    linha.total_receber = (Number(linha.valor_total_ordens) || 0) - linha.total_descontos;
+    linha.total_receber = totalReceberFolha(linha);
   }
   // Bônus mudou de mão (o RH pode liberar na conversa com a gestão, mesmo sem
   // o indicador bater — era exatamente esse o pedido) — o valor das ordens
@@ -7385,7 +7402,7 @@ function gerarPeriodoFolha(inicio, fim) {
       dias_trab: diasTrab, bonus: apto ? 'APTO' : 'INAPTO',
       qtd_ifi: ret.ifi, qtd_irr: ret.irr, ifi_pct: ifiPct, irr_pct: irrPct,
       ...manuais,
-      total_descontos: totalDescontos, total_receber: valorOrdens - totalDescontos,
+      total_descontos: totalDescontos,   // total_receber sai de aplicarDescontoRetorno logo abaixo
     };
     // desc_ifi/desc_irr saem da CONTAGEM de retornos × valor de contrato — o
     // comentário de CAMPOS_MATERIAL_FOLHA sempre disse isso, mas ninguém
