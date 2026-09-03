@@ -7142,14 +7142,32 @@ async function aplicarRetornosGigaNaFolha(periodo, porTecnico) {
   const r = alteradas.length ? await syncBatchToSupabase('folhaPagamento', alteradas) : { ok: true };
   return { alteradas: alteradas.length, semLinha, sync: r };
 }
-// desc_ifi / desc_irr NÃO são digitados: é a quantidade de retornos × o valor
-// de contrato (DESCONTOS_RETORNO_FIXOS). O % e o TOTAL A RECEBER saem junto.
-// Antes isso só existia no comentário — a linha nova nascia com desconto ZERO
-// mesmo tendo retorno contado, e alguém tinha que lançar na mão.
+// Quanto CUSTA um retorno pro técnico. Regra confirmada pelo cliente em
+// 03/09/2026: o desconto acompanha a FAIXA do próprio técnico, a mesma do
+// valor da ordem — não é valor fixo.
+//   IFI  desconta o preço da ATIVAÇÃO:  48,50 inapto / 53,00 apto
+//   IRR  desconta o preço do REPARO:    38,50 inapto / 42,00 apto
+// Faz sentido: o retorno devolve exatamente o que aquela ordem pagou. Antes
+// aqui usava DESCONTOS_RETORNO_FIXOS, que só tem a faixa "normal" — o técnico
+// APTO era descontado a menos do que recebeu pela ordem.
+// (DESCONTOS_RETORNO_FIXOS continua valendo pro painel de referência de preço
+// do Financeiro, onde não existe técnico nem faixa.)
+function precoRetornoDoTecnico(tipo, linha, janela) {
+  const apto = /apto/i.test(String(linha.bonus || '')) && !/inapto/i.test(String(linha.bonus || ''));
+  // vigência pela data FIM do ciclo (o contrato reajusta de tempos em tempos)
+  const tabela = valoresVigentesEm((janela && janela.fim) || (linha.periodo ? datasDoPeriodoFolha(linha.periodo).fim : ''));
+  const alvo = tipo === 'ifi' ? /ativa/ : /reparo/;
+  const l = tabela.find(v => alvo.test(normalizeHeader(v.label)));
+  if (!l) return 0;
+  return apto ? l.d26 : l.normal;
+}
+// desc_ifi / desc_irr NÃO são digitados: é a quantidade de retornos × o preço
+// da faixa do técnico (ver precoRetornoDoTecnico). O % e o TOTAL A RECEBER
+// saem junto. Antes isso só existia no comentário — a linha nova nascia com
+// desconto ZERO mesmo tendo retorno contado, e alguém lançava na mão.
 function aplicarDescontoRetorno(linha, janela) {
-  const preco = rot => (DESCONTOS_RETORNO_FIXOS.find(d => normalizeHeader(d.label).includes(rot)) || {}).tecnico || 0;
-  linha.desc_ifi = (Number(linha.qtd_ifi) || 0) * preco('ifi');
-  linha.desc_irr = (Number(linha.qtd_irr) || 0) * preco('irr');
+  linha.desc_ifi = (Number(linha.qtd_ifi) || 0) * precoRetornoDoTecnico('ifi', linha, janela);
+  linha.desc_irr = (Number(linha.qtd_irr) || 0) * precoRetornoDoTecnico('irr', linha, janela);
   const base = (janela && janela.inicio && janela.fim) ? baseDoTecnico(linha.tecnico, janela.inicio, janela.fim) : null;
   if (base) {
     linha.ifi_pct = base.ativacao ? ((Number(linha.qtd_ifi) || 0) / base.ativacao) * 100 : 0;
@@ -7220,7 +7238,11 @@ async function salvarCampoFolha(tecnico, periodo, campo, valor) {
     const janela = datasDoPeriodoFolha(periodo);
     if (janela.inicio && janela.fim) {
       linha.valor_total_ordens = valorOrdensDoPeriodo(tecnico, janela.inicio, janela.fim, valor === 'APTO');
-      linha.total_receber = linha.valor_total_ordens - (Number(linha.total_descontos) || 0);
+      // o DESCONTO do retorno acompanha a mesma faixa (ver precoRetornoDoTecnico):
+      // virar APTO sobe o valor da ordem E o valor de cada retorno. Sem isto, o
+      // técnico promovido a APTO recebia pela faixa de 26 dias mas continuava
+      // sendo descontado pela faixa normal.
+      aplicarDescontoRetorno(linha, janela);
     }
   }
   DB.folhaPagamento[idx] = linha;
@@ -13129,7 +13151,9 @@ function holeriteTecnicoHTML(linha) {
   const qtdDesc = (manual.qtd_ifi !== undefined ? manual.qtd_ifi : n(linha.qtd_ifi))
                 + (manual.qtd_irr !== undefined ? manual.qtd_irr : n(linha.qtd_irr));
   const aReceber = totalValor - totalDesc;
-  const precoRetorno = rot => (DESCONTOS_RETORNO_FIXOS.find(d => normalizeHeader(d.label).includes(rot)) || {}).tecnico || 0;
+  // "Desconto aplicado para cada" mostra o preço da FAIXA daquele técnico —
+  // é o mesmo número que a folha desconta (precoRetornoDoTecnico).
+  const precoRetorno = tipo => precoRetornoDoTecnico(tipo, linha, janela);
   const cel = v => v ? formatCurrency(v) : '-';
   // Cada número do holerite é editável (pedido do cliente): a edição fica só
   // NESTE holerite (HOLERITE_MANUAL), não volta pra folha nem pro banco — o
