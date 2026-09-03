@@ -13161,7 +13161,14 @@ function quebraPorTipoDoTecnico(ordens, janela, apto) {
     if (janela && janela.inicio && janela.fim && !inRange(p.data, janela.inicio, janela.fim)) return;
     const t = normalizeHeader(p.tipo_atividade);
     const sp = ehOrdemSP(p.cidade);
-    const tipo = TIPOS_FOLHA.find(x => x.re.test(t) && !!x.sp === sp);
+    // Só ATIVAÇÃO e M.ENDEREÇO têm linha "SP" separada (é o que existe no
+    // holerite em papel do cliente). Reparo, Upgrade e M.Cômodo feitos fora do
+    // Litoral Sul caem na linha NORMAL do tipo deles — sem esse segundo find,
+    // eles não achavam balde nenhum e a ordem SUMIA da folha: o técnico não
+    // via a ordem nem recebia por ela. Achado na auditoria de 03/09/2026,
+    // e não é caso raro: 102 ordens fora do Litoral no ciclo 21/07-20/08.
+    const tipo = TIPOS_FOLHA.find(x => x.re.test(t) && !!x.sp === sp)
+              || TIPOS_FOLHA.find(x => x.re.test(t) && !x.sp);
     if (!tipo) return;
     out[tipo.chave]++;
     const l = linhaValorOrdem(p.tipo_atividade, p.data);
