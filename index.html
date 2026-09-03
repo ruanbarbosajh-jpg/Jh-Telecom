@@ -384,12 +384,48 @@
   .hol-assina { margin-top: 26px; font-size: 10px; letter-spacing: .1em; color: var(--text-muted); }
   .hol-assina span { display: block; border-top: 1px solid var(--text-muted); width: 240px; margin-top: 30px; }
   .hol-data { margin-top: 10px; text-align: right; font-size: 10px; color: var(--text-muted); font-style: italic; }
-  /* impressão: só o holerite vai pro papel */
+  /* ---- IMPRESSÃO DO HOLERITE ----
+     Três coisas quebravam o papel e estão resolvidas aqui:
+     1. o navegador NÃO imprime cor de fundo sem print-color-adjust: exact —
+        as faixas PROVENTOS/DESCONTOS saíam brancas, sem a cor do modelo;
+     2. o holerite herdava a paleta do TEMA ESCURO, então no papel branco o
+        texto saía cinza-claro, quase apagado. Aqui a paleta é fixada em
+        tinta escura sobre branco, dê no que der o tema da tela;
+     3. saía em 3 páginas. Corpo menor, menos respiro e page-break-inside
+        nas tabelas fazem caber em uma. */
   @media print {
+    @page { size: A4 portrait; margin: 10mm; }
     body * { visibility: hidden; }
     #hol-area, #hol-area * { visibility: visible; }
     #hol-area { position: absolute; left: 0; top: 0; width: 100%; }
-    .holerite { border: none; max-width: none; }
+    /* paleta de PAPEL — não depende do tema da tela */
+    #hol-area .holerite {
+      --card-bg: #fff; --bg-page: #fff; --border: #b9c2d2;
+      --text-primary: #101828; --text-secondary: #33405a; --text-muted: #5b6780;
+      --accent: #14487a; --success: #146c3a; --danger: #a11212; --radius: 0;
+      border: none; max-width: none; margin: 0; padding: 0;
+      font-size: 10.5px; color: #101828; background: #fff;
+    }
+    #hol-area .holerite * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    #hol-area .holerite table { page-break-inside: avoid; margin-bottom: 2px; }
+    #hol-area .holerite th, #hol-area .holerite td { padding: 3px 6px; border-color: #b9c2d2; }
+    /* as faixas do modelo em papel: azul nos proventos, vermelho nos descontos */
+    #hol-area .hol-faixa { margin: 9px 0 0; padding: 4px 6px; color: #fff !important; }
+    #hol-area .hol-prov { background: #1b4d7a !important; }
+    #hol-area .hol-desc { background: #7a2020 !important; }
+    #hol-area .hol-tab thead th, #hol-area .hol-ind th { background: #eef2f8 !important; color: #33405a !important; }
+    #hol-area .hol-tab tbody tr.hol-total td { background: #eef2f8 !important; color: #101828 !important; font-weight: 700; }
+    #hol-area .hol-fecho tr.hol-total td { color: #146c3a !important; }
+    #hol-area .hol-nome { margin: 9px 0 10px; }
+    #hol-area .hol-assina { margin-top: 16px; }
+    #hol-area .hol-assina span { margin-top: 20px; }
+    /* campo editável tem que sair como TEXTO no papel, não como caixa de
+       formulário — no print anterior a borda do input aparecia em volta de
+       cada número */
+    #hol-area input.hol-edit {
+      border: none !important; background: transparent !important;
+      color: #101828 !important; padding: 0 !important; width: auto !important;
+    }
   }
   .modal-largo { width: min(1100px, 94vw); max-height: 88vh; overflow: auto; position: relative; }
   .mt-fechar {
@@ -748,27 +784,58 @@
   table.data-table th.col-fds-ini, table.data-table td.col-fds-ini { border-left: 2px solid var(--fds-borda); }
   table.data-table th.col-fds-fim, table.data-table td.col-fds-fim { border-right: 2px solid var(--fds-borda); }
   table.data-table tr:hover td.col-fds { background: var(--fds-bg); }
-  /* ---- BLOCO DE DESCONTOS na Folha (pedido do cliente 03/09/2026) ----
-     São ~20 colunas seguidas (Desc. *, Parcela * e TOTAL DESCONTOS) que TIRAM
-     dinheiro do técnico, no meio de 47 colunas que em maioria somam. Sem uma
-     marca própria elas se perdiam entre as de produção. Mesmo recurso já usado
-     no fim de semana da Presença: fundo próprio + borda só onde o grupo começa
-     e termina, pra ler como um bloco só e não como 20 colunas listradas. */
-  table.data-table th.col-desc, table.data-table td.col-desc { background: var(--desc-bg); }
-  table.data-table th.col-desc-ini, table.data-table td.col-desc-ini { border-left: 2px solid var(--desc-borda); }
-  table.data-table th.col-desc-fim, table.data-table td.col-desc-fim { border-right: 2px solid var(--desc-borda); }
-  table.data-table th.col-desc { color: var(--danger); }
-  /* o hover e a faixa zebrada não podem apagar a cor do bloco.
-     A regra da zebra no tema CLARO tem 7 classes (:root + [data-theme] + as
-     outras 5) e vence uma versão sem o :root — por isso o par abaixo, um pra
-     cada tema. Já custou o bloco ficar sem cor nas linhas pares no claro. */
-  table.data-table tr:hover td.col-desc { background: var(--desc-bg); }
-  table.data-table tbody tr:nth-child(even):not(.total-row):not(.linha-subitem):not(.linha-espaco) > td.col-desc {
-    background: var(--desc-bg);
-  }
-  :root[data-theme="light"] table.data-table tbody tr:nth-child(even):not(.total-row):not(.linha-subitem):not(.linha-espaco) > td.col-desc {
-    background: var(--desc-bg);
-  }
+  /* ---- CORES DAS COLUNAS DA FOLHA ----
+     Extraídas do arquivo do cliente (FOLHA DE PAGAMENTO JH LT 2026.pdf), lendo
+     o preenchimento real de cada célula do cabeçalho — não "parecido", é a cor
+     que ele já usa:
+        #404040  produção  (nome, quantidades por tipo, dias, bônus)
+        #0B3040  valores   (o dinheiro de cada tipo, aluguel, empréstimo, % IND.)
+        #104861  frota     (frota e dias de aluguel)
+        #680000  descontos (Qtd IFI/IRR, Desc. * e TOTAL DOS DESCONTOS)
+        #960000  parcelas  (em que parcela está cada desconto)
+        #0D3512  a receber (o fecho)
+     São cores ESCURAS com texto branco, então valem nos dois temas sem
+     variante — mesma decisão das faixas do holerite. No corpo da tabela só
+     entra um véu bem fraco da mesma cor, pra ler como bloco sem virar
+     um tabuleiro colorido. */
+  table.data-table th.col-g-prod   { background: #404040; color: #fff; }
+  table.data-table th.col-g-valor  { background: #0B3040; color: #fff; }
+  table.data-table th.col-g-frota  { background: #104861; color: #fff; }
+  table.data-table th.col-g-desc   { background: #680000; color: #fff; }
+  table.data-table th.col-g-parc   { background: #960000; color: #fff; }
+  table.data-table th.col-g-receb  { background: #0D3512; color: #fff; }
+  /* borda só nas pontas de cada grupo — no meio viraria listra */
+  table.data-table th.col-g-ini, table.data-table td.col-g-ini { border-left: 2px solid var(--border); }
+  table.data-table th.col-g-fim, table.data-table td.col-g-fim { border-right: 2px solid var(--border); }
+  /* véu no corpo. Precisa vencer a faixa zebrada (7 classes no tema claro por
+     causa do :root[data-theme]), por isso o :root em todas — já custou o bloco
+     ficar sem cor nas linhas pares só no tema claro. */
+  :root table.data-table td.col-g-valor,
+  :root table.data-table tbody tr:nth-child(even) > td.col-g-valor,
+  :root table.data-table tr:hover td.col-g-valor  { background: rgba(11, 48, 64, .16); }
+  :root table.data-table td.col-g-frota,
+  :root table.data-table tbody tr:nth-child(even) > td.col-g-frota,
+  :root table.data-table tr:hover td.col-g-frota  { background: rgba(16, 72, 97, .16); }
+  :root table.data-table td.col-g-desc,
+  :root table.data-table tbody tr:nth-child(even) > td.col-g-desc,
+  :root table.data-table tr:hover td.col-g-desc   { background: rgba(104, 0, 0, .13); }
+  :root table.data-table td.col-g-parc,
+  :root table.data-table tbody tr:nth-child(even) > td.col-g-parc,
+  :root table.data-table tr:hover td.col-g-parc   { background: rgba(150, 0, 0, .13); }
+  :root table.data-table td.col-g-receb,
+  :root table.data-table tbody tr:nth-child(even) > td.col-g-receb,
+  :root table.data-table tr:hover td.col-g-receb  { background: rgba(13, 53, 18, .20); }
+  /* no tema claro o véu escuro fica pesado — mesma cor, bem mais fraca */
+  :root[data-theme="light"] table.data-table td.col-g-valor,
+  :root[data-theme="light"] table.data-table tbody tr:nth-child(even) > td.col-g-valor { background: rgba(11, 48, 64, .07); }
+  :root[data-theme="light"] table.data-table td.col-g-frota,
+  :root[data-theme="light"] table.data-table tbody tr:nth-child(even) > td.col-g-frota { background: rgba(16, 72, 97, .07); }
+  :root[data-theme="light"] table.data-table td.col-g-desc,
+  :root[data-theme="light"] table.data-table tbody tr:nth-child(even) > td.col-g-desc  { background: rgba(104, 0, 0, .07); }
+  :root[data-theme="light"] table.data-table td.col-g-parc,
+  :root[data-theme="light"] table.data-table tbody tr:nth-child(even) > td.col-g-parc  { background: rgba(150, 0, 0, .07); }
+  :root[data-theme="light"] table.data-table td.col-g-receb,
+  :root[data-theme="light"] table.data-table tbody tr:nth-child(even) > td.col-g-receb { background: rgba(13, 53, 18, .10); }
   .table-wrap { overflow-x: auto; background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); }
   /* ---- PRIMEIRA COLUNA FIXA (03/09/2026) ----
      A Folha tem 47 colunas e quase 6.000px: rolando pro lado pra ver o valor
@@ -7048,7 +7115,10 @@ async function aplicarRetornosGigaNaFolha(periodo, porTecnico) {
       alvo = achou >= 0 ? achou : undefined;
     }
     if (alvo === undefined) { semLinha.push(r.nome); return; }
-    const linha = { ...DB.folhaPagamento[alvo], qtd_ifi: r.ifi, qtd_irr: r.irr };
+    // marca a origem: a partir daqui essa linha para de ser recontada sozinha
+    // pela base de IFI/IRR — a contagem da GIGA é a que vale (ver autoRetorno
+    // em renderFolhaPagamento).
+    const linha = { ...DB.folhaPagamento[alvo], qtd_ifi: r.ifi, qtd_irr: r.irr, retorno_origem: 'giga' };
     aplicarDescontoRetorno(linha, janela);
     DB.folhaPagamento[alvo] = linha;
     alteradas.push(linha);
@@ -7056,11 +7126,15 @@ async function aplicarRetornosGigaNaFolha(periodo, porTecnico) {
   // técnico que está na folha e NÃO apareceu na planilha: zera o retorno dele.
   // Sem isso, quem tinha retorno num envio anterior e não tem mais ficaria
   // pagando por um retorno que a GIGA já tirou.
+  // A comparação é pelo NOME de dentro de cada entrada, não pela chave do
+  // objeto: quem chama pode montar o mapa com a chave já normalizada ou não, e
+  // depender disso zerava justamente quem tinha acabado de ser lançado.
+  const nomesNaPlanilha = new Set(Object.values(porTecnico).map(x => normalizeHeader(x.nome)));
   DB.folhaPagamento.forEach((l, i) => {
     if (l.periodo !== periodo) return;
-    if (porTecnico[normalizeHeader(l.tecnico)]) return;
-    if (!l.qtd_ifi && !l.qtd_irr) return;
-    const linha = { ...l, qtd_ifi: 0, qtd_irr: 0 };
+    if (nomesNaPlanilha.has(normalizeHeader(l.tecnico))) return;
+    if (!l.qtd_ifi && !l.qtd_irr && l.retorno_origem === 'giga') return;
+    const linha = { ...l, qtd_ifi: 0, qtd_irr: 0, retorno_origem: 'giga' };
     aplicarDescontoRetorno(linha, janela);
     DB.folhaPagamento[i] = linha;
     alteradas.push(linha);
@@ -12554,13 +12628,21 @@ function renderFolhaPagamento(modo) {
   // linhas antigas (de antes do SEM_PERIODO_FOLHA) ainda podem ter periodo
   // null/'' vindo do banco — tratamos junto com o texto-sentinela como "sem período"
   const ehSemPeriodoFolha = p => !p || p === SEM_PERIODO_FOLHA;
-  const periodosNomeados = [...new Set(DB.folhaPagamento.map(r=>r.periodo).filter(p => p && !ehSemPeriodoFolha(p)))];
+  // Ordenados do mais NOVO pro mais antigo (pelo fim do ciclo). Período cujo
+  // rótulo não tem data (ex.: veio da planilha com o nome da aba) vai pro fim.
+  const periodosNomeados = [...new Set(DB.folhaPagamento.map(r=>r.periodo).filter(p => p && !ehSemPeriodoFolha(p)))]
+    .sort((a, b) => String(datasDoPeriodoFolha(b).fim || '').localeCompare(String(datasDoPeriodoFolha(a).fim || '')));
   const temSemPeriodo = DB.folhaPagamento.some(r => ehSemPeriodoFolha(r.periodo));
+  // Abre no ciclo MAIS RECENTE, não em "Todos os períodos". Com "todos", o
+  // mesmo técnico aparecia uma vez por ciclo e parecia linha duplicada — foi
+  // exatamente a dúvida do cliente em 03/09/2026 (dois "MARCO AURÉLIO", um com
+  // 258 ordens e outro com 232: eram dois fechamentos diferentes).
+  const periodoPadraoFolha = periodosNomeados[0] || '';
   document.getElementById('content').innerHTML = `<div class="toolbar toolbar-fixa">
     <div class="field"><label>Técnico</label><input type="text" id="f-tech" placeholder="Nome" list="tech-list"></div>
     ${DB.folhaPagamento.length ? `<div class="field"><label>Período</label><select id="f-periodo">
       <option value="">Todos os períodos</option>
-      ${periodosNomeados.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
+      ${periodosNomeados.map(p=>`<option value="${esc(p)}"${p === periodoPadraoFolha ? ' selected' : ''}>${esc(p)}</option>`).join('')}
       ${temSemPeriodo ? `<option value="__sem_periodo__">(sem período definido)</option>` : ''}
     </select></div>` : ''}
     <div class="field"><label>Retornos IFI/IRR — de</label><input type="date" id="fol-ret-de"></div>
@@ -12668,7 +12750,33 @@ function renderFolhaPagamento(modo) {
     const janelaBase = janelaFolha.inicio ? janelaFolha
       : (cicloQueContem(retFim).inicio ? cicloQueContem(retFim) : { inicio: retIni, fim: retFim });
     const contagemRet = recalcula ? contarRetornosPorOfensor(retIni, retFim) : null;
-    const rows = !recalcula ? brutas : brutas.map(r => {
+    // ---- ENQUANTO A PLANILHA DA GIGA NÃO CHEGA (pedido do cliente 03/09/2026)
+    // A GIGA só manda o arquivo de retornos depois que o ciclo fecha. Até lá, a
+    // Qtd. IFI/IRR da folha ficava parada no que existia na hora em que o
+    // período foi gerado — quem importasse a planilha de IFI/IRR depois disso
+    // não via a folha mudar.
+    // Agora, linha que ainda NÃO recebeu a planilha da GIGA (retorno_origem
+    // diferente de 'giga') tem os retornos recontados na hora, direto da base
+    // de IFI/IRR já importada (mesma conta de sempre: contarRetornosPorOfensor,
+    // atribuindo ao ofensor). Assim que a planilha da GIGA for enviada, aquela
+    // linha passa a valer a contagem dela e para de ser recalculada.
+    // Não grava nada: é uma LENTE sobre a tela. O número oficial só muda quando
+    // alguém gera o período ou envia a planilha da GIGA.
+    const autoRetorno = !recalcula && janelaFolha.inicio && janelaFolha.fim
+      ? contarRetornosPorOfensor(janelaFolha.inicio, janelaFolha.fim) : null;
+    let quantosAuto = 0;
+    const brutasComRetorno = !autoRetorno ? brutas : brutas.map(r => {
+      if (r.retorno_origem === 'giga') return r;
+      const c = autoRetorno[r.tecnico]
+        || autoRetorno[Object.keys(autoRetorno).find(k => normalizeHeader(k) === normalizeHeader(r.tecnico)) || ''];
+      if (!c) return (r.qtd_ifi || r.qtd_irr) ? { ...r, qtd_ifi: 0, qtd_irr: 0, _retornoAuto: true } : r;
+      quantosAuto++;
+      const base = baseDoTecnico(r.tecnico, janelaFolha.inicio, janelaFolha.fim);
+      return { ...r, qtd_ifi: c.ifi, qtd_irr: c.irr, _retornoAuto: true,
+        ifi_pct: base.ativacao ? (c.ifi / base.ativacao) * 100 : 0,
+        irr_pct: base.reparos ? (c.irr / base.reparos) * 100 : 0, _recalculado: true };
+    });
+    const rows = !recalcula ? brutasComRetorno : brutas.map(r => {
       const c = contagemRet[r.tecnico] || { ifi: 0, irr: 0 };
       const base = baseDoTecnico(r.tecnico, janelaBase.inicio, janelaBase.fim);
       const ifiPct = base.ativacao ? (c.ifi / base.ativacao) * 100 : 0;
@@ -12738,7 +12846,12 @@ function renderFolhaPagamento(modo) {
              atribuídos ao técnico ofensor. Denominadores (ativações e reparos) são os do ciclo
              ${janelaBase.inicio ? formatDate(janelaBase.inicio) + ' a ' + formatDate(janelaBase.fim) : 'do próprio intervalo'}.
              Valores em dinheiro são os da planilha e não mudam com esse filtro.`
-          : 'Números como vieram na planilha da folha. Preencha as datas de "Retornos IFI/IRR" na barra de cima para recontar pelos retornos baixados num intervalo.'}
+          : quantosAuto
+            ? `Qtd. e % de IFI/IRR de <b>${quantosAuto} técnico(s)</b> estão sendo contados agora pela base de <b>IFI/IRR já importada</b>,
+               atribuídos ao ofensor — é o que vale enquanto a planilha da GIGA daquele ciclo não é enviada.
+               Assim que você enviar a planilha da GIGA no painel acima, a contagem dela passa a valer e estes números param de ser recalculados.
+               O resto dos valores é o da folha e não muda com isso.`
+            : 'Números como vieram na planilha da folha. Preencha as datas de "Retornos IFI/IRR" na barra de cima para recontar pelos retornos baixados num intervalo.'}
       </p>
       ${renderFolhaCompleta(ranking, pct, IFI_TARGET, IRR_TARGET)}
       <div class="section-heading">Holerite<span class="sec-nota">extrato de serviços do técnico, no formato que vai pra assinatura</span></div>
@@ -13139,6 +13252,16 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     data-campo="${campo}" ${attrsChave(r)} value="${esc(valor || '')}" placeholder="-" style="width:52px;text-align:center">`;
   const cols = [
     ['Técnico', r=>r.tecnico],
+    // Período logo depois do nome: sem ele, com o filtro em "Todos os
+    // períodos" o mesmo técnico aparecia duas vezes (um fechamento por ciclo)
+    // e parecia linha duplicada. Rótulo sem data ganha um aviso, porque é
+    // justamente ele que deixa a quebra por tipo zerada — a conta por tipo
+    // precisa de um intervalo de datas pra filtrar a Produção.
+    ['Período', r => {
+      const j = datasDoPeriodoFolha(r.periodo);
+      return j.inicio ? esc(r.periodo)
+        : `<span title="Este período não tem data no nome, então a quebra por tipo de serviço não tem como ser calculada." style="color:var(--warn-text)">${esc(r.periodo || '(sem período)')} ⚠</span>`;
+    }],
     ['Total Ordens', r=>r.total_ordens],
     // quantidade E valor de cada tipo, lado a lado (pedido do cliente
     // 03/09/2026): antes só existia a soma "Valor Ordens", e não dava pra
@@ -13188,17 +13311,24 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     ['TOTAL DESCONTOS', r=>`<span class="folha-total-descontos" style="color:var(--danger);font-weight:700">${money(r.total_descontos)}</span>`],
     ['TOTAL A RECEBER', r=>`<span class="folha-total-receber" style="color:var(--success);font-weight:700">${money(r.total_receber)}</span>`]
   ];
-  // Quais colunas formam o bloco de DESCONTO: as "Desc. *", as "Parcela *"
-  // (que dizem em que parcela aquele desconto está) e o TOTAL DESCONTOS.
-  // A classe sai do próprio cabeçalho em vez de ser escrita nas ~20 entradas
-  // do array — coluna de desconto nova nasce marcada sozinha.
-  const ehColDesconto = h => /^desc\.|^parcela |^total descontos$/i.test(String(h).trim());
+  // A qual BLOCO cada coluna pertence — as cores saem do arquivo do cliente
+  // (ver o CSS de .col-g-*). O grupo é deduzido do próprio cabeçalho em vez de
+  // ser escrito nas ~48 entradas do array: coluna nova nasce no bloco certo.
+  const grupoDaColuna = h => {
+    const t = String(h).trim();
+    if (/^total a receber$/i.test(t)) return 'receb';
+    if (/^parcela /i.test(t)) return 'parc';
+    if (/^desc\.|^total descontos$|^qtd i(fi|rr)$/i.test(t)) return 'desc';
+    if (/^frota$|^dias aluguel$/i.test(t)) return 'frota';
+    if (/^valor |^empréstimo$|^% i(fi|rr)$/i.test(t)) return 'valor';
+    return 'prod';
+  };
   const classeCol = i => {
-    if (!ehColDesconto(cols[i][0])) return '';
-    const cls = ['col-desc'];
-    // borda só nas pontas do grupo: no meio ela viraria listra
-    if (i === 0 || !ehColDesconto(cols[i - 1][0])) cls.push('col-desc-ini');
-    if (i === cols.length - 1 || !ehColDesconto(cols[i + 1][0])) cls.push('col-desc-fim');
+    const g = grupoDaColuna(cols[i][0]);
+    const cls = ['col-g-' + g];
+    // borda só nas pontas de cada bloco — no meio viraria listra
+    if (i === 0 || grupoDaColuna(cols[i - 1][0]) !== g) cls.push('col-g-ini');
+    if (i === cols.length - 1 || grupoDaColuna(cols[i + 1][0]) !== g) cls.push('col-g-fim');
     return ` class="${cls.join(' ')}"`;
   };
   return `<div class="table-wrap"><table class="data-table tab-col1-fixa"><thead><tr>${cols.map((c,i)=>`<th${classeCol(i)}>${c[0]}</th>`).join('')}</tr></thead><tbody>
