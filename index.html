@@ -394,10 +394,19 @@
      3. saía em 3 páginas. Corpo menor, menos respiro e page-break-inside
         nas tabelas fazem caber em uma. */
   @media print {
-    @page { size: A4 portrait; margin: 10mm; }
+    /* PAISAGEM com DOIS holerites por folha (pedido do cliente 03/09/2026):
+       imprime o que estiver na tela — um técnico ou a pilha toda. As duas
+       colunas do grid é que fazem caber dois por A4 deitado; o
+       page-break-inside nos holerites impede que um seja cortado ao meio na
+       virada da folha. */
+    @page { size: A4 landscape; margin: 8mm; }
     body * { visibility: hidden; }
     #hol-area, #hol-area * { visibility: visible; }
-    #hol-area { position: absolute; left: 0; top: 0; width: 100%; }
+    #hol-area {
+      position: absolute; left: 0; top: 0; width: 100%;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; align-items: start;
+    }
+    #hol-area .holerite { break-inside: avoid; page-break-inside: avoid; }
     /* paleta de PAPEL — não depende do tema da tela */
     #hol-area .holerite {
       --card-bg: #fff; --bg-page: #fff; --border: #b9c2d2;
@@ -12791,12 +12800,16 @@ function renderFolhaPagamento(modo) {
       if (r.retorno_origem === 'giga') return r;
       const c = autoRetorno[r.tecnico]
         || autoRetorno[Object.keys(autoRetorno).find(k => normalizeHeader(k) === normalizeHeader(r.tecnico)) || ''];
-      if (!c) return (r.qtd_ifi || r.qtd_irr) ? { ...r, qtd_ifi: 0, qtd_irr: 0, _retornoAuto: true } : r;
+      // recontar a QUANTIDADE sem refazer o DESCONTO deixava a tela mostrando
+      // "1 IFI" com "R$ 0,00" de desconto ao lado — foi o que o cliente viu.
+      // aplicarDescontoRetorno refaz desconto, % e TOTAL A RECEBER de uma vez,
+      // na faixa do técnico (48,50/53,00 e 38,50/42,00).
+      if (!c) {
+        if (!r.qtd_ifi && !r.qtd_irr) return r;
+        return aplicarDescontoRetorno({ ...r, qtd_ifi: 0, qtd_irr: 0, _retornoAuto: true }, janelaFolha);
+      }
       quantosAuto++;
-      const base = baseDoTecnico(r.tecnico, janelaFolha.inicio, janelaFolha.fim);
-      return { ...r, qtd_ifi: c.ifi, qtd_irr: c.irr, _retornoAuto: true,
-        ifi_pct: base.ativacao ? (c.ifi / base.ativacao) * 100 : 0,
-        irr_pct: base.reparos ? (c.irr / base.reparos) * 100 : 0, _recalculado: true };
+      return aplicarDescontoRetorno({ ...r, qtd_ifi: c.ifi, qtd_irr: c.irr, _retornoAuto: true, _recalculado: true }, janelaFolha);
     });
     const rows = !recalcula ? brutasComRetorno : brutas.map(r => {
       const c = contagemRet[r.tecnico] || { ifi: 0, irr: 0 };
@@ -12880,8 +12893,12 @@ function renderFolhaPagamento(modo) {
       <div class="panel" style="margin-bottom:1.5rem">
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:6px">
           <div class="field" style="margin:0"><label>Técnico</label><select id="hol-tecnico">
+            <option value="__todos__">— Todos os técnicos (${ranking.length}) —</option>
             ${ranking.map(r => `<option value="${esc(r.tecnico)}|${esc(r.periodo)}">${esc(r.tecnico)}</option>`).join('')}
           </select></div>
+          <div class="field" style="margin:0"><label>Quantos mostrar</label>
+            <input type="number" id="hol-quantos" min="1" max="${ranking.length}" value="${ranking.length}" style="width:90px">
+          </div>
           <button type="button" class="btn-export-img" id="hol-img">🖼 Gerar imagem</button>
           <button type="button" class="btn-secundario" id="hol-print" style="padding:8px 14px">🖨 Imprimir</button>
           ${podeEditarFolhaPagamento() ? '<button type="button" class="btn-secundario" id="hol-refazer" style="padding:8px 14px">↺ Refazer pelo sistema</button>' : ''}
@@ -12901,13 +12918,29 @@ function renderFolhaPagamento(modo) {
 
     // ---- Holerite (extrato de serviços) ----
     const selHol = document.getElementById('hol-tecnico');
+    const inpQuantos = document.getElementById('hol-quantos');
+    // "Todos" monta a pilha inteira de holerites; escolher um técnico mostra
+    // só o dele. O campo "Quantos mostrar" corta a pilha — serve pra imprimir
+    // um lote de cada vez em vez dos 30 de uma vez.
     const desenharHolerite = () => {
       if (!selHol || !selHol.value) return;
+      const area = document.getElementById('hol-area');
+      if (selHol.value === '__todos__') {
+        const n = Math.max(1, Math.min(ranking.length, parseInt(inpQuantos.value, 10) || ranking.length));
+        const lista = ranking.slice(0, n);
+        area.innerHTML = lista.map(l => holeriteTecnicoHTML(l)).join('');
+        // cada holerite edita o seu: o wiring é por bloco, não pela tela toda
+        area.querySelectorAll('.holerite').forEach((el, i) => {
+          ligarEdicaoHolerite(lista[i].tecnico, lista[i].periodo, desenharHolerite, el);
+        });
+        return;
+      }
       const [tec, per] = selHol.value.split('|');
       const linha = ranking.find(r => r.tecnico === tec && r.periodo === per);
-      document.getElementById('hol-area').innerHTML = linha ? holeriteTecnicoHTML(linha) : '';
-      ligarEdicaoHolerite(tec, per, desenharHolerite);
+      area.innerHTML = linha ? holeriteTecnicoHTML(linha) : '';
+      ligarEdicaoHolerite(tec, per, desenharHolerite, area);
     };
+    if (inpQuantos) inpQuantos.addEventListener('change', desenharHolerite);
     if (selHol) {
       selHol.addEventListener('change', desenharHolerite);
       desenharHolerite();
@@ -12918,9 +12951,14 @@ function renderFolhaPagamento(modo) {
         toast('Holerite refeito pelos números do sistema.', 'ok', 2000);
       });
       document.getElementById('hol-img').addEventListener('click', () => {
-        const alvo = document.querySelector('#hol-area .holerite');
+        // "Todos" captura a pilha inteira num PNG só; um técnico, só o dele
+        const alvo = selHol.value === '__todos__'
+          ? document.getElementById('hol-area')
+          : document.querySelector('#hol-area .holerite');
         if (!alvo) return;
-        capturarElementoComoImagem(alvo, 'holerite-' + normalizeHeader(selHol.value.split('|')[0]).replace(/[^a-z0-9]+/g, '-'));
+        const nome = selHol.value === '__todos__' ? 'holerites-' + hojeISOLocal()
+          : 'holerite-' + normalizeHeader(selHol.value.split('|')[0]).replace(/[^a-z0-9]+/g, '-');
+        capturarElementoComoImagem(alvo, nome);
       });
       document.getElementById('hol-print').addEventListener('click', () => window.print());
     }
@@ -13081,13 +13119,15 @@ function quebraPorTipoDoTecnico(ordens, janela, apto) {
 // Liga os campos do holerite. Quantidade e texto gravam direto; dinheiro usa a
 // mesma máscara da Folha (os DÍGITOS viram centavos). Toda edição redesenha o
 // holerite inteiro, porque mudar uma linha mexe nos três totais do rodapé.
-function ligarEdicaoHolerite(tecnico, periodo, redesenhar) {
+function ligarEdicaoHolerite(tecnico, periodo, redesenhar, raiz) {
+  const escopo = raiz || document.getElementById('hol-area');
+  if (!escopo) return;
   const chave = `${tecnico}|${periodo}`;
   const guardar = (campo, valor) => {
     HOLERITE_MANUAL[chave] = HOLERITE_MANUAL[chave] || {};
     HOLERITE_MANUAL[chave][campo] = valor;
   };
-  document.querySelectorAll('#hol-area input.hol-edit').forEach(el => {
+  escopo.querySelectorAll('input.hol-edit').forEach(el => {
     const campo = el.dataset.campo;
     if (el.classList.contains('hol-edit-moeda')) {
       el.addEventListener('input', () => {
@@ -13128,7 +13168,20 @@ function holeriteTecnicoHTML(linha) {
   });
   const SERVICOS = TIPOS_FOLHA.map(t => [t.rot, t.chave]);
   const n = v => Number(v) || 0;
-  const campoManual = c => manual[c] !== undefined ? manual[c] : n(linha[c]);
+  // desc_ifi/desc_irr do holerite saem da CONTA (quantidade × o preço que o
+  // próprio holerite acabou de imprimir na linha "Desconto aplicado para
+  // cada"), não do valor gravado na folha. Sem isso o papel se contradizia:
+  // dizia "R$ 53,00 para cada" e descontava R$ 48,50, porque o valor gravado
+  // era de antes da regra de faixa. Edição à mão continua vencendo.
+  const campoManual = c => {
+    if (manual[c] !== undefined) return manual[c];
+    if (c === 'desc_ifi' || c === 'desc_irr') {
+      const tipo = c === 'desc_ifi' ? 'ifi' : 'irr';
+      const qtd = manual['qtd_' + tipo] !== undefined ? manual['qtd_' + tipo] : n(linha['qtd_' + tipo]);
+      return qtd * precoRetornoDoTecnico(tipo, linha, janela);
+    }
+    return n(linha[c]);
+  };
   const diasTrab = manual.dias_trab !== undefined ? manual.dias_trab : n(linha.dias_trab);
   const diasAluguel = manual.dias_aluguel !== undefined ? manual.dias_aluguel : n(linha.dias_aluguel);
   const totalQtd = SERVICOS.reduce((a, [, k]) => a + contagem[k], 0);
@@ -13287,16 +13340,17 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
         : `<span title="Este período não tem data no nome, então a quebra por tipo de serviço não tem como ser calculada." style="color:var(--warn-text)">${esc(r.periodo || '(sem período)')} ⚠</span>`;
     }],
     ['Total Ordens', r=>r.total_ordens],
-    // quantidade E valor de cada tipo, lado a lado (pedido do cliente
-    // 03/09/2026): antes só existia a soma "Valor Ordens", e não dava pra
-    // conferir de onde ela vinha sem abrir o holerite.
-    ...TIPOS_FOLHA.reduce((acc, t) => acc.concat([
-      [t.rot, r => contagemPorTipoNoPeriodo(r.tecnico, r.periodo)[t.chave]],
-      ['Valor ' + t.rot, r => {
-        const v = contagemPorTipoNoPeriodo(r.tecnico, r.periodo)['v_' + t.chave];
-        return v ? `<span class="folha-valor-tipo">${money(v)}</span>` : '-';
-      }],
-    ]), []),
+    // Primeiro TODAS as quantidades, depois TODOS os valores (pedido do
+    // cliente 03/09/2026). Intercalado — quantidade, valor, quantidade,
+    // valor — obrigava a pular de coluna em coluna pra somar as ordens, e as
+    // duas leituras que o cliente faz são separadas: "quantas ordens ele fez"
+    // e "quanto isso deu". Agora cada leitura é um bloco contínuo, e ainda
+    // casa com a cor: quantidade no cinza da produção, valor no azul.
+    ...TIPOS_FOLHA.map(t => [t.rot, r => contagemPorTipoNoPeriodo(r.tecnico, r.periodo)[t.chave]]),
+    ...TIPOS_FOLHA.map(t => ['Valor ' + t.rot, r => {
+      const v = contagemPorTipoNoPeriodo(r.tecnico, r.periodo)['v_' + t.chave];
+      return v ? `<span class="folha-valor-tipo">${money(v)}</span>` : '-';
+    }]),
     ['Valor Ordens', r=>`<span class="folha-valor-ordens">${money(r.valor_total_ordens)}</span>`],
     ['Dias Trab.', r => podePagamento ? inputNumero(r, 'dias_trab', r.dias_trab) : r.dias_trab],
     ['Bônus', r => podePagamento
