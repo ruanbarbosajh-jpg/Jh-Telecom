@@ -401,11 +401,6 @@
   .holerite .q input.hol-edit { text-align: center; }
   input.hol-edit-txt { text-align: center; color: var(--text-muted); }
   .hol-editado { color: var(--warn-text); font-weight: 700; }
-  /* rótulo preenchido, como no modelo em papel: azul nos proventos, vinho nos
-     descontos, texto branco. É o que dá a cara do documento — sem isso ele
-     vira "mais uma tabela". Cor fixa de propósito, igual às faixas. */
-  .holerite td.rot-prov { background: #1b4d7a; color: #fff; font-weight: 600; }
-  .holerite td.rot-desc { background: #7a2020; color: #fff; font-weight: 600; }
   .hol-assina { margin-top: 26px; font-size: 10px; letter-spacing: .1em; color: var(--text-muted); }
   .hol-assina span { display: block; border-top: 1px solid var(--text-muted); width: 240px; margin-top: 30px; }
   .hol-data { margin-top: 10px; text-align: right; font-size: 10px; color: var(--text-muted); font-style: italic; }
@@ -458,8 +453,6 @@
     #hol-area .hol-prov { background: #1b4d7a !important; }
     #hol-area .hol-desc { background: #7a2020 !important; }
     #hol-area .hol-tab thead th, #hol-area .hol-ind th { background: #eef2f8 !important; color: #33405a !important; }
-    #hol-area .holerite td.rot-prov { background: #1b4d7a !important; color: #fff !important; }
-    #hol-area .holerite td.rot-desc { background: #7a2020 !important; color: #fff !important; }
     #hol-area .hol-tab tbody tr.hol-total td { background: #eef2f8 !important; color: #101828 !important; font-weight: 700; }
     #hol-area .hol-fecho tr.hol-total td { color: #146c3a !important; }
     #hol-area .hol-topo { flex-direction: column; align-items: center; gap: 2px; border-bottom-width: 1px; padding-bottom: 6px; }
@@ -7337,7 +7330,7 @@ function baseDoTecnico(tecnico, ini, fim) {
 // edita esses (podeEditarFolhaMaterial). desc_ifi/desc_irr ficam de fora de
 // propósito: são automáticos, vêm da contagem de retornos × valor fixo do
 // contrato (DESCONTOS_RETORNO_FIXOS), ninguém digita eles à mão.
-const CAMPOS_MATERIAL_FOLHA = ['desc_equipamento','desc_multa','desc_miscelanea','desc_mecanica','desc_vale','desc_ferramentas','desc_combustivel','desc_fiscalizacao'];
+const CAMPOS_MATERIAL_FOLHA = ['desc_equipamento','desc_multa','desc_miscelanea','desc_mecanica','desc_vale','desc_ferramentas','desc_combustivel','desc_fiscalizacao','desc_pedagio'];
 // TOTAL DESCONTOS soma TODOS os descontos (material + IFI/IRR); só os de
 // material são editáveis, mas o indicador entra na soma igual.
 const CAMPOS_TODO_DESCONTO_FOLHA = [...CAMPOS_MATERIAL_FOLHA, 'desc_ifi', 'desc_irr'];
@@ -13375,7 +13368,19 @@ function holeriteTecnicoHTML(linha) {
     contagem[t.chave] = manual['q_' + t.chave] !== undefined ? manual['q_' + t.chave] : quebra[t.chave];
     valores[t.chave]  = manual['v_' + t.chave] !== undefined ? manual['v_' + t.chave] : quebra['v_' + t.chave];
   });
-  const SERVICOS = TIPOS_FOLHA.map(t => [t.rot, t.chave]);
+  // Ordem e rótulo do papel do cliente: os tipos "normais" primeiro, na ordem
+  // Ativação/Mud. Cômodo/Mud. Endereço/Reparo/Upgrade, e as duas variantes
+  // "SP" (Ativação SP, M.E SP) por último, coladas no Empréstimo — TIPOS_FOLHA
+  // não segue essa ordem (as variantes SP ficam coladas na tipo normal delas,
+  // que é o que interessa pras OUTRAS telas que usam esse array). E só aqui
+  // no holerite o nome do serviço sai por extenso ("Mudança de Cômodo"), não
+  // abreviado como na tabela larga da Folha (lá abreviado cabe mais coluna).
+  const ORDEM_HOLERITE = ['ativacao', 'mudanca_comodo', 'mudanca_endereco', 'reparo', 'upgrade', 'ativacao_sp', 'mudanca_endereco_sp'];
+  const ROTULO_HOLERITE = { mudanca_comodo: 'Mudança de Cômodo', mudanca_endereco: 'Mudança de Endereço' };
+  const SERVICOS = ORDEM_HOLERITE.map(chave => {
+    const t = TIPOS_FOLHA.find(x => x.chave === chave);
+    return [ROTULO_HOLERITE[chave] || t.rot, chave];
+  });
   const n = v => Number(v) || 0;
   // desc_ifi/desc_irr do holerite saem da CONTA (quantidade × o preço que o
   // próprio holerite acabou de imprimir na linha "Desconto aplicado para
@@ -13397,24 +13402,28 @@ function holeriteTecnicoHTML(linha) {
   const totalValor = SERVICOS.reduce((a, [, k]) => a + valores[k], 0) + campoManual('valor_aluguel') + campoManual('emprestimo');
   // desconto: rótulo, campo do valor, campo da parcela, e a quantidade quando
   // o desconto vem de contagem (IFI/IRR) em vez de ser lançado à mão
+  const qtdIfiHol = manual.qtd_ifi !== undefined ? manual.qtd_ifi : n(linha.qtd_ifi);
+  const qtdIrrHol = manual.qtd_irr !== undefined ? manual.qtd_irr : n(linha.qtd_irr);
   const DESCONTOS = [
-    ['Desc. IFI', 'desc_ifi', null, manual.qtd_ifi !== undefined ? manual.qtd_ifi : n(linha.qtd_ifi)],
-    ['Desc. IRR', 'desc_irr', null, manual.qtd_irr !== undefined ? manual.qtd_irr : n(linha.qtd_irr)],
+    ['Desc. IFI', 'desc_ifi', null, qtdIfiHol],
+    ['Desc. IRR', 'desc_irr', null, qtdIrrHol],
     ['Desc. Equipamento', 'desc_equipamento', 'parcela_equipamento', null],
     ['Desc. Multa', 'desc_multa', 'parcela_multa', null],
     ['Desc. Miscelânea', 'desc_miscelanea', 'parcela_miscelanea', null],
     ['Desc. Mecânica', 'desc_mecanica', 'parcela_mecanica', null],
     ['Desc. Ferramentas', 'desc_ferramentas', 'parcela_ferramentas', null],
-    ['Desc. Vale', 'desc_vale', 'parcela_vale', null],
     ['Desc. Fiscalização', 'desc_fiscalizacao', 'parcela_fiscalizacao', null],
+    ['Desc. Vale', 'desc_vale', 'parcela_vale', null],
+    ['Tag Pedágio', 'desc_pedagio', null, null],
     ['Desc. Cartão Combustível', 'desc_combustivel', 'parcela_combustivel', null],
   ];
   const totalDesc = DESCONTOS.reduce((a, [, campo]) => a + campoManual(campo), 0);
-  const qtdDesc = (manual.qtd_ifi !== undefined ? manual.qtd_ifi : n(linha.qtd_ifi))
-                + (manual.qtd_irr !== undefined ? manual.qtd_irr : n(linha.qtd_irr));
+  const qtdDesc = qtdIfiHol + qtdIrrHol;
   const aReceber = totalValor - totalDesc;
   // "Desconto aplicado para cada" mostra o preço da FAIXA daquele técnico —
-  // é o mesmo número que a folha desconta (precoRetornoDoTecnico).
+  // é o mesmo número que a folha desconta (precoRetornoDoTecnico). Só mostra
+  // o preço quando teve retorno DAQUELE tipo no ciclo (senão fica "-", igual
+  // ao modelo em papel — sem retorno, "quanto custaria" não é informação útil).
   const precoRetorno = tipo => precoRetornoDoTecnico(tipo, linha, janela);
   const cel = v => v ? formatCurrency(v) : '-';
   // Cada número do holerite é editável (pedido do cliente): a edição fica só
@@ -13430,14 +13439,15 @@ function holeriteTecnicoHTML(linha) {
         data-centavos="${Math.round((valor || 0) * 100)}" value="${formatCurrency(valor || 0)}">`;
   const campoTexto = (campo, valor) => edit ? esc(valor || '')
     : `<input type="text" class="hol-edit hol-edit-txt" data-campo="${campo}" value="${esc(valor || '')}" placeholder="-">`;
-  // No modelo em papel do cliente o RÓTULO de cada serviço/desconto é uma
-  // célula PREENCHIDA (azul nos proventos, vinho nos descontos) com texto
-  // branco, não texto solto — é o que dava a cara do documento.
-  const linhaServico = ([rot, k]) => `<tr><td class="rot-prov">${rot}</td>
+  // No modelo em papel do cliente o rótulo de cada serviço/desconto é célula
+  // NORMAL (mesmo fundo da tabela) — só a FAIXA "PROVENTOS"/"DESCONTOS" tem
+  // cor cheia. Uma versão anterior pintava cada linha de azul/vinho; o
+  // cliente mandou foto do papel de verdade e não é assim (04/09/2026).
+  const linhaServico = ([rot, k]) => `<tr><td>${rot}</td>
       <td class="q">${campoQtd('q_' + k, contagem[k])}</td>
       <td class="v">${campoDin('v_' + k, valores[k])}</td></tr>`;
   const linhaDesconto = ([rot, campo, parcela, qtd]) => `<tr>
-      <td class="rot-desc">${rot}</td><td class="q">${qtd !== null ? campoQtd(campo === 'desc_ifi' ? 'qtd_ifi' : 'qtd_irr', qtd) : ''}</td>
+      <td>${rot}</td><td class="q">${qtd !== null ? campoQtd(campo === 'desc_ifi' ? 'qtd_ifi' : 'qtd_irr', qtd) : ''}</td>
       <td class="v">${campoDin(campo, campoManual(campo))}</td>
       <td class="p">${parcela ? campoTexto(parcela, manual[parcela] !== undefined ? manual[parcela] : linha[parcela]) : ''}</td></tr>`;
   const mes = janela.fim ? new Date(janela.fim + 'T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) : '';
@@ -13453,7 +13463,7 @@ function holeriteTecnicoHTML(linha) {
       <tr><th></th><th>IFI</th><th>IRR</th></tr>
       <tr><td>Seu indicador</td><td>${formatPct(n(linha.ifi_pct), 1)}</td><td>${formatPct(n(linha.irr_pct), 1)}</td></tr>
       <tr><td>Indicador solicitado</td><td>${formatPct(BONUS_IFI_MAX, 2)}</td><td>${formatPct(BONUS_IRR_MAX, 2)}</td></tr>
-      <tr><td>Desconto aplicado para cada</td><td>${formatCurrency(precoRetorno('ifi'))}</td><td>${formatCurrency(precoRetorno('irr'))}</td></tr>
+      <tr><td>Desconto aplicado para cada</td><td>${qtdIfiHol ? formatCurrency(precoRetorno('ifi')) : '-'}</td><td>${qtdIrrHol ? formatCurrency(precoRetorno('irr')) : '-'}</td></tr>
     </tbody></table>
 
     <div class="hol-faixa hol-prov">PROVENTOS</div>
@@ -13597,6 +13607,7 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     ['Desc. Ferramentas', r => podeMaterial(r) ? inputMoeda(r, 'desc_ferramentas', r.desc_ferramentas) : money(r.desc_ferramentas)],
     ['Desc. Combustível', r => podeMaterial(r) ? inputMoeda(r, 'desc_combustivel', r.desc_combustivel) : money(r.desc_combustivel)],
     ['Desc. Fiscalização', r => podeMaterial(r) ? inputMoeda(r, 'desc_fiscalizacao', r.desc_fiscalizacao) : money(r.desc_fiscalizacao)],
+    ['Desc. Pedágio', r => podeMaterial(r) ? inputMoeda(r, 'desc_pedagio', r.desc_pedagio) : money(r.desc_pedagio)],
     // Bloco "Parcela X" — mesma ordem e mesmo lugar da planilha do cliente
     // (logo depois dos descontos, antes do TOTAL DOS DESCONTOS).
     ['Parcela Equip.', r => podeMaterial(r) ? inputParcela(r, 'parcela_equipamento', r.parcela_equipamento) : (r.parcela_equipamento || '-')],
@@ -13649,11 +13660,12 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
 //   DESCONTOS = vale + desconto de VT + INSS férias + INSS + mecânico
 //   A RECEBER = PROVENTOS − DESCONTOS           Márcia: 1.871,54 − 221,02 = 1.650,52
 const FOLHA_ESC_PROVENTOS = [
-  { campo: 'vt',                  rot: 'VT' },
+  { campo: 'vt',                  rot: 'Transporte' },
+  { campo: 'salario_familia',     rot: 'Salário Família' },
+  { campo: 'salario_maternidade', rot: 'Salário Maternidade' },
+  { campo: 'ferias',              rot: 'Férias' },
   { campo: 'aluguel_veiculo',     rot: 'Aluguel veículo' },
   { campo: 'bonificacao',         rot: 'Bonificação' },
-  { campo: 'salario_maternidade', rot: 'Salário maternidade' },
-  { campo: 'ferias',              rot: 'Férias' },
 ];
 const FOLHA_ESC_DESCONTOS = [
   { campo: 'desconto_vale',     rot: 'Desconto vale' },
@@ -13918,8 +13930,12 @@ function holeriteEscritorioHTML(l) {
     if (!m) return l.periodo || '';
     return new Date(+m[3], +m[2] - 1, +m[1]).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
   })();
-  const linhaProv = c => `<tr><td class="rot-prov">${c.rot}</td><td class="v">${cel(n(l[c.campo]))}</td></tr>`;
-  const linhaDesc = c => `<tr><td class="rot-desc">${c.rot}</td><td class="v">${cel(n(l[c.campo]))}</td></tr>`;
+  // Linhas normais, sem fundo colorido — só a FAIXA "PROVENTOS"/"DESCONTOS" tem
+  // cor cheia, igual à foto do papel de verdade que o cliente mandou (04/09/2026).
+  // 3 colunas (Informações/Quant./Valores), igual ao holerite do técnico — só
+  // "Dias trabalhados" usa a coluna de quantidade; o resto fica em branco ali.
+  const linhaProv = c => `<tr><td>${c.rot}</td><td class="q"></td><td class="v">${cel(n(l[c.campo]))}</td></tr>`;
+  const linhaDesc = c => `<tr><td>${c.rot}</td><td class="v">${cel(n(l[c.campo]))}</td></tr>`;
   return `<div class="holerite">
     <div class="hol-topo">
       <div class="hol-marca">JH TELECOM<span>SOLUÇÕES EM FIBRA ÓPTICA</span></div>
@@ -13928,25 +13944,25 @@ function holeriteEscritorioHTML(l) {
     <div class="hol-nome">${esc(l.pessoa)}<span>${esc(l.cargo || '')} · ${esc(l.periodo)}</span></div>
 
     <div class="hol-faixa hol-prov">PROVENTOS</div>
-    <table class="hol-tab"><thead><tr><th>Informações</th><th class="v">Valores</th></tr></thead>
+    <table class="hol-tab"><thead><tr><th>Informações</th><th class="q">Quant.</th><th class="v">Valores</th></tr></thead>
       <tbody>
-        <tr><td>Salário base</td><td class="v">${cel(n(l.salario_base))}</td></tr>
-        <tr><td>Dias trabalhados</td><td class="v">${n(l.dias_trab)}</td></tr>
-        <tr><td class="rot-prov">Líquido</td><td class="v">${cel(n(l.liquido))}</td></tr>
+        <!-- Dias trabalhados mostra o valor já PRORATEADO (líquido), não o
+             salário-base cheio — salario_base/liquido continuam gravados
+             separados (liquido = base × dias/30), só a linha do papel junta
+             quantidade e valor num lugar só, como no modelo de verdade. -->
+        <tr><td>Dias trabalhados</td><td class="q">${n(l.dias_trab)}</td><td class="v">${cel(n(l.liquido))}</td></tr>
         ${FOLHA_ESC_PROVENTOS.map(linhaProv).join('')}
-        <tr class="hol-total"><td>Total de proventos</td><td class="v">${formatCurrency(n(l.proventos))}</td></tr>
+        <tr class="hol-total"><td>Total de proventos</td><td class="q"></td><td class="v">${formatCurrency(n(l.proventos))}</td></tr>
       </tbody></table>
 
-    <div class="hol-faixa hol-desc">DESCONTOS</div>
+    <div class="hol-faixa hol-prov">DESCONTOS</div>
     <table class="hol-tab"><thead><tr><th>Descontos</th><th class="v">Valores</th></tr></thead>
       <tbody>
         ${FOLHA_ESC_DESCONTOS.map(linhaDesc).join('')}
-        <tr class="hol-total"><td>Total de descontos</td><td class="v">${formatCurrency(n(l.descontos))}</td></tr>
+        <tr class="hol-total"><td>Total de descontos</td><td class="v" style="color:var(--danger)">${formatCurrency(n(l.descontos))}</td></tr>
       </tbody></table>
 
     <table class="hol-tab hol-fecho"><tbody>
-      <tr><td>Total proventos</td><td class="v">${formatCurrency(n(l.proventos))}</td></tr>
-      <tr><td>Total descontos</td><td class="v" style="color:var(--danger)">${formatCurrency(n(l.descontos))}</td></tr>
       <tr class="hol-total"><td>Total a receber</td><td class="v">${formatCurrency(n(l.total_receber))}</td></tr>
     </tbody></table>
 
