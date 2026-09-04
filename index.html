@@ -6583,11 +6583,20 @@ function renderDashboard() {
     // com cadastro financeiro, e essa tabela sumia pra eles).
     const rotuloPeriodo = `${formatDate(s)} a ${formatDate(e)}`;
     const pivotDash = pivotDoCadastroFin();
-    const idxCicloDash = pivotDash ? pivotDash.periodos.indexOf(rotuloPeriodo) : -1;
-    // pivotDash.periodos vem do mais ANTIGO pro mais NOVO — pega os últimos
+    // ACHADO NA AUDITORIA DE 04/09/2026: pivotDash.periodos NÃO vem
+    // garantidamente ordenado — é a concatenação de duas fontes (planilha
+    // COMPARATIVO velha + cadastro da tela Financeiro), e quando um período
+    // só existe numa das duas o array pode intercalar fora de ordem
+    // (o cliente selecionou 21/05 a 20/06 e a tabela mostrou 21/07 a 20/08
+    // logo depois — mais NOVO que o ciclo escolhido). Ordena pela data real
+    // (fim do período) antes de cortar, em vez de confiar na ordem do array.
+    const periodosOrdenados = pivotDash ? [...pivotDash.periodos].sort((a, b) =>
+      String(datasDoPeriodoFolha(a).fim || '').localeCompare(String(datasDoPeriodoFolha(b).fim || ''))) : [];
+    const idxCicloDash = periodosOrdenados.indexOf(rotuloPeriodo);
+    // periodosOrdenados vem do mais ANTIGO pro mais NOVO — pega os últimos
     // 5 até o ciclo escolhido (inclusive) e inverte pra mostrar do mais novo
     // pro mais antigo.
-    const periodosDash = idxCicloDash < 0 ? [] : pivotDash.periodos.slice(Math.max(0, idxCicloDash - 4), idxCicloDash + 1).reverse();
+    const periodosDash = idxCicloDash < 0 ? [] : periodosOrdenados.slice(Math.max(0, idxCicloDash - 4), idxCicloDash + 1).reverse();
     const periodosExibidos = periodosDash.slice(0, 4);
     const valDash = (obj, p) => (obj && obj[p]) || 0;
     // seta comparando a coluna com a PRÓXIMA (period anterior, já que a
