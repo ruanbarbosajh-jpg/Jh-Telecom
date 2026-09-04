@@ -7431,9 +7431,23 @@ function gerarPeriodoFolha(inicio, fim) {
     //   VALOR        = dias × a diária do tipo de frota (ver DIARIA_ALUGUEL).
     // Só preenche o que ainda não foi mexido à mão: quem já lançou o valor na
     // tela continua mandando.
-    if (!manuais.frota) manuais.frota = frotaDoTecnico(tecnico, inicio, fim);
-    if (!manuais.dias_aluguel) manuais.dias_aluguel = diasTrab;
-    if (!manuais.valor_aluguel) {
+    //
+    // ACHADO NA AUDITORIA DE 04/09/2026: a primeira versão testava
+    // `!manuais.X` (falsy) pra decidir se preenchia sozinho — mas ZERO
+    // também é falsy. RH zera o aluguel de propósito (carro quebrado, técnico
+    // sem carro no mês) e ISSO é um lançamento manual válido; reimportar
+    // Produção reescrevia o zero por cima, silenciosamente. O teste certo é
+    // se o campo existe em `existente` — o mesmo critério que o forEach logo
+    // acima já usa pra preservar desconto, parcela etc. (inclusive quando o
+    // valor salvo é 0).
+    const eraNovo = !existente;
+    if (eraNovo || existente.frota === undefined || existente.frota === null || existente.frota === '') {
+      manuais.frota = frotaDoTecnico(tecnico, inicio, fim);
+    }
+    if (eraNovo || existente.dias_aluguel === undefined || existente.dias_aluguel === null) {
+      manuais.dias_aluguel = diasTrab;
+    }
+    if (eraNovo || existente.valor_aluguel === undefined || existente.valor_aluguel === null) {
       manuais.valor_aluguel = +(Number(manuais.dias_aluguel) * diariaDoAluguel(manuais.frota)).toFixed(2);
     }
     const totalDescontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(manuais[c]) || 0), 0);
@@ -13097,6 +13111,22 @@ function renderFolhaPagamento(modo) {
     // TOTAL A RECEBER ficam levemente desatualizados no RANKING/gráficos até
     // a próxima vez que a pessoa clicar "Filtrar", o que é uma troca melhor
     // que a tela pular sozinha a cada campo editado.
+    // ACHADO NA AUDITORIA DE 04/09/2026: editar bônus/dias/desconto na tabela
+    // atualizava só a CÉLULA da própria linha (ver comentário grande acima) —
+    // mas o Holerite, logo abaixo, lê de `ranking`, um array separado que
+    // ficava com a cópia ANTIGA da linha. Resultado: a tabela mostrava um
+    // total e o holerite do mesmo técnico, na mesma tela, mostrava outro —
+    // exatamente o tipo de contradição que o cliente já reportou uma vez
+    // (ver commit 6adea58). `linha` aqui é o registro FRESCO que
+    // salvarCampoFolha devolve; substitui a entrada correspondente dentro de
+    // `ranking` (mesma referência que popula o seletor do holerite) e manda
+    // redesenhar — se não tiver holerite na tela, desenharHolerite() não faz
+    // nada de mais (ver a guarda `if (!area || !selHol) return`).
+    const sincronizarHolerite = linha => {
+      const i = ranking.findIndex(x => x.tecnico === linha.tecnico && x.periodo === linha.periodo);
+      if (i >= 0) ranking[i] = linha;
+      if (typeof desenharHolerite === 'function') desenharHolerite();
+    };
     document.querySelectorAll('select.folha-edit[data-campo="bonus"]').forEach(sel => {
       const corDoValor = () => sel.value === 'APTO' ? 'var(--success)' : 'var(--danger)';
       sel.addEventListener('change', async () => {
@@ -13114,6 +13144,7 @@ function renderFolhaPagamento(modo) {
         const tdValor = tr.querySelector('.folha-valor-ordens'), tdReceber = tr.querySelector('.folha-total-receber');
         if (tdValor) tdValor.textContent = formatCurrency(r.linha.valor_total_ordens);
         if (tdReceber) tdReceber.textContent = formatCurrency(r.linha.total_receber);
+        sincronizarHolerite(r.linha);
       });
     });
     document.querySelectorAll('input.folha-edit[data-campo="dias_trab"]').forEach(inp => {
@@ -13126,6 +13157,7 @@ function renderFolhaPagamento(modo) {
         inp.disabled = false;
         if (!r.ok) { toast('Não consegui salvar: ' + ((r.error && r.error.message) || 'erro desconhecido'), 'erro'); return; }
         toast('Salvo.', 'ok', 1500);
+        sincronizarHolerite(r.linha);
       });
     });
     // "Parcela X" — texto livre, não mexe em nenhum total (só salva).
@@ -13138,6 +13170,7 @@ function renderFolhaPagamento(modo) {
         inp.disabled = false;
         if (!r.ok) { toast('Não consegui salvar: ' + ((r.error && r.error.message) || 'erro desconhecido'), 'erro'); return; }
         toast('Salvo.', 'ok', 1500);
+        sincronizarHolerite(r.linha);
       });
     });
     // Descontos em R$: formata a cada tecla digitada (técnica de "dígitos viram
@@ -13168,6 +13201,7 @@ function renderFolhaPagamento(modo) {
         const tdDesc = tr.querySelector('.folha-total-descontos'), tdReceber = tr.querySelector('.folha-total-receber');
         if (tdDesc) tdDesc.textContent = formatCurrency(r.linha.total_descontos);
         if (tdReceber) tdReceber.textContent = formatCurrency(r.linha.total_receber);
+        sincronizarHolerite(r.linha);
       });
     });
 
