@@ -1838,6 +1838,7 @@
       <a data-route="finance"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.8" y="4.8" width="14.4" height="10" rx="1.8"/><path d="M1.8 7.8h14.4"/><line x1="12.5" y1="11.3" x2="12.8" y2="11.3"/></svg></i><span class="nav-txt">Financeiro</span></a>
       <a data-route="folha"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.3" y="5.3" width="15.4" height="8.6" rx="1.5"/><circle cx="9" cy="9.6" r="2.2"/><line x1="3.6" y1="7.6" x2="3.8" y2="7.6"/><line x1="14.4" y1="11.6" x2="14.6" y2="11.6"/></svg></i><span class="nav-txt">Folha de Pagamento</span></a>
       <a data-route="relatoriofin"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2.4" y="2.4" width="13.2" height="13.2" rx="1.6"/><line x1="5.6" y1="12" x2="5.6" y2="8.6"/><line x1="9" y1="12" x2="9" y2="6.2"/><line x1="12.4" y1="12" x2="12.4" y2="9.8"/></svg></i><span class="nav-txt">Relatório do Financeiro</span></a>
+      <a data-route="folhaescritorio"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="3" y="2.2" width="12" height="13.6" rx="1.5"/><line x1="6" y1="6" x2="12" y2="6"/><line x1="6" y1="9" x2="12" y2="9"/><line x1="6" y1="12" x2="9.6" y2="12"/></svg></i><span class="nav-txt">Folha — Escritório</span></a>
       <div class="sidebar-group">Comparativos</div>
       <a data-route="cmpproducao"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M3 6h9.2M11 3.8 13.2 6 11 8.2"/><path d="M15 12H5.8M7 9.8 4.8 12 7 14.2"/></svg></i><span class="nav-txt">Produção</span></a>
       <a data-route="cmpifiirr"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M3 6h9.2M11 3.8 13.2 6 11 8.2"/><path d="M15 12H5.8M7 9.8 4.8 12 7 14.2"/></svg></i><span class="nav-txt">IFI / IRR</span></a>
@@ -1911,6 +1912,10 @@ const SUPABASE_TABLES = {
   // banco não é limpo (ver sql/PASSO-4-limpar-folha-duplicada.sql), a tela
   // sempre limpa as duplicatas na carga.
   folhaPagamento:  { table: 'folha_pagamento',    conflict: 'tecnico,periodo', dedupe: deduplicarFolhaPagamento },
+  // Folha do ESCRITORIO — tabela propria (ver sql/PASSO-18-folha-escritorio.sql).
+  // Nao cabe na folha_pagamento: la a linha e um tecnico com ordens e retorno,
+  // aqui e salario mensal, VT, ferias e INSS.
+  folhaEscritorio: { table: 'folha_escritorio',   conflict: 'pessoa,periodo' },
   // PCR: as linhas do CSV de atividades. Diferente das outras tabelas, essas
   // linhas carregam DATAS de verdade (abertura, limite, encerramento, início) —
   // no banco viram texto ISO, então precisam voltar a ser Date ao carregar,
@@ -2238,6 +2243,7 @@ const SCRIPT_DA_TABELA = {
   presenca_tecnicos: 'PASSO-4', presenca: 'PASSO-4', presenca_log: 'PASSO-4',
   presenca_escritorio_pessoas: 'PASSO-5', presenca_escritorio: 'PASSO-5',
   presenca_escritorio_log: 'PASSO-5', presenca_escritorio_folgas: 'PASSO-5',
+  folha_escritorio: 'PASSO-18',
 };
 // Barra de aviso do topo. Substitui o alerta que travava a tela a cada login:
 // tabela que falta não impede nada, então vira uma linha discreta com o que
@@ -2372,7 +2378,7 @@ const ROUTE_PERMISSIONS = {
   //     editam a do ESCRITÓRIO. Cada dupla só olha a tela da outra (ver
   //     NOMES_PRESENCA_EDITAM / NOMES_ESCRITORIO_EDITAM e podeAcessar).
   admin: ['import', 'dashboard', 'toll', 'finance', 'comparisons', 'folha',
-          'retornosgiga', 'relatoriofin'],
+          'retornosgiga', 'relatoriofin', 'folhaescritorio'],
   // RH: "no momento" (28/08/2026, pedido do cliente) só enxerga Pedágio —
   // lista de bloqueio com TODAS as outras rotas, de propósito. Se voltar a
   // ter acesso mais amplo depois, é só tirar rota daqui (era ['dashboard',
@@ -2407,7 +2413,7 @@ const ROUTE_PERMISSIONS = {
   // ATENÇÃO: com isso ela também enxerga "Importar Excel". O que continua
   // exclusivo do Analista são os avisos técnicos e a edição que passa por
   // ehAnalista(), que compara o papel direto e não olha esta lista.
-  gestao: ['finance', 'folha', 'comparisons', 'dashboard', 'relatoriofin'],
+  gestao: ['finance', 'folha', 'comparisons', 'dashboard', 'relatoriofin', 'folhaescritorio'],
   // Escritório (revisado 01/09/2026, pedido do cliente):
   //   • PRAZO: tudo (reparo 24h, ativações 36h, ofensores, PCR, Parcial do Dia)
   //     (as telas de Pleito foram removidas em 02/09/2026).
@@ -2421,7 +2427,7 @@ const ROUTE_PERMISSIONS = {
   //   • Fica de fora de frota, pedágio, financeiro, folha e Resumo Geral.
   escritorio: ['dashboard', 'acomtec', 'fleet', 'toll',
                'finance', 'folha', 'cmpproducao', 'cmpifiirr', 'comparisons',
-               'relatorios', 'import', 'retornosgiga', 'relatoriofin'],
+               'relatorios', 'import', 'retornosgiga', 'relatoriofin', 'folhaescritorio'],
   // Almoxarifado (revisado 01/09/2026, pedido do cliente): "acessa tudo que o
   // RH acessa, MENOS o Financeiro" — por isso esta lista sempre acompanhou a
   // do RH. Se mexer nas permissões do RH, mexa aqui junto.
@@ -2433,7 +2439,7 @@ const ROUTE_PERMISSIONS = {
   // Almoxarifado ficou IGUAL à do RH; a diferença entre os dois perfis hoje
   // é só quem loga em cada conta.
   almox: ['dashboard', 'relatoriosdia', 'relatorios', 'import', 'retornosgiga',
-          'finance', 'folha', 'comparisons', 'relatoriofin'],
+          'finance', 'folha', 'comparisons', 'relatoriofin', 'folhaescritorio'],
 };
 // Perfis que o sistema conhece. Perfil que não esteja aqui (erro de digitação
 // na tabela "perfis" do Supabase, perfil novo criado sem ajustar o sistema)
@@ -2456,6 +2462,9 @@ function podeEditarMO() { return !!currentUser && currentUser.role !== 'escritor
 // check é a segunda tranca, na EDIÇÃO: se um dia a rota for reaberta pra
 // alguém ver, esse alguém entra em modo leitura em vez de poder gravar.
 function podeEditarFinanceiro() { return ehAnalista(); }
+// Folha do escritorio: RH e Analista. E o RH quem lanca salario, VT, ferias
+// e INSS — mesma logica de podeEditarFolhaPagamento, que ja e do RH.
+function podeEditarFolhaEscritorio() { return !!currentUser && ['analista', 'rh'].includes(currentUser.role); }
 // Produção: o Escritório entra na tela, mas só enxerga a seção "Ordens do
 // Período — Detalhamento" (pedido do cliente, 01/09/2026). Fica de fora dos
 // cards do topo, dos gráficos, do ranking de técnicos, da Tabela de Bônus, da
@@ -2518,7 +2527,7 @@ function podeAcessar(role, route) {
 const DB = {
   fechamento: [], producao: [], prazo: [], folhaPagamento: [], baseDoDia: [], prazoReparoDia: [],
   frotaLinks: [], frotaTroca: [], frotaManutencao: [], frotaDesvinc: [], frotaMultas: [], frotaRevisao: [],
-  pedagio: [], financeiro: [], importsLog: [],
+  pedagio: [], financeiro: [], folhaEscritorio: [], importsLog: [],
   pcr: [], // linhas do CSV de atividades importado na aba PCR
   // Abas "PRAZO INFORMADO REPARO (PLEITO)" e "PRAZO INFORMADO AT-ME (PLEITO)"
   // de PRAZOS_ESCRITÓRIO.xlsx — uma linha por TENTATIVA "não concluído" (não
@@ -2552,6 +2561,7 @@ const DB = {
 const DB_INDEX = {
   producao: new Map(), fechamento: new Map(), prazo: new Map(), folhaPagamento: new Map(), baseDoDia: new Map(), prazoReparoDia: new Map(),
   frotaLinks: new Map(), frotaTroca: new Map(), frotaManutencao: new Map(), frotaDesvinc: new Map(), frotaMultas: new Map(), frotaRevisao: new Map(),
+  folhaEscritorio: new Map(),
   pedagio: new Map(), financeiro: new Map(), pcr: new Map(), pleito: new Map(),
   presencaTecnicos: new Map(), presenca: new Map(),
   presencaEscritorioPessoas: new Map(), presencaEscritorio: new Map(),
@@ -5933,6 +5943,7 @@ const PAGES = {
   finance: { title: 'Financeiro', render: renderFinance },
   folha: { title: 'Folha de Pagamento', render: () => renderFolhaPagamento('folha') },
   relatoriofin: { title: 'Relatório do Financeiro', render: () => renderFolhaPagamento('relatorio') },
+  folhaescritorio: { title: 'Folha — Escritório', render: renderFolhaEscritorio },
   cmpproducao: { title: 'Comparativo de Produção', render: renderCmpProducao },
   cmpifiirr: { title: 'Comparativo de IFI / IRR', render: renderCmpIfiIrr },
   cmpprazo: { title: 'Comparativo de Prazo', render: renderCmpPrazo },
@@ -13517,6 +13528,326 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
   return `<div class="table-wrap"><table class="data-table tab-col1-fixa"><thead><tr>${cols.map((c,i)=>`<th${classeCol(i)}>${c[0]}</th>`).join('')}</tr></thead><tbody>
     ${rows.map(r=>`<tr>${cols.map((c,i)=>`<td${classeCol(i)}>${c[1](r) ?? ''}</td>`).join('')}</tr>`).join('')}
   </tbody></table></div>`;
+}
+
+
+// ===================== FOLHA DE PAGAMENTO — ESCRITÓRIO =====================
+// A folha do escritório não cabe na do técnico: lá cada linha tem ordens,
+// retorno IFI/IRR e desconto de material; aqui é salário mensal, VT, férias,
+// INSS e maternidade. Tela e tabela próprias (ver
+// sql/PASSO-18-folha-escritorio.sql).
+//
+// Os campos e a ordem saíram do arquivo do cliente (FECHAMENTO ESCRITÓRIO).
+// As contas, conferidas nas linhas dele:
+//   LIQUIDO   = SALÁRIO BASE × (DIAS / 30)     Márcia: 1.804,00 × 23/30 = 1.383,07
+//   PROVENTOS = LIQUIDO + VT + aluguel + bonificação + maternidade + férias
+//   DESCONTOS = vale + desconto de VT + INSS férias + INSS + mecânico
+//   A RECEBER = PROVENTOS − DESCONTOS           Márcia: 1.871,54 − 221,02 = 1.650,52
+const FOLHA_ESC_PROVENTOS = [
+  { campo: 'vt',                  rot: 'VT' },
+  { campo: 'aluguel_veiculo',     rot: 'Aluguel veículo' },
+  { campo: 'bonificacao',         rot: 'Bonificação' },
+  { campo: 'salario_maternidade', rot: 'Salário maternidade' },
+  { campo: 'ferias',              rot: 'Férias' },
+];
+const FOLHA_ESC_DESCONTOS = [
+  { campo: 'desconto_vale',     rot: 'Desconto vale' },
+  { campo: 'desconto_vt',       rot: 'Desconto de VT' },
+  { campo: 'inss_ferias',       rot: 'INSS sobre férias' },
+  { campo: 'inss',              rot: 'INSS' },
+  { campo: 'desconto_mecanico', rot: 'Desconto mecânico' },
+];
+// Quadro do escritório com o salário de cada um, como veio no fechamento que o
+// cliente mandou. Serve de PARTIDA quando um período ainda não foi cadastrado —
+// depois disso vale o que estiver salvo, e o salário é editável na tela.
+// O VT tambem vem do fechamento do cliente: quase todo mundo tem R$ 275,60,
+// mas supervisao/coordenacao/gerencia tem valor proprio e a auxiliar de
+// limpeza nao tem. Tudo editavel na tela — isto e so o ponto de partida.
+const QUADRO_ESCRITORIO = [
+  { pessoa: 'Daniela dos Santos',           cargo: 'Atendente',                  salario: 1804.00, vt: 275.60 },
+  { pessoa: 'Ruan Anthony Gerôncio Barbosa',cargo: 'Analista Jr.',               salario: 3500.00, vt: 275.60 },
+  { pessoa: 'Kimberly Nunes Souza',         cargo: 'Atendente',                  salario: 1804.00, vt: 275.60 },
+  { pessoa: 'Gabrielle Almeida Da Silva',   cargo: 'Atendente',                  salario: 1804.00, vt: 275.60 },
+  { pessoa: 'Guilherme de Castro da Silva', cargo: 'Auxiliar de almoxarifado',   salario: 2000.00, vt: 275.60 },
+  { pessoa: 'Luma Santana Queiroz',         cargo: 'Atendente',                  salario: 1804.00, vt: 275.60 },
+  { pessoa: 'Márcia Gomes Andrade',         cargo: 'Atendente',                  salario: 1804.00, vt: 275.60 },
+  { pessoa: 'Maria Clara Martins da Silva', cargo: 'Auxiliar de limpeza',        salario: 1000.00, vt: 0.00 },
+  { pessoa: 'Mateus de Jesus Pinheiro',     cargo: 'Supervisor de almoxarifado', salario: 4000.00, vt: 275.60 },
+  { pessoa: 'Matheus Santos Francisco',     cargo: 'Supervisor de campo',        salario: 4000.00, vt: 1000.00 },
+  { pessoa: 'Rebeca dos Santos',            cargo: 'Atendente',                  salario: 2300.00, vt: 275.60 },
+  { pessoa: 'Robson José',                  cargo: 'Gerente de serviços',        salario: 8000.00, vt: 1000.00 },
+  { pessoa: 'Edvania Ferreira da Silva',    cargo: 'Atendente',                  salario: 1804.00, vt: 275.60 },
+  { pessoa: 'Sândila Assis Felitti',        cargo: 'Atendente',                  salario: 1804.00, vt: 275.60 },
+  { pessoa: 'Sebastião Ferreira',           cargo: 'Coordenador de campo',       salario: 5500.00, vt: 1500.00 },
+  { pessoa: 'Thais Oliveira',               cargo: 'Coordenadora escritório',    salario: 4000.00, vt: 275.60 },
+  { pessoa: 'Vanessa Batista da Silva',     cargo: 'Assistente de RH',           salario: 2500.00, vt: 275.60 },
+  { pessoa: 'Caio Silva Pereira',           cargo: 'Atendente',                  salario: 1650.00, vt: 275.60 },
+  { pessoa: 'Vitória Professor',            cargo: 'Supervisora escritório',     salario: 2630.00, vt: 275.60 },
+];
+const DIAS_MES_ESCRITORIO = 30;   // o cliente calcula sempre sobre 30, não sobre o mês corrido
+function recalcularLinhaEscritorio(l) {
+  const n = v => Number(v) || 0;
+  l.liquido = +(n(l.salario_base) * (n(l.dias_trab) / DIAS_MES_ESCRITORIO)).toFixed(2);
+  l.proventos = +(l.liquido + FOLHA_ESC_PROVENTOS.reduce((a, c) => a + n(l[c.campo]), 0)).toFixed(2);
+  l.descontos = +FOLHA_ESC_DESCONTOS.reduce((a, c) => a + n(l[c.campo]), 0).toFixed(2);
+  l.total_receber = +(l.proventos - l.descontos).toFixed(2);
+  return l;
+}
+// Períodos do escritório são MÊS CALENDÁRIO ("01/03/2026 a 31/03/2026"), não o
+// ciclo 21-20 dos técnicos — é assim no fechamento do cliente.
+function periodosFolhaEscritorio() {
+  const salvos = [...new Set((DB.folhaEscritorio || []).map(r => r.periodo).filter(Boolean))];
+  const hoje = new Date();
+  const doMes = d => {
+    const ini = new Date(d.getFullYear(), d.getMonth(), 1);
+    const fim = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    return `${formatDate(isoLocalDe(ini))} a ${formatDate(isoLocalDe(fim))}`;
+  };
+  const atual = doMes(hoje);
+  const anterior = doMes(new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1));
+  const lista = [...new Set([atual, anterior, ...salvos])];
+  return { lista, atual };
+}
+function isoLocalDe(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// Linhas de um período: o que está salvo, e quem ainda não tem linha entra com
+// o salário do quadro e o mês cheio.
+function linhasFolhaEscritorio(periodo) {
+  const salvas = (DB.folhaEscritorio || []).filter(r => r.periodo === periodo);
+  const porNome = new Map(salvas.map(r => [normalizeHeader(r.pessoa), r]));
+  const out = QUADRO_ESCRITORIO.map(q => {
+    const achada = porNome.get(normalizeHeader(q.pessoa));
+    if (achada) { porNome.delete(normalizeHeader(q.pessoa)); return recalcularLinhaEscritorio({ ...achada }); }
+    return recalcularLinhaEscritorio({
+      pessoa: q.pessoa, periodo, cargo: q.cargo, operacao: 'Casa Cliente',
+      salario_base: q.salario, dias_trab: DIAS_MES_ESCRITORIO, vt: q.vt || 0,
+    });
+  });
+  // gente cadastrada só no banco (contratada depois) continua aparecendo
+  porNome.forEach(r => out.push(recalcularLinhaEscritorio({ ...r })));
+  return out;
+}
+async function salvarFolhaEscritorio(linhas) {
+  linhas.forEach(l => {
+    l.atualizado_em = new Date().toISOString();
+    l.atualizado_por = currentUser ? (currentUser.nome || currentUser.login) : null;
+    upsertRow(DB.folhaEscritorio, DB_INDEX.folhaEscritorio, `${l.pessoa}|${l.periodo}`, l);
+  });
+  const r = await syncBatchToSupabase('folhaEscritorio', linhas);
+  return { ok: !r || r.ok !== false, resultado: r };
+}
+
+function renderFolhaEscritorio() {
+  const { lista, atual } = periodosFolhaEscritorio();
+  document.getElementById('content').innerHTML = `<div class="toolbar toolbar-fixa">
+    <div class="field"><label>Período</label><select id="fe-periodo">
+      ${lista.map(p => `<option value="${esc(p)}"${p === atual ? ' selected' : ''}>${esc(p)}</option>`).join('')}
+    </select></div>
+    <div class="field"><label>Colaborador</label><input type="text" id="fe-nome" placeholder="Nome"></div>
+    <button class="btn" id="fe-filtrar">Filtrar</button>
+  </div>
+  <p style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">
+    Salário, dias e lançamentos são editáveis. Líquido, Proventos, Descontos e A Receber
+    são calculados: <b>Líquido = salário ÷ 30 × dias</b>. Cada período é salvo separado.
+  </p>
+  <div id="fe-body"></div>`;
+  document.getElementById('fe-filtrar').addEventListener('click', load);
+  document.getElementById('fe-periodo').addEventListener('change', load);
+  load();
+
+  function load() {
+    const periodo = document.getElementById('fe-periodo').value;
+    const filtro = (document.getElementById('fe-nome').value || '').toLowerCase();
+    let linhas = linhasFolhaEscritorio(periodo);
+    if (filtro) linhas = linhas.filter(l => l.pessoa.toLowerCase().includes(filtro));
+    const pode = podeEditarFolhaEscritorio();
+    const money = v => formatCurrency(Number(v) || 0);
+    const inpNum = (l, campo, largura) => pode
+      ? `<input type="number" class="folha-edit" step="0.5" min="0" data-pessoa="${esc(l.pessoa)}" data-campo="${campo}" value="${Number(l[campo]) || 0}" style="width:${largura}px">`
+      : (Number(l[campo]) || 0);
+    const inpDin = (l, campo) => {
+      if (!pode) return money(l[campo]);
+      const cent = Math.round((Number(l[campo]) || 0) * 100);
+      return `<input type="text" inputmode="decimal" class="folha-edit folha-edit-moeda fe-campo${cent ? ' tem-valor' : ''}"
+        data-pessoa="${esc(l.pessoa)}" data-campo="${campo}" data-centavos="${cent}"
+        value="${formatCurrency(cent / 100)}" style="width:112px;text-align:right">`;
+    };
+    const cols = [
+      ['Colaborador', l => esc(l.pessoa), 'prod'],
+      ['Cargo',       l => esc(l.cargo || '-'), 'prod'],
+      ['Operação',    l => esc(l.operacao || '-'), 'prod'],
+      ['Salário base',l => inpDin(l, 'salario_base'), 'valor'],
+      ['Dias trab.',  l => inpNum(l, 'dias_trab', 66), 'prod'],
+      ['Líquido',     l => `<span class="fe-liquido">${money(l.liquido)}</span>`, 'valor'],
+      ...FOLHA_ESC_PROVENTOS.map(c => [c.rot, l => inpDin(l, c.campo), 'valor']),
+      ...FOLHA_ESC_DESCONTOS.map(c => [c.rot, l => inpDin(l, c.campo), 'desc']),
+      ['PROVENTOS',   l => `<span class="fe-proventos" style="color:var(--accent);font-weight:700">${money(l.proventos)}</span>`, 'valor'],
+      ['DESCONTOS',   l => `<span class="fe-descontos" style="color:var(--danger);font-weight:700">${money(l.descontos)}</span>`, 'desc'],
+      ['A RECEBER',   l => `<span class="fe-receber" style="color:var(--success);font-weight:700">${money(l.total_receber)}</span>`, 'receb'],
+    ];
+    const classeCol = i => {
+      const g = cols[i][2];
+      const cls = ['col-g-' + g];
+      if (i === 0 || cols[i - 1][2] !== g) cls.push('col-g-ini');
+      if (i === cols.length - 1 || cols[i + 1][2] !== g) cls.push('col-g-fim');
+      return ` class="${cls.join(' ')}"`;
+    };
+    const tot = c => linhas.reduce((a, l) => a + (Number(l[c]) || 0), 0);
+
+    document.getElementById('fe-body').innerHTML = `
+      <div class="cards-grid">
+        ${metricCard('Colaboradores', linhas.length)}
+        ${metricCard('Total de proventos', money(tot('proventos')))}
+        ${metricCard('Total de descontos', money(tot('descontos')), tot('descontos') > 0)}
+        ${metricCard('Total a receber', money(tot('total_receber')), false, { positive: true })}
+      </div>
+      <div class="section-heading">Folha do Escritório<span class="sec-nota">${esc(periodo)}</span></div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table tab-col1-fixa">
+        <thead><tr>${cols.map((c, i) => `<th${classeCol(i)}>${c[0]}</th>`).join('')}</tr></thead>
+        <tbody>${linhas.map(l => `<tr data-linha="${esc(l.pessoa)}">${cols.map((c, i) => `<td${classeCol(i)}>${c[1](l)}</td>`).join('')}</tr>`).join('')}
+          <tr class="total-row">${cols.map((c, i) => {
+            const campo = { 'Líquido':'liquido', 'PROVENTOS':'proventos', 'DESCONTOS':'descontos', 'A RECEBER':'total_receber' }[c[0]];
+            return `<td${classeCol(i)}>${i === 0 ? linhas.length + ' colaborador(es)' : (campo ? money(tot(campo)) : '')}</td>`;
+          }).join('')}</tr>
+        </tbody></table></div>
+      ${pode ? `<div class="fin-salvar-barra">
+        <button class="btn" id="fe-salvar">Salvar alterações</button>
+        <span id="fe-msg" style="font-size:13px;color:var(--text-muted)"></span>
+      </div>` : ''}
+      <div class="section-heading">Holerite<span class="sec-nota">no formato que vai pra assinatura</span></div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+          <div class="field" style="margin:0"><label>Colaborador</label><select id="fe-hol-pessoa">
+            <option value="__todos__">— Todos (${linhas.length}) —</option>
+            ${linhas.map(l => `<option value="${esc(l.pessoa)}">${esc(l.pessoa)}</option>`).join('')}
+          </select></div>
+          <div class="field" style="margin:0"><label>Quantos mostrar</label>
+            <input type="number" id="fe-hol-quantos" min="1" max="${linhas.length}" value="${linhas.length}" style="width:90px"></div>
+          <button type="button" class="btn-export-img" id="fe-hol-img">🖼 Gerar imagem</button>
+          <button type="button" class="btn-secundario" id="fe-hol-print" style="padding:8px 14px">🖨 Imprimir</button>
+        </div>
+      </div>
+      <div id="hol-area"></div>`;
+
+    // ---- edição ----
+    const acha = p => linhas.find(l => l.pessoa === p);
+    const refazLinha = l => {
+      recalcularLinhaEscritorio(l);
+      const tr = document.querySelector(`tr[data-linha="${CSS.escape(l.pessoa)}"]`);
+      if (!tr) return;
+      const p = s => tr.querySelector(s);
+      if (p('.fe-liquido'))   p('.fe-liquido').textContent = money(l.liquido);
+      if (p('.fe-proventos')) p('.fe-proventos').textContent = money(l.proventos);
+      if (p('.fe-descontos')) p('.fe-descontos').textContent = money(l.descontos);
+      if (p('.fe-receber'))   p('.fe-receber').textContent = money(l.total_receber);
+      const msg = document.getElementById('fe-msg');
+      if (msg) msg.innerHTML = '<span style="color:var(--warn-text)">Há alterações não salvas.</span>';
+      desenharHolerite();
+    };
+    document.querySelectorAll('#fe-body input.folha-edit-moeda').forEach(el => {
+      el.addEventListener('input', () => {
+        const cent = parseInt(el.value.replace(/\D/g, '') || '0', 10);
+        el.dataset.centavos = cent;
+        el.value = formatCurrency(cent / 100);
+        el.classList.toggle('tem-valor', cent > 0);
+        const l = acha(el.dataset.pessoa); if (!l) return;
+        l[el.dataset.campo] = cent / 100;
+        refazLinha(l);
+      });
+    });
+    document.querySelectorAll('#fe-body input[type="number"].folha-edit').forEach(el => {
+      el.addEventListener('input', () => {
+        const l = acha(el.dataset.pessoa); if (!l) return;
+        l[el.dataset.campo] = Math.max(0, Number(el.value) || 0);
+        refazLinha(l);
+      });
+    });
+    const btn = document.getElementById('fe-salvar');
+    if (btn) btn.addEventListener('click', async () => {
+      const msg = document.getElementById('fe-msg');
+      btn.disabled = true; msg.textContent = 'Salvando…';
+      const r = await salvarFolhaEscritorio(linhas.map(l => ({ ...l })));
+      btn.disabled = false;
+      if (!r.ok) {
+        const e = r.resultado && r.resultado.error;
+        msg.innerHTML = `<span style="color:var(--danger)">Não consegui salvar no servidor: ${esc((e && e.message) || 'erro desconhecido')}</span>`;
+        toast('Salvou na tela, mas não gravou no servidor.', 'erro');
+        return;
+      }
+      msg.innerHTML = `<span style="color:var(--success)">Salvo em ${esc(periodo)}.</span>`;
+      toast('Folha do escritório salva.', 'ok', 2000);
+    });
+
+    // ---- holerite ----
+    const selHol = document.getElementById('fe-hol-pessoa');
+    const inpQ = document.getElementById('fe-hol-quantos');
+    function desenharHolerite() {
+      const area = document.getElementById('hol-area');
+      if (!area || !selHol) return;
+      const escolhidas = selHol.value === '__todos__'
+        ? linhas.slice(0, Math.max(1, Math.min(linhas.length, parseInt(inpQ.value, 10) || linhas.length)))
+        : linhas.filter(l => l.pessoa === selHol.value);
+      area.innerHTML = escolhidas.map(holeriteEscritorioHTML).join('');
+    }
+    selHol.addEventListener('change', desenharHolerite);
+    inpQ.addEventListener('change', desenharHolerite);
+    document.getElementById('fe-hol-print').addEventListener('click', () => window.print());
+    document.getElementById('fe-hol-img').addEventListener('click', () => {
+      const alvo = selHol.value === '__todos__' ? document.getElementById('hol-area')
+        : document.querySelector('#hol-area .holerite');
+      if (!alvo) return;
+      capturarElementoComoImagem(alvo, 'holerite-escritorio-' + hojeISOLocal());
+    });
+    desenharHolerite();
+  }
+}
+// Holerite do escritório. Mesma casca do holerite do técnico (mesmas classes,
+// então herda o desenho e o CSS de impressão), com os campos de salário no
+// lugar dos de ordem.
+function holeriteEscritorioHTML(l) {
+  const n = v => Number(v) || 0;
+  const cel = v => v ? formatCurrency(v) : '-';
+  const mes = (() => {
+    const m = String(l.periodo || '').match(/(\d{2})\/(\d{2})\/(\d{4})\s*$/);
+    if (!m) return l.periodo || '';
+    return new Date(+m[3], +m[2] - 1, +m[1]).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  })();
+  const linhaProv = c => `<tr><td class="rot-prov">${c.rot}</td><td class="v">${cel(n(l[c.campo]))}</td></tr>`;
+  const linhaDesc = c => `<tr><td class="rot-desc">${c.rot}</td><td class="v">${cel(n(l[c.campo]))}</td></tr>`;
+  return `<div class="holerite">
+    <div class="hol-topo">
+      <div class="hol-marca">JH TELECOM<span>SOLUÇÕES EM FIBRA ÓPTICA</span></div>
+      <div class="hol-tit">ESCRITÓRIO</div>
+    </div>
+    <div class="hol-nome">${esc(l.pessoa)}<span>${esc(l.cargo || '')} · ${esc(l.periodo)}</span></div>
+
+    <div class="hol-faixa hol-prov">PROVENTOS</div>
+    <table class="hol-tab"><thead><tr><th>Informações</th><th class="v">Valores</th></tr></thead>
+      <tbody>
+        <tr><td>Salário base</td><td class="v">${cel(n(l.salario_base))}</td></tr>
+        <tr><td>Dias trabalhados</td><td class="v">${n(l.dias_trab)}</td></tr>
+        <tr><td class="rot-prov">Líquido</td><td class="v">${cel(n(l.liquido))}</td></tr>
+        ${FOLHA_ESC_PROVENTOS.map(linhaProv).join('')}
+        <tr class="hol-total"><td>Total de proventos</td><td class="v">${formatCurrency(n(l.proventos))}</td></tr>
+      </tbody></table>
+
+    <div class="hol-faixa hol-desc">DESCONTOS</div>
+    <table class="hol-tab"><thead><tr><th>Descontos</th><th class="v">Valores</th></tr></thead>
+      <tbody>
+        ${FOLHA_ESC_DESCONTOS.map(linhaDesc).join('')}
+        <tr class="hol-total"><td>Total de descontos</td><td class="v">${formatCurrency(n(l.descontos))}</td></tr>
+      </tbody></table>
+
+    <table class="hol-tab hol-fecho"><tbody>
+      <tr><td>Total proventos</td><td class="v">${formatCurrency(n(l.proventos))}</td></tr>
+      <tr><td>Total descontos</td><td class="v" style="color:var(--danger)">${formatCurrency(n(l.descontos))}</td></tr>
+      <tr class="hol-total"><td>Total a receber</td><td class="v">${formatCurrency(n(l.total_receber))}</td></tr>
+    </tbody></table>
+
+    <div class="hol-assina">Assinatura<span></span></div>
+    <div class="hol-data">${esc(mes)}</div>
+  </div>`;
 }
 
 // ===================== COMPARATIVO FINANCEIRO =====================
