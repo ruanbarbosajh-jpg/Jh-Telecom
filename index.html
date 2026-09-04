@@ -2459,14 +2459,15 @@ const ROUTE_PERMISSIONS = {
   // Frota e Pedágio. Presença (técnicos e escritório) saiu de vez em
   // 04/09/2026 — antes ele via sem editar, agora ficou exclusiva do Analista.
   // Financeiro travado pro Analista (03/09/2026, pedido do cliente): saiu
-  // 'finance' e 'comparisons'. Os comparativos de Produção/IFI-IRR/Prazo
-  // continuam liberados; só o Comparativo FINANCEIRO ('comparisons') saiu.
+  // 'finance' e 'comparisons'. Em 04/09/2026 'finance' voltou pro RH (agora
+  // ele também cadastra o fechamento do ciclo, junto com o Analista) — só o
+  // Comparativo FINANCEIRO ('comparisons') continua de fora.
   // 'folha' (Folha de Pagamento dos técnicos) voltou a ser liberada pro RH
   // (04/09/2026, pedido do cliente) — é a tela onde ele lança dias
   // trabalhados e bônus apto/inapto (podeEditarFolhaPagamento já incluía
   // 'rh', só a rota estava bloqueada).
   rh: ['dashboard', 'relatoriosdia', 'relatorios', 'import', 'retornosgiga',
-       'finance', 'comparisons', 'relatoriofin', 'presenca'],
+       'comparisons', 'relatoriofin', 'presenca'],
   // Gestão (02/09/2026, pedido do cliente): MESMO acesso do Analista, EXCETO
   // o Financeiro. Em 01/09 ela esteve restrita só ao Dashboard (via
   // trancarGestaoSoNoDashboard, removida); em 02/09 ganhou acesso total (lista
@@ -2528,11 +2529,12 @@ function ehAnalista() { return !!currentUser && currentUser.role === 'analista';
 // pode ser mexido por quem só acompanha.
 function podeEditarMO() { return !!currentUser && currentUser.role !== 'escritorio'; }
 // Cadastro financeiro (tela Financeiro): quem digita despesa do ciclo. Em
-// 03/09/2026 o cliente trancou TODO o financeiro no Analista — e a rota
-// 'finance' já está bloqueada pros outros perfis em ROUTE_PERMISSIONS. Este
-// check é a segunda tranca, na EDIÇÃO: se um dia a rota for reaberta pra
-// alguém ver, esse alguém entra em modo leitura em vez de poder gravar.
-function podeEditarFinanceiro() { return ehAnalista(); }
+// 03/09/2026 o cliente trancou TODO o financeiro no Analista; em 04/09/2026
+// abriu edição pro RH também (mesma lógica de podeEditarFolhaEscritorio) —
+// e a rota 'finance' foi liberada pro RH em ROUTE_PERMISSIONS junto. Este
+// check é a segunda tranca, na EDIÇÃO: quem não é Analista/RH e ainda assim
+// enxergar a rota entra em modo leitura em vez de poder gravar.
+function podeEditarFinanceiro() { return !!currentUser && ['analista', 'rh'].includes(currentUser.role); }
 // Folha do escritorio: RH e Analista. E o RH quem lanca salario, VT, ferias
 // e INSS — mesma logica de podeEditarFolhaPagamento, que ja e do RH.
 function podeEditarFolhaEscritorio() { return !!currentUser && ['analista', 'rh'].includes(currentUser.role); }
@@ -12520,6 +12522,23 @@ function despesasDoPeriodoFin(rotulo) {
   FIN_CATEGORIAS.forEach(cat => { out[cat] = porNome[normalizeHeader(cat)] || 0; });
   return out;
 }
+// Valores desse período que já estão na planilha de comparação (COMPARATIVO.xlsx,
+// aba COMAPARATIVO) — usado pelo botão "Usar do Comparativo" pra pré-preencher o
+// cadastro sem o usuário ter que digitar de novo o que já veio da GIGA. Mesma
+// busca por nome normalizado de despesasDoPeriodoFin (a planilha grava "FROTA
+// -DESCONTO", o cadastro grava "Frota - Desconto").
+function valoresDoComparativoFin(rotulo) {
+  const cmp = DB.comparativoFinanceiro;
+  const out = {};
+  if (!cmp || !cmp.porCategoria) return out;
+  const porNome = {};
+  Object.keys(cmp.porCategoria).forEach(label => {
+    const v = cmp.porCategoria[label][rotulo];
+    if (v) porNome[normalizeHeader(label)] = v;
+  });
+  FIN_CATEGORIAS.forEach(cat => { if (porNome[normalizeHeader(cat)]) out[cat] = porNome[normalizeHeader(cat)]; });
+  return out;
+}
 // Existe cadastro (qualquer valor > 0) pra esse período? É o que decide se o
 // Dashboard e o Comparativo usam o cadastro ou caem na planilha antiga.
 function temCadastroFin(rotulo) {
@@ -12612,7 +12631,8 @@ function renderFinance() {
       </p>
       <div class="fin-grade">${FIN_GRUPOS.map(grupoHtml).join('')}</div>
       ${podeEditarFinanceiro() ? `<div class="fin-salvar-barra">
-        <button class="btn" id="fin-salvar">Salvar alterações</button>
+        <button class="btn" id="fin-salvar">Atualizar fechamento</button>
+        <button type="button" class="btn-secundario" id="fin-usar-comparativo">Usar do Comparativo (Excel)</button>
         <span id="fin-msg" style="font-size:13px;color:var(--text-muted)"></span>
       </div>` : ''}
 
@@ -12784,6 +12804,31 @@ function renderFinance() {
       leitor.readAsArrayBuffer(arquivo);
     });
 
+    // "Usar do Comparativo": pré-preenche com o que já está na planilha de
+    // comparação (COMPARATIVO.xlsx) pra esse período, sem gravar sozinho —
+    // a pessoa confere os números na tela e só depois clica em "Atualizar
+    // fechamento". Só sobrescreve as categorias que existem na planilha;
+    // o resto do que já estava digitado fica como estava.
+    const btnComparativo = document.getElementById('fin-usar-comparativo');
+    if (btnComparativo) btnComparativo.addEventListener('click', () => {
+      const doComparativo = valoresDoComparativoFin(rotulo);
+      const msg = document.getElementById('fin-msg');
+      if (!Object.keys(doComparativo).length) {
+        msg.innerHTML = `<span style="color:var(--warn-text)">Não achei ${esc(rotulo)} na planilha de comparação (importe COMPARATIVO.xlsx na tela Importar Excel).</span>`;
+        return;
+      }
+      inputs().forEach(el => {
+        const v = doComparativo[el.dataset.cat];
+        if (v === undefined) return;
+        const centavos = Math.round(v * 100);
+        el.dataset.centavos = centavos;
+        el.value = formatCurrency(centavos / 100);
+        el.classList.toggle('tem-valor', centavos > 0);
+      });
+      recalcular();
+      msg.innerHTML = '<span style="color:var(--warn-text)">Preenchido com os valores da planilha de comparação — confira e clique em "Atualizar fechamento" pra gravar.</span>';
+    });
+
     const btn = document.getElementById('fin-salvar');
     if (btn) btn.addEventListener('click', async () => {
       const msg = document.getElementById('fin-msg');
@@ -12801,22 +12846,31 @@ function renderFinance() {
     });
 
     // ---- painel de PDF (o mesmo de antes) ----
-    const { despesa, lucro } = recalcular();
+    // Os dois callbacks recalculam na hora do clique (não usam um valor
+    // fixado no load()): senão o PDF saía com os números de quando a tela
+    // abriu, ignorando o que a pessoa digitou ou trouxe do Comparativo
+    // depois, sem ter salvo ainda.
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'resumo', label: 'Resumo (Receita/Despesa/Lucro)' },
       { id: 'categorias', label: 'Detalhamento por categoria' }
     ]);
     wirePdfExportPanel('Financeiro — ' + rotulo, {
-      resumo: () => secaoTabela('Resumo Financeiro — ' + rotulo, [
-        { l: 'Receita das ordens', v: formatCurrency(receita) },
-        { l: 'Total de Despesas', v: formatCurrency(despesa) },
-        { l: 'Lucro', v: formatCurrency(lucro) }
-      ], [{ header: 'Indicador', get: r => r.l }, { header: 'Valor', get: r => r.v }]),
-      categorias: () => secaoTabela('Despesas — ' + rotulo,
-        FIN_GRUPOS.reduce((a, g) => a.concat(g.itens.map(c => ({ grupo: g.grupo, cat: c, v: lerValores()[c] || 0 }))), []),
-        [{ header: 'Grupo', get: r => r.grupo }, { header: 'Categoria', get: r => r.cat },
-         { header: 'Valor', get: r => formatCurrency(r.v) }],
-        { totalRow: ['TOTAL DESPESAS', '', formatCurrency(despesa)] }),
+      resumo: () => {
+        const { despesa, lucro } = recalcular();
+        return secaoTabela('Resumo Financeiro — ' + rotulo, [
+          { l: 'Receita das ordens', v: formatCurrency(receita) },
+          { l: 'Total de Despesas', v: formatCurrency(despesa) },
+          { l: 'Lucro', v: formatCurrency(lucro) }
+        ], [{ header: 'Indicador', get: r => r.l }, { header: 'Valor', get: r => r.v }]);
+      },
+      categorias: () => {
+        const { despesa } = recalcular();
+        return secaoTabela('Despesas — ' + rotulo,
+          FIN_GRUPOS.reduce((a, g) => a.concat(g.itens.map(c => ({ grupo: g.grupo, cat: c, v: lerValores()[c] || 0 }))), []),
+          [{ header: 'Grupo', get: r => r.grupo }, { header: 'Categoria', get: r => r.cat },
+           { header: 'Valor', get: r => formatCurrency(r.v) }],
+          { totalRow: ['TOTAL DESPESAS', '', formatCurrency(despesa)] });
+      },
     });
   }
 }
@@ -15137,7 +15191,10 @@ const ARQUIVOS_IMPORT = [
   { nome: 'PRAZOS_ESCRITÓRIO.xlsx', desc: 'Abas BASE DE DADOS, BASE DO DIA, PRAZO REPARO DO DIA (parcial do dia) e PRAZO INFORMADO REPARO/AT-ME (PLEITO)', assinaturas: [{sheet:'BASE DE DADOS', target:'prazo'}, {sheet:'BASE DO DIA', target:'baseDoDia'}, {sheet:'PRAZO REPARO DO DIA', target:'prazoReparoDia'}, {sheet:'PRAZO INFORMADO REPARO (PLEITO)', target:'pleito'}, {sheet:'PRAZO INFORMADO AT-ME (PLEITO)', target:'pleito'}] },
   { nome: 'FROTA_LITORAL.xlsx', desc: 'Abas FROTA LITORAL, TROCA DE VEICULO, MANUTENÇÕES, DESVINCULAÇÕES, MULTAS', assinaturas: [{sheet:'FROTA LITORAL', target:'frotaLinks'}] },
   { nome: 'GESTAO_PEDAGIO.xlsx', desc: 'Passagens de pedágio (Taggy)', assinaturas: [{target:'pedagio'}] },
-  { nome: 'base_dados_financeiro.xlsx', desc: 'Aba BASE — receitas/despesas da Base JH por período', assinaturas: [{sheet:'BASE', target:'financeiro'}] },
+  // base_dados_financeiro.xlsx saiu daqui em 04/09/2026 (pedido do cliente):
+  // despesa do ciclo agora é digitada direto na tela Financeiro (cadastro
+  // por período, RH/Analista) — a planilha de comparação (COMPARATIVO.xlsx,
+  // linha abaixo) continua valendo pros ciclos antigos, essa não muda.
   // sem "sheet" de propósito (mesmo padrão do Pedágio, logo acima): o nome da
   // aba real muda a cada mês ("FOLHA 21.07 a 20.08", "FOLHA 21.08 a 20.09"...
   // — é dali que resolverPeriodoPorNomeDaAba tira o período). Exigir o nome
