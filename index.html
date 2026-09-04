@@ -61,10 +61,15 @@
          --tab-linha    divisor fino e discreto
          --tab-total    fundo da linha de total
          --tab-num      o número comum, sem alarde
-         --tab-alerta   vermelho suave, só onde há alerta real */
+         --tab-alerta   vermelho suave, só onde há alerta real
+         --tab-sucesso  verde suave, mesma família do --tab-alerta (04/09/2026:
+                        os totais de Despesa/Receita/Lucro usavam --danger/
+                        --accent/--success direto — saturado demais em cima do
+                        fundo já colorido da linha de total; o cliente pediu
+                        "cor mais suave nos totais") */
     --tab-cab: #1b2a4a; --tab-cab-txt: #93c5fd;
     --tab-zebra: #131f37; --tab-linha: #1e293b;
-    --tab-total: #1e3a8a; --tab-num: #e2e8f0; --tab-alerta: #f87171;
+    --tab-total: #1e3a8a; --tab-num: #e2e8f0; --tab-alerta: #f87171; --tab-sucesso: #86efac;
     --track-bg: #161f38;
     --brand-1: #4f7fff; --brand-2: #22c55e;
     --row-hover: #101a30; --gauge-track: rgba(255,255,255,0.12); --gauge-meta: #38bdf8; --nav-inactive: #b7c0d8; --nav-hover-bg: rgba(255,255,255,0.05);
@@ -113,7 +118,7 @@
     /* --tab-num escurecido em 04/09/2026 (pedido do cliente): #101828 já era
        quase preto, mas ainda lia como cinza no papel claro da tela — foi pra
        #060a13, mais próximo do preto de verdade. */
-    --tab-total: #dbe6fb; --tab-num: #060a13; --tab-alerta: #c81e1e;
+    --tab-total: #dbe6fb; --tab-num: #060a13; --tab-alerta: #c81e1e; --tab-sucesso: #15803d;
     --desc-bg: rgba(200,30,30,0.055); --desc-borda: rgba(200,30,30,0.38);
     --sombra-flutuante: 0 12px 32px rgba(20,32,64,.16);
   }
@@ -984,8 +989,12 @@
     color: var(--text-secondary); max-width: 105ch; }
   .diagnostico-texto b { color: var(--text-primary); font-weight: 700; }
 
-  .gauge-arc-wrap { text-align: center; padding: 4px 0 2px; }
-  .gauge-arc { width: 100%; max-width: 260px; height: auto; display: block; margin: 4px auto 0; }
+  /* Pedido do cliente 04/09/2026 ("preencha o espaço"): o arco tinha um teto
+     de 260px e ficava plantado no topo do painel — em painel largo (grid de
+     2 colunas) sobrava uma faixa vazia enorme do lado e embaixo. Agora o arco
+     cresce mais (até 380px) e o wrap centraliza na altura toda do painel. */
+  .gauge-arc-wrap { text-align: center; padding: 4px 0 2px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100%; }
+  .gauge-arc { width: 100%; max-width: 380px; height: auto; display: block; margin: 4px auto 0; }
   .gauge-arc-value { fill: var(--text-primary); font-size: 30px; font-weight: 800; letter-spacing: .01em; }
   .gauge-arc-tick { fill: var(--text-muted); font-size: 11.5px; font-weight: 600; }
   .gauge-arc-meta-label { font-size: 9.5px; font-weight: 800; letter-spacing: .02em; }
@@ -6790,9 +6799,9 @@ function renderDashboard() {
         <thead><tr><th>Despesas / Receitas</th><th>${esc(rotuloPeriodo)}</th></tr></thead>
         <tbody>
           ${linhasResumo.map(l => `<tr><td class="cat-cell">${esc(l.rot)}</td><td>${l.v !== undefined ? formatCurrency(l.v) : '-'}</td></tr>`).join('')}
-          <tr class="total-row"><td class="cat-cell" style="color:var(--danger)">TOTAL DESPESAS</td><td style="color:var(--danger)">${formatCurrency(despesaFinal)}</td></tr>
-          <tr class="total-row"><td class="cat-cell" style="color:var(--accent)">RECEITA DAS ORDENS</td><td style="color:var(--accent)">${formatCurrency(receitaFinal)}</td></tr>
-          <tr class="total-row"><td class="cat-cell" style="color:var(--success)">LUCRO</td><td style="color:var(--success)">${formatCurrency(lucroFinal)}</td></tr>
+          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-alerta)">TOTAL DESPESAS</td><td style="color:var(--tab-alerta)">${formatCurrency(despesaFinal)}</td></tr>
+          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-cab-txt)">RECEITA DAS ORDENS</td><td style="color:var(--tab-cab-txt)">${formatCurrency(receitaFinal)}</td></tr>
+          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-sucesso)">LUCRO</td><td style="color:var(--tab-sucesso)">${formatCurrency(lucroFinal)}</td></tr>
         </tbody>
       </table></div>`;
 
@@ -12218,7 +12227,7 @@ function renderToll() {
         </select>
       </div>
       <div class="table-wrap"><table class="data-table"><thead><tr>
-        <th>Data/Hora</th><th>Placa</th><th>Marca/Modelo</th><th>Cadastro</th><th>Condutor atual</th><th>Endereço</th><th>Valor</th><th>Status</th>
+        <th>Data/Hora</th><th>Placa</th><th>Marca/Modelo</th><th>Cadastro</th><th>Condutor atual</th><th>Endereço</th><th>Valor</th>
       </tr></thead><tbody>
       ${rows.slice(0,limitePed).map(r=>{
         const fora = /fora/i.test(r.status||'');
@@ -12226,8 +12235,7 @@ function renderToll() {
         return `<tr><td>${formatDate(r.data_transacao)} ${r.hora||''}</td><td>${r.placa}</td><td>${r.marca} ${r.modelo||''}</td>
         <td style="${fora?'color:var(--danger);font-weight:600':''}">${r.cadastro}</td>
         <td>${r.condutor_atual==='NÃO ENCONTRADA'?`<span class="badge warn">Não encontrada</span>`:`<span style="color:${fora?'var(--danger)':'var(--text-primary)'}">${r.condutor_atual}</span>`}</td>
-        <td style="${foraCid?'color:#fb923c':''}">${r.endereco}</td><td>${formatCurrency(r.valor)}</td>
-        <td>${fora?`<span class="badge warn">${r.status}</span>`:`<span class="badge ok">${r.status}</span>`}</td></tr>`;
+        <td style="${foraCid?'color:#fb923c':''}">${r.endereco}</td><td>${formatCurrency(r.valor)}</td></tr>`;
       }).join('')}
       </tbody></table></div>
       <div id="pdf-export-area"></div>
@@ -14312,9 +14320,9 @@ function renderComparisonsFromPivot(pivotRecebido) {
         <th>Despesas / Receitas</th>${selecionados.map(p=>`<th>${p}</th>`).join('')}<th class="col-total">Total do período selecionado</th>${penultimo?`<th>Variação (${penultimo} → ${ultimo})</th>`:''}
       </tr></thead><tbody>
         ${categorias.map(c=>`<tr><td class="cat-cell">${c}</td>${selecionados.map(p=>`<td>${pivot.porCategoria[c][p] ? formatCurrency(pivot.porCategoria[c][p]) : '-'}</td>`).join('')}<td class="col-total">${formatCurrency(totalCategoria(c))}</td>${penultimo?`<td>${diffMoney(val(pivot.porCategoria[c],penultimo),val(pivot.porCategoria[c],ultimo),true)}</td>`:''}</tr>`).join('')}
-        <tr class="total-row"><td class="cat-cell" style="color:var(--danger)">TOTAL DESPESAS</td>${selecionados.map(p=>`<td style="color:var(--danger)">${formatCurrency(val(pivot.totalDespesas,p))}</td>`).join('')}<td class="col-total" style="color:var(--danger)">${formatCurrency(totalLinha(pivot.totalDespesas))}</td>${penultimo?`<td style="color:var(--danger)">${diffMoney(val(pivot.totalDespesas,penultimo),val(pivot.totalDespesas,ultimo),true)}</td>`:''}</tr>
-        <tr class="total-row"><td class="cat-cell" style="color:var(--accent)">RECEITA DAS ORDENS</td>${selecionados.map(p=>`<td style="color:var(--accent)">${formatCurrency(val(pivot.receitaOrdens,p))}</td>`).join('')}<td class="col-total" style="color:var(--accent)">${formatCurrency(totalLinha(pivot.receitaOrdens))}</td>${penultimo?`<td style="color:var(--accent)">${diffMoney(val(pivot.receitaOrdens,penultimo),val(pivot.receitaOrdens,ultimo))}</td>`:''}</tr>
-        <tr class="total-row"><td class="cat-cell" style="color:var(--success)">LUCRO</td>${selecionados.map(p=>`<td style="color:var(--success)">${formatCurrency(val(pivot.lucro,p))}</td>`).join('')}<td class="col-total" style="color:var(--success)">${formatCurrency(totalLinha(pivot.lucro))}</td>${penultimo?`<td style="color:var(--success)">${diffMoney(val(pivot.lucro,penultimo),val(pivot.lucro,ultimo))}</td>`:''}</tr>
+        <tr class="total-row"><td class="cat-cell" style="color:var(--tab-alerta)">TOTAL DESPESAS</td>${selecionados.map(p=>`<td style="color:var(--tab-alerta)">${formatCurrency(val(pivot.totalDespesas,p))}</td>`).join('')}<td class="col-total" style="color:var(--tab-alerta)">${formatCurrency(totalLinha(pivot.totalDespesas))}</td>${penultimo?`<td style="color:var(--tab-alerta)">${diffMoney(val(pivot.totalDespesas,penultimo),val(pivot.totalDespesas,ultimo),true)}</td>`:''}</tr>
+        <tr class="total-row"><td class="cat-cell" style="color:var(--tab-cab-txt)">RECEITA DAS ORDENS</td>${selecionados.map(p=>`<td style="color:var(--tab-cab-txt)">${formatCurrency(val(pivot.receitaOrdens,p))}</td>`).join('')}<td class="col-total" style="color:var(--tab-cab-txt)">${formatCurrency(totalLinha(pivot.receitaOrdens))}</td>${penultimo?`<td style="color:var(--tab-cab-txt)">${diffMoney(val(pivot.receitaOrdens,penultimo),val(pivot.receitaOrdens,ultimo))}</td>`:''}</tr>
+        <tr class="total-row"><td class="cat-cell" style="color:var(--tab-sucesso)">LUCRO</td>${selecionados.map(p=>`<td style="color:var(--tab-sucesso)">${formatCurrency(val(pivot.lucro,p))}</td>`).join('')}<td class="col-total" style="color:var(--tab-sucesso)">${formatCurrency(totalLinha(pivot.lucro))}</td>${penultimo?`<td style="color:var(--tab-sucesso)">${diffMoney(val(pivot.lucro,penultimo),val(pivot.lucro,ultimo))}</td>`:''}</tr>
       </tbody></table></div>
       <div class="section-heading">Serviços Concluídos e Valor a Receber (GIGA → JH)</div>
       <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
@@ -14443,9 +14451,9 @@ function renderComparisonsFromBase() {
         <th>Despesas / Receitas</th>${dados.map(d=>`<th>${d.periodo}</th>`).join('')}<th class="col-total">Total do período selecionado</th>${penultimo?`<th>Variação (${penultimo.periodo} → ${ultimo.periodo})</th>`:''}
       </tr></thead><tbody>
         ${categorias.map(c=>`<tr><td class="cat-cell">${c}</td>${dados.map(d=>`<td>${d.porCategoria[c] ? formatCurrency(d.porCategoria[c]) : '-'}</td>`).join('')}<td class="col-total">${formatCurrency(totalCategoria(c))}</td>${penultimo?`<td>${diffMoney(penultimo.porCategoria[c]||0,ultimo.porCategoria[c]||0,true)}</td>`:''}</tr>`).join('')}
-        <tr class="total-row"><td class="cat-cell" style="color:var(--danger)">TOTAL DESPESAS</td>${dados.map(d=>`<td style="color:var(--danger)">${formatCurrency(d.despesa)}</td>`).join('')}<td class="col-total" style="color:var(--danger)">${formatCurrency(totalDespesa)}</td>${penultimo?`<td style="color:var(--danger)">${diffMoney(penultimo.despesa,ultimo.despesa,true)}</td>`:''}</tr>
-        <tr class="total-row"><td class="cat-cell" style="color:var(--accent)">RECEITA DAS ORDENS</td>${dados.map(d=>`<td style="color:var(--accent)">${formatCurrency(d.receita)}</td>`).join('')}<td class="col-total" style="color:var(--accent)">${formatCurrency(totalReceita)}</td>${penultimo?`<td style="color:var(--accent)">${diffMoney(penultimo.receita,ultimo.receita)}</td>`:''}</tr>
-        <tr class="total-row"><td class="cat-cell" style="color:var(--success)">LUCRO</td>${dados.map(d=>`<td style="color:var(--success)">${formatCurrency(d.lucro)}</td>`).join('')}<td class="col-total" style="color:var(--success)">${formatCurrency(totalLucro)}</td>${penultimo?`<td style="color:var(--success)">${diffMoney(penultimo.lucro,ultimo.lucro)}</td>`:''}</tr>
+        <tr class="total-row"><td class="cat-cell" style="color:var(--tab-alerta)">TOTAL DESPESAS</td>${dados.map(d=>`<td style="color:var(--tab-alerta)">${formatCurrency(d.despesa)}</td>`).join('')}<td class="col-total" style="color:var(--tab-alerta)">${formatCurrency(totalDespesa)}</td>${penultimo?`<td style="color:var(--tab-alerta)">${diffMoney(penultimo.despesa,ultimo.despesa,true)}</td>`:''}</tr>
+        <tr class="total-row"><td class="cat-cell" style="color:var(--tab-cab-txt)">RECEITA DAS ORDENS</td>${dados.map(d=>`<td style="color:var(--tab-cab-txt)">${formatCurrency(d.receita)}</td>`).join('')}<td class="col-total" style="color:var(--tab-cab-txt)">${formatCurrency(totalReceita)}</td>${penultimo?`<td style="color:var(--tab-cab-txt)">${diffMoney(penultimo.receita,ultimo.receita)}</td>`:''}</tr>
+        <tr class="total-row"><td class="cat-cell" style="color:var(--tab-sucesso)">LUCRO</td>${dados.map(d=>`<td style="color:var(--tab-sucesso)">${formatCurrency(d.lucro)}</td>`).join('')}<td class="col-total" style="color:var(--tab-sucesso)">${formatCurrency(totalLucro)}</td>${penultimo?`<td style="color:var(--tab-sucesso)">${diffMoney(penultimo.lucro,ultimo.lucro)}</td>`:''}</tr>
       </tbody></table></div>
       <div class="section-heading">Serviços Concluídos e Valor a Receber (GIGA → JH)</div>
       <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
