@@ -7168,6 +7168,42 @@ function contarRetornosGiga(rows, inicio, fim) {
   });
   return { porTecnico, noPeriodo, fora, semOfensor };
 }
+// Mesma planilha de contarRetornosGiga, mas devolve a linha INTEIRA (data,
+// cliente, O.S, tipo) em vez de só a contagem — é o que a tela Financeiro usa
+// pra mostrar "igual o Detalhe de Retornos", só que com a base da GIGA em vez
+// da base própria do sistema (produção/PCR). Consulta só nessa tela: não
+// grava em lugar nenhum, não mexe na folha (isso continua sendo o painel de
+// Retornos da GIGA de dentro da Folha de Pagamento).
+function extrairRetornosGigaDetalhe(rows, inicio, fim) {
+  if (!rows || rows.length < 2) return { erro: 'Planilha vazia.' };
+  const cab = rows[0].map(normalizeHeader);
+  const col = nome => cab.indexOf(normalizeHeader(nome));
+  const iData = col('Data'), iInd = col('IND'), iExec = col('Executor');
+  if (iData < 0 || iInd < 0 || iExec < 0) {
+    return { erro: 'Não encontrei as colunas "Data", "IND" e "Executor" nessa planilha. É o arquivo de retornos que a GIGA manda?' };
+  }
+  const iRecurso = col('Recurso'), iNome = col('Nome'), iOs = col('Ordem de Serviço'), iTipo = col('Tipo de Atividade'), iAging = col('AGING');
+  const linhas = [];
+  let fora = 0;
+  rows.slice(1).forEach(r => {
+    const ind = String(r[iInd] || '').trim().toUpperCase();
+    if (ind !== 'IFI' && ind !== 'IRR') return;
+    const dataISO = excelDateToISO(r[iData]);
+    if (!dataISO) return;
+    if (inicio && fim && !inRange(dataISO, inicio, fim)) { fora++; return; }
+    const ofensor = String(r[iExec] || '').trim();
+    if (!ofensor) return;
+    linhas.push({
+      data: dataISO, ind, ofensor,
+      recurso: iRecurso >= 0 ? String(r[iRecurso] || '').trim() : '',
+      cliente: iNome >= 0 ? String(r[iNome] || '').trim() : '',
+      os: iOs >= 0 ? String(r[iOs] ?? '').trim() : '',
+      tipo: iTipo >= 0 ? String(r[iTipo] || '').trim() : '',
+      aging: iAging >= 0 ? r[iAging] : null,
+    });
+  });
+  return { linhas, fora };
+}
 // Joga a contagem da planilha da GIGA nas linhas da folha daquele período.
 // Só mexe em Qtd. IFI / Qtd. IRR (e no desconto que sai deles) — desconto de
 // material, parcela, frota e bônus ficam exatamente como estavam.
@@ -12413,6 +12449,42 @@ function renderFinance() {
         <button class="btn" id="fin-salvar">Salvar alterações</button>
         <span id="fin-msg" style="font-size:13px;color:var(--text-muted)"></span>
       </div>` : ''}
+
+      <div class="section-heading">Valores por Serviço — Normal e 26 Dias</div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">Tabela vigente em ${formatDate(p.end)} — o técnico recebe o valor "26 Dias" quando está APTO ao bônus, e "Normal" quando não está (ver a Folha de Pagamento).</p>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Serviço</th><th>Valor Normal</th><th>Valor 26 Dias</th></tr></thead>
+          <tbody>${valoresVigentesEm(p.end).map(v => `<tr><td class="cat-cell">${esc(v.label)}</td><td>${formatCurrency(v.normal)}</td><td>${formatCurrency(v.d26)}</td></tr>`).join('')}</tbody>
+        </table></div>
+      </div>
+
+      <div class="section-heading">Verificação por Técnico</div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">Quantos serviços de cada tipo o técnico concluiu em ${esc(rotulo)}, quantos dias ele trabalhou e quanto isso daria nas duas faixas de preço — pra conferir contra a folha antes de fechar.</p>
+        <div class="toolbar" style="margin-bottom:0">
+          <div class="field"><label>Técnico</label><input type="text" id="fin-vt-tecnico" placeholder="Nome" list="tech-list"></div>
+          <button class="btn" id="fin-vt-buscar">Verificar</button>
+        </div>
+        <div id="fin-vt-body" style="margin-top:12px"></div>
+      </div>
+
+      <div class="section-heading">Retornos da GIGA (planilha)</div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
+          Envie a mesma planilha de retornos que a GIGA manda ("IFI e IRR ….xlsx") pra ver o detalhe — data, cliente,
+          O.S e tipo — de cada retorno em ${esc(rotulo)}. É só consulta aqui, igual o Detalhe de Retornos, só que com a
+          base da GIGA em vez da base própria do sistema. Pra aplicar o desconto na folha, use o painel de Retornos da
+          GIGA de dentro da tela Folha de Pagamento.
+        </p>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+          <div class="field" style="margin:0"><label>Planilha da GIGA</label><input type="file" id="fin-giga-file" accept=".xlsx,.xls"></div>
+          <div class="field" style="margin:0"><label>Ofensor</label><input type="text" id="fin-giga-ofensor" placeholder="Nome" list="tech-list"></div>
+          <span id="fin-giga-msg" style="font-size:13px"></span>
+        </div>
+        <div id="fin-giga-body"><div class="empty">Envie a planilha da GIGA pra ver o detalhe.</div></div>
+      </div>
+
       <div id="pdf-export-area"></div>`;
 
     const inputs = () => [...document.querySelectorAll('.fin-campo')];
@@ -12451,6 +12523,100 @@ function renderFinance() {
       if (msg) msg.innerHTML = '<span style="color:var(--warn-text)">Há alterações não salvas.</span>';
     }));
     recalcular();
+
+    // ---- Verificação por técnico ----
+    document.getElementById('fin-vt-buscar').addEventListener('click', () => {
+      const tecnico = document.getElementById('fin-vt-tecnico').value.trim();
+      const corpo = document.getElementById('fin-vt-body');
+      if (!tecnico) { corpo.innerHTML = '<div class="empty">Escolha um técnico.</div>'; return; }
+      const tabela = valoresVigentesEm(p.end);
+      const porTipo = tabela.map(v => ({ label: v.label, re: v.re, normal: v.normal, d26: v.d26, qtd: 0 }));
+      const dias = new Set();
+      DB.producao.forEach(o => {
+        if (!isConcluido(o.status)) return;
+        if (normalizeHeader(o.recurso) !== normalizeHeader(tecnico)) return;
+        if (!inRange(o.data, p.start, p.end)) return;
+        const t = normalizeHeader(o.tipo_atividade);
+        const item = porTipo.find(x => x.re.test(t));
+        if (item) item.qtd++;
+        if (o.data) dias.add(o.data);
+      });
+      const totalQtd = porTipo.reduce((a, x) => a + x.qtd, 0);
+      const totalNormal = porTipo.reduce((a, x) => a + x.qtd * x.normal, 0);
+      const totalD26 = porTipo.reduce((a, x) => a + x.qtd * x.d26, 0);
+      if (!totalQtd) { corpo.innerHTML = `<div class="empty">Nenhum serviço concluído de ${esc(tecnico)} em ${esc(rotulo)}.</div>`; return; }
+      corpo.innerHTML = `
+        <div class="cards-grid" style="margin-bottom:12px">
+          ${metricCard('Dias trabalhados', dias.size)}
+          ${metricCard('Total de serviços', totalQtd)}
+          ${metricCard('Valor normal', formatCurrency(totalNormal))}
+          ${metricCard('Valor 26 dias', formatCurrency(totalD26))}
+        </div>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Serviço</th><th>Qtd.</th><th>Valor Normal</th><th>Valor 26 Dias</th></tr></thead>
+          <tbody>
+            ${porTipo.map(x => `<tr><td class="cat-cell">${esc(x.label)}</td><td>${x.qtd}</td><td>${formatCurrency(x.qtd * x.normal)}</td><td>${formatCurrency(x.qtd * x.d26)}</td></tr>`).join('')}
+            <tr class="total-row"><td>Total Geral</td><td>${totalQtd}</td><td>${formatCurrency(totalNormal)}</td><td>${formatCurrency(totalD26)}</td></tr>
+          </tbody>
+        </table></div>`;
+    });
+
+    // ---- Retornos da GIGA (planilha) — só consulta, não persiste e não mexe
+    // na folha (isso continua sendo o painel de dentro da tela Folha de
+    // Pagamento). Fica em memória só enquanto essa tela estiver aberta.
+    let retornosGigaDetalhe = [];
+    const desenharGigaDetalhe = () => {
+      const filtro = (document.getElementById('fin-giga-ofensor').value || '').trim().toLowerCase();
+      const corpo = document.getElementById('fin-giga-body');
+      const linhas = retornosGigaDetalhe.filter(r => !filtro || r.ofensor.toLowerCase().includes(filtro));
+      if (!linhas.length) {
+        corpo.innerHTML = `<div class="empty">${retornosGigaDetalhe.length ? 'Nenhum retorno desse ofensor.' : 'Envie a planilha da GIGA pra ver o detalhe.'}</div>`;
+        return;
+      }
+      const qtdIfi = linhas.filter(r => r.ind === 'IFI').length, qtdIrr = linhas.filter(r => r.ind === 'IRR').length;
+      corpo.innerHTML = `
+        <div class="cards-grid" style="margin-bottom:12px">
+          ${metricCard('Total de retornos', linhas.length)}
+          ${metricCard('Qtd. IFI', qtdIfi)}
+          ${metricCard('Qtd. IRR', qtdIrr)}
+        </div>
+        <p style="font-size:12px;color:var(--text-secondary);margin:0 0 8px">${linhas.length} retorno(s)${linhas.length > 300 ? ' — exibindo os 300 primeiros' : ''}.</p>
+        <div class="table-wrap"><table class="data-table"><thead><tr>
+          <th>Data</th><th>Ofensor</th><th>Recurso (retorno)</th><th>Cliente</th><th>O.S</th><th>Tipo</th><th>IND</th><th>Aging</th>
+        </tr></thead><tbody>
+          ${linhas.slice(0, 300).map(r => `<tr><td>${r.data ? formatDate(r.data) : '-'}</td><td>${esc(r.ofensor)}</td><td>${esc(r.recurso) || '-'}</td><td>${esc(r.cliente) || '-'}</td><td>${esc(r.os) || '-'}</td><td>${esc(r.tipo) || '-'}</td><td><span class="badge ${r.ind === 'IFI' ? 'warn' : 'amber'}">${r.ind}</span></td><td>${r.aging ?? '-'}</td></tr>`).join('')}
+        </tbody></table></div>`;
+    };
+    document.getElementById('fin-giga-ofensor').addEventListener('input', desenharGigaDetalhe);
+    document.getElementById('fin-giga-file').addEventListener('change', () => {
+      const inputGiga = document.getElementById('fin-giga-file');
+      const arquivo = inputGiga.files && inputGiga.files[0];
+      const msg = document.getElementById('fin-giga-msg');
+      if (!arquivo) return;
+      if (typeof XLSX === 'undefined') { msg.innerHTML = '<span style="color:var(--danger)">A biblioteca de planilha não carregou (sem internet?).</span>'; inputGiga.value = ''; return; }
+      msg.innerHTML = '<span style="color:var(--text-muted)">Lendo a planilha…</span>';
+      const leitor = new FileReader();
+      leitor.onload = ev => {
+        try {
+          const wb = XLSX.read(ev.target.result, { type: 'array', cellDates: true });
+          let resultado = null;
+          for (const nome of wb.SheetNames) {
+            const linhasCru = XLSX.utils.sheet_to_json(wb.Sheets[nome], { header: 1, raw: true, defval: null });
+            const tentativa = extrairRetornosGigaDetalhe(linhasCru, p.start, p.end);
+            if (!tentativa.erro) { resultado = tentativa; break; }
+          }
+          if (!resultado) { msg.innerHTML = '<span style="color:var(--danger)">Não encontrei as colunas "Data", "IND" e "Executor" nessa planilha.</span>'; return; }
+          retornosGigaDetalhe = resultado.linhas;
+          msg.innerHTML = `<span style="color:var(--success)">${resultado.linhas.length} retorno(s) em ${esc(rotulo)}</span>` +
+            (resultado.fora ? ` <span style="color:var(--text-muted)">— ${resultado.fora} fora do período (ignorados)</span>` : '');
+          desenharGigaDetalhe();
+        } catch (e) {
+          msg.innerHTML = `<span style="color:var(--danger)">Erro ao ler a planilha: ${esc(e.message)}</span>`;
+        }
+        inputGiga.value = '';
+      };
+      leitor.readAsArrayBuffer(arquivo);
+    });
 
     const btn = document.getElementById('fin-salvar');
     if (btn) btn.addEventListener('click', async () => {
