@@ -1233,6 +1233,20 @@
   table.data-table tr.total-row td { font-weight: 700; background: var(--tab-total); color: #fff; border-top: 2px solid var(--tab-linha); }
   :root[data-theme="light"] table.data-table tr.total-row td { color: var(--text-primary); }
   table.data-table td.cat-cell { font-weight: 600; color: var(--text-primary); }
+  /* Comparativo do Dashboard ("Resumo financeiro do ciclo") — pedido do
+     cliente 04/09/2026, igual ao print que ele mandou: barrinha colorida do
+     lado do rótulo, e a seta de tendência vira uma pastilha redonda (sem o
+     texto de porcentagem, só a cor+seta) em vez do texto corrido que o
+     diffBadge normal usa em outras telas. */
+  .cmp-dash .cat-cell { position: relative; padding-left: 20px; }
+  .cmp-dash .cat-cell::before { content: ''; position: absolute; left: 6px; top: 50%; transform: translateY(-50%);
+    width: 4px; height: 14px; border-radius: 2px; background: var(--warn-text); }
+  .cmp-dash tr.total-row td.cat-cell::before { background: currentColor; }
+  .cmp-seta { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px;
+    border-radius: 50%; font-size: 10px; font-weight: 700; margin-left: 6px; vertical-align: -3px; line-height: 1; }
+  .cmp-seta.bom { background: color-mix(in srgb, var(--tab-sucesso) 22%, transparent); color: var(--tab-sucesso); }
+  .cmp-seta.ruim { background: color-mix(in srgb, var(--tab-alerta) 22%, transparent); color: var(--tab-alerta); }
+  .cmp-seta.igual { background: color-mix(in srgb, var(--tab-cab-txt) 22%, transparent); color: var(--tab-cab-txt); }
   /* coluna "Total do período selecionado" nos comparativos (Financeiro) —
      pedido do cliente: precisa de um design diferente pra diferenciar das
      colunas de cada período e da coluna de Variação ao lado. Borda nos dois
@@ -6480,8 +6494,20 @@ function renderDashboard() {
   // tinha sido tirado em 01/09/2026). Abre sozinho no ciclo mais recente que
   // TEM dado (no dia 21 o ciclo corrente ainda está vazio), mas agora dá pra
   // trocar pra qualquer outro pelo seletor.
-  const ciclos = ciclosDoFechamento().lista;
-  const comDado = ciclos.find(c => DB.fechamento.some(f => f.inicio === c.start && f.ate_o_dia === c.end));
+  // ACHADO NA AUDITORIA DE 04/09/2026: o seletor só listava ciclo que já tem
+  // linha em DB.fechamento (aba RELATORIO) — só apareciam 2, mesmo com mais
+  // ciclos já cadastrados na tela Financeiro (é de lá que o "Resumo
+  // financeiro do ciclo" tira os até 4 períodos comparados). Junta as duas
+  // fontes pro seletor não ficar mais curto que a própria tabela de baixo.
+  const ciclosFech = ciclosDoFechamento().lista;
+  const vistosCiclo = new Map(ciclosFech.map(c => [c.start + '|' + c.end, c]));
+  const pivotParaCiclos = pivotDoCadastroFin();
+  (pivotParaCiclos ? pivotParaCiclos.periodos : []).forEach(rotulo => {
+    const { inicio, fim } = datasDoPeriodoFolha(rotulo);
+    if (inicio && fim && !vistosCiclo.has(inicio + '|' + fim)) vistosCiclo.set(inicio + '|' + fim, { start: inicio, end: fim });
+  });
+  const ciclos = [...vistosCiclo.values()].sort((a, b) => String(b.end).localeCompare(String(a.end)));
+  const comDado = ciclosFech.find(c => DB.fechamento.some(f => f.inicio === c.start && f.ate_o_dia === c.end));
   const { start, end } = comDado || ciclosDoFechamento().atual;
   const curto = iso => { const [a, m, d] = String(iso).split('-'); return `${d}.${m}`; };
   document.getElementById('content').innerHTML = `
@@ -6520,6 +6546,51 @@ function renderDashboard() {
     // da conta e criava uma diferença de R$2.605,50 entre tela e Excel.
     const fech = DB.fechamento.filter(f => overlaps(f.inicio, f.ate_o_dia, s, e));
 
+    // Resumo Despesas/Receitas do ciclo, comparado com os ciclos ANTERIORES
+    // (pedido do cliente 04/09/2026, igual ao Comparativo Financeiro só que
+    // direto aqui no Dashboard, sempre em torno do ciclo escolhido no
+    // seletor do topo). Mostra até 4 ciclos — o escolhido e até 3 antes dele,
+    // do mais recente pro mais antigo — e busca 1 ciclo A MAIS só pra ter
+    // contra o que comparar a seta da última coluna visível.
+    // Calculado ANTES do "sem dados no período" de propósito: essa tabela usa
+    // o cadastro da tela Financeiro, não a aba RELATORIO — um ciclo sem
+    // fechamento importado ainda pode ter esse resumo pra mostrar (achado na
+    // auditoria de 04/09/2026: o seletor de ciclo passou a listar período só
+    // com cadastro financeiro, e essa tabela sumia pra eles).
+    const rotuloPeriodo = `${formatDate(s)} a ${formatDate(e)}`;
+    const pivotDash = pivotDoCadastroFin();
+    const idxCicloDash = pivotDash ? pivotDash.periodos.indexOf(rotuloPeriodo) : -1;
+    // pivotDash.periodos vem do mais ANTIGO pro mais NOVO — pega os últimos
+    // 5 até o ciclo escolhido (inclusive) e inverte pra mostrar do mais novo
+    // pro mais antigo.
+    const periodosDash = idxCicloDash < 0 ? [] : pivotDash.periodos.slice(Math.max(0, idxCicloDash - 4), idxCicloDash + 1).reverse();
+    const periodosExibidos = periodosDash.slice(0, 4);
+    const valDash = (obj, p) => (obj && obj[p]) || 0;
+    // seta comparando a coluna com a PRÓXIMA (period anterior, já que a
+    // ordem aqui é do mais novo pro mais antigo) — pastilha redonda, sem
+    // texto de %, igual ao print que o cliente mandou (04/09/2026).
+    const setaDash = (obj, i, invert) => {
+      const anterior = periodosDash[i + 1];
+      if (!anterior) return '';
+      return ' ' + setaPill(valDash(obj, anterior), valDash(obj, periodosDash[i]), invert);
+    };
+    const categoriasDash = pivotDash ? Object.keys(pivotDash.porCategoria).filter(c => periodosExibidos.some(p => pivotDash.porCategoria[c][p])) : [];
+    // Mesmo desenho da tela de Comparativos (renderComparisonsFromPivot):
+    // data-table comum, categoria em .cat-cell e as três linhas de fecho em
+    // .total-row. Classe "cmp-dash" liga a barrinha colorida do rótulo e a
+    // pastilha da seta (ver CSS perto de td.cat-cell).
+    const resumoFinanceiro = !periodosExibidos.length ? '' : `
+      <div class="section-heading sem-toggle">Resumo financeiro do ciclo<span class="sec-nota">comparado com os ciclos anteriores</span></div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table cmp-dash">
+        <thead><tr><th>Despesas / Receitas</th>${periodosExibidos.map(p => `<th>${esc(p)}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${categoriasDash.map(cat => `<tr><td class="cat-cell">${esc(cat)}</td>${periodosExibidos.map((p, i) => `<td>${valDash(pivotDash.porCategoria[cat], p) ? formatCurrency(valDash(pivotDash.porCategoria[cat], p)) : '-'}${setaDash(pivotDash.porCategoria[cat], i, true)}</td>`).join('')}</tr>`).join('')}
+          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-alerta)">TOTAL DESPESAS</td>${periodosExibidos.map((p, i) => `<td style="color:var(--tab-alerta)">${formatCurrency(valDash(pivotDash.totalDespesas, p))}${setaDash(pivotDash.totalDespesas, i, true)}</td>`).join('')}</tr>
+          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-cab-txt)">RECEITA DAS ORDENS</td>${periodosExibidos.map((p, i) => `<td style="color:var(--tab-cab-txt)">${formatCurrency(valDash(pivotDash.receitaOrdens, p))}${setaDash(pivotDash.receitaOrdens, i, false)}</td>`).join('')}</tr>
+          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-sucesso)">LUCRO</td>${periodosExibidos.map((p, i) => `<td style="color:var(--tab-sucesso)">${formatCurrency(valDash(pivotDash.lucro, p))}${setaDash(pivotDash.lucro, i, false)}</td>`).join('')}</tr>
+        </tbody>
+      </table></div>`;
+
     if (!fech.length) {
       const ciclos = ciclosDoFechamento().lista;
       const dica = !DB.fechamento.length
@@ -6530,7 +6601,8 @@ function renderDashboard() {
              ${ciclos.map(c => `<button class="btn" data-ciclo="${c.start}|${c.end}">${formatDate(c.start)} a ${formatDate(c.end)}</button>`).join('')}
            </div>`
         : '';
-      body.innerHTML = `<div class="panel"><div class="empty">Sem dados no período.<br><span style="font-size:12px">${dica}</span>${botoes}</div></div>`;
+      const tituloVazio = resumoFinanceiro ? 'Sem dados de PRODUÇÃO neste ciclo — o resumo financeiro acima usa o cadastro da tela Financeiro, não depende disso.' : 'Sem dados no período.';
+      body.innerHTML = `${resumoFinanceiro}<div class="panel"><div class="empty">${tituloVazio}<br><span style="font-size:12px">${dica}</span>${botoes}</div></div>`;
       body.querySelectorAll('button[data-ciclo]').forEach(b => b.addEventListener('click', () => {
         const [ini, fim] = b.dataset.ciclo.split('|');
         document.getElementById('f-start').value = ini;
@@ -6680,7 +6752,6 @@ function renderDashboard() {
     // da empresa inteira (inclui folha do escritório, imposto, aluguel da base,
     // internet, água, energia…), coisas que o fechamento por técnico não tem.
     // Sem ela, cai no fechamento (GIGA − despesas dos técnicos).
-    const rotuloPeriodo = `${formatDate(s)} a ${formatDate(e)}`;
     const cmp = DB.comparativoFinanceiro;
     // ORDEM DAS FONTES (03/09/2026): o CADASTRO da tela Financeiro vem primeiro.
     // Ele é digitado por período dentro do sistema e é o que o cliente mantém
@@ -6788,44 +6859,6 @@ function renderDashboard() {
       { rot: 'Reparos', v: reparos }, { rot: 'Ativação', v: ativacao },
       { rot: 'M. Endereço', v: me }, { rot: 'Upgrade', v: upgrade }, { rot: 'M. Cômodo', v: mc }
     ].sort((a, b) => b.v - a.v);
-    // Resumo Despesas/Receitas do ciclo, comparado com os ciclos ANTERIORES
-    // (pedido do cliente 04/09/2026, igual ao Comparativo Financeiro só que
-    // direto aqui no Dashboard, sempre em torno do ciclo escolhido no
-    // seletor do topo). Mostra até 4 ciclos — o escolhido e até 3 antes dele,
-    // do mais recente pro mais antigo — e busca 1 ciclo A MAIS só pra ter
-    // contra o que comparar a seta da última coluna visível.
-    const pivotDash = pivotDoCadastroFin();
-    const idxCicloDash = pivotDash ? pivotDash.periodos.indexOf(rotuloPeriodo) : -1;
-    // pivotDash.periodos vem do mais ANTIGO pro mais NOVO — pega os últimos
-    // 5 até o ciclo escolhido (inclusive) e inverte pra mostrar do mais novo
-    // pro mais antigo.
-    const periodosDash = idxCicloDash < 0 ? [] : pivotDash.periodos.slice(Math.max(0, idxCicloDash - 4), idxCicloDash + 1).reverse();
-    const periodosExibidos = periodosDash.slice(0, 4);
-    const valDash = (obj, p) => (obj && obj[p]) || 0;
-    // seta comparando a coluna com a PRÓXIMA (period anterior, já que a
-    // ordem aqui é do mais novo pro mais antigo) — reaproveita diffBadge, que
-    // já sabe colorir "subiu"/"desceu" certo pra cada lado (invert=true pra
-    // despesa: descer é bom).
-    const setaDash = (obj, i, invert) => {
-      const anterior = periodosDash[i + 1];
-      if (!anterior) return '';
-      return ' ' + diffBadge(valDash(obj, anterior), valDash(obj, periodosDash[i]), invert);
-    };
-    const categoriasDash = pivotDash ? Object.keys(pivotDash.porCategoria).filter(c => periodosExibidos.some(p => pivotDash.porCategoria[c][p])) : [];
-    // Mesmo desenho da tela de Comparativos (renderComparisonsFromPivot):
-    // data-table comum, categoria em .cat-cell e as três linhas de fecho em
-    // .total-row, coloridas só no texto.
-    const resumoFinanceiro = !periodosExibidos.length ? '' : `
-      <div class="section-heading sem-toggle">Resumo financeiro do ciclo<span class="sec-nota">comparado com os ciclos anteriores</span></div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table">
-        <thead><tr><th>Despesas / Receitas</th>${periodosExibidos.map(p => `<th>${esc(p)}</th>`).join('')}</tr></thead>
-        <tbody>
-          ${categoriasDash.map(cat => `<tr><td class="cat-cell">${esc(cat)}</td>${periodosExibidos.map((p, i) => `<td>${valDash(pivotDash.porCategoria[cat], p) ? formatCurrency(valDash(pivotDash.porCategoria[cat], p)) : '-'}${setaDash(pivotDash.porCategoria[cat], i, true)}</td>`).join('')}</tr>`).join('')}
-          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-alerta)">TOTAL DESPESAS</td>${periodosExibidos.map((p, i) => `<td style="color:var(--tab-alerta)">${formatCurrency(valDash(pivotDash.totalDespesas, p))}${setaDash(pivotDash.totalDespesas, i, true)}</td>`).join('')}</tr>
-          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-cab-txt)">RECEITA DAS ORDENS</td>${periodosExibidos.map((p, i) => `<td style="color:var(--tab-cab-txt)">${formatCurrency(valDash(pivotDash.receitaOrdens, p))}${setaDash(pivotDash.receitaOrdens, i, false)}</td>`).join('')}</tr>
-          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-sucesso)">LUCRO</td>${periodosExibidos.map((p, i) => `<td style="color:var(--tab-sucesso)">${formatCurrency(valDash(pivotDash.lucro, p))}${setaDash(pivotDash.lucro, i, false)}</td>`).join('')}</tr>
-        </tbody>
-      </table></div>`;
 
     body.innerHTML = `
       <div class="section-heading sem-toggle">Resultado do ciclo</div>
@@ -12798,6 +12831,17 @@ function diffBadge(x,y,invert) {
   const pct=((y-x)/Math.abs(x))*100; const sign=pct>=0?'+':''; const arrow=pct>=0?'▲':'▼';
   const bom = invert ? pct<0 : pct>=0;
   return `<span style="color:${bom?'var(--success)':'var(--danger)'}">${arrow} ${sign}${formatPct(pct, 1)}</span>`;
+}
+// Mesma ideia do diffBadge, só que como PASTILHA redonda (só a seta, sem
+// texto de %) — pedido do cliente 04/09/2026 pro Resumo financeiro do
+// Dashboard, igual ao print que ele mandou. "=" quando não mudou nada.
+function setaPill(x, y, invert) {
+  if (!x && x !== 0) return '';
+  const d = y - x;
+  if (d === 0) return '<span class="cmp-seta igual">=</span>';
+  const arrow = d > 0 ? '▲' : '▼';
+  const bom = invert ? d < 0 : d > 0;
+  return `<span class="cmp-seta ${bom ? 'bom' : 'ruim'}">${arrow}</span>`;
 }
 function diffMoney(x,y,invert) {
   const d = y-x; const sign = d>=0?'+':''; const arrow = d>=0?'▲':'▼';
