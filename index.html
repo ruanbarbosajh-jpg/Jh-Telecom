@@ -6576,12 +6576,11 @@ function renderDashboard() {
     // "Todos os ciclos": pega tudo, sem filtrar por período (ver `todos` acima).
     const fech = todos ? DB.fechamento.slice() : DB.fechamento.filter(f => overlaps(f.inicio, f.ate_o_dia, s, e));
 
-    // Resumo Despesas/Receitas do ciclo, comparado com os ciclos ANTERIORES
-    // (pedido do cliente 04/09/2026, igual ao Comparativo Financeiro só que
-    // direto aqui no Dashboard, sempre em torno do ciclo escolhido no
-    // seletor do topo). Mostra até 4 ciclos — o escolhido e até 3 antes dele,
-    // do mais recente pro mais antigo — e busca 1 ciclo A MAIS só pra ter
-    // contra o que comparar a seta da última coluna visível.
+    // Resumo Despesas/Receitas do ciclo — pedido do cliente 04/09/2026: mostra
+    // SÓ o ciclo escolhido no seletor do topo (nada de comparar com anteriores
+    // aqui — isso agora é o "Comparativo entre Ciclos" logo abaixo, separado
+    // de propósito). Em "Todos os ciclos", vira a tabela completa: cada
+    // período importado como coluna, mais uma coluna de Total.
     // Calculado ANTES do "sem dados no período" de propósito: essa tabela usa
     // o cadastro da tela Financeiro, não a aba RELATORIO — um ciclo sem
     // fechamento importado ainda pode ter esse resumo pra mostrar (achado na
@@ -6592,50 +6591,15 @@ function renderDashboard() {
     // ACHADO NA AUDITORIA DE 04/09/2026: pivotDash.periodos NÃO vem
     // garantidamente ordenado — é a concatenação de duas fontes (planilha
     // COMPARATIVO velha + cadastro da tela Financeiro), e quando um período
-    // só existe numa das duas o array pode intercalar fora de ordem
-    // (o cliente selecionou 21/05 a 20/06 e a tabela mostrou 21/07 a 20/08
-    // logo depois — mais NOVO que o ciclo escolhido). Ordena pela data real
-    // (fim do período) antes de cortar, em vez de confiar na ordem do array.
+    // só existe numa das duas o array pode intercalar fora de ordem. Ordena
+    // pela data real (fim do período) antes de usar, em vez de confiar na
+    // ordem do array. Do mais ANTIGO pro mais NOVO (esquerda pra direita).
     const periodosOrdenados = pivotDash ? [...pivotDash.periodos].sort((a, b) =>
       String(datasDoPeriodoFolha(a).fim || '').localeCompare(String(datasDoPeriodoFolha(b).fim || ''))) : [];
-    const idxCicloDash = periodosOrdenados.indexOf(rotuloPeriodo);
-    // periodosOrdenados vem do mais ANTIGO pro mais NOVO — pega os últimos
-    // 5 até o ciclo escolhido (inclusive) e inverte pra mostrar do mais novo
-    // pro mais antigo.
-    const periodosDash = idxCicloDash < 0 ? [] : periodosOrdenados.slice(Math.max(0, idxCicloDash - 4), idxCicloDash + 1).reverse();
-    const periodosExibidos = periodosDash.slice(0, 4);
-    const valDash = (obj, p) => (obj && obj[p]) || 0;
-    // seta comparando a coluna com a PRÓXIMA (period anterior, já que a
-    // ordem aqui é do mais novo pro mais antigo) — pastilha redonda, sem
-    // texto de %, igual ao print que o cliente mandou (04/09/2026).
-    const setaDash = (obj, i, invert) => {
-      const anterior = periodosDash[i + 1];
-      if (!anterior) return '';
-      return ' ' + setaPill(valDash(obj, anterior), valDash(obj, periodosDash[i]), invert);
-    };
-    const categoriasDash = pivotDash ? Object.keys(pivotDash.porCategoria).filter(c => periodosExibidos.some(p => pivotDash.porCategoria[c][p])) : [];
-    // Mesmo desenho da tela de Comparativos (renderComparisonsFromPivot):
-    // data-table comum, categoria em .cat-cell e as três linhas de fecho em
-    // .total-row. Classe "cmp-dash" liga a barrinha colorida do rótulo e a
-    // pastilha da seta (ver CSS perto de td.cat-cell).
-    const resumoFinanceiro = !periodosExibidos.length ? '' : `
-      <div class="section-heading sem-toggle">Resumo financeiro do ciclo<span class="sec-nota">comparado com os ciclos anteriores</span></div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table cmp-dash">
-        <thead><tr><th>Despesas / Receitas</th>${periodosExibidos.map(p => `<th class="num">${esc(p)}</th>`).join('')}</tr></thead>
-        <tbody>
-          ${categoriasDash.map(cat => `<tr><td class="cat-cell">${esc(cat)}</td>${periodosExibidos.map((p, i) => `<td class="num">${valDash(pivotDash.porCategoria[cat], p) ? formatCurrency(valDash(pivotDash.porCategoria[cat], p)) : '-'}${setaDash(pivotDash.porCategoria[cat], i, true)}</td>`).join('')}</tr>`).join('')}
-          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-alerta)">TOTAL DESPESAS</td>${periodosExibidos.map((p, i) => `<td class="num" style="color:var(--tab-alerta)">${formatCurrency(valDash(pivotDash.totalDespesas, p))}${setaDash(pivotDash.totalDespesas, i, true)}</td>`).join('')}</tr>
-          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-cab-txt)">RECEITA DAS ORDENS</td>${periodosExibidos.map((p, i) => `<td class="num" style="color:var(--tab-cab-txt)">${formatCurrency(valDash(pivotDash.receitaOrdens, p))}${setaDash(pivotDash.receitaOrdens, i, false)}</td>`).join('')}</tr>
-          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-sucesso)">LUCRO</td>${periodosExibidos.map((p, i) => {
-            // lucro negativo é prejuízo — alerta (vermelho), não o verde fixo
-            // de sempre (pedido do cliente 04/09/2026: "-R$ 427.322,69 deve
-            // estar em destaque vermelho").
-            const v = valDash(pivotDash.lucro, p);
-            const cor = v < 0 ? 'var(--tab-alerta)' : 'var(--tab-sucesso)';
-            return `<td class="num" style="color:${cor}">${formatCurrency(v)}${setaDash(pivotDash.lucro, i, false)}</td>`;
-          }).join('')}</tr>
-        </tbody>
-      </table></div>`;
+    const periodosParaResumo = todos ? periodosOrdenados : (periodosOrdenados.includes(rotuloPeriodo) ? [rotuloPeriodo] : []);
+    const resumoFinanceiro = !periodosParaResumo.length ? '' : `
+      <div class="section-heading sem-toggle">Resumo financeiro do ciclo<span class="sec-nota">${todos ? 'todos os ciclos importados, com total' : 'só o ciclo selecionado'}</span></div>
+      ${tabelaFinanceiraComparativa(periodosParaResumo, pivotDash, { comSetas: false, comTotal: todos })}`;
 
     if (!fech.length) {
       const ciclos = ciclosDoFechamento().lista;
@@ -6977,6 +6941,13 @@ function renderDashboard() {
           </div>
         </div>
       </div>
+      ${periodosOrdenados.length >= 2 ? `
+      <div class="section-heading sem-toggle">Comparativo entre Ciclos<span class="sec-nota">escolha 2 ou mais ciclos pra comparar</span></div>
+      <div class="toolbar" style="margin-bottom:0">
+        ${multiSelectField('dash-cmp-periodos', 'Ciclos', periodosOrdenados, { noun: 'ciclo(s)', allLabel: 'Todos os ciclos', preset: periodosOrdenados.slice(-2) })}
+        <button class="btn" id="dash-cmp-aplicar">Comparar</button>
+      </div>
+      <div id="dash-cmp-body" style="margin-top:12px;margin-bottom:1.5rem"></div>` : ''}
       <div class="section-heading sem-toggle">Produção por tipo de serviço<span class="sec-nota">${totalOrdens.toLocaleString('pt-BR')} ordens concluídas no ciclo</span></div>
       <div class="panel" style="margin-bottom:1.5rem"><div id="dash-prod-tipo"></div></div>
       ${painelValorGiga(itensGiga, { centralizar: true, nota: 'Contagem da aba RELATORIO (fechamento do ciclo) × valor de contrato por serviço.' })}
@@ -7065,6 +7036,25 @@ function renderDashboard() {
       </div>
       <div id="dash-complementar"></div>
     `;
+    // ---- Comparativo entre Ciclos: pedido do cliente 04/09/2026, separado
+    // do "Resumo financeiro do ciclo" (esse mostra só o escolhido no topo) —
+    // aqui a pessoa escolhe à mão 2 ou mais ciclos pra comparar lado a lado,
+    // com seta de tendência entre eles.
+    if (document.getElementById('dash-cmp-periodos')) {
+      const atualizarComparativoCiclos = () => {
+        const corpo = document.getElementById('dash-cmp-body');
+        const selecionados = getMultiSelectValues('dash-cmp-periodos');
+        if (selecionados.length < 2) { corpo.innerHTML = '<div class="empty">Selecione 2 ou mais ciclos pra comparar.</div>'; return; }
+        // mais novo pro mais antigo — mesma convenção da seta (compara com a PRÓXIMA coluna)
+        const ordenados = [...selecionados].sort((a, b) =>
+          String(datasDoPeriodoFolha(b).fim || '').localeCompare(String(datasDoPeriodoFolha(a).fim || '')));
+        corpo.innerHTML = tabelaFinanceiraComparativa(ordenados, pivotDash, { comSetas: true, comTotal: true });
+      };
+      wireMultiSelectField('dash-cmp-periodos', { noun: 'ciclo(s)', allLabel: 'Todos os ciclos' }, atualizarComparativoCiclos);
+      document.getElementById('dash-cmp-aplicar').addEventListener('click', atualizarComparativoCiclos);
+      atualizarComparativoCiclos();
+    }
+
     // produção por tipo de serviço — barras, com a contagem no fim de cada uma
     barsChart('dash-prod-tipo', tipos.map(t => ({
       label: t.rot, value: t.v, display: t.v.toLocaleString('pt-BR'),
@@ -12909,6 +12899,45 @@ function setaPill(x, y, invert) {
   // não só um círculo com a seta pelada).
   const pct = x ? ` ${formatPct(Math.abs((d / Math.abs(x)) * 100), 1)}` : '';
   return `<span class="cmp-seta ${bom ? 'bom' : 'ruim'}">${arrow}${pct}</span>`;
+}
+// Tabela Despesas/Receitas por categoria + TOTAL DESPESAS/RECEITA DAS
+// ORDENS/LUCRO, comparando os `periodos` passados (array de rótulos, na
+// ordem que devem aparecer da ESQUERDA pra DIREITA). Usada tanto no "Resumo
+// financeiro do ciclo" do Dashboard (1 período só, ou todos) quanto no novo
+// "Comparativo entre Ciclos" (2+ períodos escolhidos à mão) — pedido do
+// cliente 04/09/2026: ele queria os dois usos separados, não um só
+// misturando as duas coisas.
+// opts.comSetas: mostra a pastilha de tendência comparando cada coluna com
+// a PRÓXIMA do array — só faz sentido com `periodos` do mais novo pro mais
+// antigo. opts.comTotal: soma tudo numa coluna TOTAL no fim.
+function tabelaFinanceiraComparativa(periodos, pivotDash, opts = {}) {
+  if (!periodos.length || !pivotDash) return '';
+  const comSetas = !!opts.comSetas, comTotal = !!opts.comTotal;
+  const valDash = (obj, p) => (obj && obj[p]) || 0;
+  const setaDash = (obj, i, invert) => {
+    if (!comSetas) return '';
+    const anterior = periodos[i + 1];
+    if (!anterior) return '';
+    return ' ' + setaPill(valDash(obj, anterior), valDash(obj, periodos[i]), invert);
+  };
+  const somaTotal = obj => periodos.reduce((a, p) => a + valDash(obj, p), 0);
+  const celTotal = (obj, cor) => !comTotal ? '' : `<td class="num col-total"${cor ? ` style="color:${cor}"` : ''}>${formatCurrency(somaTotal(obj))}</td>`;
+  const categorias = pivotDash.porCategoria ? Object.keys(pivotDash.porCategoria).filter(c => periodos.some(p => pivotDash.porCategoria[c][p])) : [];
+  const totalLucro = somaTotal(pivotDash.lucro);
+  return `<div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table cmp-dash">
+    <thead><tr><th>Despesas / Receitas</th>${periodos.map(p => `<th class="num">${esc(p)}</th>`).join('')}${comTotal ? '<th class="num col-total">Total</th>' : ''}</tr></thead>
+    <tbody>
+      ${categorias.map(cat => `<tr><td class="cat-cell">${esc(cat)}</td>${periodos.map((p, i) => `<td class="num">${valDash(pivotDash.porCategoria[cat], p) ? formatCurrency(valDash(pivotDash.porCategoria[cat], p)) : '-'}${setaDash(pivotDash.porCategoria[cat], i, true)}</td>`).join('')}${celTotal(pivotDash.porCategoria[cat])}</tr>`).join('')}
+      <tr class="total-row"><td class="cat-cell" style="color:var(--tab-alerta)">TOTAL DESPESAS</td>${periodos.map((p, i) => `<td class="num" style="color:var(--tab-alerta)">${formatCurrency(valDash(pivotDash.totalDespesas, p))}${setaDash(pivotDash.totalDespesas, i, true)}</td>`).join('')}${celTotal(pivotDash.totalDespesas, 'var(--tab-alerta)')}</tr>
+      <tr class="total-row"><td class="cat-cell" style="color:var(--tab-cab-txt)">RECEITA DAS ORDENS</td>${periodos.map((p, i) => `<td class="num" style="color:var(--tab-cab-txt)">${formatCurrency(valDash(pivotDash.receitaOrdens, p))}${setaDash(pivotDash.receitaOrdens, i, false)}</td>`).join('')}${celTotal(pivotDash.receitaOrdens, 'var(--tab-cab-txt)')}</tr>
+      <tr class="total-row"><td class="cat-cell" style="color:var(--tab-sucesso)">LUCRO</td>${periodos.map((p, i) => {
+        // lucro negativo é prejuízo — alerta (vermelho), não o verde fixo de sempre
+        const v = valDash(pivotDash.lucro, p);
+        const cor = v < 0 ? 'var(--tab-alerta)' : 'var(--tab-sucesso)';
+        return `<td class="num" style="color:${cor}">${formatCurrency(v)}${setaDash(pivotDash.lucro, i, false)}</td>`;
+      }).join('')}${celTotal(pivotDash.lucro, totalLucro < 0 ? 'var(--tab-alerta)' : 'var(--tab-sucesso)')}</tr>
+    </tbody>
+  </table></div>`;
 }
 function diffMoney(x,y,invert) {
   const d = y-x; const sign = d>=0?'+':''; const arrow = d>=0?'▲':'▼';
