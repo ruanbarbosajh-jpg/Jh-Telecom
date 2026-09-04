@@ -381,6 +381,11 @@
   .holerite .q input.hol-edit { text-align: center; }
   input.hol-edit-txt { text-align: center; color: var(--text-muted); }
   .hol-editado { color: var(--warn-text); font-weight: 700; }
+  /* rótulo preenchido, como no modelo em papel: azul nos proventos, vinho nos
+     descontos, texto branco. É o que dá a cara do documento — sem isso ele
+     vira "mais uma tabela". Cor fixa de propósito, igual às faixas. */
+  .holerite td.rot-prov { background: #1b4d7a; color: #fff; font-weight: 600; }
+  .holerite td.rot-desc { background: #7a2020; color: #fff; font-weight: 600; }
   .hol-assina { margin-top: 26px; font-size: 10px; letter-spacing: .1em; color: var(--text-muted); }
   .hol-assina span { display: block; border-top: 1px solid var(--text-muted); width: 240px; margin-top: 30px; }
   .hol-data { margin-top: 10px; text-align: right; font-size: 10px; color: var(--text-muted); font-style: italic; }
@@ -406,28 +411,44 @@
       position: absolute; left: 0; top: 0; width: 100%;
       display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; align-items: start;
     }
-    #hol-area .holerite { break-inside: avoid; page-break-inside: avoid; }
+    /* o holerite sai INTEIRO ou vai pra folha seguinte. Antes o
+       break-inside estava só no bloco de fora, e as tabelas de dentro
+       quebravam mesmo assim — os PROVENTOS terminavam numa página e os
+       DESCONTOS começavam na outra, que foi o que o cliente viu. */
+    #hol-area .holerite {
+      break-inside: avoid; page-break-inside: avoid;
+      border: 1px solid #101828 !important; padding: 3mm 4mm !important;
+    }
+    #hol-area .holerite table, #hol-area .holerite tr,
+    #hol-area .holerite .hol-faixa { break-inside: avoid; page-break-inside: avoid; }
+    #hol-area .holerite .hol-faixa { break-after: avoid; page-break-after: avoid; }
     /* paleta de PAPEL — não depende do tema da tela */
     #hol-area .holerite {
       --card-bg: #fff; --bg-page: #fff; --border: #b9c2d2;
       --text-primary: #101828; --text-secondary: #33405a; --text-muted: #5b6780;
       --accent: #14487a; --success: #146c3a; --danger: #a11212; --radius: 0;
       border: none; max-width: none; margin: 0; padding: 0;
-      font-size: 10.5px; color: #101828; background: #fff;
+      font-size: 8px; line-height: 1.25; color: #101828; background: #fff;
     }
     #hol-area .holerite * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     #hol-area .holerite table { page-break-inside: avoid; margin-bottom: 2px; }
-    #hol-area .holerite th, #hol-area .holerite td { padding: 3px 6px; border-color: #b9c2d2; }
+    #hol-area .holerite th, #hol-area .holerite td { padding: 1.5px 4px; border-color: #b9c2d2; }
     /* as faixas do modelo em papel: azul nos proventos, vermelho nos descontos */
-    #hol-area .hol-faixa { margin: 9px 0 0; padding: 4px 6px; color: #fff !important; }
+    #hol-area .hol-faixa { margin: 4px 0 0; padding: 2px 5px; color: #fff !important; }
     #hol-area .hol-prov { background: #1b4d7a !important; }
     #hol-area .hol-desc { background: #7a2020 !important; }
     #hol-area .hol-tab thead th, #hol-area .hol-ind th { background: #eef2f8 !important; color: #33405a !important; }
+    #hol-area .holerite td.rot-prov { background: #1b4d7a !important; color: #fff !important; }
+    #hol-area .holerite td.rot-desc { background: #7a2020 !important; color: #fff !important; }
     #hol-area .hol-tab tbody tr.hol-total td { background: #eef2f8 !important; color: #101828 !important; font-weight: 700; }
     #hol-area .hol-fecho tr.hol-total td { color: #146c3a !important; }
-    #hol-area .hol-nome { margin: 9px 0 10px; }
-    #hol-area .hol-assina { margin-top: 16px; }
-    #hol-area .hol-assina span { margin-top: 20px; }
+    #hol-area .hol-topo { flex-direction: column; align-items: center; gap: 2px; border-bottom-width: 1px; padding-bottom: 6px; }
+    #hol-area .hol-marca { text-align: center; }
+    #hol-area .hol-nome { margin: 5px 0; text-align: center; font-size: 11px; }
+    #hol-area .hol-nome span { text-align: center; }
+    #hol-area .hol-assina { margin-top: 8px; }
+    #hol-area .hol-assina span { margin-top: 10px; width: 150px; }
+    #hol-area .hol-data { margin-top: 4px; }
     /* campo editável tem que sair como TEXTO no papel, não como caixa de
        formulário — no print anterior a borda do input aparecia em volta de
        cada número */
@@ -435,6 +456,10 @@
       border: none !important; background: transparent !important;
       color: #101828 !important; padding: 0 !important; width: auto !important;
     }
+    /* Calibrado medindo o holerite renderizado: com 8px e padding de 1,5px ele
+       fica em 182mm, e meia folha A4 DEITADA tem 194mm de altura útil. Antes,
+       com 10,5px, dava 271mm — nao cabia de jeito nenhum, e por isso ele
+       quebrava no meio por mais break-inside que tivesse. */
   }
   .modal-largo { width: min(1100px, 94vw); max-height: 88vh; overflow: auto; position: relative; }
   .mt-fechar {
@@ -13296,11 +13321,14 @@ function holeriteTecnicoHTML(linha) {
         data-centavos="${Math.round((valor || 0) * 100)}" value="${formatCurrency(valor || 0)}">`;
   const campoTexto = (campo, valor) => edit ? esc(valor || '')
     : `<input type="text" class="hol-edit hol-edit-txt" data-campo="${campo}" value="${esc(valor || '')}" placeholder="-">`;
-  const linhaServico = ([rot, k]) => `<tr><td>${rot}</td>
+  // No modelo em papel do cliente o RÓTULO de cada serviço/desconto é uma
+  // célula PREENCHIDA (azul nos proventos, vinho nos descontos) com texto
+  // branco, não texto solto — é o que dava a cara do documento.
+  const linhaServico = ([rot, k]) => `<tr><td class="rot-prov">${rot}</td>
       <td class="q">${campoQtd('q_' + k, contagem[k])}</td>
       <td class="v">${campoDin('v_' + k, valores[k])}</td></tr>`;
   const linhaDesconto = ([rot, campo, parcela, qtd]) => `<tr>
-      <td>${rot}</td><td class="q">${qtd !== null ? campoQtd(campo === 'desc_ifi' ? 'qtd_ifi' : 'qtd_irr', qtd) : ''}</td>
+      <td class="rot-desc">${rot}</td><td class="q">${qtd !== null ? campoQtd(campo === 'desc_ifi' ? 'qtd_ifi' : 'qtd_irr', qtd) : ''}</td>
       <td class="v">${campoDin(campo, campoManual(campo))}</td>
       <td class="p">${parcela ? campoTexto(parcela, manual[parcela] !== undefined ? manual[parcela] : linha[parcela]) : ''}</td></tr>`;
   const mes = janela.fim ? new Date(janela.fim + 'T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) : '';
