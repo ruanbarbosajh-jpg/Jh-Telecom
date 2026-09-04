@@ -6815,11 +6815,19 @@ function renderDashboard() {
     // recurso (não tem folha de escritório, imposto, aluguel da base…).
     const cadTem = temCadastroFin(rotuloPeriodo);
     const cadDespesa = cadTem ? FIN_CATEGORIAS.reduce((a, c) => a + (despesasDoPeriodoFin(rotuloPeriodo)[c] || 0), 0) : 0;
-    const cmpTem = !cadTem && !!(cmp && cmp.receitaOrdens && cmp.receitaOrdens[rotuloPeriodo] !== undefined);
-    const receitaFinal  = cadTem ? valorPagoGiga : (cmpTem ? cmp.receitaOrdens[rotuloPeriodo]  : valorPagoGiga);
+    const cmpTem = !cadTem && !!(cmp && cmp.totalDespesas && cmp.totalDespesas[rotuloPeriodo] !== undefined);
+    // AUDITORIA 04/09/2026: receita usa o fechamento (valorPagoGiga) sempre
+    // que ESTE ciclo tem fechamento importado — a planilha de Comparação é
+    // só uma foto de quando foi gerada e fica desatualizada se o Relatório
+    // Geral for reimportado depois (ver mesmo ajuste em pivotDoCadastroFin).
+    // Mas um ciclo antigo que só existe na planilha (fechamento daquele mês
+    // nunca foi reimportado) não tem `fech` nenhum — usar valorPagoGiga aí
+    // dava R$ 0,00 e apagava a receita real do histórico. Só troca de fonte
+    // quando há fechamento de verdade pra esse período.
+    const receitaFinal  = fech.length ? valorPagoGiga : (cmpTem ? cmp.receitaOrdens[rotuloPeriodo] : valorPagoGiga);
     const despesaFinal  = cadTem ? cadDespesa    : (cmpTem ? cmp.totalDespesas[rotuloPeriodo]  : despesasTotal);
     const lucroFinal    = receitaFinal - despesaFinal;
-    const fonteFin = cadTem ? 'cadastro do Financeiro' : (cmpTem ? 'planilha de Comparação' : 'fechamento por técnico');
+    const fonteFin = cadTem ? 'cadastro do Financeiro' : (cmpTem ? 'despesa da planilha de Comparação' + (fech.length ? ' (receita do fechamento por técnico)' : ' (sem fechamento importado pra esse ciclo — receita também da planilha)') : 'fechamento por técnico');
     const lucroTotal = lucroFinal;
 
     // ---- variação vs. ciclo ANTERIOR (só apresentação: usa os mesmos
@@ -12629,6 +12637,21 @@ function renderFinance() {
         Receita das ordens = soma de VALOR PAGO GIGA do fechamento deste ciclo (${(DB.fechamento || []).filter(f => overlaps(f.inicio, f.ate_o_dia, p.start, p.end)).length} técnico(s)).
         Total de Despesas e Lucro são calculados sozinhos conforme você digita.
       </p>
+      ${(() => {
+        // AUDITORIA 04/09/2026: sem cadastro, os campos abaixo nascem
+        // zerados — "Total de Despesas R$ 0,00" e "Lucro" igual à receita
+        // cheia, como se o ciclo não tivesse custo nenhum. Quando a planilha
+        // de Comparação já tem despesa pra esse período, avisa antes que a
+        // pessoa leia o R$ 0,00 como se fosse real.
+        const cmpAqui = DB.comparativoFinanceiro;
+        const temNaPlanilha = cmpAqui && cmpAqui.totalDespesas && cmpAqui.totalDespesas[rotulo] !== undefined;
+        if (temCadastroFin(rotulo) || !temNaPlanilha) return '';
+        return `<p style="font-size:12px;color:var(--warn-text);background:color-mix(in srgb, var(--warn-text) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn-text) 35%, transparent);border-radius:var(--r-sm);padding:10px 12px;margin:-6px 0 18px">
+          Este período ainda não tem nada cadastrado aqui — os campos abaixo estão zerados, então "Total de Despesas" e "Lucro" não refletem o ciclo de verdade.
+          A planilha de Comparação já tem despesa de <b>${formatCurrency(cmpAqui.totalDespesas[rotulo])}</b> pra ${esc(rotulo)} (é o que aparece no Dashboard).
+          Clique em <b>"Usar do Comparativo (Excel)"</b> abaixo pra trazer esses valores pro cadastro.
+        </p>`;
+      })()}
       <div class="fin-grade">${FIN_GRUPOS.map(grupoHtml).join('')}</div>
       ${podeEditarFinanceiro() ? `<div class="fin-salvar-barra">
         <button class="btn" id="fin-salvar">Atualizar fechamento</button>
@@ -14479,7 +14502,7 @@ function pivotDoCadastroFin() {
   const doCadastro = periodosDoCadastroFin().lista.filter(p => temCadastroFin(p.rotulo));
   const planilha = DB.comparativoFinanceiro;
   const doPivot = planilha ? planilha.periodos.filter(p => !doCadastro.some(c => c.rotulo === p)) : [];
-  if (!doCadastro.length) return planilha;
+  if (!doPivot.length && !doCadastro.length) return planilha;
   // ordem cronológica: mais antigo à esquerda, igual à planilha
   const periodos = [...doPivot, ...doCadastro.map(p => p.rotulo).reverse()];
   const porCategoria = {}, totalDespesas = {}, receitaOrdens = {}, lucro = {};
@@ -14490,8 +14513,20 @@ function pivotDoCadastroFin() {
       if (v !== undefined) põe(porCategoria, cat, per, v);
     });
     totalDespesas[per] = planilha.totalDespesas[per];
-    receitaOrdens[per] = planilha.receitaOrdens[per];
-    lucro[per] = planilha.lucro[per];
+    // AUDITORIA 04/09/2026: a "RECEITA DAS ORDENS" que a planilha de
+    // Comparação traz é uma FOTO de quando ela foi gerada — reimportar o
+    // Relatório Geral depois (linha de técnico corrigida, adicionada etc.)
+    // deixa esse número desatualizado, enquanto o fechamento (RELATORIO)
+    // já reflete o dado novo. "Receita — pago pela GIGA" é, por definição,
+    // "nunca digitada" (mesma regra de receitaDoPeriodoFin): prefere somar o
+    // fechamento de novo. MAS só quando esse período TEM fechamento
+    // importado — período antigo que só existe na planilha (nunca foi
+    // reimportado) usava R$ 0,00 aqui antes desse ajuste, apagando a
+    // receita real do histórico; nesse caso mantém o valor da planilha.
+    const { inicio, fim } = datasDoPeriodoFolha(per);
+    const temFechamento = inicio && fim && DB.fechamento.some(f => overlaps(f.inicio, f.ate_o_dia, inicio, fim));
+    receitaOrdens[per] = temFechamento ? receitaDoPeriodoFin(inicio, fim) : planilha.receitaOrdens[per];
+    lucro[per] = receitaOrdens[per] - totalDespesas[per];
   });
   doCadastro.forEach(p => {
     const d = despesasDoPeriodoFin(p.rotulo);
