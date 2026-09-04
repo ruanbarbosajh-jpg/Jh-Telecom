@@ -1246,11 +1246,15 @@
   .cmp-dash .cat-cell::before { content: ''; position: absolute; left: 6px; top: 50%; transform: translateY(-50%);
     width: 4px; height: 14px; border-radius: 2px; background: var(--warn-text); }
   .cmp-dash tr.total-row td.cat-cell::before { background: currentColor; }
-  .cmp-seta { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px;
-    border-radius: 50%; font-size: 10px; font-weight: 700; margin-left: 6px; vertical-align: -3px; line-height: 1; }
-  .cmp-seta.bom { background: color-mix(in srgb, var(--tab-sucesso) 22%, transparent); color: var(--tab-sucesso); }
-  .cmp-seta.ruim { background: color-mix(in srgb, var(--tab-alerta) 22%, transparent); color: var(--tab-alerta); }
-  .cmp-seta.igual { background: color-mix(in srgb, var(--tab-cab-txt) 22%, transparent); color: var(--tab-cab-txt); }
+  /* Tag discreta de tendência (pedido do cliente 04/09/2026: nem só um
+     círculo pelado com a seta, nem o texto corrido do diffBadge — uma
+     etiqueta pequena com seta + % de variação). */
+  .cmp-seta { display: inline-flex; align-items: center; gap: 2px; padding: 2px 7px;
+    border-radius: 999px; font-size: 10.5px; font-weight: 700; margin-left: 6px;
+    vertical-align: 1px; line-height: 1.5; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .cmp-seta.bom { background: color-mix(in srgb, var(--tab-sucesso) 20%, transparent); color: var(--tab-sucesso); }
+  .cmp-seta.ruim { background: color-mix(in srgb, var(--tab-alerta) 20%, transparent); color: var(--tab-alerta); }
+  .cmp-seta.igual { background: color-mix(in srgb, var(--tab-cab-txt) 20%, transparent); color: var(--tab-cab-txt); }
   /* coluna "Total do período selecionado" nos comparativos (Financeiro) —
      pedido do cliente: precisa de um design diferente pra diferenciar das
      colunas de cada período e da coluna de Variação ao lado. Borda nos dois
@@ -6526,10 +6530,12 @@ function renderDashboard() {
     <input type="hidden" id="dash-tech-a" value=""><input type="hidden" id="dash-tech-b" value="">
     <div class="dash-cabecalho">
       <h2>Painel de Gestão</h2>
-      <div class="field" style="margin:8px 0"><label>Ciclo</label><select id="dash-ciclo">
-        <option value="todos">— Todos os ciclos —</option>
-        ${ciclos.map(c => `<option value="${c.start}|${c.end}"${c.start === start && c.end === end ? ' selected' : ''}>${formatDate(c.start)} a ${formatDate(c.end)}</option>`).join('')}
-      </select></div>
+      <div class="toolbar" style="margin:10px 0 8px">
+        <div class="field"><label>Ciclo</label><select id="dash-ciclo">
+          <option value="todos">— Todos os ciclos —</option>
+          ${ciclos.map(c => `<option value="${c.start}|${c.end}"${c.start === start && c.end === end ? ' selected' : ''}>${formatDate(c.start)} a ${formatDate(c.end)}</option>`).join('')}
+        </select></div>
+      </div>
       <p id="dash-ciclo-desc"></p>
     </div>
     <div id="dash-body"></div>`;
@@ -6615,12 +6621,19 @@ function renderDashboard() {
     const resumoFinanceiro = !periodosExibidos.length ? '' : `
       <div class="section-heading sem-toggle">Resumo financeiro do ciclo<span class="sec-nota">comparado com os ciclos anteriores</span></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table cmp-dash">
-        <thead><tr><th>Despesas / Receitas</th>${periodosExibidos.map(p => `<th>${esc(p)}</th>`).join('')}</tr></thead>
+        <thead><tr><th>Despesas / Receitas</th>${periodosExibidos.map(p => `<th class="num">${esc(p)}</th>`).join('')}</tr></thead>
         <tbody>
-          ${categoriasDash.map(cat => `<tr><td class="cat-cell">${esc(cat)}</td>${periodosExibidos.map((p, i) => `<td>${valDash(pivotDash.porCategoria[cat], p) ? formatCurrency(valDash(pivotDash.porCategoria[cat], p)) : '-'}${setaDash(pivotDash.porCategoria[cat], i, true)}</td>`).join('')}</tr>`).join('')}
-          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-alerta)">TOTAL DESPESAS</td>${periodosExibidos.map((p, i) => `<td style="color:var(--tab-alerta)">${formatCurrency(valDash(pivotDash.totalDespesas, p))}${setaDash(pivotDash.totalDespesas, i, true)}</td>`).join('')}</tr>
-          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-cab-txt)">RECEITA DAS ORDENS</td>${periodosExibidos.map((p, i) => `<td style="color:var(--tab-cab-txt)">${formatCurrency(valDash(pivotDash.receitaOrdens, p))}${setaDash(pivotDash.receitaOrdens, i, false)}</td>`).join('')}</tr>
-          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-sucesso)">LUCRO</td>${periodosExibidos.map((p, i) => `<td style="color:var(--tab-sucesso)">${formatCurrency(valDash(pivotDash.lucro, p))}${setaDash(pivotDash.lucro, i, false)}</td>`).join('')}</tr>
+          ${categoriasDash.map(cat => `<tr><td class="cat-cell">${esc(cat)}</td>${periodosExibidos.map((p, i) => `<td class="num">${valDash(pivotDash.porCategoria[cat], p) ? formatCurrency(valDash(pivotDash.porCategoria[cat], p)) : '-'}${setaDash(pivotDash.porCategoria[cat], i, true)}</td>`).join('')}</tr>`).join('')}
+          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-alerta)">TOTAL DESPESAS</td>${periodosExibidos.map((p, i) => `<td class="num" style="color:var(--tab-alerta)">${formatCurrency(valDash(pivotDash.totalDespesas, p))}${setaDash(pivotDash.totalDespesas, i, true)}</td>`).join('')}</tr>
+          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-cab-txt)">RECEITA DAS ORDENS</td>${periodosExibidos.map((p, i) => `<td class="num" style="color:var(--tab-cab-txt)">${formatCurrency(valDash(pivotDash.receitaOrdens, p))}${setaDash(pivotDash.receitaOrdens, i, false)}</td>`).join('')}</tr>
+          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-sucesso)">LUCRO</td>${periodosExibidos.map((p, i) => {
+            // lucro negativo é prejuízo — alerta (vermelho), não o verde fixo
+            // de sempre (pedido do cliente 04/09/2026: "-R$ 427.322,69 deve
+            // estar em destaque vermelho").
+            const v = valDash(pivotDash.lucro, p);
+            const cor = v < 0 ? 'var(--tab-alerta)' : 'var(--tab-sucesso)';
+            return `<td class="num" style="color:${cor}">${formatCurrency(v)}${setaDash(pivotDash.lucro, i, false)}</td>`;
+          }).join('')}</tr>
         </tbody>
       </table></div>`;
 
@@ -12888,10 +12901,14 @@ function diffBadge(x,y,invert) {
 function setaPill(x, y, invert) {
   if (!x && x !== 0) return '';
   const d = y - x;
-  if (d === 0) return '<span class="cmp-seta igual">=</span>';
+  if (d === 0) return '<span class="cmp-seta igual">= 0,0%</span>';
   const arrow = d > 0 ? '▲' : '▼';
   const bom = invert ? d < 0 : d > 0;
-  return `<span class="cmp-seta ${bom ? 'bom' : 'ruim'}">${arrow}</span>`;
+  // % só dá pra calcular com base != 0 (senão a variação é infinita) — sem
+  // base, mostra só a seta (pedido do cliente 04/09/2026: virou tag com %,
+  // não só um círculo com a seta pelada).
+  const pct = x ? ` ${formatPct(Math.abs((d / Math.abs(x)) * 100), 1)}` : '';
+  return `<span class="cmp-seta ${bom ? 'bom' : 'ruim'}">${arrow}${pct}</span>`;
 }
 function diffMoney(x,y,invert) {
   const d = y-x; const sign = d>=0?'+':''; const arrow = d>=0?'▲':'▼';
