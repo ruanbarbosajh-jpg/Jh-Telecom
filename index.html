@@ -350,6 +350,10 @@
   input.folha-edit-moeda.tem-valor:focus { border-color: var(--warn-text); }
   /* "Parcela X" (2/3, 1/1) — texto curto, cor neutra (não é dinheiro) */
   input.folha-edit-parcela { text-align: center; }
+  /* Linha com edição pendente (Salvar/Descartar alterações da Folha) — faixa
+     fina na borda esquerda avisa qual linha tem alteração ainda não gravada,
+     sem precisar de uma coluna extra só pra isso. */
+  table.data-table tr.linha-nao-salva > td:first-child { box-shadow: inset 3px 0 0 var(--warn-text); }
   /* Linha intercalada foi tentada em 03/09/2026 e revertida em 04/09/2026 —
      o cliente achou visualmente carregado ("mantenha tudo escuro mesmo sem
      intercalar"). Só cabeçalho e linha de total continuam com cor própria
@@ -7375,11 +7379,15 @@ const CAMPOS_TODO_DESCONTO_FOLHA = [...CAMPOS_MATERIAL_FOLHA, 'desc_ifi', 'desc_
 // VOLTA pra tela: bônus e desconto são dinheiro, não pode "parecer salvo" sem
 // estar. Desconto de material recalcula TOTAL DESCONTOS/TOTAL A RECEBER junto,
 // senão as duas colunas ficavam com o valor antigo da planilha.
-async function salvarCampoFolha(tecnico, periodo, campo, valor) {
-  const key = `${tecnico}|${periodo}`;
-  const idx = DB_INDEX.folhaPagamento.get(key);
-  if (idx === undefined) return { ok: false, error: { message: 'Linha da folha não encontrada (tecnico/período).' } };
-  const linha = { ...DB.folhaPagamento[idx], [campo]: valor };
+// Recalcula os campos DERIVADOS de uma linha da folha depois de mudar um
+// campo digitável (total_descontos/total_receber pros descontos e aluguel;
+// valor_total_ordens/desconto de retorno pro bônus) — SEM gravar em lugar
+// nenhum. Extraído de salvarCampoFolha pra poder reaproveitar exatamente a
+// mesma conta na PRÉVIA local (tabela + holerite) antes de "Salvar
+// alterações" persistir de verdade — ver o bloco de edição em
+// renderFolhaPagamento.
+function recalcularCampoFolha(linhaAtual, campo, valor) {
+  const linha = { ...linhaAtual, [campo]: valor };
   // aluguel e empréstimo também mexem no total a receber (são provento — ver
   // totalReceberFolha), por isso entram na mesma lista de campos que forçam o
   // recálculo do fecho da linha
@@ -7391,9 +7399,9 @@ async function salvarCampoFolha(tecnico, periodo, campo, valor) {
   // o indicador bater — era exatamente esse o pedido) — o valor das ordens
   // muda junto: faixa "d26" quando vira APTO, "normal" quando vira INAPTO.
   if (campo === 'bonus') {
-    const janela = datasDoPeriodoFolha(periodo);
+    const janela = datasDoPeriodoFolha(linha.periodo);
     if (janela.inicio && janela.fim) {
-      linha.valor_total_ordens = valorOrdensDoPeriodo(tecnico, janela.inicio, janela.fim, valor === 'APTO');
+      linha.valor_total_ordens = valorOrdensDoPeriodo(linha.tecnico, janela.inicio, janela.fim, valor === 'APTO');
       // o DESCONTO do retorno acompanha a mesma faixa (ver precoRetornoDoTecnico):
       // virar APTO sobe o valor da ordem E o valor de cada retorno. Sem isto, o
       // técnico promovido a APTO recebia pela faixa de 26 dias mas continuava
@@ -7401,13 +7409,29 @@ async function salvarCampoFolha(tecnico, periodo, campo, valor) {
       aplicarDescontoRetorno(linha, janela);
     }
   }
-  DB.folhaPagamento[idx] = linha;
-  if (!supa) return { ok: true, offline: true, linha };
+  return linha;
+}
+// Grava a linha INTEIRA da folha (tecnico+período) como está agora — chamada
+// pelo botão "Salvar alterações" em renderFolhaPagamento, uma vez por linha
+// que tiver campo pendente. A linha já chega com todo campo derivado
+// recalculado (recalcularCampoFolha foi aplicado a cada edição, na hora, só
+// que sem persistir) — aqui é só gravar o estado atual dela.
+async function salvarLinhaFolha(linha) {
+  const idx = DB_INDEX.folhaPagamento.get(`${linha.tecnico}|${linha.periodo}`);
+  if (idx === undefined) return { ok: false, error: { message: 'Linha da folha não encontrada (tecnico/período).' } };
+  // Cópia, não a mesma referência da linha do ranking — senão, depois de
+  // salvar uma vez, DB.folhaPagamento[idx] e a linha na tela viram o MESMO
+  // objeto, e o próximo campo editado (antes de salvar de novo) volta a
+  // mutar DB.folhaPagamento na hora, igual o bug que a cópia em
+  // renderFolhaPagamento (const ranking = rows.map(r => ({...r}))...) já
+  // tinha corrigido pro primeiro salvamento.
+  DB.folhaPagamento[idx] = { ...linha };
+  if (!supa) return { ok: true, offline: true };
   try {
     const { error } = await supa.from('folha_pagamento').upsert(linha, { onConflict: 'tecnico,periodo' });
-    if (error) return { ok: false, error, linha };
-    return { ok: true, linha };
-  } catch (e) { return { ok: false, error: e, linha }; }
+    if (error) return { ok: false, error };
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e }; }
 }
 // Soma o valor das ordens (o que a JH paga ao técnico) das ordens CONCLUÍDAS
 // dele num período, usando a faixa de preço "d26" quando ele está APTO ao
@@ -13165,7 +13189,13 @@ function renderFolhaPagamento(modo) {
     const dentroIfi = rows.filter(r=>pct(r.ifi_pct, r) <= IFI_TARGET).length;
     const dentroIrr = rows.filter(r=>pct(r.irr_pct, r) <= IRR_TARGET).length;
 
-    const ranking = [...rows].sort((a,b)=>b.total_receber-a.total_receber);
+    // Cópia rasa de cada linha, sempre — alguns caminhos acima (retorno_origem
+    // 'giga', sem alteração no autoRetorno) devolvem a MESMA referência de
+    // DB.folhaPagamento[i] pra evitar trabalho à toa. Sem essa cópia aqui, o
+    // "Descartar alterações" da edição da tabela (mais abaixo) não descartava
+    // nada: `Object.assign` numa linha do ranking já estaria mutando
+    // DB.folhaPagamento direto, antes mesmo de "Salvar" ser clicado.
+    const ranking = rows.map(r => ({ ...r })).sort((a,b)=>b.total_receber-a.total_receber);
     const topGanham = [...ranking].map(r=>({label:r.tecnico, value:r.total_receber, display:formatCurrency(r.total_receber), color:'#22c55e'}));
     const bottomGanham = [...ranking].sort((a,b)=>a.total_receber-b.total_receber).map(r=>({label:r.tecnico, value:r.total_receber, display:formatCurrency(r.total_receber), color:'#ef4444'}));
 
@@ -13218,6 +13248,11 @@ function renderFolhaPagamento(modo) {
             : 'Números como vieram na planilha da folha. Preencha as datas de "Retornos IFI/IRR" na barra de cima para recontar pelos retornos baixados num intervalo.'}
       </p>
       ${renderFolhaCompleta(ranking, pct, IFI_TARGET, IRR_TARGET)}
+      ${(podeEditarFolhaPagamento() || podeEditarFolhaMaterial()) ? `<div class="fin-salvar-barra">
+        <button class="btn" id="folha-salvar" disabled>Salvar alterações</button>
+        <button class="btn-secundario" id="folha-descartar" disabled>Descartar alterações</button>
+        <span id="folha-edit-msg" style="font-size:13px;color:var(--text-muted)"></span>
+      </div>` : ''}
       <div class="section-heading">Holerite<span class="sec-nota">extrato de serviços do técnico, no formato que vai pra assinatura</span></div>
       <div class="panel" style="margin-bottom:1.5rem">
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:6px">
@@ -13293,55 +13328,52 @@ function renderFolhaPagamento(modo) {
     }
 
     // ---- edição dos campos da folha (dias/bônus: RH+Analista; material: +Almox) ----
-    // Sempre grava no registro RAW (tecnico+período) por baixo, mesmo com o
-    // filtro de retornos ativo — "recalcular pelos retornos" é uma LENTE sobre
-    // os números, editar tem que valer na fonte, não no que está na tela.
+    // Pedido do cliente 04/09/2026: editar na tabela não grava mais na hora —
+    // fica PENDENTE (na própria linha do `ranking`, em memória) até a pessoa
+    // clicar "Salvar alterações", com "Descartar alterações" pra voltar tudo
+    // pro que já estava gravado. Antes disso cada campo salvava sozinho no
+    // "change"/blur, sem chance de revisar um lote de edições antes de valer.
     //
-    // NUNCA chama load() de novo aqui: recarregar a tela inteira depois de
-    // CADA edição fazia a página voltar pro topo e a tabela "tremer" (a
-    // linha em que a pessoa estava editando sumia da vista). Em vez disso,
-    // corrige só a célula que mudou, na própria linha — TOTAL DESCONTOS e
-    // TOTAL A RECEBER ficam levemente desatualizados no RANKING/gráficos até
-    // a próxima vez que a pessoa clicar "Filtrar", o que é uma troca melhor
-    // que a tela pular sozinha a cada campo editado.
-    // ACHADO NA AUDITORIA DE 04/09/2026: editar bônus/dias/desconto na tabela
-    // atualizava só a CÉLULA da própria linha (ver comentário grande acima) —
-    // mas o Holerite, logo abaixo, lê de `ranking`, um array separado que
-    // ficava com a cópia ANTIGA da linha. Resultado: a tabela mostrava um
-    // total e o holerite do mesmo técnico, na mesma tela, mostrava outro —
-    // exatamente o tipo de contradição que o cliente já reportou uma vez
-    // (ver commit 6adea58). `linha` aqui é o registro FRESCO que
-    // salvarCampoFolha devolve; substitui a entrada correspondente dentro de
-    // `ranking` (mesma referência que popula o seletor do holerite) e manda
-    // redesenhar — se não tiver holerite na tela, desenharHolerite() não faz
-    // nada de mais (ver a guarda `if (!area || !selHol) return`).
-    const sincronizarHolerite = linha => {
-      const i = ranking.findIndex(x => x.tecnico === linha.tecnico && x.periodo === linha.periodo);
-      if (i >= 0) ranking[i] = linha;
-      if (typeof desenharHolerite === 'function') desenharHolerite();
+    // `pendentes` é um Map linha-do-ranking → <tr> (a MESMA referência que
+    // popula o holerite logo abaixo — por isso mutar a linha aqui já reflete
+    // lá, sem precisar de um "sincronizarHolerite" separado como antes).
+    // NUNCA chama load() de novo num campo isolado: recarregar a tela inteira
+    // a cada tecla fazia a página voltar pro topo e a tabela "tremer" — só o
+    // botão "Descartar" (uma ação deliberada, não uma tecla) recarrega tudo.
+    const pendentes = new Map();
+    const btnSalvar = document.getElementById('folha-salvar');
+    const btnDescartar = document.getElementById('folha-descartar');
+    const msgEdit = document.getElementById('folha-edit-msg');
+    const atualizarBarraSalvar = () => {
+      if (!btnSalvar) return;
+      const n = pendentes.size;
+      btnSalvar.disabled = !n;
+      btnDescartar.disabled = !n;
+      msgEdit.innerHTML = n ? `<span style="color:var(--warn-text)">${n} linha(s) com alteração não salva.</span>` : '';
     };
+    const marcarPendente = (linha, tr) => {
+      pendentes.set(linha, tr);
+      tr.classList.add('linha-nao-salva');
+      atualizarBarraSalvar();
+    };
+    const desenharHoleriteSeAberto = () => { if (typeof desenharHolerite === 'function') desenharHolerite(); };
     document.querySelectorAll('select.folha-edit[data-campo="bonus"]').forEach(sel => {
       const corDoValor = () => sel.value === 'APTO' ? 'var(--success)' : 'var(--danger)';
-      sel.addEventListener('change', async () => {
-        sel.style.color = corDoValor(); // reage na hora, não espera o servidor
+      sel.addEventListener('change', () => {
+        sel.style.color = corDoValor();
         const { tecnico, periodo } = sel.dataset;
-        sel.disabled = true;
-        const r = await salvarCampoFolha(tecnico, periodo, 'bonus', sel.value);
-        sel.disabled = false;
-        if (!r.ok) { toast('Não consegui salvar: ' + ((r.error && r.error.message) || 'erro desconhecido'), 'erro'); return; }
-        toast('Salvo.', 'ok', 1500);
+        const linha = ranking.find(x => x.tecnico === tecnico && x.periodo === periodo);
+        if (!linha) return;
+        Object.assign(linha, recalcularCampoFolha(linha, 'bonus', sel.value));
         // bônus muda a faixa de preço das ordens (APTO usa o valor de 26 dias,
         // INAPTO usa o padrão) — corrige Valor Ordens e Total a Receber só
-        // NESSA linha, sem recarregar a tela (ver o comentário grande acima)
+        // NESSA linha, sem recarregar a tela
         const tr = sel.closest('tr');
         const tdValor = tr.querySelector('.folha-valor-ordens'), tdReceber = tr.querySelector('.folha-total-receber');
-        if (tdValor) tdValor.textContent = formatCurrency(r.linha.valor_total_ordens);
-        if (tdReceber) tdReceber.textContent = formatCurrency(r.linha.total_receber);
-        // ACHADO NA AUDITORIA DE 04/09/2026: só corrigia Valor Ordens (o
-        // agregado) — a quebra POR TIPO ("Valor Mud. Cômodo", "Valor Reparo
-        // Corretivo" etc., cada uma com seu próprio valor de 26 dias) ficava
-        // com o preço antigo do bônus até a pessoa apertar "Filtrar" de novo.
-        // Recalcula na hora com o mesmo cálculo de renderFolhaCompleta.
+        if (tdValor) tdValor.textContent = formatCurrency(linha.valor_total_ordens);
+        if (tdReceber) tdReceber.textContent = formatCurrency(linha.total_receber);
+        // a quebra POR TIPO ("Valor Mud. Cômodo", "Valor Reparo Corretivo"
+        // etc., cada uma com seu próprio valor de 26 dias) muda junto
         const janela = datasDoPeriodoFolha(periodo);
         const ordensDoTecnico = DB.producao.filter(p => isConcluido(p.status) && normalizeHeader(p.recurso) === normalizeHeader(tecnico));
         const porTipo = quebraPorTipoDoTecnico(ordensDoTecnico, janela, sel.value === 'APTO');
@@ -13349,33 +13381,32 @@ function renderFolhaPagamento(modo) {
           const v = porTipo['v_' + span.dataset.tipo];
           span.textContent = v ? formatCurrency(v) : '-';
         });
-        sincronizarHolerite(r.linha);
+        marcarPendente(linha, tr);
+        desenharHoleriteSeAberto();
       });
     });
     document.querySelectorAll('input.folha-edit[data-campo="dias_trab"]').forEach(inp => {
-      inp.addEventListener('change', async () => {
+      inp.addEventListener('change', () => {
         const valor = Math.max(0, parseInt(inp.value, 10) || 0);
         inp.value = valor;
         const { tecnico, periodo } = inp.dataset;
-        inp.disabled = true;
-        const r = await salvarCampoFolha(tecnico, periodo, 'dias_trab', valor);
-        inp.disabled = false;
-        if (!r.ok) { toast('Não consegui salvar: ' + ((r.error && r.error.message) || 'erro desconhecido'), 'erro'); return; }
-        toast('Salvo.', 'ok', 1500);
-        sincronizarHolerite(r.linha);
+        const linha = ranking.find(x => x.tecnico === tecnico && x.periodo === periodo);
+        if (!linha) return;
+        Object.assign(linha, recalcularCampoFolha(linha, 'dias_trab', valor));
+        marcarPendente(linha, inp.closest('tr'));
+        desenharHoleriteSeAberto();
       });
     });
-    // "Parcela X" — texto livre, não mexe em nenhum total (só salva).
+    // "Parcela X" — texto livre, não mexe em nenhum total (só marca pendente).
     document.querySelectorAll('input.folha-edit-parcela').forEach(inp => {
-      inp.addEventListener('change', async () => {
+      inp.addEventListener('change', () => {
         const valor = inp.value.trim();
         const { tecnico, periodo, campo } = inp.dataset;
-        inp.disabled = true;
-        const r = await salvarCampoFolha(tecnico, periodo, campo, valor);
-        inp.disabled = false;
-        if (!r.ok) { toast('Não consegui salvar: ' + ((r.error && r.error.message) || 'erro desconhecido'), 'erro'); return; }
-        toast('Salvo.', 'ok', 1500);
-        sincronizarHolerite(r.linha);
+        const linha = ranking.find(x => x.tecnico === tecnico && x.periodo === periodo);
+        if (!linha) return;
+        Object.assign(linha, recalcularCampoFolha(linha, campo, valor));
+        marcarPendente(linha, inp.closest('tr'));
+        desenharHoleriteSeAberto();
       });
     });
     // Descontos em R$: formata a cada tecla digitada (técnica de "dígitos viram
@@ -13391,24 +13422,54 @@ function renderFolhaPagamento(modo) {
     };
     document.querySelectorAll('input.folha-edit-moeda').forEach(inp => {
       inp.addEventListener('input', () => formatarMoedaInput(inp));
-      inp.addEventListener('change', async () => {
+      inp.addEventListener('change', () => {
         const valor = (parseInt(inp.dataset.centavos || '0', 10)) / 100;
         const { tecnico, periodo, campo } = inp.dataset;
-        inp.disabled = true;
-        const r = await salvarCampoFolha(tecnico, periodo, campo, valor);
-        inp.disabled = false;
-        if (!r.ok) { toast('Não consegui salvar: ' + ((r.error && r.error.message) || 'erro desconhecido'), 'erro'); return; }
-        toast('Salvo.', 'ok', 1500);
-        // só a linha editada: TOTAL DESCONTOS e TOTAL A RECEBER dessa mesma
-        // linha (o backend já recalculou os dois — salvarCampoFolha devolve
-        // a linha inteira em r.linha)
+        const linha = ranking.find(x => x.tecnico === tecnico && x.periodo === periodo);
+        if (!linha) return;
+        Object.assign(linha, recalcularCampoFolha(linha, campo, valor));
+        // só a linha editada: TOTAL DESCONTOS e TOTAL A RECEBER dessa mesma linha
         const tr = inp.closest('tr');
         const tdDesc = tr.querySelector('.folha-total-descontos'), tdReceber = tr.querySelector('.folha-total-receber');
-        if (tdDesc) tdDesc.textContent = formatCurrency(r.linha.total_descontos);
-        if (tdReceber) tdReceber.textContent = formatCurrency(r.linha.total_receber);
-        sincronizarHolerite(r.linha);
+        if (tdDesc) tdDesc.textContent = formatCurrency(linha.total_descontos);
+        if (tdReceber) tdReceber.textContent = formatCurrency(linha.total_receber);
+        marcarPendente(linha, tr);
+        desenharHoleriteSeAberto();
       });
     });
+    if (btnSalvar) btnSalvar.addEventListener('click', async () => {
+      btnSalvar.disabled = true; btnDescartar.disabled = true;
+      msgEdit.textContent = 'Salvando…';
+      const entradas = [...pendentes.entries()];
+      const resultados = await Promise.all(entradas.map(async ([linha]) => ({ linha, r: await salvarLinhaFolha(linha) })));
+      let falhas = 0;
+      resultados.forEach(({ linha, r }) => {
+        if (r.ok) {
+          const tr = pendentes.get(linha);
+          if (tr) tr.classList.remove('linha-nao-salva');
+          pendentes.delete(linha);
+        } else falhas++;
+      });
+      // atualiza só os botões (habilita/desabilita pelo que sobrou em
+      // `pendentes`) — NÃO chama atualizarBarraSalvar() aqui: ela também
+      // reescreve a mensagem, e apagaria o "salvo"/"não consegui" que acabou
+      // de ser escrito embaixo.
+      btnSalvar.disabled = !pendentes.size;
+      btnDescartar.disabled = !pendentes.size;
+      if (falhas) {
+        msgEdit.innerHTML = `<span style="color:var(--danger)">${falhas} linha(s) não consegui salvar no servidor. Tente de novo.</span>`;
+        toast(`${falhas} linha(s) não salvaram no servidor.`, 'erro');
+      } else {
+        msgEdit.innerHTML = `<span style="color:var(--success)">${entradas.length} linha(s) salva(s).</span>`;
+        toast(`${entradas.length} alteração(ões) salva(s).`, 'ok', 2000);
+      }
+    });
+    if (btnDescartar) btnDescartar.addEventListener('click', () => {
+      if (!pendentes.size) return;
+      if (!confirm(`Descartar ${pendentes.size} linha(s) com alteração não salva? Os campos voltam pro que já estava gravado.`)) return;
+      load();
+    });
+    atualizarBarraSalvar();
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'resumo', label: 'Resumo financeiro e indicadores' },
