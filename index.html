@@ -10832,6 +10832,7 @@ function renderGestaoPresenca() {
       ${multiCityField('gp-cidades', 'Cidades')}
       ${podeEditarPresenca() ? '<button type="button" class="btn" id="gp-add-tec">+ Técnico</button><button type="button" class="btn" id="gp-repetir" title="Copia o status de ontem pra hoje de quem ainda não tem status hoje">Repetir dia anterior</button><button type="button" class="btn" id="gp-marcar-todos" title="Marca hoje como Presente pra todo mundo filtrado">Marcar todos presentes</button>' : ''}
       <button type="button" class="btn" id="gp-exportar">Exportar Excel</button>
+      <button type="button" class="btn-export-img" id="gp-img">🖼 Gerar imagem</button>
       <button type="button" class="btn" id="f-apply">Filtrar</button>
     </div>
     <div id="gp-body"></div>`;
@@ -10844,6 +10845,15 @@ function renderGestaoPresenca() {
     const cab = ['Técnico', 'Cidade', 'Supervisor', ...dias.map(d => formatDate(d))];
     const linhas = roster.map(t => [t.tecnico, t.cidade, t.supervisor || '-', ...dias.map(d => { const s = statusDe(t.tecnico, d); return s ? `${s} - ${STATUS_PRESENCA[s].label}` : ''; })]);
     exportarQuadroPresenca(`presenca-tecnicos-${dias[0]}-a-${dias[6]}`, cab, linhas);
+  });
+  // Pedido do cliente 04/09/2026: imagem do QUADRO (não da tela toda — os
+  // painéis de resumo/histórico abaixo não interessam pra quem só quer
+  // mandar "quem tá de folga essa semana" no zap). Mesma função das outras
+  // telas (Holerite, Frota): capturarElementoComoImagem já troca os <select>
+  // de status por texto no CLONE, então a imagem sai com o nome do status
+  // ("P", "FOLGA"...), não com a caixinha de formulário vazia.
+  document.getElementById('gp-img').addEventListener('click', () => {
+    capturarElementoComoImagem(document.getElementById('gp-quadro'), `presenca-tecnicos-${dias[0]}-a-${dias[6]}`);
   });
   if (podeEditarPresenca()) {
     document.getElementById('gp-add-tec').addEventListener('click', () => abrirModalTecnico());
@@ -10880,7 +10890,7 @@ function renderGestaoPresenca() {
     }
     body.innerHTML = `
       <div id="gp-metrics" style="margin-bottom:1.5rem"></div>
-      <div class="panel" style="margin-bottom:1.5rem;overflow:auto">
+      <div class="panel" id="gp-quadro" style="margin-bottom:1.5rem;overflow:auto">
         <div class="section-heading" style="margin-top:0">Quadro de presença — ${formatDate(dias[0])} a ${formatDate(dias[6])}</div>
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
           ${statusKeys.map(k => `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:14px"><span style="width:10px;height:10px;border-radius:3px;background:${STATUS_PRESENCA[k].cor};display:inline-block"></span>${k} — ${STATUS_PRESENCA[k].label}</span>`).join('')}
@@ -11247,6 +11257,7 @@ function renderGestaoPresencaEscritorio() {
       <button type="button" class="btn" id="ge-next" title="7 dias depois">7 dias ▶</button>
       <button type="button" class="btn" id="ge-hoje" title="Volta a semana pra hoje">Hoje</button>
       ${podeEditarPresencaEscritorio() ? '<button type="button" class="btn" id="ge-add-pessoa">+ Pessoa</button>' : ''}
+      <button type="button" class="btn-export-img" id="ge-img">🖼 Gerar imagem</button>
       <button type="button" class="btn" id="f-apply">Filtrar</button>
     </div>
     <div id="ge-body"></div>`;
@@ -11255,6 +11266,10 @@ function renderGestaoPresencaEscritorio() {
   document.getElementById('ge-next').addEventListener('click', () => { const el = document.getElementById('ge-inicio'); el.value = isoAddDias(el.value, 7); load(); });
   document.getElementById('ge-hoje').addEventListener('click', () => { document.getElementById('ge-inicio').value = hoje; load(); });
   if (podeEditarPresencaEscritorio()) document.getElementById('ge-add-pessoa').addEventListener('click', () => abrirModalPessoaEscritorio());
+  // mesmo botão da Presença — Técnicos: imagem só do quadro, ver comentário lá.
+  document.getElementById('ge-img').addEventListener('click', () => {
+    capturarElementoComoImagem(document.getElementById('ge-quadro'), `presenca-escritorio-${dias[0]}-a-${dias[6]}`);
+  });
   let dias = [], pessoas = [];
   // campo 'status' (todo mundo) ou 'turno' (só atendente, só fim de semana)
   const statusDe = (pessoa, data, campo) => {
@@ -11319,7 +11334,7 @@ function renderGestaoPresencaEscritorio() {
     }
     body.innerHTML = `
       <div id="ge-metrics" style="margin-bottom:1.5rem"></div>
-      <div class="panel" style="margin-bottom:1.5rem;overflow:auto">
+      <div class="panel" id="ge-quadro" style="margin-bottom:1.5rem;overflow:auto">
         <div class="section-heading" style="margin-top:0">Quadro de presença — ${formatDate(dias[0])} a ${formatDate(dias[6])}</div>
         <div class="table-wrap"><table class="data-table tab-col1-fixa">
           <thead>
