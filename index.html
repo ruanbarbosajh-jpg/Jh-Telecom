@@ -2383,9 +2383,9 @@ const ROUTE_PERMISSIONS = {
   //   • IFI/IRR e PRAZO inteiro — inclusive a Parcial do Dia, que era bloqueada
   //     ("acompanham pela PCR") e voltou a ser liberada.
   //   • Frota continua liberada; Pedágio e Comparativo Financeiro, não.
-  //   • Presença: Supervisor/Coordenador (admin) edita a de TÉCNICOS; Thaís e
-  //     Rebeca editam a do ESCRITÓRIO. Cada lado só olha a tela do outro
-  //     (ver podeEditarPresenca / NOMES_ESCRITORIO_EDITAM e podeAcessar).
+  //   • Presença: Matheus e Sebastião editam a de TÉCNICOS; Thaís e Rebeca
+  //     editam a do ESCRITÓRIO. Cada dupla só olha a tela da outra (ver
+  //     NOMES_PRESENCA_EDITAM / NOMES_ESCRITORIO_EDITAM e podeAcessar).
   admin: ['import', 'dashboard', 'toll', 'finance', 'comparisons', 'folha',
           'retornosgiga', 'relatoriofin', 'folhaescritorio'],
   // RH: "no momento" (28/08/2026, pedido do cliente) só enxerga Pedágio —
@@ -2396,8 +2396,8 @@ const ROUTE_PERMISSIONS = {
   // RH (revisado 01/09/2026, pedido do cliente): volta a ter acesso amplo —
   // Produção, Acompanhamento Técnico, IFI/IRR, PRAZO inteiro,
   // Frota e Pedágio. Presença (técnicos e
-  // escritório) ele VÊ mas não edita — RH não é nem 'admin' nem 'analista'
-  // (podeEditarPresenca) nem está em NOMES_ESCRITORIO_EDITAM.
+  // escritório) ele VÊ mas não edita — a edição é por nome, e nenhum nome do RH
+  // está em NOMES_PRESENCA_EDITAM / NOMES_ESCRITORIO_EDITAM.
   // Financeiro travado pro Analista (03/09/2026, pedido do cliente): saiu
   // 'finance', 'folha' e 'comparisons'. A Folha era a tela onde o RH lançava
   // dias trabalhados e bônus (podeEditarFolhaPagamento) — combine com o
@@ -2495,20 +2495,19 @@ function podeEditarFolhaMaterial() {
 }
 // Gestão de Presença: regra mais restrita que o resto do sistema — não é mais
 // "todo mundo menos Escritório" (pedido do cliente revisado). Marcar presença
-// / cadastrar técnico / editar cidade e supervisor no dia a dia é do perfil
-// Supervisor/Coordenador (admin) inteiro e do Analista — não só de Matheus e
-// Sebastião por nome (pedido do cliente 04/09/2026: qualquer conta de
-// Supervisor/Coordenador precisa editar, não só essas duas). Tirar técnico do
-// quadro continua só do Analista (ver podeExcluirTecnicoPresenca) — permissão
-// separada de propósito, pra ninguém apagar gente por engano.
-function podeEditarPresenca() { return !!currentUser && (currentUser.role === 'analista' || currentUser.role === 'admin'); }
+// / cadastrar técnico / editar cidade e supervisor no dia a dia é só Matheus,
+// Sebastião e o Analista; tirar técnico do quadro é só o Analista (ver
+// podeExcluirTecnicoPresenca) — duas permissões separadas de propósito, pra
+// ninguém apagar gente por engano.
+const NOMES_PRESENCA_EDITAM = ['Matheus', 'Sebastião'];
+function podeEditarPresenca() { return !!currentUser && (currentUser.role === 'analista' || NOMES_PRESENCA_EDITAM.includes(currentUser.nome)); }
 function podeExcluirTecnicoPresenca() { return !!currentUser && currentUser.role === 'analista'; }
 // Presença do Escritório é tela separada, com dono diferente: só Thaís,
-// Rebeca e o Analista MEXEM. Supervisor/Coordenador (admin) — que cuida do
-// quadro de TÉCNICOS — enxerga em modo leitura (pedido do cliente 01/09/2026),
-// assim como o Escritório.
-// Espelho disso na outra tela: Supervisor/Coordenador (admin) edita a
-// Presença dos TÉCNICOS e Thaís/Rebeca só olham.
+// Rebeca e o Analista MEXEM. Matheus e Sebastião — que têm o mesmo perfil
+// "admin", só que cuidam do quadro de TÉCNICOS — enxergam em modo leitura
+// (pedido do cliente 01/09/2026), assim como o Escritório.
+// Espelho disso na outra tela: Matheus e Sebastião editam a Presença dos
+// TÉCNICOS (NOMES_PRESENCA_EDITAM) e Thaís/Rebeca só olham.
 const NOMES_ESCRITORIO_EDITAM = ['Thaís', 'Rebeca'];
 // Perfis que ENXERGAM o quadro do escritório sem editar. Gestão fica de fora.
 // 'gestao' entrou em 02/09/2026: o cliente pediu que a Gestão tenha o mesmo
@@ -5571,10 +5570,14 @@ function insertRow(target, map, row, extra) {
     }
     case 'frotaLinks': {
       const obj = { motorista: s('motorista'), placa: s('placa'), supervisor: s('supervisor'), cidade: s('cidade'), locadora: s('locadora'), vinculacao: d('vinculacao'), observacao: s('observacao') };
-      // Chave é só motorista+placa (sem data): vínculo é o carro atual do motorista,
-      // não um registro por reimportação. Antes a data entrava na chave e cada
-      // planilha nova (ou vinculação em branco) virava linha duplicada na tela.
-      obj.chave = obj.motorista && obj.placa ? `${obj.motorista}|${obj.placa}` : null;
+      // Chave é só a PLACA. A planilha do cliente traz uma linha por carro —
+      // "TOTAL DE PLACAS" no topo dela é o total oficial da frota — e o campo
+      // Motorista é só quem está com o carro AGORA (pode virar "JH", "OFICINA
+      // (...)" ou "LOCADORA" quando ninguém está dirigindo). Chave com
+      // motorista+placa tratava troca de condutor do MESMO carro como um
+      // vínculo novo em vez de atualizar o existente — o carro ficava
+      // repetido na tela uma vez por condutor que ele já teve.
+      obj.chave = obj.placa || null;
       return upsertRow(DB.frotaLinks, DB_INDEX.frotaLinks, obj.chave, obj);
       break;
     }
