@@ -3895,8 +3895,15 @@ function extrairBairro(endereco) {
   const espaco = meio.indexOf(' ');
   return espaco === -1 ? '' : meio.slice(espaco + 1).trim();
 }
+// ACHADO NA AUDITORIA DE 04/09/2026: registro sem data (aStart/aEnd em
+// branco) devolvia "overlaps = true" — ou seja, contava como pertencente A
+// QUALQUER período. Um fechamento importado sem inicio/ate_o_dia preenchido
+// (linha da aba RELATORIO com data quebrada) aparecia então em TODO ciclo do
+// Dashboard, não só no dele — o cliente via "técnico de outro fechamento"
+// misturado não importa qual ciclo escolhesse no seletor. Sem data não
+// pertence a período nenhum; muda pra false.
 function overlaps(aStart, aEnd, bStart, bEnd) {
-  if (!aStart || !aEnd) return true;
+  if (!aStart || !aEnd) return false;
   return aStart <= bEnd && aEnd >= bStart;
 }
 // paleta de gráficos restrita a tons de azul e verde — usada em série única/
@@ -6520,21 +6527,33 @@ function renderDashboard() {
     <div class="dash-cabecalho">
       <h2>Painel de Gestão</h2>
       <div class="field" style="margin:8px 0"><label>Ciclo</label><select id="dash-ciclo">
+        <option value="todos">— Todos os ciclos —</option>
         ${ciclos.map(c => `<option value="${c.start}|${c.end}"${c.start === start && c.end === end ? ' selected' : ''}>${formatDate(c.start)} a ${formatDate(c.end)}</option>`).join('')}
       </select></div>
       <p id="dash-ciclo-desc"></p>
     </div>
     <div id="dash-body"></div>`;
   document.getElementById('dash-ciclo').addEventListener('change', function () {
-    const [ini, fim] = this.value.split('|');
-    document.getElementById('f-start').value = ini;
-    document.getElementById('f-end').value = fim;
+    if (this.value === 'todos') {
+      document.getElementById('f-start').value = '';
+      document.getElementById('f-end').value = '';
+    } else {
+      const [ini, fim] = this.value.split('|');
+      document.getElementById('f-start').value = ini;
+      document.getElementById('f-end').value = fim;
+    }
     load();
   });
   load();
   function load() {
     const s = document.getElementById('f-start').value, e = document.getElementById('f-end').value;
-    document.getElementById('dash-ciclo-desc').innerHTML = `Fechamento do ciclo <b>${formatDate(s)}</b> a <b>${formatDate(e)}</b> · já com os valores de contrato reajustados`;
+    // "Todos os ciclos" (pedido do cliente 04/09/2026): f-start/f-end ficam
+    // em branco de propósito — é o sinal pro resto do load() não filtrar por
+    // período nenhum (ver `todos` logo abaixo).
+    const todos = !s || !e;
+    document.getElementById('dash-ciclo-desc').innerHTML = todos
+      ? `Fechamento de <b>todos os ciclos</b> importados · já com os valores de contrato reajustados`
+      : `Fechamento do ciclo <b>${formatDate(s)}</b> a <b>${formatDate(e)}</b> · já com os valores de contrato reajustados`;
     const body = document.getElementById('dash-body');
 
     // Todos os números desta página vêm exclusivamente da aba RELATORIO
@@ -6548,7 +6567,8 @@ function renderDashboard() {
     // despesa lançada (ex.: aluguel de carro) sem nenhuma ordem no ciclo —
     // achado real: técnico com total_geral 0, R$2.605,50 de despesa, sumia
     // da conta e criava uma diferença de R$2.605,50 entre tela e Excel.
-    const fech = DB.fechamento.filter(f => overlaps(f.inicio, f.ate_o_dia, s, e));
+    // "Todos os ciclos": pega tudo, sem filtrar por período (ver `todos` acima).
+    const fech = todos ? DB.fechamento.slice() : DB.fechamento.filter(f => overlaps(f.inicio, f.ate_o_dia, s, e));
 
     // Resumo Despesas/Receitas do ciclo, comparado com os ciclos ANTERIORES
     // (pedido do cliente 04/09/2026, igual ao Comparativo Financeiro só que
