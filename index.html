@@ -6476,11 +6476,10 @@ function renderDashboard() {
   // é gerada. Abrir sempre no ciclo de hoje deixava a tela vazia no dia 21 —
   // parecia que a importação não tinha funcionado. Se o ciclo atual não tem
   // nada, abre no ciclo mais recente que TEM.
-  // Sem filtro de período (pedido do cliente, 01/09/2026): o Dashboard é o
-  // fechamento de UM ciclo, e o ciclo aparece no título. Pega sempre o mais
-  // recente que TENHA dado — no dia 21 o ciclo corrente ainda está vazio e a
-  // tela nasceria em branco. Os campos de data continuam existindo escondidos
-  // porque o resto da máquina (guardarFiltros, exportações) lê deles.
+  // Volta a ter escolha de ciclo (pedido do cliente 04/09/2026 — reabre o que
+  // tinha sido tirado em 01/09/2026). Abre sozinho no ciclo mais recente que
+  // TEM dado (no dia 21 o ciclo corrente ainda está vazio), mas agora dá pra
+  // trocar pra qualquer outro pelo seletor.
   const ciclos = ciclosDoFechamento().lista;
   const comDado = ciclos.find(c => DB.fechamento.some(f => f.inicio === c.start && f.ate_o_dia === c.end));
   const { start, end } = comDado || ciclosDoFechamento().atual;
@@ -6490,13 +6489,22 @@ function renderDashboard() {
     <input type="hidden" id="dash-tech-a" value=""><input type="hidden" id="dash-tech-b" value="">
     <div class="dash-cabecalho">
       <h2>Painel de Gestão</h2>
-      <p>Fechamento do ciclo <b>${formatDate(start)}</b> a <b>${formatDate(end)}</b>
-         · já com os valores de contrato reajustados</p>
+      <div class="field" style="margin:8px 0"><label>Ciclo</label><select id="dash-ciclo">
+        ${ciclos.map(c => `<option value="${c.start}|${c.end}"${c.start === start && c.end === end ? ' selected' : ''}>${formatDate(c.start)} a ${formatDate(c.end)}</option>`).join('')}
+      </select></div>
+      <p id="dash-ciclo-desc"></p>
     </div>
     <div id="dash-body"></div>`;
+  document.getElementById('dash-ciclo').addEventListener('change', function () {
+    const [ini, fim] = this.value.split('|');
+    document.getElementById('f-start').value = ini;
+    document.getElementById('f-end').value = fim;
+    load();
+  });
   load();
   function load() {
     const s = document.getElementById('f-start').value, e = document.getElementById('f-end').value;
+    document.getElementById('dash-ciclo-desc').innerHTML = `Fechamento do ciclo <b>${formatDate(s)}</b> a <b>${formatDate(e)}</b> · já com os valores de contrato reajustados`;
     const body = document.getElementById('dash-body');
 
     // Todos os números desta página vêm exclusivamente da aba RELATORIO
@@ -6780,28 +6788,42 @@ function renderDashboard() {
       { rot: 'Reparos', v: reparos }, { rot: 'Ativação', v: ativacao },
       { rot: 'M. Endereço', v: me }, { rot: 'Upgrade', v: upgrade }, { rot: 'M. Cômodo', v: mc }
     ].sort((a, b) => b.v - a.v);
-    // resumo Despesas/Receitas do ciclo, categoria por categoria — pedido do
-    // cliente pra ficar bem no topo da tela. A quebra vem do CADASTRO da tela
-    // Financeiro; período que ainda não foi cadastrado cai na planilha
-    // COMPARATIVO, como era antes.
-    const linhasResumo = cadTem
-      ? (() => { const d = despesasDoPeriodoFin(rotuloPeriodo); return FIN_CATEGORIAS.map(cat => ({ rot: cat, v: d[cat] })); })()
-      : cmpTem
-        ? Object.keys(cmp.porCategoria).map(cat => ({ rot: cat, v: cmp.porCategoria[cat][rotuloPeriodo] }))
-        : [];
+    // Resumo Despesas/Receitas do ciclo, comparado com os ciclos ANTERIORES
+    // (pedido do cliente 04/09/2026, igual ao Comparativo Financeiro só que
+    // direto aqui no Dashboard, sempre em torno do ciclo escolhido no
+    // seletor do topo). Mostra até 4 ciclos — o escolhido e até 3 antes dele,
+    // do mais recente pro mais antigo — e busca 1 ciclo A MAIS só pra ter
+    // contra o que comparar a seta da última coluna visível.
+    const pivotDash = pivotDoCadastroFin();
+    const idxCicloDash = pivotDash ? pivotDash.periodos.indexOf(rotuloPeriodo) : -1;
+    // pivotDash.periodos vem do mais ANTIGO pro mais NOVO — pega os últimos
+    // 5 até o ciclo escolhido (inclusive) e inverte pra mostrar do mais novo
+    // pro mais antigo.
+    const periodosDash = idxCicloDash < 0 ? [] : pivotDash.periodos.slice(Math.max(0, idxCicloDash - 4), idxCicloDash + 1).reverse();
+    const periodosExibidos = periodosDash.slice(0, 4);
+    const valDash = (obj, p) => (obj && obj[p]) || 0;
+    // seta comparando a coluna com a PRÓXIMA (period anterior, já que a
+    // ordem aqui é do mais novo pro mais antigo) — reaproveita diffBadge, que
+    // já sabe colorir "subiu"/"desceu" certo pra cada lado (invert=true pra
+    // despesa: descer é bom).
+    const setaDash = (obj, i, invert) => {
+      const anterior = periodosDash[i + 1];
+      if (!anterior) return '';
+      return ' ' + diffBadge(valDash(obj, anterior), valDash(obj, periodosDash[i]), invert);
+    };
+    const categoriasDash = pivotDash ? Object.keys(pivotDash.porCategoria).filter(c => periodosExibidos.some(p => pivotDash.porCategoria[c][p])) : [];
     // Mesmo desenho da tela de Comparativos (renderComparisonsFromPivot):
     // data-table comum, categoria em .cat-cell e as três linhas de fecho em
-    // .total-row, coloridas só no texto. Sem estilo próprio de propósito —
-    // é a mesma tabela da planilha, então tem que parecer a mesma tabela.
-    const resumoFinanceiro = !linhasResumo.length ? '' : `
-      <div class="section-heading sem-toggle">Resumo financeiro do ciclo</div>
+    // .total-row, coloridas só no texto.
+    const resumoFinanceiro = !periodosExibidos.length ? '' : `
+      <div class="section-heading sem-toggle">Resumo financeiro do ciclo<span class="sec-nota">comparado com os ciclos anteriores</span></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table">
-        <thead><tr><th>Despesas / Receitas</th><th>${esc(rotuloPeriodo)}</th></tr></thead>
+        <thead><tr><th>Despesas / Receitas</th>${periodosExibidos.map(p => `<th>${esc(p)}</th>`).join('')}</tr></thead>
         <tbody>
-          ${linhasResumo.map(l => `<tr><td class="cat-cell">${esc(l.rot)}</td><td>${l.v !== undefined ? formatCurrency(l.v) : '-'}</td></tr>`).join('')}
-          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-alerta)">TOTAL DESPESAS</td><td style="color:var(--tab-alerta)">${formatCurrency(despesaFinal)}</td></tr>
-          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-cab-txt)">RECEITA DAS ORDENS</td><td style="color:var(--tab-cab-txt)">${formatCurrency(receitaFinal)}</td></tr>
-          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-sucesso)">LUCRO</td><td style="color:var(--tab-sucesso)">${formatCurrency(lucroFinal)}</td></tr>
+          ${categoriasDash.map(cat => `<tr><td class="cat-cell">${esc(cat)}</td>${periodosExibidos.map((p, i) => `<td>${valDash(pivotDash.porCategoria[cat], p) ? formatCurrency(valDash(pivotDash.porCategoria[cat], p)) : '-'}${setaDash(pivotDash.porCategoria[cat], i, true)}</td>`).join('')}</tr>`).join('')}
+          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-alerta)">TOTAL DESPESAS</td>${periodosExibidos.map((p, i) => `<td style="color:var(--tab-alerta)">${formatCurrency(valDash(pivotDash.totalDespesas, p))}${setaDash(pivotDash.totalDespesas, i, true)}</td>`).join('')}</tr>
+          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-cab-txt)">RECEITA DAS ORDENS</td>${periodosExibidos.map((p, i) => `<td style="color:var(--tab-cab-txt)">${formatCurrency(valDash(pivotDash.receitaOrdens, p))}${setaDash(pivotDash.receitaOrdens, i, false)}</td>`).join('')}</tr>
+          <tr class="total-row"><td class="cat-cell" style="color:var(--tab-sucesso)">LUCRO</td>${periodosExibidos.map((p, i) => `<td style="color:var(--tab-sucesso)">${formatCurrency(valDash(pivotDash.lucro, p))}${setaDash(pivotDash.lucro, i, false)}</td>`).join('')}</tr>
         </tbody>
       </table></div>`;
 
