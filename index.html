@@ -6671,14 +6671,31 @@ function renderDashboard() {
     // Valor pago pela GIGA por tipo de serviço (preço fixo × contagem) — usa
     // VALORES_ORDENS_FIXOS, não o "Valor Ordens" interno da Folha (esse é
     // métrica de produção, não o que a GIGA realmente paga).
-    // preço pela vigência do CICLO (fech é sempre de 1 ciclo só nessa tela) —
-    // sem isso, um reajuste de contrato mudaria sozinho o valor de um ciclo
-    // já fechado no passado.
-    const dataCicloGiga = fech[0] && fech[0].ate_o_dia;
+    // Preço pela vigência de CADA LINHA de fech (não uma vigência única pra
+    // tudo): "fech é sempre de 1 ciclo só nessa tela" deixou de valer com
+    // "Todos os ciclos" (achado na auditoria de 04/09/2026) — usar só a data
+    // da primeira linha faria um reajuste de contrato precificar errado os
+    // ciclos anteriores/posteriores a ele quando várias janelas de vigência
+    // estão misturadas no mesmo "fech". "Valor unitário" só aparece quando
+    // todas as linhas caem na mesma vigência (senão não tem UM preço pra
+    // mostrar) — o valor TOTAL soma sempre certo, linha por linha.
     const itensGiga = [
-      { label: 'Ativação', qtd: ativacao }, { label: 'Mudança de Cômodo', qtd: mc },
-      { label: 'Mudança de Endereço', qtd: me }, { label: 'Reparos', qtd: reparos }, { label: 'Upgrade', qtd: upgrade }
-    ].map(i => { const preco = precoGigaPorTipo(i.label, dataCicloGiga); return preco !== null ? { ...i, preco, valor: i.qtd * preco } : { ...i, preco: null, valor: null }; });
+      { label: 'Ativação', campo: 'ativacao' }, { label: 'Mudança de Cômodo', campo: 'mc' },
+      { label: 'Mudança de Endereço', campo: 'me' }, { label: 'Reparos', campo: 'reparos' }, { label: 'Upgrade', campo: 'upgrade' }
+    ].map(t => {
+      let qtd = 0, valor = 0, semPreco = false;
+      const precosVistos = new Set();
+      fech.forEach(f => {
+        const q = f[t.campo] || 0;
+        qtd += q;
+        const preco = precoGigaPorTipo(t.label, f.ate_o_dia);
+        if (preco === null) { semPreco = true; return; }
+        precosVistos.add(preco);
+        valor += q * preco;
+      });
+      const precoUnico = !semPreco && precosVistos.size <= 1 ? ([...precosVistos][0] ?? null) : null;
+      return { label: t.label, qtd, preco: precoUnico, valor: semPreco ? null : valor };
+    });
     const totalQtdGiga = itensGiga.reduce((a,i)=>a+i.qtd,0), totalValorGiga = itensGiga.reduce((a,i)=>a+(i.valor||0),0);
 
     // Lucro = o que a GIGA paga − nossas despesas. Usamos a coluna LUCROS da
@@ -14667,16 +14684,31 @@ function renderPainelBI(alvoId = 'content') {
     // duas telas passam a bater 1:1. Como o fechamento é fechado por ciclo, ESTE
     // painel não acompanha o filtro de cidade (o resto da tela continua
     // acompanhando) — por isso o aviso no rodapé do painel.
-    const somaFech = k => fech.reduce((a, f) => a + (f[k] || 0), 0);
-    // preço pela vigência do CICLO (mesmo motivo do Relatório de Eficiência:
-    // esse painel usa o fechamento oficial, fechado por ciclo — não pode
-    // deixar um reajuste de contrato mudar sozinho um ciclo já fechado).
-    const dataCicloGigaBI = fech[0] && fech[0].ate_o_dia;
+    // preço pela vigência de CADA LINHA de fech (não uma vigência única pra
+    // tudo): esse painel já aceita "Últimos 3/6 ciclos" — usar só a data da
+    // primeira linha de fech fazia um reajuste de contrato precificar errado
+    // os ciclos de fora da vigência dele quando o intervalo escolhido cruza
+    // uma data de reajuste (achado na auditoria de 04/09/2026, mesmo bug do
+    // Relatório de Eficiência). "Valor unitário" só aparece quando todas as
+    // linhas caem na mesma vigência — o valor TOTAL soma sempre certo.
     const itensGiga = [
-      { label: 'Ativação', qtd: somaFech('ativacao') }, { label: 'Reparos', qtd: somaFech('reparos') },
-      { label: 'Mudança de Endereço', qtd: somaFech('me') }, { label: 'Mudança de Cômodo', qtd: somaFech('mc') },
-      { label: 'Upgrade/Downgrade', qtd: somaFech('upgrade') }
-    ].map(i => { const preco = precoGigaPorTipo(i.label, dataCicloGigaBI); return preco !== null ? { ...i, preco, valor: i.qtd * preco } : { ...i, preco: null, valor: null }; });
+      { label: 'Ativação', campo: 'ativacao' }, { label: 'Reparos', campo: 'reparos' },
+      { label: 'Mudança de Endereço', campo: 'me' }, { label: 'Mudança de Cômodo', campo: 'mc' },
+      { label: 'Upgrade/Downgrade', campo: 'upgrade' }
+    ].map(t => {
+      let qtd = 0, valor = 0, semPreco = false;
+      const precosVistos = new Set();
+      fech.forEach(f => {
+        const q = f[t.campo] || 0;
+        qtd += q;
+        const preco = precoGigaPorTipo(t.label, f.ate_o_dia);
+        if (preco === null) { semPreco = true; return; }
+        precosVistos.add(preco);
+        valor += q * preco;
+      });
+      const precoUnico = !semPreco && precosVistos.size <= 1 ? ([...precosVistos][0] ?? null) : null;
+      return { label: t.label, qtd, preco: precoUnico, valor: semPreco ? null : valor };
+    });
     const totalQtdGiga = itensGiga.reduce((a,i)=>a+i.qtd,0), totalValorGiga = itensGiga.reduce((a,i)=>a+(i.valor||0),0);
 
     // ---------- IFI / IRR — mesma regra da tela Ofensor ----------
