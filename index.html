@@ -308,18 +308,25 @@
   .link-tec:hover { color: var(--text-primary); border-bottom-color: var(--text-primary); }
   input.mo-edit {
     width: 62px; padding: 4px 6px; font-size: 13px; font-weight: 700; text-align: center;
-    color: var(--tab-num); background: var(--bg-page); border: 1px solid var(--tab-linha); border-radius: 6px; outline: none;
+    color: #c084fc; background: var(--bg-page); border: 1px solid var(--border); border-radius: 6px; outline: none;
   }
-  input.mo-edit:focus { border-color: var(--accent); }
+  input.mo-edit:focus { border-color: #c084fc; }
   /* #c084fc é roxo claro, pensado pro fundo escuro do campo (--bg-page no tema
      escuro) — no tema claro esse mesmo fundo vira quase branco, e o roxo claro
-     quase some. Tema claro usa um roxo bem mais escuro, mesma família de cor. */
-  :root[data-theme="light"] input.mo-edit { font-weight: 800; }
+     quase some. Tema claro usa um roxo bem mais escuro, mesma família de cor.
+     Revertido pro roxo em 04/09/2026: a limpeza de cor do corpo da tabela
+     (mesmo dia) tinha apagado o M.O também, mas o cliente quis ele de volta —
+     é o único número que se edita direto na tabela, então continua se
+     destacando dos que só se leem. */
+  :root[data-theme="light"] input.mo-edit { color: #5b21b6; font-weight: 800; }
+  :root[data-theme="light"] input.mo-edit:focus { border-color: #5b21b6; }
   /* célula de TOTAL da M.O (texto simples, não é o input) — mesmo problema e
      mesma correção do .mo-edit acima. Especificidade igual ou maior que
-     "table.data-table tr.total-row td" (que fixa color: var(--text-primary)),
-     senão essa regra genérica da linha de total vence e o roxo nem aparece. */
-  table.data-table tr.total-row td.mo-total-cel { font-weight: 700; }
+     "table.data-table tr.total-row td" (que fixa color: #fff — ver o token
+     --tab-total), senão essa regra genérica da linha de total vence e o roxo
+     nem aparece. */
+  table.data-table tr.total-row td.mo-total-cel { color: #c084fc; font-weight: 700; }
+  :root[data-theme="light"] table.data-table tr.total-row td.mo-total-cel { color: #5b21b6; font-weight: 800; }
   /* campos editáveis da Folha de Pagamento (dias/bônus/descontos) — sem isso o
      <input type="number"> e o <select> vinham com o branco padrão do navegador,
      um retângulo claro cravado no meio da tabela escura */
@@ -340,15 +347,13 @@
   input.folha-edit-moeda.tem-valor:focus { border-color: var(--warn-text); }
   /* "Parcela X" (2/3, 1/1) — texto curto, cor neutra (não é dinheiro) */
   input.folha-edit-parcela { text-align: center; }
-  /* Linhas intercaladas (pedido do cliente 03/09/2026): tabela larga, com
-     dezenas de colunas — sem a faixa alternada o olho pula de linha ao
-     arrastar pro lado. A cor sai do próprio fundo do painel com um véu branco
-     de 3,5% (escuro) / preto de 3% (claro): funciona nos dois temas sem
-     inventar token novo, e some quando a linha tem cor própria (total-row,
-     linha-subitem, destaque de filtro). */
-  table.data-table tbody tr:nth-child(even):not(.total-row):not(.linha-subitem):not(.linha-espaco) > td {
-    background: var(--tab-zebra);
-  }
+  /* Linha intercalada foi tentada em 03/09/2026 e revertida em 04/09/2026 —
+     o cliente achou visualmente carregado ("mantenha tudo escuro mesmo sem
+     intercalar"). Só cabeçalho e linha de total continuam com cor própria
+     (--tab-cab / --tab-total, logo abaixo e em tr.total-row); o corpo fica
+     uniforme no --card-bg de sempre. --tab-zebra ficou definido no :root sem
+     uso — não removi o token pra não quebrar quem link para ele algum dia,
+     só a regra que o aplicava. */
   /* ---- HOLERITE (extrato de serviços) ----
      Papel A4 em pé: largura fixa em pt pra sair igual na tela, na imagem e na
      impressão. Cores por TOKEN — o holerite é escuro no tema escuro e claro no
@@ -899,23 +904,11 @@
   table.tab-col1-fixa th:first-child { position: sticky; left: 0; }
   table.tab-col1-fixa td:first-child { z-index: 3; background: var(--card-bg); }
   table.tab-col1-fixa th:first-child { z-index: 4; }
-  /* A célula fixa precisa ser OPACA. A faixa zebrada é um véu translúcido
-     (rgba .035) e, numa célula sticky, translúcido deixa o resto da tabela
-     passar por baixo enquanto rola. Aqui a cor sólida vai em background-COLOR
-     e o véu por cima em background-IMAGE, no mesmo elemento: fica opaco e com
-     a mesma tonalidade da faixa.
-     A especificidade precisa passar a da regra da zebra (que tem 5 classes),
-     por isso os :not() repetidos — sem eles a zebra vence por vir depois. */
-  table.tab-col1-fixa tbody tr:nth-child(even):not(.total-row):not(.linha-subitem):not(.linha-espaco) > td:first-child {
-    background-color: var(--card-bg);
-    background-image: linear-gradient(rgba(255, 255, 255, .035), rgba(255, 255, 255, .035));
-  }
-  :root[data-theme="light"] table.tab-col1-fixa tbody tr:nth-child(even):not(.total-row):not(.linha-subitem):not(.linha-espaco) > td:first-child {
-    background-color: var(--card-bg);
-    background-image: linear-gradient(rgba(0, 0, 0, .03), rgba(0, 0, 0, .03));
-  }
-  table.tab-col1-fixa tbody tr.total-row > td:first-child { background: var(--total-bg); background-image: none; }
-  table.tab-col1-fixa tbody tr:hover > td:first-child { background: var(--row-hover); background-image: none; }
+  /* A célula fixa precisa ser OPACA — sticky com fundo translúcido deixa o
+     resto da tabela passar por baixo enquanto rola. Sem zebra (revertida em
+     04/09/2026), a única linha com fundo próprio é a de total. */
+  table.tab-col1-fixa tbody tr.total-row > td:first-child { background: var(--tab-total); color: #fff; }
+  table.tab-col1-fixa tbody tr:hover > td:first-child { background: var(--row-hover); }
   /* risquinho de sombra marcando onde a coluna fixa termina — sem ele não dá
      pra perceber que o resto está deslizando por baixo */
   table.tab-col1-fixa td:first-child::after,
