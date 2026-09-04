@@ -7080,6 +7080,16 @@ function datasDoPeriodoFolha(periodo) {
   if (!achadas.length) return { inicio: '', fim: '' };
   return { inicio: iso(achadas[0]), fim: iso(achadas[achadas.length - 1]) };
 }
+// Qual período é "a folha ATUAL" — o mais recente entre os que já têm nome
+// (mesmo critério que abre a tela de Folha, ver periodoPadraoFolha em
+// renderFolhaPagamento). Pedido do cliente 04/09/2026: só esse período pode
+// ser editado (dias/bônus/descontos/parcelas) — ciclo fechado é só consulta,
+// editar um período antigo bagunçaria um fechamento que já foi pago.
+function periodoMaisRecenteFolha() {
+  const nomeados = [...new Set(DB.folhaPagamento.map(r => r.periodo).filter(p => p && p !== SEM_PERIODO_FOLHA))]
+    .sort((a, b) => String(datasDoPeriodoFolha(b).fim || '').localeCompare(String(datasDoPeriodoFolha(a).fim || '')));
+  return nomeados[0] || '';
+}
 // Tabela "Serviços concluídos e valor a receber (GIGA → JH)" — mesma conta do
 // painel "Valor pago pela GIGA" do Relatório de Eficiência/Resumo Geral (ver
 // VALORES_ORDENS_FIXOS/precoGigaPorTipo), só que pros períodos escolhidos nas
@@ -13168,6 +13178,18 @@ function renderFolhaPagamento(modo) {
         const tdValor = tr.querySelector('.folha-valor-ordens'), tdReceber = tr.querySelector('.folha-total-receber');
         if (tdValor) tdValor.textContent = formatCurrency(r.linha.valor_total_ordens);
         if (tdReceber) tdReceber.textContent = formatCurrency(r.linha.total_receber);
+        // ACHADO NA AUDITORIA DE 04/09/2026: só corrigia Valor Ordens (o
+        // agregado) — a quebra POR TIPO ("Valor Mud. Cômodo", "Valor Reparo
+        // Corretivo" etc., cada uma com seu próprio valor de 26 dias) ficava
+        // com o preço antigo do bônus até a pessoa apertar "Filtrar" de novo.
+        // Recalcula na hora com o mesmo cálculo de renderFolhaCompleta.
+        const janela = datasDoPeriodoFolha(periodo);
+        const ordensDoTecnico = DB.producao.filter(p => isConcluido(p.status) && normalizeHeader(p.recurso) === normalizeHeader(tecnico));
+        const porTipo = quebraPorTipoDoTecnico(ordensDoTecnico, janela, sel.value === 'APTO');
+        tr.querySelectorAll('.folha-valor-tipo[data-tipo]').forEach(span => {
+          const v = porTipo['v_' + span.dataset.tipo];
+          span.textContent = v ? formatCurrency(v) : '-';
+        });
         sincronizarHolerite(r.linha);
       });
     });
@@ -13398,7 +13420,9 @@ function holeriteTecnicoHTML(linha) {
   // Cada número do holerite é editável (pedido do cliente): a edição fica só
   // NESTE holerite (HOLERITE_MANUAL), não volta pra folha nem pro banco — o
   // papel pode ter um acerto pontual sem reescrever o fechamento do técnico.
-  const edit = !podeEditarFolhaPagamento();
+  // Só o período ATUAL edita (pedido do cliente 04/09/2026, mesma regra da
+  // tabela — ver periodoMaisRecenteFolha): período fechado é só consulta.
+  const edit = !podeEditarFolhaPagamento() || linha.periodo !== periodoMaisRecenteFolha();
   const campoQtd = (campo, valor) => edit ? (valor || 0)
     : `<input type="number" class="hol-edit" data-campo="${campo}" value="${valor || 0}" min="0" step="1">`;
   const campoDin = (campo, valor) => edit ? cel(valor)
@@ -13468,8 +13492,12 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
   // liberar); os 8 descontos de MATERIAL abaixo são de quem sabe o que o
   // técnico levou e não devolveu (Almoxarifado + RH + Analista). O input só
   // aparece pra quem tem a permissão — quem não tem vê o valor de sempre.
-  const podePagamento = podeEditarFolhaPagamento();
-  const podeMaterial = podeEditarFolhaMaterial();
+  // Só o período ATUAL pode ser editado (pedido do cliente 04/09/2026) — um
+  // período antigo já foi fechado e pago, editar ali de novo bagunçaria um
+  // fechamento que já saiu (ver periodoMaisRecenteFolha).
+  const periodoAtualFolha = periodoMaisRecenteFolha();
+  const podePagamento = r => podeEditarFolhaPagamento() && r.periodo === periodoAtualFolha;
+  const podeMaterial = r => podeEditarFolhaMaterial() && r.periodo === periodoAtualFolha;
   const attrsChave = r => `data-tecnico="${esc(r.tecnico)}" data-periodo="${esc(r.periodo)}"`;
   // Quantas ordens de CADA tipo (mesmas 5 categorias da tabela de preço fixa —
   // VALORES_ORDENS_FIXOS) o técnico teve CONCLUÍDAS no período da linha.
@@ -13539,11 +13567,14 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     ...TIPOS_FOLHA.map(t => [t.rot, r => contagemPorTipoNoPeriodo(r.tecnico, r.periodo)[t.chave]]),
     ...TIPOS_FOLHA.map(t => ['Valor ' + t.rot, r => {
       const v = contagemPorTipoNoPeriodo(r.tecnico, r.periodo)['v_' + t.chave];
-      return v ? `<span class="folha-valor-tipo">${money(v)}</span>` : '-';
+      // data-tipo é o gancho que o troca-de-bônus usa pra recalcular só essa
+      // célula (ver o listener de select[data-campo="bonus"] mais abaixo) —
+      // por isso o span existe mesmo quando o valor é zero/"-".
+      return `<span class="folha-valor-tipo" data-tipo="${t.chave}">${v ? money(v) : '-'}</span>`;
     }]),
     ['Valor Ordens', r=>`<span class="folha-valor-ordens">${money(r.valor_total_ordens)}</span>`],
-    ['Dias Trab.', r => podePagamento ? inputNumero(r, 'dias_trab', r.dias_trab) : r.dias_trab],
-    ['Bônus', r => podePagamento
+    ['Dias Trab.', r => podePagamento(r) ? inputNumero(r, 'dias_trab', r.dias_trab) : r.dias_trab],
+    ['Bônus', r => podePagamento(r)
       // cor no PRÓPRIO <select> (não só num badge ao lado) — verde quando a
       // opção marcada é APTO, vermelho quando é INAPTO. Atualizada nas duas
       // pontas: aqui no primeiro render, e no JS a cada troca (wireFolhaEdicao).
@@ -13558,24 +13589,24 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     ['Frota', r=>r.frota], ['Dias Aluguel', r=>r.dias_aluguel], ['Valor Aluguel', r=>money(r.valor_aluguel)],
     ['Empréstimo', r=>money(r.emprestimo)],
     ['Desc. IFI', r=>money(r.desc_ifi)], ['Desc. IRR', r=>money(r.desc_irr)],
-    ['Desc. Equipamento', r => podeMaterial ? inputMoeda(r, 'desc_equipamento', r.desc_equipamento) : money(r.desc_equipamento)],
-    ['Desc. Multa', r => podeMaterial ? inputMoeda(r, 'desc_multa', r.desc_multa) : money(r.desc_multa)],
-    ['Desc. Miscelânea', r => podeMaterial ? inputMoeda(r, 'desc_miscelanea', r.desc_miscelanea) : money(r.desc_miscelanea)],
-    ['Desc. Mecânica', r => podeMaterial ? inputMoeda(r, 'desc_mecanica', r.desc_mecanica) : money(r.desc_mecanica)],
-    ['Desc. Vale', r => podeMaterial ? inputMoeda(r, 'desc_vale', r.desc_vale) : money(r.desc_vale)],
-    ['Desc. Ferramentas', r => podeMaterial ? inputMoeda(r, 'desc_ferramentas', r.desc_ferramentas) : money(r.desc_ferramentas)],
-    ['Desc. Combustível', r => podeMaterial ? inputMoeda(r, 'desc_combustivel', r.desc_combustivel) : money(r.desc_combustivel)],
-    ['Desc. Fiscalização', r => podeMaterial ? inputMoeda(r, 'desc_fiscalizacao', r.desc_fiscalizacao) : money(r.desc_fiscalizacao)],
+    ['Desc. Equipamento', r => podeMaterial(r) ? inputMoeda(r, 'desc_equipamento', r.desc_equipamento) : money(r.desc_equipamento)],
+    ['Desc. Multa', r => podeMaterial(r) ? inputMoeda(r, 'desc_multa', r.desc_multa) : money(r.desc_multa)],
+    ['Desc. Miscelânea', r => podeMaterial(r) ? inputMoeda(r, 'desc_miscelanea', r.desc_miscelanea) : money(r.desc_miscelanea)],
+    ['Desc. Mecânica', r => podeMaterial(r) ? inputMoeda(r, 'desc_mecanica', r.desc_mecanica) : money(r.desc_mecanica)],
+    ['Desc. Vale', r => podeMaterial(r) ? inputMoeda(r, 'desc_vale', r.desc_vale) : money(r.desc_vale)],
+    ['Desc. Ferramentas', r => podeMaterial(r) ? inputMoeda(r, 'desc_ferramentas', r.desc_ferramentas) : money(r.desc_ferramentas)],
+    ['Desc. Combustível', r => podeMaterial(r) ? inputMoeda(r, 'desc_combustivel', r.desc_combustivel) : money(r.desc_combustivel)],
+    ['Desc. Fiscalização', r => podeMaterial(r) ? inputMoeda(r, 'desc_fiscalizacao', r.desc_fiscalizacao) : money(r.desc_fiscalizacao)],
     // Bloco "Parcela X" — mesma ordem e mesmo lugar da planilha do cliente
     // (logo depois dos descontos, antes do TOTAL DOS DESCONTOS).
-    ['Parcela Equip.', r => podeMaterial ? inputParcela(r, 'parcela_equipamento', r.parcela_equipamento) : (r.parcela_equipamento || '-')],
-    ['Parcela Ferramentas', r => podeMaterial ? inputParcela(r, 'parcela_ferramentas', r.parcela_ferramentas) : (r.parcela_ferramentas || '-')],
-    ['Parcela Multa', r => podeMaterial ? inputParcela(r, 'parcela_multa', r.parcela_multa) : (r.parcela_multa || '-')],
-    ['Parcela Miscelânea', r => podeMaterial ? inputParcela(r, 'parcela_miscelanea', r.parcela_miscelanea) : (r.parcela_miscelanea || '-')],
-    ['Parcela Mecânica', r => podeMaterial ? inputParcela(r, 'parcela_mecanica', r.parcela_mecanica) : (r.parcela_mecanica || '-')],
-    ['Parcela Vale', r => podeMaterial ? inputParcela(r, 'parcela_vale', r.parcela_vale) : (r.parcela_vale || '-')],
-    ['Parcela Fiscalização', r => podeMaterial ? inputParcela(r, 'parcela_fiscalizacao', r.parcela_fiscalizacao) : (r.parcela_fiscalizacao || '-')],
-    ['Parcela Combustível', r => podeMaterial ? inputParcela(r, 'parcela_combustivel', r.parcela_combustivel) : (r.parcela_combustivel || '-')],
+    ['Parcela Equip.', r => podeMaterial(r) ? inputParcela(r, 'parcela_equipamento', r.parcela_equipamento) : (r.parcela_equipamento || '-')],
+    ['Parcela Ferramentas', r => podeMaterial(r) ? inputParcela(r, 'parcela_ferramentas', r.parcela_ferramentas) : (r.parcela_ferramentas || '-')],
+    ['Parcela Multa', r => podeMaterial(r) ? inputParcela(r, 'parcela_multa', r.parcela_multa) : (r.parcela_multa || '-')],
+    ['Parcela Miscelânea', r => podeMaterial(r) ? inputParcela(r, 'parcela_miscelanea', r.parcela_miscelanea) : (r.parcela_miscelanea || '-')],
+    ['Parcela Mecânica', r => podeMaterial(r) ? inputParcela(r, 'parcela_mecanica', r.parcela_mecanica) : (r.parcela_mecanica || '-')],
+    ['Parcela Vale', r => podeMaterial(r) ? inputParcela(r, 'parcela_vale', r.parcela_vale) : (r.parcela_vale || '-')],
+    ['Parcela Fiscalização', r => podeMaterial(r) ? inputParcela(r, 'parcela_fiscalizacao', r.parcela_fiscalizacao) : (r.parcela_fiscalizacao || '-')],
+    ['Parcela Combustível', r => podeMaterial(r) ? inputParcela(r, 'parcela_combustivel', r.parcela_combustivel) : (r.parcela_combustivel || '-')],
     ['TOTAL DESCONTOS', r=>`<span class="folha-total-descontos" style="color:var(--danger);font-weight:700">${money(r.total_descontos)}</span>`],
     ['TOTAL A RECEBER', r=>`<span class="folha-total-receber" style="color:var(--success);font-weight:700">${money(r.total_receber)}</span>`]
   ];
