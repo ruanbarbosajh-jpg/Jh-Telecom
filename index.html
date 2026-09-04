@@ -3859,8 +3859,11 @@ function normalizeChaveOS(v) {
   const semZeros = s.replace(/^0+(?=[0-9])/, '');
   return semZeros;
 }
-function defaultPeriod() {
-  const today = new Date(); const day = today.getDate();
+// refISO opcional: ciclo (21 a 20) que CONTÉM essa data, em vez do ciclo de
+// hoje — usado por telas cujos dados podem estar atrasados (ex.: Pedágio,
+// ver renderToll), pra não abrir sempre numa janela sem nada importado.
+function defaultPeriod(refISO) {
+  const today = refISO ? new Date(refISO + 'T00:00:00') : new Date(); const day = today.getDate();
   let start, end;
   if (day >= 21) { start = new Date(today.getFullYear(), today.getMonth(), 21); end = new Date(today.getFullYear(), today.getMonth()+1, 20); }
   else { start = new Date(today.getFullYear(), today.getMonth()-1, 21); end = new Date(today.getFullYear(), today.getMonth(), 20); }
@@ -12238,7 +12241,14 @@ function renderFleet() {
 
 // ===================== PEDÁGIO =====================
 function renderToll() {
-  const { start, end } = defaultPeriod();
+  // ACHADO NA AUDITORIA DE 04/09/2026: a tela sempre abria no ciclo de HOJE
+  // (21 a 20) — mas a planilha da Taggy costuma vir atrasada (semanas), então
+  // o ciclo atual sempre estava vazio: sumia tudo (cards de total, "fora do
+  // horário", as duas tabelas), parecendo que a importação não tinha feito
+  // nada, com milhares de linhas já no banco. Mesmo ajuste do Dashboard: abre
+  // no ciclo que contém a passagem mais RECENTE importada, não no de hoje.
+  const ultimaData = DB.pedagio.reduce((a, r) => (r.data_transacao && (!a || r.data_transacao > a)) ? r.data_transacao : a, '');
+  const { start, end } = defaultPeriod(ultimaData || undefined);
   document.getElementById('content').innerHTML = `${periodToolbar(start,end,`
     <div class="field"><label>Condutor</label><input type="text" id="f-condutor" placeholder="Nome" list="condutor-list"></div>
     <div class="field"><label>Placa</label><input type="text" id="f-placa" placeholder="Placa"></div>
@@ -12293,8 +12303,29 @@ function renderToll() {
     const divergent = rows.filter(r => r.condutor_atual && r.condutor_atual !== 'NÃO ENCONTRADA' && r.condutor_atual !== r.cadastro);
     const foraHorario = rows.filter(r => /fora/i.test(r.status||'')).length;
     const foraCidade = rows.filter(r => enderecoForaDasCidades(r.endereco)).length;
-    const byPlacaMap = {}; rows.forEach(r => { const p=r.placa||'Não informado'; byPlacaMap[p]=(byPlacaMap[p]||0)+r.valor; });
-    const byPlaca = Object.entries(byPlacaMap).map(([placa,total])=>({label:placa,value:total,display:formatCurrency(total)})).sort((a,b)=>b.value-a.value);
+    // pedido do cliente: o gráfico "Gasto por Veículo" só mostrava a placa —
+    // sem abrir a tabela de baixo não dava pra saber de quem era o carro.
+    // Uma placa pode aparecer com condutor/cadastro diferente entre
+    // passagens (troca de motorista no meio do período), então pega o mais
+    // FREQUENTE de cada um nas passagens filtradas, não só o da 1ª linha.
+    const byPlacaMap = {};
+    rows.forEach(r => {
+      const p = r.placa || 'Não informado';
+      if (!byPlacaMap[p]) byPlacaMap[p] = { total: 0, condutores: {}, cadastros: {} };
+      const info = byPlacaMap[p];
+      info.total += r.valor;
+      const cond = r.condutor_atual === 'NÃO ENCONTRADA' ? 'Não encontrada' : (r.condutor_atual || 'Não informado');
+      info.condutores[cond] = (info.condutores[cond] || 0) + 1;
+      const cad = r.cadastro || 'Não informado';
+      info.cadastros[cad] = (info.cadastros[cad] || 0) + 1;
+    });
+    const maisFrequente = obj => Object.entries(obj).sort((a, b) => b[1] - a[1])[0][0];
+    const byPlaca = Object.entries(byPlacaMap).map(([placa, info]) => {
+      const condutor = maisFrequente(info.condutores);
+      const cadastro = maisFrequente(info.cadastros);
+      const rotulo = condutor === cadastro ? `${placa} — ${condutor}` : `${placa} — ${condutor} (cadastro: ${cadastro})`;
+      return { label: rotulo, placa, condutor, cadastro, value: info.total, display: formatCurrency(info.total) };
+    }).sort((a, b) => b.value - a.value);
     // ---- Pedágio por Condutor: total gasto, quantas passagens, e o pedágio
     // (mesmo endereço) que ele mais repetiu — pedido do cliente: "quantas
     // vezes esteve no mesmo pedágio". "Não encontrada" fica num grupo só (não
@@ -12456,7 +12487,10 @@ function renderToll() {
         {l:'Total de passagens', v:rows.length}, {l:'Valor total', v:formatCurrency(totalValue)},
         {l:'Fora do horário', v:foraHorario}, {l:'Fora das cidades cobradas', v:foraCidade}, {l:'Condutor não encontrado', v:naoEncontrada}
       ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
-      placa: () => secaoTabela('Gasto de Pedágio por Veículo', byPlaca, [{header:'Placa', get:r=>r.label}, {header:'Valor', get:r=>formatCurrency(r.value)}]),
+      placa: () => secaoTabela('Gasto de Pedágio por Veículo', byPlaca, [
+        {header:'Placa', get:r=>r.placa}, {header:'Condutor', get:r=>r.condutor}, {header:'Cadastro', get:r=>r.cadastro},
+        {header:'Valor', get:r=>formatCurrency(r.value)}
+      ]),
       // os dois abaixo levam SÓ o que está filtrado na tela (barra de cima +
       // funil de coluna) — antes o PDF sempre saía com a lista inteira
       condutor: () => {
