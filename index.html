@@ -981,21 +981,35 @@
   .fin-grupo .fin-linha:last-of-type { border-bottom: none; }
   .fin-linha > span { font-size: 13px; color: var(--text-primary); }
   .fin-linha input { flex: none; }
-  /* resumo do topo (Receita / Despesas / Lucro) como 3 cartões, não linhas de
-     tabela — é o fecho, tem que dar pra bater o olho */
-  .fin-fecho { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 12px; margin-bottom: 1.25rem; }
-  .fin-fecho div { background: var(--card-bg); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 14px 16px; border-top: 3px solid; }
-  .fin-fecho .rot { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
-  .fin-fecho .val { display: block; font-size: 22px; font-weight: 700; letter-spacing: -.02em;
-    font-variant-numeric: tabular-nums; }
-  .fin-fecho .f-receita { border-top-color: var(--accent); }
-  .fin-fecho .f-receita .val { color: var(--accent); }
-  .fin-fecho .f-despesa { border-top-color: var(--danger); }
-  .fin-fecho .f-despesa .val { color: var(--danger); }
-  .fin-fecho .f-lucro { border-top-color: var(--success); }
-  .fin-fecho .f-lucro .val { color: var(--success); }
+  /* Resumo Receita / Despesa / Lucro (Financeiro e Dashboard, mesmo visual —
+     08/09/2026, pedido do cliente: os cartões antigos eram só texto num
+     retângulo com uma borda colorida em cima; isso aqui dá pra cada linha um
+     selo de ícone com o mesmo tom da métrica, pra bater o olho e já saber do
+     que se trata sem ler o rótulo primeiro). Empilhado (não lado a lado)
+     porque com 3 linhas de largura total dá pra ler valor grande sem
+     espremer em telas menores — ver resumoFinCard() no JS. */
+  .fin-resumo { display: flex; flex-direction: column; gap: 10px; margin-bottom: 1.25rem; }
+  .fin-resumo-linha { display: flex; align-items: center; gap: 14px; padding: 14px 18px;
+    background: var(--card-bg); border: 1px solid var(--border); border-left: 4px solid var(--linha);
+    border-radius: var(--radius); }
+  .fin-resumo-linha.receita { --linha: var(--accent); }
+  .fin-resumo-linha.despesa { --linha: var(--danger); }
+  .fin-resumo-linha.lucro   { --linha: var(--success); }
+  .fin-resumo-ic { flex: none; width: 40px; height: 40px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--linha) 16%, transparent); color: var(--linha); }
+  .fin-resumo-ic svg { width: 22px; height: 22px; }
+  .fin-resumo-txt { flex: 1 1 auto; min-width: 0; }
+  .fin-resumo-txt .rot { display: block; font-size: var(--fs-xs); font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+  .fin-resumo-txt .sub { font-size: var(--fs-sm); color: var(--text-secondary); margin-top: 2px; }
+  .fin-resumo-txt .sub b { color: var(--text-primary); font-weight: 700; }
+  .fin-resumo-linha .val { flex: none; font-size: clamp(20px, 2.6vw, 30px); font-weight: 800;
+    letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--linha); text-align: right; }
+  @media (max-width: 560px) {
+    .fin-resumo-linha { flex-wrap: wrap; }
+    .fin-resumo-linha .val { width: 100%; text-align: left; padding-left: 54px; }
+  }
   /* barra de salvar que acompanha a rolagem — com 17 campos, o botão ficava
      lá embaixo e não dava pra saber se havia alteração pendente */
   .fin-salvar-barra { position: sticky; bottom: 0; z-index: 10;
@@ -1278,6 +1292,12 @@
   .cmp-dash .cat-cell::before { content: ''; position: absolute; left: 6px; top: 50%; transform: translateY(-50%);
     width: 4px; height: 14px; border-radius: 2px; background: var(--warn-text); }
   .cmp-dash tr.total-row td.cat-cell::before { background: currentColor; }
+  /* Cliente pediu pra tirar o fundo azul das linhas TOTAL DESPESAS/RECEITA
+     DAS ORDENS/LUCRO no "Resumo financeiro do ciclo" (08/09/2026) — a
+     barrinha colorida do lado do rótulo já identifica cada uma, o fundo
+     --tab-total ficava pesado. Só nessa tabela (.cmp-dash); o total-row das
+     outras tabelas do sistema continua com o fundo de sempre. */
+  table.data-table.cmp-dash tr.total-row td { background: transparent; }
   /* Tag discreta de tendência (pedido do cliente 04/09/2026: nem só um
      círculo pelado com a seta, nem o texto corrido do diffBadge — uma
      etiqueta pequena com seta + % de variação). */
@@ -1511,21 +1531,10 @@
     font-weight: 800; background: var(--total-bg); color: var(--text-primary);
     border-bottom: 2px solid var(--accent); position: sticky; top: 0;
   }
-  .dash-dinheiro { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px; }
-  .dash-fin {
-    position: relative; overflow: hidden; padding: 22px 24px; border-radius: var(--r-md);
-    background: var(--card-bg); border: 1px solid var(--border); border-top: 4px solid var(--linha);
-    display: flex; flex-direction: column; gap: 5px;
-  }
-  .dash-fin.receita { --linha: var(--accent); }
-  .dash-fin.despesa { --linha: var(--danger); }
-  .dash-fin.lucro   { --linha: var(--success); }
-  .dash-fin .rot { font-size: var(--fs-xs); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--text-muted); }
-  /* o número é o que a diretoria olha primeiro — maior que o resto, mas sem
-     exagero (46px estourava visualmente ao lado dos cartões de operação) */
-  .dash-fin .val { font-size: clamp(26px, 3.1vw, 37px); font-weight: 800; letter-spacing: -.025em; color: var(--linha); line-height: 1.04; }
-  .dash-fin .pe  { font-size: var(--fs-sm); color: var(--text-secondary); }
-  .dash-fin .pe b { color: var(--text-primary); font-weight: 700; }
+  /* Receita/Despesa/Lucro do Dashboard viraram o mesmo componente do
+     Financeiro (ver .fin-resumo, resumoFinCards() no JS) — 08/09/2026,
+     pedido do cliente ("melhore o design"). CSS antiga dos 3 cartões lado a
+     lado (.dash-dinheiro/.dash-fin) saiu daqui por ficar sem uso. */
   /* linha de operação */
   /* são sempre 4 cartões (técnicos, produção, gasolina, aluguel) — com
      auto-fit o grid abria 6 trilhas em tela larga e sobrava buraco à direita */
@@ -1597,7 +1606,6 @@
     font-size: var(--fs-sm); color: var(--warn-text); line-height: 1.5;
   }
   .dash-obs b { font-weight: 800; }
-  @media (max-width: 820px) { .dash-dinheiro { grid-template-columns: 1fr; } }
 
   /* ===================== MENU INICIAL (tela de entrada) =====================
      Vitrine das telas do sistema: busca, filtro por área e um cartão por rota.
@@ -2434,20 +2442,24 @@ const ROUTE_PERMISSIONS = {
   // Analista — o único perfil SEM 'bi' bloqueado abaixo. A aba "Dashboard" foi
   // removida (28/08/2026): o que tinha de único (evolução por status, ranking
   // de cidades por status, mapa de bairros) migrou pra dentro do 'bi'.
-  // Supervisor/Coordenador: fica de fora do Relatório de Eficiência, Pedágio,
-  // de todo o Financeiro (tela + comparativo) e da Folha de Pagamento — pedido do cliente.
+  // Supervisor/Coordenador: fica de fora do Relatório de Eficiência, de todo
+  // o Financeiro (tela + comparativo) e da Folha de Pagamento — pedido do
+  // cliente. Pedágio ('toll') saiu da lista de bloqueio em 08/09/2026 (pedido
+  // do cliente) — Sebastião (e os demais do mesmo perfil: Matheus, Thaís,
+  // Rebeca, já que não existe permissão por PESSOA, só por perfil) passou a
+  // ver a tela.
   // 'retornosgiga' (conferência da planilha de retornos da GIGA) é EXCLUSIVA do
   // Analista — está bloqueada em todos os outros perfis, igual à 'import'.
   // Supervisor/Coordenador (revisado 01/09/2026, pedido do cliente):
   //   • Produção e Acompanhamento Técnico.
   //   • IFI/IRR e PRAZO inteiro — inclusive a Parcial do Dia, que era bloqueada
   //     ("acompanham pela PCR") e voltou a ser liberada.
-  //   • Frota continua liberada; Pedágio e Comparativo Financeiro, não.
+  //   • Frota e Pedágio liberados; Comparativo Financeiro, não.
   //   • Presença (técnicos e escritório) ficou EXCLUSIVA do Analista em
   //     04/09/2026 (pedido do cliente) — nem Matheus/Sebastião, que editavam
   //     a de técnicos, continuam vendo. Ver 'presenca' abaixo e
   //     podeAcessar (presencaescritorio tem regra própria, fora desta lista).
-  admin: ['import', 'dashboard', 'toll', 'finance', 'comparisons', 'folha',
+  admin: ['import', 'dashboard', 'finance', 'comparisons', 'folha',
           'retornosgiga', 'relatoriofin', 'folhaescritorio', 'presenca'],
   // RH: "no momento" (28/08/2026, pedido do cliente) só enxerga Pedágio —
   // lista de bloqueio com TODAS as outras rotas, de propósito. Se voltar a
@@ -6436,6 +6448,25 @@ function metricCard(label, value, negative, opts = {}) {
   }
   return `<div class="metric-card${opts.accent?' accent':''}${nivel}"><div class="label">${icon}${label}</div><div class="value${classe}">${value}</div>${variacao}${sub}</div>`;
 }
+// Selo de ícone + linha pro resumo Receita/Despesa/Lucro — mesmo visual no
+// Financeiro e no Dashboard (08/09/2026, pedido do cliente: "melhore o
+// design"), pra não ter dois jeitos diferentes de mostrar a mesma coisa.
+// itens: [{ tipo: 'receita'|'despesa'|'lucro', rot, val, sub, id }] — `id` é
+// opcional, só o Financeiro usa (o valor é recalculado ao vivo enquanto a
+// pessoa digita, então o <span> do valor precisa de um id fixo pra achar).
+const FIN_RESUMO_ICONES = {
+  receita: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h14M4 8v7M8 8v7M12 8v7M16 8v7M2.5 17h15M10 2 3 8h14L10 2Z"/></svg>',
+  despesa: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="10" cy="5" rx="6" ry="2.4"/><path d="M4 5v4c0 1.3 2.7 2.4 6 2.4s6-1.1 6-2.4V5"/><path d="M4 9v4c0 1.3 2.7 2.4 6 2.4s6-1.1 6-2.4V9"/></svg>',
+  lucro: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 14l5-5 3 3 6-7"/><path d="M13 5h4v4"/></svg>',
+};
+function resumoFinCards(itens) {
+  return `<div class="fin-resumo">${itens.map(it => `
+    <div class="fin-resumo-linha ${it.tipo}">
+      <div class="fin-resumo-ic">${FIN_RESUMO_ICONES[it.tipo]}</div>
+      <div class="fin-resumo-txt"><span class="rot">${esc(it.rot)}</span>${it.sub ? `<div class="sub">${it.sub}</div>` : ''}</div>
+      <span class="val"${it.id ? ` id="${it.id}"` : ''}>${it.val}</span>
+    </div>`).join('')}</div>`;
+}
 // Faixa de alertas do topo: transforma em UMA linha o que hoje só dá pra
 // descobrir rolando a tela inteira. Não calcula nada novo — só lê os números
 // que a própria tela já produziu. itens: [{texto, tipo:'ruim'|'atencao'|'ok', rota}]
@@ -6818,6 +6849,11 @@ function renderDashboard() {
     // recurso (não tem folha de escritório, imposto, aluguel da base…).
     const cadTem = temCadastroFin(rotuloPeriodo);
     const cadDespesa = cadTem ? FIN_CATEGORIAS.reduce((a, c) => a + (despesasDoPeriodoFin(rotuloPeriodo)[c] || 0), 0) : 0;
+    // cadastro incompleto (algumas categorias zeradas aqui, mas com valor na
+    // planilha de Comparação) infla o lucro deste ciclo silenciosamente — ver
+    // categoriasFaltantesFin(). Só faz sentido avisar quando é 1 ciclo (o card
+    // some em "Todos os ciclos", que soma vários períodos de uma vez).
+    const cadFaltando = (cadTem && !todos) ? categoriasFaltantesFin(rotuloPeriodo) : [];
     const cmpTem = !cadTem && !!(cmp && cmp.totalDespesas && cmp.totalDespesas[rotuloPeriodo] !== undefined);
     // AUDITORIA 04/09/2026: receita usa o fechamento (valorPagoGiga) sempre
     // que ESTE ciclo tem fechamento importado — a planilha de Comparação é
@@ -6928,28 +6964,22 @@ function renderDashboard() {
 
     body.innerHTML = `
       <div class="section-heading sem-toggle">Resultado do ciclo</div>
-      <div class="dash-dinheiro">
-        <div class="dash-fin receita">
-          <span class="rot">Receita — pago pela GIGA</span>
-          <span class="val">${formatCurrency(receitaFinal)}</span>
-          <span class="pe"><b>${totalOrdens.toLocaleString('pt-BR')}</b> ordens no ciclo${varGiga ? ` · ${varGiga.pct >= 0 ? '▲' : '▼'} ${formatPct(Math.abs(varGiga.pct))} vs. anterior` : ''}</span>
-        </div>
-        <div class="dash-fin despesa">
-          <span class="rot">Despesa total</span>
-          <span class="val">${formatCurrency(despesaFinal)}</span>
-          <span class="pe">a quebra por categoria está logo abaixo</span>
-        </div>
-        <div class="dash-fin lucro">
-          <span class="rot">Lucro</span>
-          <span class="val">${formatCurrency(lucroFinal)}</span>
-          <span class="pe">margem de <b>${formatPct(margem)}</b> sobre a receita</span>
-        </div>
-      </div>
+      ${resumoFinCards([
+        { tipo: 'receita', rot: 'Receita — pago pela GIGA', val: formatCurrency(receitaFinal),
+          sub: `<b>${totalOrdens.toLocaleString('pt-BR')}</b> ordens no ciclo${varGiga ? ` · ${varGiga.pct >= 0 ? '▲' : '▼'} ${formatPct(Math.abs(varGiga.pct))} vs. anterior` : ''}` },
+        { tipo: 'despesa', rot: 'Despesa total', val: formatCurrency(despesaFinal), sub: 'a quebra por categoria está logo abaixo' },
+        { tipo: 'lucro', rot: 'Lucro', val: formatCurrency(lucroFinal), sub: `margem de <b>${formatPct(margem)}</b> sobre a receita` },
+      ])}
       <p style="margin:-6px 0 20px;font-size:var(--fs-sm);color:var(--text-muted)">
         Receita, despesa e lucro pela <b>${esc(fonteFin)}</b>${cadTem || cmpTem
           ? ' — inclui folha do escritório, imposto, aluguel da base e demais custos da empresa, que não aparecem no fechamento por técnico.'
           : '. Cadastre as despesas deste ciclo na tela Financeiro para ver o resultado da empresa inteira.'}
       </p>
+      ${cadFaltando.length ? `<p style="margin:-14px 0 20px;font-size:var(--fs-sm);color:var(--warn-text);background:color-mix(in srgb, var(--warn-text) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn-text) 35%, transparent);border-radius:var(--r-sm);padding:10px 12px">
+        Cadastro do Financeiro <b>incompleto</b> pra ${esc(rotuloPeriodo)}: ${cadFaltando.length} categoria(s) zerada(s) aqui mas com valor na planilha de Comparação
+        (${cadFaltando.map(esc).join(', ')}) — a "Despesa total" e o "Lucro" acima estão contando essas categorias como R$ 0,00.
+        Complete o cadastro na tela <b>Financeiro</b> (botão "Usar do Comparativo (Excel)") pra corrigir.
+      </p>` : ''}
       <div class="dash-duas">
         <div class="dash-duas-esq">${resumoFinanceiro}</div>
         <div class="dash-duas-dir">
@@ -8588,6 +8618,14 @@ const BUCKET_LABEL = { ate24:'Até 24hrs', ate48:'Até 48hrs', maior48:'Maior qu
 // ordens da aba (2.433 até 36h = exatamente as com aging <= 1,5).
 const PRAZO_ATIVACAO_HORAS = 36;
 const BUCKET_LABEL_ATIVACAO = { ate36:'Até 36hrs', ate48:'Até 48hrs', maior48:'Maior que 48hrs', outlier:'Outliers' };
+// A PCR mistura Reparo (24h) e Ativação/M.Endereço (36h) na MESMA tabela
+// ("Prazos do Dia — Detalhado") — uma ordem aberta de ativação calcula a
+// faixa pela régua de 36h (classifyBucketAtivacao), que devolve 'ate36', uma
+// chave que só existe em BUCKET_LABEL_ATIVACAO. Rótulo buscado só em
+// BUCKET_LABEL (a tabela de REPARO) virava "undefined" pra toda ativação
+// ainda aberta (achado 08/09/2026). 'ate48'/'maior48'/'outlier' têm o MESMO
+// texto nos dois mapas, então juntar os dois num só é seguro.
+const BUCKET_LABEL_UNIFICADO = { ...BUCKET_LABEL, ...BUCKET_LABEL_ATIVACAO };
 function classifyBucketAtivacao(statusPrazo, aging) {
   const n = normalizeHeader(statusPrazo);
   if (/ate 36/.test(n)) return 'ate36';
@@ -9272,8 +9310,11 @@ function tempoDesde(d) {
   return dias === 1 ? 'há 1 dia' : `há ${dias} dias`;
 }
 const fmtDataHoraCompleta = d => d ? `${fmtDT(d)}` : '-';
-// SQL pra criar a tabela do PCR no Supabase — aparece na tela pra não depender
-// de eu mandar o comando por fora quando o banco ainda não tem essa tabela.
+// SQL pra criar a tabela do PCR no Supabase. NÃO aparece mais fixo na tela
+// (08/09/2026, pedido do cliente) — depois que a tabela é criada uma vez, ela
+// nunca mais precisa disso, e ficava poluindo a PCR pro Analista pra sempre.
+// Só volta a aparecer sozinho quando um import de CSV falhar de verdade (ver
+// o insertAdjacentHTML logo abaixo).
 function painelSqlPCR() {
   const sql = `create table if not exists pcr (
   id            bigserial primary key,
@@ -9402,7 +9443,6 @@ function renderPCR() {
     </div>
     <p id="pcr-msg" style="font-size:13px;color:var(--text-secondary);margin:0 0 6px"></p>
     <p id="pcr-atualizado" style="font-size:13px;margin:0 0 1rem"></p>
-    ${supa && ehAnalista() ? painelSqlPCR() : ''}
     <div id="pcr-body"></div>`;
 
   document.getElementById('pcr-file').addEventListener('change', ev => {
@@ -9520,7 +9560,15 @@ function renderPCR() {
     const prazoUnificado = [...abertasOrdenadas, ...fechadasOrdenadas];
     const vencidas = abertasOrdenadas.filter(r => r.limite && horasAte(r) < 0);
     const vence2h  = abertasOrdenadas.filter(r => r.limite && horasAte(r) >= 0 && horasAte(r) < 2);
-    const faixaAtualDaAberta = r => r.abertura ? faixaPorAging((agoraPCR - r.abertura) / 86400000, r.horas_prazo) : null;
+    // achado 08/09/2026: usava r.horas_prazo (calculado na importação do CSV),
+    // mas essa coluna NÃO existe na tabela "pcr" do Supabase — some depois de
+    // recarregar a página. Sem ela, `horasPrazo === 24` dava falso pra
+    // REPARO também, caía na régua de 36h da Ativação e devolvia faixa
+    // 'ate36', que não existe pro Reparo — virava "undefined" na tela (Status
+    // Prazo) e no PDF. Recalcula do tipo_atividade (esse sim sempre salvo),
+    // igual foi calculado originalmente na importação (ver horasPrazo logo
+    // acima na função de import do CSV).
+    const faixaAtualDaAberta = r => r.abertura ? faixaPorAging((agoraPCR - r.abertura) / 86400000, ehPrazoDeAtivacao(r, true) ? PRAZO_ATIVACAO_HORAS : 24) : null;
     const faixaEfetiva = r => r.faixa || (aberta(r) ? faixaAtualDaAberta(r) : null);
     // Extraídos como funções separadas (em vez de só inline na linha da
     // tabela) pra o PDF poder gerar o MESMO texto que a tela mostra, sem
@@ -9541,17 +9589,30 @@ function renderPCR() {
       }
       return `${Math.floor(h / 24)}d`;
     };
+    // achado 08/09/2026: o "⏳ " aqui na frente do rótulo quebrava o PDF — o
+    // jsPDF usa fonte padrão (Helvetica), que só sabe desenhar Latin-1, e um
+    // emoji fora dessa faixa derruba a largura de TODOS os caracteres depois
+    // dele na mesma célula (virava "#ó O u t l i e r s" na exportação). Texto
+    // puro em vez de emoji resolve nas duas telas (a tabela em tela e o PDF
+    // usam a MESMA função, de propósito — ver comentário logo acima).
     const textoFaixaEfetiva = r => {
       const faixa = faixaEfetiva(r);
-      const rotulo = faixa ? BUCKET_LABEL[faixa] : '-';
-      return aberta(r) && faixa ? '⏳ ' + rotulo : rotulo;
+      // BUCKET_LABEL_UNIFICADO (não só BUCKET_LABEL): essa tabela mistura
+      // Reparo (24h) e Ativação/M.Endereço (36h) — ver comentário na
+      // declaração da constante.
+      const rotulo = faixa ? BUCKET_LABEL_UNIFICADO[faixa] : '-';
+      return aberta(r) && faixa ? rotulo + ' (em aberto)' : rotulo;
     };
     const linhaPrazoUnificado = r => {
       const abertaAgora = aberta(r);
       const h = horasFalta(r);
       const corFalta = h===null ? 'var(--text-muted)' : h < 0 ? 'var(--danger)' : h < 2 ? '#fb923c' : h < 4 ? '#f59e0b' : 'var(--text-secondary)';
       const faixa = faixaEfetiva(r);
-      const corFaixa = faixa==='ate24'?'var(--success)':faixa==='ate48'?'#38bdf8':faixa?'var(--danger)':'var(--text-muted)';
+      // 'ate36' é o "dentro do prazo" de Ativação/M.Endereço — mesmo status de
+      // 'ate24' pro Reparo (mesma mistura Reparo+Ativação de textoFaixaEfetiva
+      // acima). Sem esse caso, ativação/m.endereço dentro do prazo aparecia em
+      // VERMELHO (mesma cor de estourado), porque só 'ate24' caía em verde.
+      const corFaixa = (faixa==='ate24'||faixa==='ate36')?'var(--success)':faixa==='ate48'?'#38bdf8':faixa?'var(--danger)':'var(--text-muted)';
       const divergiu = r.periodo && r.periodo_sistema && normalizeHeader(r.periodo)!==normalizeHeader(r.periodo_sistema);
       const tec = ehRecursoTecnico(r.recurso) ? r.recurso : '';
       return `<tr>
@@ -9593,17 +9654,22 @@ function renderPCR() {
     // "A Executar" e "Total Geral" eram a MESMA coluna duas vezes — o grupo só
     // contava pendente, então total geral não passava de repetir o que já
     // estava em "A Executar". Agora entra também quem já foi CONCLUÍDO
-    // (mesma cidade/tipo), e Total = Concluído + A Executar, por construção —
-    // cancelado/em rota/iniciado/não concluído ficam de fora da conta, porque
-    // não são nem "já entregue" nem "ainda por fazer" nesse recorte.
+    // (mesma cidade/tipo), e Total = Concluído + A Executar, por construção.
+    // "A Executar" (08/09/2026, pedido do cliente) passou a somar pendente +
+    // em rota + iniciado — é a mesma regra do "Mão de Obra" da Parcial do Dia
+    // (ordem em aberto, ainda na mão do técnico, só que ele já pode ter
+    // começado ou estar a caminho). Antes só "pendente" contava, e uma ordem
+    // já iniciada/em rota sumia da conta até ser concluída. Cancelado e não
+    // concluído continuam de fora — não são nem entrega nem pendência.
+    const ehAExecutar = bucket => bucket === 'pendente' || bucket === 'em_rota' || bucket === 'iniciado';
     const mapaExec = {};
     rows.forEach(r => {
       const bucket = classifyStatusGranular(r.status);
-      if (bucket !== 'pendente' && bucket !== 'concluido') return;
+      if (!ehAExecutar(bucket) && bucket !== 'concluido') return;
       const c = r.cidade || 'Não informado', t = nomeTipoPCR(r.tipo_atividade);
       if (!mapaExec[c]) mapaExec[c] = {};
       if (!mapaExec[c][t]) mapaExec[c][t] = { concluido: 0, pendente: 0 };
-      mapaExec[c][t][bucket]++;
+      mapaExec[c][t][ehAExecutar(bucket) ? 'pendente' : 'concluido']++;
     });
     const aExecutar = {
       grupos: Object.keys(mapaExec).sort((a, b) => a.localeCompare(b, 'pt-BR')).map(c => {
@@ -9836,7 +9902,7 @@ function renderPCR() {
         <b style="${estiloSituacao('pendente')}">pendente</b> (${porSituacao('pendente')}) ·
         <b style="${estiloSituacao('em_rota')}">em rota</b> (${porSituacao('em_rota')}) ·
         <b style="${estiloSituacao('iniciado')}">iniciado</b> (${porSituacao('iniciado')}).
-        Em <b>Status Prazo</b>, o ⏳ marca faixa AINDA NÃO DEFINITIVA — calculada pelo tempo já decorrido de uma
+        Em <b>Status Prazo</b>, o "(em aberto)" marca faixa AINDA NÃO DEFINITIVA — calculada pelo tempo já decorrido de uma
         ordem que continua aberta, não pelo aging final.
         O período vem da HORA DO LIMITE (abertura + 24h), não do turno gravado no sistema —
         um prazo que vence 09:00 é MANHÃ mesmo que o sistema tenha registrado "Tarde"
@@ -9856,8 +9922,8 @@ function renderPCR() {
       </div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
         Cidade e tipo de serviço, comparando o que já foi <b style="color:var(--success)">concluído</b> com o que
-        ainda está <b style="color:#f59e0b">pendente</b> — <b>Total Geral = Concluído + A Executar</b>.
-        Cancelado, em rota, iniciado e não concluído ficam fora dessa conta (não são nem entrega nem pendência).
+        ainda está <b style="color:#f59e0b">a executar</b> (pendente, em rota ou iniciado) — <b>Total Geral = Concluído + A Executar</b>.
+        Cancelado e não concluído ficam fora dessa conta (não são nem entrega nem pendência).
       </p>
       ${!aExecutar.total ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma ordem concluída ou pendente nesse dia/filtro.</div></div>' : `
       <div class="cards-grid" style="margin-bottom:1rem">
@@ -12591,6 +12657,21 @@ function valoresDoComparativoFin(rotulo) {
   FIN_CATEGORIAS.forEach(cat => { if (porNome[normalizeHeader(cat)]) out[cat] = porNome[normalizeHeader(cat)]; });
   return out;
 }
+// Categorias que a planilha de Comparação já tem pra esse período mas o
+// cadastro ainda está zerado — sinal de cadastro DIGITADO PELA METADE (ex.:
+// alguém lançou só "Conta de Água" e salvou, esquecendo o resto). Como
+// temCadastroFin() vira true com QUALQUER categoria > 0, esse cadastro
+// incompleto passa a mandar sozinho e some com o resto da despesa da
+// planilha, sem aviso nenhum — achado real: ciclo 21/06 a 20/07/2026 com só
+// R$90,54 de despesa cadastrada (Conta de Água) contra R$394.190,44 na
+// planilha, o que inflava o lucro pra quase 100% de margem. Usado pra avisar
+// (Dashboard e Financeiro), não pra decidir a fonte — o cadastro continua
+// mandando mesmo incompleto (decisão do cliente 08/09/2026).
+function categoriasFaltantesFin(rotulo) {
+  const doCadastro = despesasDoPeriodoFin(rotulo);
+  const doComparativo = valoresDoComparativoFin(rotulo);
+  return FIN_CATEGORIAS.filter(cat => !doCadastro[cat] && doComparativo[cat]);
+}
 // Existe cadastro (qualquer valor > 0) pra esse período? É o que decide se o
 // Dashboard e o Comparativo usam o cadastro ou caem na planilha antiga.
 function temCadastroFin(rotulo) {
@@ -12626,13 +12707,40 @@ function periodosDoCadastroFin() {
                   .sort((a, b) => String(b.end).localeCompare(String(a.end))), atual: rotAtual };
 }
 
+// Sugestão de datas pro botão "Criar novo período": o ciclo seguinte ao mais
+// recente que já existe na lista (dia depois do fim do último até o mesmo dia
+// do mês seguinte — a regra "21 a 20" já cai certa quando o anterior também
+// respeitou essa regra, que é o caso normal). É só sugestão: os campos ficam
+// livres pra digitar qualquer data.
+function proximoCicloSugeridoFin(lista) {
+  if (!lista.length) return defaultPeriod();
+  const d = new Date(lista[0].end + 'T00:00:00');
+  d.setDate(d.getDate() + 1);
+  const start = d.toISOString().slice(0, 10);
+  const dEnd = new Date(d);
+  dEnd.setMonth(dEnd.getMonth() + 1);
+  dEnd.setDate(dEnd.getDate() - 1);
+  return { start, end: dEnd.toISOString().slice(0, 10) };
+}
 function renderFinance() {
   const { lista, atual } = periodosDoCadastroFin();
+  const sugestao = proximoCicloSugeridoFin(lista);
   document.getElementById('content').innerHTML = `<div class="toolbar">
     <div class="field"><label>Período</label><select id="fin-periodo">
       ${lista.map(p => `<option value="${esc(p.rotulo)}"${p.rotulo === atual ? ' selected' : ''}>${esc(p.rotulo)}</option>`).join('')}
     </select></div>
     <button class="btn" id="fin-carregar">Carregar período</button>
+    ${podeEditarFinanceiro() ? '<button type="button" class="btn-secundario" id="fin-novo-periodo">+ Criar novo período</button>' : ''}
+  </div>
+  <div id="fin-novo-painel" class="panel" style="display:none;margin:0 0 1rem">
+    <div class="toolbar" style="margin:0">
+      <div class="field"><label>De</label><input type="date" id="fin-novo-de" value="${sugestao.start}"></div>
+      <div class="field"><label>Até</label><input type="date" id="fin-novo-ate" value="${sugestao.end}"></div>
+      <button class="btn" id="fin-novo-confirmar">Criar período</button>
+      <button type="button" class="btn-secundario" id="fin-novo-cancelar">Cancelar</button>
+    </div>
+    <p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">O ciclo normal vai do dia 21 de um mês ao dia 20 do seguinte — as datas já vêm sugeridas assim, mas dá pra digitar qualquer intervalo.</p>
+    <p id="fin-novo-msg" style="font-size:12px;color:var(--warn-text);margin:6px 0 0"></p>
   </div>
   <p style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">
     Os valores ficam salvos por período no banco. Trocar de período aqui não altera
@@ -12641,6 +12749,32 @@ function renderFinance() {
   <div id="fin-body"></div>`;
   document.getElementById('fin-carregar').addEventListener('click', load);
   document.getElementById('fin-periodo').addEventListener('change', load);
+  const btnNovo = document.getElementById('fin-novo-periodo');
+  if (btnNovo) {
+    const painelNovo = document.getElementById('fin-novo-painel');
+    btnNovo.addEventListener('click', () => { painelNovo.style.display = painelNovo.style.display === 'none' ? '' : 'none'; });
+    document.getElementById('fin-novo-cancelar').addEventListener('click', () => { painelNovo.style.display = 'none'; });
+    document.getElementById('fin-novo-confirmar').addEventListener('click', () => {
+      const de = document.getElementById('fin-novo-de').value, ate = document.getElementById('fin-novo-ate').value;
+      const msg = document.getElementById('fin-novo-msg');
+      if (!de || !ate) { msg.textContent = 'Preencha as duas datas.'; return; }
+      if (ate < de) { msg.textContent = '"Até" não pode ser antes de "De".'; return; }
+      const rotulo = rotuloPeriodoFin(de, ate);
+      const sel = document.getElementById('fin-periodo');
+      if (![...sel.options].some(o => o.value === rotulo)) {
+        // entra na MESMA lista que load() usa pra achar o período — sem isso o
+        // seletor mostraria a opção nova, mas "Carregar período" não acharia
+        // as datas dela (lista.find ficaria sem bater com o rótulo).
+        lista.push({ rotulo, start: de, end: ate });
+        lista.sort((a, b) => String(b.end).localeCompare(String(a.end)));
+        sel.innerHTML = lista.map(p => `<option value="${esc(p.rotulo)}">${esc(p.rotulo)}</option>`).join('');
+      }
+      sel.value = rotulo;
+      painelNovo.style.display = 'none';
+      msg.textContent = '';
+      load();
+    });
+  }
   load();
 
   function load() {
@@ -12672,11 +12806,11 @@ function renderFinance() {
 
     document.getElementById('fin-body').innerHTML = `
       <div class="section-heading sem-toggle">Receitas e Despesas<span class="sec-nota">${esc(rotulo)}</span></div>
-      <div class="fin-fecho">
-        <div class="f-receita"><span class="rot">Receita das ordens</span><span class="val" id="fin-receita">${formatCurrency(receita)}</span></div>
-        <div class="f-despesa"><span class="rot">Total de Despesas</span><span class="val" id="fin-despesa">${formatCurrency(0)}</span></div>
-        <div class="f-lucro"><span class="rot">Lucro</span><span class="val" id="fin-lucro">${formatCurrency(0)}</span></div>
-      </div>
+      ${resumoFinCards([
+        { tipo: 'receita', rot: 'Receita das ordens', val: formatCurrency(receita), id: 'fin-receita' },
+        { tipo: 'despesa', rot: 'Total de Despesas', val: formatCurrency(0), id: 'fin-despesa' },
+        { tipo: 'lucro', rot: 'Lucro', val: formatCurrency(0), id: 'fin-lucro' },
+      ])}
       <p style="font-size:12px;color:var(--text-muted);margin:-6px 0 18px">
         Receita das ordens = soma de VALOR PAGO GIGA do fechamento deste ciclo (${(DB.fechamento || []).filter(f => overlaps(f.inicio, f.ate_o_dia, p.start, p.end)).length} técnico(s)).
         Total de Despesas e Lucro são calculados sozinhos conforme você digita.
@@ -12689,11 +12823,22 @@ function renderFinance() {
         // pessoa leia o R$ 0,00 como se fosse real.
         const cmpAqui = DB.comparativoFinanceiro;
         const temNaPlanilha = cmpAqui && cmpAqui.totalDespesas && cmpAqui.totalDespesas[rotulo] !== undefined;
-        if (temCadastroFin(rotulo) || !temNaPlanilha) return '';
+        if (!temCadastroFin(rotulo)) {
+          if (!temNaPlanilha) return '';
+          return `<p style="font-size:12px;color:var(--warn-text);background:color-mix(in srgb, var(--warn-text) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn-text) 35%, transparent);border-radius:var(--r-sm);padding:10px 12px;margin:-6px 0 18px">
+            Este período ainda não tem nada cadastrado aqui — os campos abaixo estão zerados, então "Total de Despesas" e "Lucro" não refletem o ciclo de verdade.
+            A planilha de Comparação já tem despesa de <b>${formatCurrency(cmpAqui.totalDespesas[rotulo])}</b> pra ${esc(rotulo)} (é o que aparece no Dashboard).
+            Clique em <b>"Usar do Comparativo (Excel)"</b> abaixo pra trazer esses valores pro cadastro.
+          </p>`;
+        }
+        // Cadastro existe, mas cobre só ALGUMAS categorias — o resto conta como
+        // R$0,00 no Total de Despesas mesmo a planilha já tendo valor pra elas.
+        const faltando = categoriasFaltantesFin(rotulo);
+        if (!faltando.length) return '';
         return `<p style="font-size:12px;color:var(--warn-text);background:color-mix(in srgb, var(--warn-text) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn-text) 35%, transparent);border-radius:var(--r-sm);padding:10px 12px;margin:-6px 0 18px">
-          Este período ainda não tem nada cadastrado aqui — os campos abaixo estão zerados, então "Total de Despesas" e "Lucro" não refletem o ciclo de verdade.
-          A planilha de Comparação já tem despesa de <b>${formatCurrency(cmpAqui.totalDespesas[rotulo])}</b> pra ${esc(rotulo)} (é o que aparece no Dashboard).
-          Clique em <b>"Usar do Comparativo (Excel)"</b> abaixo pra trazer esses valores pro cadastro.
+          Cadastro <b>incompleto</b> pra ${esc(rotulo)}: ${faltando.length} categoria(s) está(ão) zerada(s) aqui mas a planilha de Comparação já tem valor —
+          ${faltando.map(esc).join(', ')}. "Total de Despesas" e "Lucro" abaixo estão contando essas categorias como R$ 0,00.
+          Clique em <b>"Usar do Comparativo (Excel)"</b> abaixo pra completar (sobrescreve com o valor da planilha toda categoria que existir nela — confira antes de gravar).
         </p>`;
       })()}
       <div class="fin-grade">${FIN_GRUPOS.map(grupoHtml).join('')}</div>
