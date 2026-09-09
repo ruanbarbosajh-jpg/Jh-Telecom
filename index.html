@@ -5884,8 +5884,67 @@ function tryParsePivotFinanceiro(rows) {
   return { periodos: periodCols.map(p=>p.periodo), porCategoria, totalDespesas, receitaOrdens, lucro };
 }
 
+// Aba "PORTAS DA CTO" (planilha PORTAS DA CTO.xlsx — a MESMA fonte que
+// alimentava o Power BI "CLEAN UP - BAIXADA & SP"): uma linha por PORTA, não
+// por caixa. São 3 colunas — LOCALIZAÇÃO CTO, Porta, Status — e o que
+// interessa pro mapa é a caixa inteira, então aqui agrupa por localização:
+// quantas portas a caixa tem no total e quantas ficaram VAGAS (é a "vaga
+// liberada" que o cliente conta depois da limpeza).
+// Status possíveis na planilha real: "VAGA" (livre), um número de contrato,
+// "ATIVO", "SEM CTT"/"SEM CONTRATO"/"SEM ID" (ocupada sem contrato achado).
+// Só "VAG..." conta como vaga; o resto é porta ocupada.
+function tryParsePortasCTO(rows) {
+  let cab = -1, iLoc = -1, iPorta = -1, iStatus = -1;
+  for (let i = 0; i < Math.min(10, rows.length); i++) {
+    const norm = (rows[i] || []).map(c => normalizeHeader(c));
+    const loc = norm.findIndex(c => c === 'localizacao cto');
+    if (loc === -1) continue;
+    cab = i; iLoc = loc;
+    iPorta = norm.findIndex(c => c === 'porta' || c === 'portas');
+    iStatus = norm.findIndex(c => c === 'status');
+    break;
+  }
+  if (cab === -1 || iPorta === -1) return null;
+  const porCto = new Map();
+  for (let r = cab + 1; r < rows.length; r++) {
+    const loc = String((rows[r] || [])[iLoc] || '').trim();
+    if (!loc) continue;
+    if (!porCto.has(loc)) porCto.set(loc, { total: 0, vagas: 0 });
+    const c = porCto.get(loc);
+    c.total++;
+    const st = normalizeHeader(iStatus === -1 ? '' : rows[r][iStatus]);
+    if (!st || st.startsWith('vag')) c.vagas++;
+  }
+  if (!porCto.size) return null;
+  let gravadas = 0, semCoord = 0;
+  porCto.forEach((c, loc) => {
+    const ponto = parseCoordCleanUp(loc);
+    if (!ponto) semCoord++;
+    const obj = {
+      localizacao: loc, lat: ponto ? ponto.lat : null, lon: ponto ? ponto.lon : null,
+      portas: c.vagas, portas_total: c.total,
+      observacao: 'Importado da planilha PORTAS DA CTO',
+    };
+    obj.chave = chaveCleanUp(obj);
+    upsertRow(DB.cleanUp, DB_INDEX.cleanUp, obj.chave, obj);
+    gravadas++;
+  });
+  return { gravadas, semCoord };
+}
+
 function importSheet(sheetName, rows) {
   if (!rows || rows.length < 2) return { target: null, inserted: 0, headersSeen: [] };
+  // "PORTAS DA CTO" precisa de parser próprio (linha por PORTA, agrupada por
+  // caixa) — mesma situação da aba COMAPARATIVO logo abaixo.
+  const portasCto = tryParsePortasCTO(rows);
+  if (portasCto) {
+    const logEntry = { sheet_name: sheetName, target_table: 'cleanUp', row_count: portasCto.gravadas, imported_at: new Date().toLocaleString('pt-BR') };
+    DB.importsLog.unshift(logEntry);
+    const syncPromise = syncBatchToSupabase('cleanUp', DB.cleanUp.slice());
+    logImportToSupabase({ ...logEntry, imported_by: currentUser ? (currentUser.nome || currentUser.login) : null });
+    return { target: 'cleanUp', inserted: portasCto.gravadas, syncPromise,
+      aviso: portasCto.semCoord ? `${portasCto.semCoord} caixa(s) sem coordenada reconhecida — entram na lista, mas não no mapa.` : null };
+  }
 
   // A aba "VALORES ORDENS" é IGNORADA de propósito: os valores de contrato
   // agora são fixos no sistema (VALORES_ORDENS_FIXOS), decisão do cliente.
@@ -9036,13 +9095,23 @@ function ativarBotoesImagem(raiz) {
     h3.appendChild(criarBotaoImg(() => capturarElementoComoImagem(p, nomeArquivoDe(h3.textContent))));
   });
 }
+// Texto de uma célula PRA EXPORTAR. Célula que tem campo dentro (a folha
+// inteira é editável: dias, bônus, descontos, parcelas) devolve string vazia
+// no textContent — o valor mora no .value do input, não no texto do <td>.
+// Sem isso o Excel/imagem da Folha de Pagamento saía com metade das colunas
+// em branco. Mesmo cuidado que ativarFiltrosDeColuna já tinha com <select>.
+function textoCelulaExport(td) {
+  const campo = td.querySelector('input, select, textarea');
+  if (campo) return String(campo.value == null ? '' : campo.value).trim();
+  return (td.textContent || '').trim();
+}
 function exportarTabelaImagem(tabela, nomeArquivo, titulo) {
   if (!tabela) return null;
   const cabLinha = [...tabela.querySelectorAll('thead tr')].filter(tr => tr.querySelector('th')).pop();
   const cab = [...cabLinha.querySelectorAll('th')].map(th => th.textContent.replace('▾','').trim());
   const corpo = [...tabela.querySelectorAll('tbody tr')]
     .filter(tr => tr.style.display !== 'none' && tr.querySelector('td'))
-    .map(tr => [...tr.querySelectorAll('td')].map(td => td.textContent.trim()));
+    .map(tr => [...tr.querySelectorAll('td')].map(textoCelulaExport));
   if (!corpo.length) return null;
   const PAD = 14, LINHA = 30, FONTE = 13, TOPO = titulo ? 58 : 20;
   const cv = document.createElement('canvas');
@@ -9097,7 +9166,7 @@ function exportarTabelaVisivel(tabela, nomeArquivo, ordemColunas) {
   let cab = [...cabLinha.querySelectorAll('th')].map(th => th.textContent.replace('▾','').trim());
   let corpo = [...tabela.querySelectorAll('tbody tr')]
     .filter(tr => tr.style.display !== 'none' && tr.querySelector('td'))
-    .map(tr => [...tr.querySelectorAll('td')].map(td => td.textContent.trim()));
+    .map(tr => [...tr.querySelectorAll('td')].map(textoCelulaExport));
   if (ordemColunas && ordemColunas.length) {
     const idxs = ordemColunas.map(nome => cab.findIndex(c => normalizeHeader(c) === normalizeHeader(nome))).filter(i => i >= 0);
     if (idxs.length) {
@@ -12736,9 +12805,30 @@ function renderToll() {
 function parseCoordCleanUp(txt) {
   const s = String(txt || '').trim();
   if (!s) return null;
+  // FORMATO DMS — é o que o cliente usa de verdade: a planilha "PORTAS DA
+  // CTO.xlsx" (a mesma que alimentava o Power BI) guarda tudo como
+  // 23°56'07.5"S 46°17'10.7"W, que é o formato que o Google Maps mostra na
+  // ficha do lugar. Sem entender isso, colar a coordenada dele caía no
+  // caminho de "endereço" e o mapa dizia que não achou — foi exatamente o
+  // erro relatado em 09/09/2026.
+  const dms = s.match(/(\d+)\s*°\s*(\d+)\s*['′]\s*([\d.,]+)\s*["″]?\s*([NSEWOL])/gi);
+  if (dms && dms.length === 2) {
+    const grau = t => {
+      const m = t.match(/(\d+)\s*°\s*(\d+)\s*['′]\s*([\d.,]+)\s*["″]?\s*([NSEWOL])/i);
+      const v = Number(m[1]) + Number(m[2]) / 60 + parseFloat(String(m[3]).replace(',', '.')) / 3600;
+      // S e W/O (oeste, em português) são negativos
+      return /[SWO]/i.test(m[4]) ? -v : v;
+    };
+    const a = grau(dms[0]), b = grau(dms[1]);
+    // a ordem normal é latitude primeiro, mas se vier trocada o |valor| > 90
+    // denuncia (latitude nunca passa de 90) — aí inverte em vez de recusar
+    const lat = Math.abs(a) <= 90 ? a : b, lon = Math.abs(a) <= 90 ? b : a;
+    if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) return { lat, lon };
+    return null;
+  }
   // Texto com LETRA é endereço, nunca coordenada — sem essa checagem
   // "Rua 15, 20" viraria o ponto (15, 20), que cai no meio da África.
-  // (Coordenada copiada do Google Maps não tem letra nenhuma.)
+  // (Coordenada decimal copiada do Google Maps não tem letra nenhuma.)
   if (/[a-zà-ú]/i.test(s)) return null;
   // "-23.9608, -46.3336" (o que o Google Maps copia) e também "-23,9608 -46,3336".
   // A vírgula é ambígua em pt-BR (separa os dois números OU é decimal), então
@@ -12773,12 +12863,22 @@ function temCoordCleanUp(r) {
   const ok = v => v !== null && v !== undefined && v !== '' && isFinite(Number(v));
   return ok(r.lat) && ok(r.lon);
 }
-// Chave natural de uma limpeza: a coordenada arredondada (6 casas ~ 11cm) +
-// a data. Mesma CTO limpa de novo noutro dia é registro NOVO (é outro
+// Chave natural de uma limpeza: o TEXTO da localização como está na planilha
+// + a data. Mesma CTO limpa de novo noutro dia é registro NOVO (é outro
 // serviço); reimportar a mesma planilha atualiza o que já existe.
+//
+// Por que o texto e não a coordenada arredondada (era assim antes): na
+// planilha real do cliente (PORTAS DA CTO.xlsx) existem 16 caixas no MESMO
+// ponto — um prédio grande — diferenciadas de propósito na 7ª casa decimal
+// (-46.2984930, -46.2984931, ... -46.2984945). Arredondando em 6 casas as 16
+// viravam 2 chaves e 14 caixas sumiam na importação (483 lidas, 469
+// gravadas). O texto preserva a numeração que o cliente usa.
+// O normalizeHeader tira só acento/caixa/espaço extra, então a MESMA caixa
+// escrita com espaçamento diferente continua caindo na mesma chave.
 function chaveCleanUp(r) {
   const lat = Number(r.lat), lon = Number(r.lon);
-  const coord = isFinite(lat) && isFinite(lon) ? `${lat.toFixed(6)},${lon.toFixed(6)}` : normalizeHeader(r.localizacao);
+  const texto = normalizeHeader(r.localizacao);
+  const coord = texto || (isFinite(lat) && isFinite(lon) ? `${lat.toFixed(7)},${lon.toFixed(7)}` : '');
   return `${coord}|${r.data || ''}`;
 }
 async function salvarCleanUp(reg) {
@@ -12972,7 +13072,7 @@ function desenharMapaCleanUp(elId, linhas) {
       <b>${esc(r.localizacao || 'CTO sem descrição')}</b><br>
       ${r.data ? `Data: <b>${formatDate(r.data)}</b><br>` : ''}
       ${r.cidade || r.bairro ? `Local: ${esc([r.bairro, r.cidade].filter(Boolean).join(' — '))}<br>` : ''}
-      Vagas liberadas: <b>${portas}</b><br>
+      Vagas liberadas: <b>${portas}</b>${r.portas_total ? ` de ${r.portas_total} portas` : ''}<br>
       ${r.tecnico ? `Técnico: ${esc(r.tecnico)}<br>` : ''}
       ${r.contrato ? `Contrato: ${esc(r.contrato)}<br>` : ''}
       ${r.os ? `O.S: ${esc(r.os)}<br>` : ''}
@@ -12980,8 +13080,41 @@ function desenharMapaCleanUp(elId, linhas) {
       <span style="color:#5b6780">${lat.toFixed(5)}, ${lon.toFixed(5)}</span>`);
   });
   // enquadra o mapa no que existe (uma caixa só = zoom fechado nela)
-  if (pontos.length === 1) map.setView(pontos[0], 16);
-  else map.fitBounds(L.latLngBounds(pontos).pad(0.15));
+  // animate:false de propósito — com animação o Leaflet agenda o movimento e
+  // o zoom só chega no fim; quem chama logo depois (ou o observer abaixo) lia
+  // um estado pela metade.
+  const enquadrar = () => {
+    if (pontos.length === 1) map.setView(pontos[0], 16, { animate: false });
+    else map.fitBounds(L.latLngBounds(pontos).pad(0.15), { animate: false });
+  };
+  enquadrar();
+  // O mapa nasce junto com a tela: na hora do primeiro fitBounds o container
+  // ainda tem altura 0 (o navegador não fechou o layout ainda), e o Leaflet
+  // calcula o zoom por esse tamanho — dava zoom 0, o MUNDO inteiro, em vez da
+  // Baixada (era o que o cliente estava vendo em 09/09/2026: 483 bolinhas
+  // certas, todas espremidas num mapa-múndi).
+  // requestAnimationFrame sozinho não resolve: dependendo de quando a aba
+  // monta, o layout ainda não fechou nesse frame. O ResizeObserver dispara
+  // exatamente quando o container ganha tamanho de verdade — aí sim
+  // invalidateSize() relê a medida e o enquadramento é refeito. Desliga
+  // depois do primeiro enquadramento bom pra não ficar reenquadrando o mapa
+  // enquanto a pessoa navega nele.
+  // invalidateSize() SEM animação: o padrão dele agenda um resize suave, e o
+  // fitBounds logo em seguida ainda calculava pelo tamanho velho (era isso
+  // que sobrava de zoom 0 mesmo com o container já medindo 1171x640).
+  const remedir = () => {
+    map.invalidateSize({ animate: false, pan: false });
+    enquadrar();
+  };
+  if (typeof ResizeObserver !== 'undefined') {
+    const obs = new ResizeObserver(() => {
+      if (!el.clientHeight || !el.clientWidth) return;
+      remedir();
+      obs.disconnect();
+    });
+    obs.observe(el);
+  }
+  requestAnimationFrame(remedir);
 }
 
 // ===================== FINANCEIRO =====================
@@ -14156,7 +14289,11 @@ function renderFolhaPagamento(modo) {
       <div class="panel" style="margin-bottom:1.5rem"><h3>Descontos por tipo (equipe)</h3><div id="c-desc"></div></div>`;
 
     body.innerHTML = soRelatorio ? blocoRelatorio + '<div id="pdf-export-area"></div>' : `
-      <div class="section-heading">Folha de Pagamento completa</div>
+      <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">Folha de Pagamento completa
+        <button type="button" class="btn-export-xls" id="folha-export-xls">⤓ Excel da folha</button>
+        <button type="button" class="btn-export-img" id="folha-export-img">🖼 Imagem da folha</button>
+      </div>
+      <div id="folha-export-aviso"></div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
         ${recalcula
           ? `Qtd. e % de IFI/IRR e o Bônus foram <b>recalculados</b> com os retornos baixados de <b>${formatDate(retIni)}</b> a <b>${formatDate(retFim)}</b>,
@@ -14264,6 +14401,38 @@ function renderFolhaPagamento(modo) {
     // a cada tecla fazia a página voltar pro topo e a tabela "tremer" — só o
     // botão "Descartar" (uma ação deliberada, não uma tecla) recarrega tudo.
     const pendentes = new Map();
+    // ---- Excel e imagem da folha (pedido do cliente 09/09/2026) ----
+    // A tabela da folha é toda editável, então a exportação genérica lia
+    // célula vazia onde tem <input> — resolvido em textoCelulaExport(), que
+    // as duas funções de export usam agora. Exporta o que está NA TELA:
+    // respeita o período escolhido e o funil de filtro por coluna.
+    let exportacaoPendente = false;
+    const nomeArqFolha = 'folha-de-pagamento-' + String(periodo || 'todos-os-periodos').replace(/[^\w]+/g, '-').replace(/^-|-$/g, '');
+    const avisoExport = document.getElementById('folha-export-aviso');
+    const atualizarAvisoExport = () => {
+      if (!avisoExport) return;
+      avisoExport.innerHTML = exportacaoPendente
+        ? `<p style="margin:0 0 10px;font-size:var(--fs-sm);color:var(--warn-text);background:color-mix(in srgb, var(--warn-text) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn-text) 35%, transparent);border-radius:var(--r-sm);padding:10px 12px">
+             <b>Falta exportar.</b> A folha foi alterada e salva — gere o <b>Excel</b> ou a <b>imagem</b> acima pra guardar o comprovante desse fechamento.
+           </p>` : '';
+    };
+    const tabelaFolha = () => document.getElementById('folha-tab');
+    const btnXls = document.getElementById('folha-export-xls');
+    const btnImg = document.getElementById('folha-export-img');
+    if (btnXls) btnXls.addEventListener('click', () => {
+      if (!tabelaFolha()) { toast('Sem folha na tela pra exportar.', 'aviso'); return; }
+      exportarTabelaVisivel(tabelaFolha(), nomeArqFolha);
+      exportacaoPendente = false; atualizarAvisoExport();
+      toast('Excel da folha gerado.', 'ok', 2000);
+    });
+    if (btnImg) btnImg.addEventListener('click', () => {
+      const r = tabelaFolha() && exportarTabelaImagem(tabelaFolha(), nomeArqFolha,
+        'Folha de Pagamento — ' + (periodo || 'todos os períodos'));
+      if (!r) { toast('Sem linha visível pra gerar a imagem.', 'aviso'); return; }
+      exportacaoPendente = false; atualizarAvisoExport();
+      toast(`Imagem gerada (${r.linhas} linha(s)).`, 'ok', 2000);
+    });
+
     const btnSalvar = document.getElementById('folha-salvar');
     const btnDescartar = document.getElementById('folha-descartar');
     const msgEdit = document.getElementById('folha-edit-msg');
@@ -14385,6 +14554,13 @@ function renderFolhaPagamento(modo) {
       } else {
         msgEdit.innerHTML = `<span style="color:var(--success)">${entradas.length} linha(s) salva(s).</span>`;
         toast(`${entradas.length} alteração(ões) salva(s).`, 'ok', 2000);
+        // "deve ser obrigatório exportar" (pedido do cliente 09/09/2026):
+        // mexeu na folha e salvou, tem que sair o comprovante — o aviso fica
+        // fixo na tela até gerar o Excel OU a imagem daquele período. Não
+        // trava o trabalho (travar o RH no meio do fechamento seria pior),
+        // mas não deixa passar batido.
+        exportacaoPendente = true;
+        atualizarAvisoExport();
       }
     });
     if (btnDescartar) btnDescartar.addEventListener('click', () => {
@@ -14811,7 +14987,7 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     if (i === cols.length - 1 || grupoDaColuna(cols[i + 1][0]) !== g) cls.push('col-g-fim');
     return ` class="${cls.join(' ')}"`;
   };
-  return `<div class="table-wrap"><table class="data-table tab-col1-fixa"><thead><tr>${cols.map((c,i)=>`<th${classeCol(i)}>${c[0]}</th>`).join('')}</tr></thead><tbody>
+  return `<div class="table-wrap"><table class="data-table tab-col1-fixa" id="folha-tab"><thead><tr>${cols.map((c,i)=>`<th${classeCol(i)}>${c[0]}</th>`).join('')}</tr></thead><tbody>
     ${rows.map(r=>`<tr>${cols.map((c,i)=>`<td${classeCol(i)}>${c[1](r) ?? ''}</td>`).join('')}</tr>`).join('')}
   </tbody></table></div>`;
 }
@@ -15907,7 +16083,10 @@ const ARQUIVOS_IMPORT = [
   // importação certa — quem decide o destino é o conteúdo das colunas
   // (pickBestTarget), não o nome da aba.
   { nome: 'FOLHA_DE_PAGAMENTO...xlsx', desc: 'Aba FOLHA DE PAGAMENTO (ordens/descontos/bônus). A aba VALORES ORDENS não é importada — os valores por serviço são fixos no sistema.', assinaturas: [{target:'folhaPagamento'}] },
-  { nome: 'COMPARATIVO.xlsx', desc: 'Abas BASE_PRODUCAO (produção) e COMAPARATIVO (tabela financeira pronta por período)', assinaturas: [{sheet:'BASE_PRODUCAO', target:'producao'}, {sheet:'COMAPARATIVO', target:'comparativoFinanceiro'}] }
+  { nome: 'COMPARATIVO.xlsx', desc: 'Abas BASE_PRODUCAO (produção) e COMAPARATIVO (tabela financeira pronta por período)', assinaturas: [{sheet:'BASE_PRODUCAO', target:'producao'}, {sheet:'COMAPARATIVO', target:'comparativoFinanceiro'}] },
+  // é a mesma planilha que alimentava o Power BI "CLEAN UP - BAIXADA & SP" —
+  // uma linha por PORTA; o sistema agrupa por caixa sozinho (tryParsePortasCTO)
+  { nome: 'PORTAS DA CTO.xlsx', desc: 'Aba PORTAS DA CTO — uma linha por porta (LOCALIZAÇÃO CTO, Porta, Status). Vira o mapa da aba Clean Up, agrupado por caixa.', assinaturas: [{sheet:'PORTAS DA CTO', target:'cleanUp'}] }
 ];
 function renderImport() {
   document.getElementById('content').innerHTML = `
