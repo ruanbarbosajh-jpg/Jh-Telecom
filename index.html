@@ -9030,13 +9030,25 @@ function ehPrazoDeAtivacao(row, incluirME) {
 //   anterior = Reparo Corretivo        -> IRR se voltou em até 30 dias
 //   anterior = Ativação / Mud.Endereço -> IFI se voltou em até 15 dias
 // Fora dessas janelas a operadora marca "DESC" (não conta como retorno).
+// ACHADO 09/09/2026 (aviso do cliente: "somente esses serviços gera o
+// retorno... o retorno sempre vai vir como reparo"): só Ativação, Mudança de
+// Endereço e Reparo Corretivo geram retorno — Mudança de Cômodo e Upgrade/
+// Downgrade NÃO geram, nem IFI nem IRR. O `else` genérico de antes caía
+// direto no ramo do IFI pra QUALQUER tipo anterior que não fosse Reparo —
+// confirmado em produção: 247 casos onde o serviço anterior era M.Cômodo ou
+// Upgrade/Downgrade viravam IFI incorretamente (ex.: contrato 4598026,
+// Upgrade/Downgrade em 15/02 seguido de Reparo em 01/03, 14 dias — contava
+// como IFI, quando não deveria contar retorno nenhum). Reaproveita
+// ehBaseDoIfi/ehServicoReparo (mesma regra usada no denominador dos
+// indicadores) em vez de reimplementar o regex aqui.
 const JANELA_IFI = 15, JANELA_IRR = 30;
 function classificaRetorno(tipoAnterior, dias) {
   if (dias === null || dias === undefined || !isFinite(dias)) return '';
   const t = normalizeHeader(tipoAnterior || '');
   if (!t || t === '-') return '';
-  if (/reparo/.test(t)) return dias <= JANELA_IRR ? 'IRR' : 'DESC';
-  return dias <= JANELA_IFI ? 'IFI' : 'DESC';
+  if (ehServicoReparo(tipoAnterior)) return dias <= JANELA_IRR ? 'IRR' : 'DESC';
+  if (ehBaseDoIfi(tipoAnterior)) return dias <= JANELA_IFI ? 'IFI' : 'DESC';
+  return ''; // Mudança de Cômodo, Upgrade/Downgrade ou qualquer outro tipo: não gera retorno
 }
 // Histórico de conclusões por CONTRATO, a partir da base de produção — é com
 // ele que descobrimos quem atendeu o cliente da última vez (o "ofensor").
