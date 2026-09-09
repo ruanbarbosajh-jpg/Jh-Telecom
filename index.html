@@ -7590,7 +7590,7 @@ function renderRelatorioGeralCompleto(fech) {
   if (!fech.length) return '<div class="empty">Sem dados. Importe a aba RELATORIO de RELATORIO_GERAL.xlsx.</div>';
   const toPct = v => Math.abs(v||0) <= 5 ? (v||0)*100 : (v||0); // fração até 500% — cobre eficiência acima de 100%
   // APTO verde, FORA (ou qualquer outro que não seja apto) vermelho
-  const statusCell = r => `<span style="color:${/apto/i.test(r.status)&&!/inapto/i.test(r.status)?'var(--success)':'var(--danger)'};font-weight:700">${r.status||'-'}</span>`;
+  const statusCell = r => `<span style="color:${/apto/i.test(r.status)&&!/inapto/i.test(r.status)?'var(--success)':'var(--danger)'};font-weight:700">${esc(r.status)||'-'}</span>`;
   // Lucro: quem está ABAIXO DA MÉDIA da equipe no ciclo fica vermelho, quem
   // está na média ou acima fica verde — dá pra bater o olho e ver quem está
   // puxando o resultado pra baixo sem precisar comparar linha a linha.
@@ -7602,7 +7602,7 @@ function renderRelatorioGeralCompleto(fech) {
       title="Média da equipe no ciclo: ${formatCurrency(mediaLucro)}">${formatCurrency(v)}</span>`;
   };
   const cols = [
-    ['Técnico', r=>r.tecnico], ['Início', r=>formatDate(r.inicio)], ['Até o dia', r=>formatDate(r.ate_o_dia)],
+    ['Técnico', r=>esc(r.tecnico)], ['Início', r=>formatDate(r.inicio)], ['Até o dia', r=>formatDate(r.ate_o_dia)],
     ['Ativação', r=>r.ativacao], ['M.Cômodo', r=>r.mc], ['M.Endereço', r=>r.me], ['Reparos', r=>r.reparos], ['Upgrade', r=>r.upgrade],
     ['Total Geral', r=>r.total_geral], ['Valor Ordens', r=>formatCurrency(r.valor_ordens)], ['Dias Trab.', r=>r.dias_trabalhados],
     ['Qtd IRR', r=>r.qtd_irr], ['Ind. IRR', r=>formatPct(toPct(r.ind_irr), 2)], ['Desc. IRR', r=>formatCurrency(r.desc_irr)],
@@ -7619,7 +7619,7 @@ function renderTopTechniciansTable(rows) {
   if (!rows.length) return '<div class="empty">Sem dados no período. Importe a aba RELATORIO.</div>';
   const toPct = v => Math.abs(v||0) <= 5 ? (v||0)*100 : (v||0); // fração até 500% — cobre eficiência acima de 100%
   return `<div class="table-wrap"><table class="data-table"><thead><tr><th>Técnico</th><th>Ordens</th><th>Valor ordens</th><th>Gasolina</th><th>Despesas</th><th>Lucro</th><th>Eficiência</th></tr></thead><tbody>
-    ${rows.map(r=>`<tr><td>${r.tecnico}</td><td>${r.total_geral}</td><td>${formatCurrency(r.valor_ordens)}</td><td>${formatCurrency(r.gasolina)}</td><td>${formatCurrency(r.despesas)}</td><td>${formatCurrency(r.lucros)}</td><td>${formatPct(toPct(r.eficiencia), 1)}</td></tr>`).join('')}
+    ${rows.map(r=>`<tr><td>${esc(r.tecnico)}</td><td>${esc(r.total_geral)}</td><td>${formatCurrency(r.valor_ordens)}</td><td>${formatCurrency(r.gasolina)}</td><td>${formatCurrency(r.despesas)}</td><td>${formatCurrency(r.lucros)}</td><td>${formatPct(toPct(r.eficiencia), 1)}</td></tr>`).join('')}
   </tbody></table></div>`;
 }
 // Tabela de bônus: o técnico só recebe se estiver DENTRO dos indicadores
@@ -8645,13 +8645,13 @@ function renderAcomTec() {
       const mostrados = lim === 'Todos' ? filtrados : filtrados.slice(0, parseInt(lim));
       document.getElementById('det-tbody').innerHTML = mostrados.map(r => `<tr>
         <td>${r.data ? formatDate(r.data) : '-'}</td>
-        <td class="cat-cell">${r.nome || '-'}</td>
-        <td>${r.os || '-'}</td>
-        <td>${r.contrato || '-'}</td>
-        <td>${r.recurso || '-'}</td>
-        <td>${r.motivo || '-'}</td>
-        <td>${r.tipo_atividade || '-'}</td>
-        <td style="color:${corStatus(r.status)};font-weight:600">${r.status || '-'}</td>
+        <td class="cat-cell">${esc(r.nome) || '-'}</td>
+        <td>${esc(r.os) || '-'}</td>
+        <td>${esc(r.contrato) || '-'}</td>
+        <td>${esc(r.recurso) || '-'}</td>
+        <td>${esc(r.motivo) || '-'}</td>
+        <td>${esc(r.tipo_atividade) || '-'}</td>
+        <td style="color:${corStatus(r.status)};font-weight:600">${esc(r.status) || '-'}</td>
       </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text-muted)">Nenhuma ordem encontrada com esse termo.</td></tr>';
       document.getElementById('det-rodape').textContent =
         `Mostrando ${mostrados.length} de ${filtrados.length} ordens${termo ? ' (filtradas de ' + detalhe.length + ')' : ''}.`;
@@ -9802,23 +9802,23 @@ function abrirPainelTecnico(tecnico, rows, retornos, dia) {
     const horas = (r.limite - agora) / 36e5;
     const cor = horas < 0 ? 'var(--danger)' : horas < 4 ? '#f59e0b' : 'var(--text-secondary)';
     const quanto = horas < 0 ? 'vencido' : horas < 24 ? `${Math.floor(horas)}h` : `${Math.floor(horas / 24)}d`;
-    return `<tr><td class="cat-cell">${r.os || '-'}</td><td>${r.cliente || '-'}</td><td>${r.cidade || '-'}</td>
-      <td>${r.tipo_atividade || '-'}</td><td style="color:var(--warn-text);font-weight:600">${r.status || '-'}</td>
-      <td>${fmtDT(r.limite)}</td><td>${r.periodo || '-'}</td>
+    return `<tr><td class="cat-cell">${esc(r.os) || '-'}</td><td>${esc(r.cliente) || '-'}</td><td>${esc(r.cidade) || '-'}</td>
+      <td>${esc(r.tipo_atividade) || '-'}</td><td style="color:var(--warn-text);font-weight:600">${esc(r.status) || '-'}</td>
+      <td>${fmtDT(r.limite)}</td><td>${esc(r.periodo) || '-'}</td>
       <td style="color:${cor};font-weight:700">${quanto}</td></tr>`;
   };
   const linhaRet = r => `<tr>
-      <td style="font-weight:700;color:${r.ifi_irr === 'IFI' ? '#f59e0b' : '#eab308'}">${r.ifi_irr}</td>
-      <td class="cat-cell">${r.os}</td><td>${r.cliente || '-'}</td><td>${r.cidade || '-'}</td>
-      <td style="color:${isConcluido(r.status) ? 'var(--success)' : 'var(--warn-text)'};font-weight:600">${r.status || '-'}</td>
+      <td style="font-weight:700;color:${r.ifi_irr === 'IFI' ? '#f59e0b' : '#eab308'}">${esc(r.ifi_irr)}</td>
+      <td class="cat-cell">${esc(r.os)}</td><td>${esc(r.cliente) || '-'}</td><td>${esc(r.cidade) || '-'}</td>
+      <td style="color:${isConcluido(r.status) ? 'var(--success)' : 'var(--warn-text)'};font-weight:600">${esc(r.status) || '-'}</td>
       <td>${mesmo(r.ofensor)
-          ? `<b>${r.ofensor || '-'}</b> <span style="color:var(--success);font-size:11px">(é dele)</span>`
-          : `${r.ofensor || '-'} <span style="color:var(--text-secondary);font-size:11px">(está com ${tecnico})</span>`}</td>
-      <td>${r.tipo_anterior || '-'}</td><td>${formatDate(r.data_anterior)}</td><td>${r.dias}</td>
-      <td style="font-weight:700;color:${r.restam <= 3 ? 'var(--danger)' : r.restam <= 7 ? '#f59e0b' : 'var(--text-secondary)'}">${r.restam} dia(s)</td></tr>`;
+          ? `<b>${esc(r.ofensor) || '-'}</b> <span style="color:var(--success);font-size:11px">(é dele)</span>`
+          : `${esc(r.ofensor) || '-'} <span style="color:var(--text-secondary);font-size:11px">(está com ${esc(tecnico)})</span>`}</td>
+      <td>${esc(r.tipo_anterior) || '-'}</td><td>${formatDate(r.data_anterior)}</td><td>${esc(r.dias)}</td>
+      <td style="font-weight:700;color:${r.restam <= 3 ? 'var(--danger)' : r.restam <= 7 ? '#f59e0b' : 'var(--text-secondary)'}">${esc(r.restam)} dia(s)</td></tr>`;
   const m = document.getElementById('modal-tecnico');
   m.querySelector('.mt-corpo').innerHTML = `
-    <h3 style="margin:0 0 2px">${tecnico}</h3>
+    <h3 style="margin:0 0 2px">${esc(tecnico)}</h3>
     <p style="margin:0 0 16px;font-size:13px;color:var(--text-secondary)">${formatDate(dia)} — ${aVencer.length} para vencer · ${dele.length} retorno(s)</p>
     <div class="section-heading" style="margin-top:0">Prazos para vencer</div>
     ${!aVencer.length ? '<div class="empty">Nada em aberto para esse técnico nesse dia.</div>' : `
@@ -10021,12 +10021,12 @@ function renderPCR() {
       const tec = ehRecursoTecnico(r.recurso) ? r.recurso : '';
       return `<tr>
         <td style="color:${corFalta};font-weight:700">${h!==null && h<0 ? '⚠️ ' : ''}${textoFalta(r)}</td>
-        <td>${r.cidade || '-'}</td>
-        <td>${tec?`<a href="#" class="link-tec" data-tec="${tec.replace(/"/g,'&quot;')}">${tec}</a>`:'-'}</td>
-        <td>${formatDate(r.data)}</td><td class="cat-cell">${r.os || '-'}</td><td>${r.cliente || '-'}</td>
-        <td style="${estiloSituacao(classifyStatusGranular(r.status))}">${r.status || '-'}</td>
+        <td>${esc(r.cidade) || '-'}</td>
+        <td>${tec?`<a href="#" class="link-tec" data-tec="${esc(tec)}">${esc(tec)}</a>`:'-'}</td>
+        <td>${formatDate(r.data)}</td><td class="cat-cell">${esc(r.os) || '-'}</td><td>${esc(r.cliente) || '-'}</td>
+        <td style="${estiloSituacao(classifyStatusGranular(r.status))}">${esc(r.status) || '-'}</td>
         <td>${fmtDT(r.abertura)}</td><td>${fmtH(r.limite)}</td><td>${fmtDT(r.limite)}</td>
-        <td${divergiu?' title="O sistema gravou como '+r.periodo_sistema+'" style="color:#f59e0b;font-weight:700"':''}>${r.periodo || '-'}</td>
+        <td${divergiu?' title="O sistema gravou como '+esc(r.periodo_sistema)+'" style="color:#f59e0b;font-weight:700"':''}>${esc(r.periodo) || '-'}</td>
         <td style="color:${corFaixa};font-weight:700"${abertaAgora && faixa ? ' title="Ainda em aberto — faixa calculada pelo tempo decorrido até agora, não é definitiva"' : ''}>${textoFaixaEfetiva(r)}</td>
       </tr>`;
     };
@@ -10226,8 +10226,8 @@ function renderPCR() {
       return '';
     };
     const linhaTecAgora = t => { const m = minutosDe(t);
-      return `<tr><td class="cat-cell">${t.tecnico}</td><td>${t.cidade||'-'}</td><td>${t.os||'-'}</td><td>${t.cliente||'-'}</td>
-        <td>${t.tipo||'-'}</td>
+      return `<tr><td class="cat-cell">${esc(t.tecnico)}</td><td>${esc(t.cidade)||'-'}</td><td>${esc(t.os)||'-'}</td><td>${esc(t.cliente)||'-'}</td>
+        <td>${esc(t.tipo)||'-'}</td>
         <td style="${estiloSituacao(t.bucket)}">${bucketLabel[t.bucket]}</td>
         <td style="${corTempoTec(t)}">${fmtMin(m)}${t.bucket==='iniciado'&&m>60?' ⚠️':''}</td></tr>`; };
 
@@ -10293,14 +10293,14 @@ function renderPCR() {
           const corTec = !temOsDois ? '' : mesmoTec ? 'color:var(--accent);font-weight:700' : 'color:#f59e0b;font-weight:700';
           const tituloTec = !temOsDois ? '' : mesmoTec ? ' title="Mesmo técnico do atendimento anterior"' : ' title="Técnico diferente do atendimento anterior"';
           return `<tr>
-          <td style="font-weight:700;color:${r.ifi_irr==='IFI'?'#f59e0b':'#eab308'}">${r.ifi_irr}</td>
-          <td>${formatDate(r.data)}</td><td class="cat-cell">${r.os}</td><td>${r.contrato||'-'}</td><td>${r.cidade||'-'}</td><td>${r.tipo||'-'}</td>
-          <td style="${estiloSituacao(classifyStatusGranular(r.status))}">${r.status||'-'}</td>
-          <td style="${corTec}"${tituloTec}>${ehRecursoTecnico(r.tecnico_atual)?r.tecnico_atual:'-'}</td>
-          <td>${r.cliente||'-'}</td>
-          <td class="cat-cell" style="${corTec}"${tituloTec}>${r.ofensor||'-'}</td><td>${r.tipo_anterior||'-'}</td><td>${r.os_anterior||'-'}</td>
-          <td>${formatDate(r.data_anterior)}</td><td>${r.dias}</td>
-          <td style="font-weight:700;color:${r.restam<=3?'var(--danger)':r.restam<=7?'#f59e0b':'var(--text-secondary)'}">${r.restam} dia(s)</td></tr>`;
+          <td style="font-weight:700;color:${r.ifi_irr==='IFI'?'#f59e0b':'#eab308'}">${esc(r.ifi_irr)}</td>
+          <td>${formatDate(r.data)}</td><td class="cat-cell">${esc(r.os)}</td><td>${esc(r.contrato)||'-'}</td><td>${esc(r.cidade)||'-'}</td><td>${esc(r.tipo)||'-'}</td>
+          <td style="${estiloSituacao(classifyStatusGranular(r.status))}">${esc(r.status)||'-'}</td>
+          <td style="${corTec}"${tituloTec}>${ehRecursoTecnico(r.tecnico_atual)?esc(r.tecnico_atual):'-'}</td>
+          <td>${esc(r.cliente)||'-'}</td>
+          <td class="cat-cell" style="${corTec}"${tituloTec}>${esc(r.ofensor)||'-'}</td><td>${esc(r.tipo_anterior)||'-'}</td><td>${esc(r.os_anterior)||'-'}</td>
+          <td>${formatDate(r.data_anterior)}</td><td>${esc(r.dias)}</td>
+          <td style="font-weight:700;color:${r.restam<=3?'var(--danger)':r.restam<=7?'#f59e0b':'var(--text-secondary)'}">${esc(r.restam)} dia(s)</td></tr>`;
         }).join('')}
       </tbody></table></div>`}
 
@@ -10350,8 +10350,8 @@ function renderPCR() {
         <th>Tipo da O.S</th><th>Concluídos</th><th>A Executar</th><th>Total Geral</th>
       </tr></thead><tbody>
         ${aExecutar.grupos.map(g => `
-          <tr class="total-row"><td class="cat-cell">${g.cidade}</td><td style="color:var(--success);font-weight:700">${g.concluido}</td><td style="color:#f59e0b;font-weight:700">${g.pendente}</td><td style="font-weight:700">${g.total}</td></tr>
-          ${g.tipos.map(t => `<tr><td style="padding-left:26px;color:var(--text-primary);font-weight:600">${t.tipo}</td><td style="color:var(--success)">${t.concluido}</td><td style="color:#f59e0b">${t.pendente}</td><td>${t.total}</td></tr>`).join('')}
+          <tr class="total-row"><td class="cat-cell">${esc(g.cidade)}</td><td style="color:var(--success);font-weight:700">${g.concluido}</td><td style="color:#f59e0b;font-weight:700">${g.pendente}</td><td style="font-weight:700">${g.total}</td></tr>
+          ${g.tipos.map(t => `<tr><td style="padding-left:26px;color:var(--text-primary);font-weight:600">${esc(t.tipo)}</td><td style="color:var(--success)">${t.concluido}</td><td style="color:#f59e0b">${t.pendente}</td><td>${t.total}</td></tr>`).join('')}
         `).join('')}
         <tr class="total-row"><td class="cat-cell">Total Geral</td><td style="color:var(--success);font-weight:700">${aExecutar.concluido}</td><td style="color:#f59e0b;font-weight:700">${aExecutar.pendente}</td><td style="font-weight:700">${aExecutar.total}</td></tr>
       </tbody></table></div>`}
@@ -10593,7 +10593,7 @@ function montarPrazoAtivacaoDoDia(dia, cidades, incluirME) {
       <div class="table-wrap"><table class="data-table" id="pa-tab-dia"><thead><tr>
         <th>Cidades</th><th>Até 36hrs</th><th>Até 48hrs</th><th>Maior que 48hrs</th><th>Total</th><th>% no Prazo</th>
       </tr></thead><tbody>
-        ${lista.map(c=>`<tr><td class="cat-cell">${c.cidade}</td><td style="color:var(--success);font-weight:700">${c.ate36}</td><td>${c.ate48}</td>
+        ${lista.map(c=>`<tr><td class="cat-cell">${esc(c.cidade)}</td><td style="color:var(--success);font-weight:700">${c.ate36}</td><td>${c.ate48}</td>
           <td style="${c.maior48?'color:var(--danger);font-weight:700':''}">${c.maior48}</td><td>${c.total}</td><td>${cel(c)}</td></tr>`).join('')}
         <tr class="total-row"><td class="cat-cell">TOTAL</td><td style="color:var(--success);font-weight:700">${tot.ate36}</td><td>${tot.ate48}</td>
           <td style="${tot.maior48?'color:var(--danger);font-weight:700':''}">${tot.maior48}</td><td>${tot.total}</td><td>${cel(tot)}</td></tr>
@@ -10611,8 +10611,8 @@ function montarPrazoAtivacaoDoDia(dia, cidades, incluirME) {
           const falta = h < 0 ? `⚠️ venceu há ${Math.max(1, Math.floor(-h))}h`
             : h < 1 ? `${Math.round(h*60)}min` : h < 24 ? `${Math.floor(h)}h` : `${Math.floor(h/24)}d`;
           return `<tr><td style="color:${cor};font-weight:700">${falta}</td><td>${fmtDT(r.limite)}</td>
-            <td class="cat-cell">${r.recurso || '-'}</td><td>${r.os || '-'}</td><td>${r.cliente || '-'}</td><td>${r.cidade || '-'}</td>
-            <td style="${estiloSituacao(classifyStatusGranular(r.status))}">${r.status || '-'}</td></tr>`;
+            <td class="cat-cell">${esc(r.recurso) || '-'}</td><td>${esc(r.os) || '-'}</td><td>${esc(r.cliente) || '-'}</td><td>${esc(r.cidade) || '-'}</td>
+            <td style="${estiloSituacao(classifyStatusGranular(r.status))}">${esc(r.status) || '-'}</td></tr>`;
         }).join('')}
       </tbody></table></div>
       ${abertas.length > 40 ? `<p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">Mostrando as 40 mais urgentes de ${abertas.length}.</p>` : ''}
@@ -10744,7 +10744,7 @@ function renderPrazoAtivacao() {
         <div class="table-wrap"><table class="data-table" id="pa-tab-cidade"><thead><tr>
           <th>Cidades</th><th>Até 36hrs</th><th>Até 48hrs</th><th>Maior que 48hrs</th><th>Outliers</th><th>Total</th><th>% no Prazo</th>
         </tr></thead><tbody>
-          ${lista.map(c=>`<tr><td class="cat-cell">${c.cidade}</td><td style="color:var(--success);font-weight:700">${c.ate36}</td><td>${c.ate48}</td>
+          ${lista.map(c=>`<tr><td class="cat-cell">${esc(c.cidade)}</td><td style="color:var(--success);font-weight:700">${c.ate36}</td><td>${c.ate48}</td>
             <td style="${c.maior48?'color:var(--danger);font-weight:700':''}">${c.maior48}</td><td>${c.outlier}</td><td>${c.total}</td><td>${cel(c)}</td></tr>`).join('')}
           <tr class="total-row"><td class="cat-cell">TOTAL</td><td style="color:var(--success);font-weight:700">${tot.ate36}</td><td>${tot.ate48}</td>
             <td style="${tot.maior48?'color:var(--danger);font-weight:700':''}">${tot.maior48}</td><td>${tot.outlier}</td><td>${tot.total}</td><td>${cel(tot)}</td></tr>
@@ -10755,7 +10755,7 @@ function renderPrazoAtivacao() {
         <div class="table-wrap"><table class="data-table" id="pa-tab-tecnico"><thead><tr>
           <th>Técnico</th><th>Até 36hrs</th><th>Fora do prazo</th><th>Total</th><th>% no Prazo</th>
         </tr></thead><tbody>
-          ${listaTec.map(t=>`<tr><td class="cat-cell">${t.tecnico}</td><td style="color:var(--success);font-weight:700">${t.ate36}</td>
+          ${listaTec.map(t=>`<tr><td class="cat-cell">${esc(t.tecnico)}</td><td style="color:var(--success);font-weight:700">${t.ate36}</td>
             <td style="${t.fora?'color:var(--danger);font-weight:700':''}">${t.fora}</td><td>${t.total}</td>
             <td><span class="badge ${(t.ate36/t.total)*100>=PRAZO_ATIVACAO_META?'ok':'warn'}">${formatPct(((t.ate36/t.total)*100), 2)}</span></td></tr>`).join('')}
         </tbody></table></div>
@@ -11111,10 +11111,10 @@ function renderParcialDoDia() {
           const m = moDaCidadeLinha(c.cidade);
           const chave = data + '|' + c.cidade;
           const mo = moDoDia(c);
-          return `<tr><td class="cat-cell">${c.cidade}</td><td>${m.ativacao}</td><td>${m.reparo}</td><td>${m.me}</td><td>${m.mc}</td><td>${m.upgrade}</td><td>${m.total}</td>
-          <td><input type="number" min="0" class="mo-edit" value="${mo}" data-chave="${chave}" data-cidade="${c.cidade}" data-total="${m.total}"
+          return `<tr><td class="cat-cell">${esc(c.cidade)}</td><td>${m.ativacao}</td><td>${m.reparo}</td><td>${m.me}</td><td>${m.mc}</td><td>${m.upgrade}</td><td>${m.total}</td>
+          <td><input type="number" min="0" class="mo-edit" value="${mo}" data-chave="${esc(chave)}" data-cidade="${esc(c.cidade)}" data-total="${m.total}"
               ${podeEditarMO() ? 'title="Editável — a média recalcula sozinha e o número fica salvo"' : 'readonly disabled title="Só leitura para o perfil Escritório"'}></td>
-          <td data-media="${c.cidade}">${mo?(m.total/mo).toFixed(1):'-'}</td></tr>`;}).join('')}
+          <td data-media="${esc(c.cidade)}">${mo?(m.total/mo).toFixed(1):'-'}</td></tr>`;}).join('')}
         <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${totais.ativacao}</td><td>${totais.reparo}</td><td>${totais.me}</td><td>${totais.mc}</td><td>${totais.upgrade}</td><td>${totais.total}</td>
           <td class="mo-total-cel" data-mo-total>${moTotalDia()}</td>
           <td data-media-total>${moTotalDia()?(totais.total/moTotalDia()).toFixed(1):'-'}</td></tr>
@@ -12353,9 +12353,9 @@ function renderPrazo() {
             const p1 = { data: dp.data_a, faixa: dp.faixa_a };
             const p2 = { data: dp.data_b, faixa: dp.faixa_b };
             const [primeiro, segundo] = (p1.data || '') <= (p2.data || '') ? [p1, p2] : [p2, p1];
-            return `<tr><td class="cat-cell">${dp.os}</td><td>${dp.cidade || '-'}</td>
-              <td>${primeiro.data ? formatDate(primeiro.data) : '-'}</td><td>${primeiro.faixa || '-'}</td>
-              <td>${segundo.data ? formatDate(segundo.data) : '-'}</td><td>${segundo.faixa || '-'}</td></tr>`;
+            return `<tr><td class="cat-cell">${esc(dp.os)}</td><td>${esc(dp.cidade) || '-'}</td>
+              <td>${primeiro.data ? formatDate(primeiro.data) : '-'}</td><td>${esc(primeiro.faixa) || '-'}</td>
+              <td>${segundo.data ? formatDate(segundo.data) : '-'}</td><td>${esc(segundo.faixa) || '-'}</td></tr>`;
           }).join('')}
         </tbody></table></div>
       </div>`;
@@ -12498,7 +12498,7 @@ function renderOfensoresPrazo() {
     };
     const tecPeriodoRowsHtml = n => {
       const sliced = n === 'Todos' ? listaTecnicoPeriodo : listaTecnicoPeriodo.slice(0, parseInt(n));
-      return sliced.map(t=>`<tr><td class="cat-cell">${t.tecnico}</td><td>${t.manha}</td><td>${t.tarde}</td><td style="${corPorExtremo(sliced, t.total)}">${t.total}</td></tr>`).join('');
+      return sliced.map(t=>`<tr><td class="cat-cell">${esc(t.tecnico)}</td><td>${t.manha}</td><td>${t.tarde}</td><td style="${corPorExtremo(sliced, t.total)}">${t.total}</td></tr>`).join('');
     };
 
     body.innerHTML = `
@@ -12524,7 +12524,7 @@ function renderOfensoresPrazo() {
         <div class="table-wrap"><table class="data-table"><thead><tr>
           <th>Cidades</th><th>Ofensores Manhã</th><th>Ofensores Tarde</th><th>Total Atrasos</th>
         </tr></thead><tbody>
-          ${listaPeriodo.map(c=>`<tr><td class="cat-cell">${c.cidade}</td><td>${c.manha}</td><td>${c.tarde}</td><td style="${corPorExtremo(listaPeriodo, c.total)}">${c.total}</td></tr>`).join('')}
+          ${listaPeriodo.map(c=>`<tr><td class="cat-cell">${esc(c.cidade)}</td><td>${c.manha}</td><td>${c.tarde}</td><td style="${corPorExtremo(listaPeriodo, c.total)}">${c.total}</td></tr>`).join('')}
           <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${totPeriodo.manha}</td><td>${totPeriodo.tarde}</td><td>${totPeriodo.total}</td></tr>
         </tbody></table></div>
       </div>
@@ -12683,7 +12683,7 @@ function renderFleet() {
     const linksEl = document.getElementById('fleet-links');
     if (!links.length) linksEl.innerHTML = '<div class="empty">Nenhum vínculo encontrado. Importe a aba "FROTA LITORAL".</div>';
     else linksEl.innerHTML = `<div class="table-wrap"><table class="data-table"><thead><tr><th>Motorista</th><th>Placa</th><th>Supervisor</th><th>Cidade</th><th>Locadora</th><th>Vinculação</th></tr></thead><tbody>
-      ${links.map(r=>`<tr><td>${r.motorista}</td><td>${r.placa}</td><td>${r.supervisor}</td><td>${r.cidade}</td><td>${r.locadora}</td><td>${formatDate(r.vinculacao)}</td></tr>`).join('')}
+      ${links.map(r=>`<tr><td>${esc(r.motorista)}</td><td>${esc(r.placa)}</td><td>${esc(r.supervisor)}</td><td>${esc(r.cidade)}</td><td>${esc(r.locadora)}</td><td>${formatDate(r.vinculacao)}</td></tr>`).join('')}
       </tbody></table></div>`;
 
     const revEl = document.getElementById('fleet-revisao');
@@ -12697,29 +12697,29 @@ function renderFleet() {
         const texto = d < 0
           ? `⚠️ venceu há ${-d} dia(s)`
           : d === 0 ? 'é hoje' : `faltam ${d} dia(s)`;
-        return `<tr><td class="cat-cell">${r.condutor || '-'}</td><td>${r.placa || '-'}</td><td>${formatDate(r.data_revisao)}</td>
-          <td style="color:${cor};font-weight:700">${texto}</td>${revisoes.some(x=>x.obs)?`<td>${r.obs||''}</td>`:''}</tr>`;
+        return `<tr><td class="cat-cell">${esc(r.condutor) || '-'}</td><td>${esc(r.placa) || '-'}</td><td>${formatDate(r.data_revisao)}</td>
+          <td style="color:${cor};font-weight:700">${texto}</td>${revisoes.some(x=>x.obs)?`<td>${esc(r.obs)||''}</td>`:''}</tr>`;
       }).join('')}
       </tbody></table></div>`;
 
     const maintEl = document.getElementById('fleet-maint');
     if (!maint.length) maintEl.innerHTML = '<div class="empty">Nenhum registro de manutenção. Importe a aba "MANUTENÇÕES".</div>';
     else maintEl.innerHTML = `<div class="table-wrap"><table class="data-table"><thead><tr><th>Condutor</th><th>Placa</th><th>Serviço</th><th>Data</th><th>KM</th></tr></thead><tbody>
-      ${maint.map(r=>`<tr><td>${r.condutor}</td><td>${r.placa}</td><td>${r.servico}</td><td>${formatDate(r.data)}</td><td>${r.km}</td></tr>`).join('')}
+      ${maint.map(r=>`<tr><td>${esc(r.condutor)}</td><td>${esc(r.placa)}</td><td>${esc(r.servico)}</td><td>${formatDate(r.data)}</td><td>${esc(r.km)}</td></tr>`).join('')}
       </tbody></table></div>`;
 
     const multasEl = document.getElementById('fleet-multas');
     if (!multas.length) { multasEl.innerHTML = '<div class="empty">Nenhuma multa registrada. Importe a aba "MULTAS".</div>'; }
     else {
       multasEl.innerHTML = `<div class="table-wrap"><table class="data-table"><thead><tr><th>Condutor</th><th>Placa</th><th>Data</th><th>Valor</th></tr></thead><tbody>
-      ${multas.map(r=>`<tr><td>${r.condutor}</td><td>${r.placa}</td><td>${formatDate(r.data_infracao)}</td><td>${formatCurrency(r.valor_multa)}</td></tr>`).join('')}
+      ${multas.map(r=>`<tr><td>${esc(r.condutor)}</td><td>${esc(r.placa)}</td><td>${formatDate(r.data_infracao)}</td><td>${formatCurrency(r.valor_multa)}</td></tr>`).join('')}
       </tbody></table></div>`;
     }
 
     const desvincEl = document.getElementById('fleet-desvinc');
     if (!desvinc.length) desvincEl.innerHTML = '<div class="empty">Nenhuma desvinculação registrada.</div>';
     else desvincEl.innerHTML = `<div class="table-wrap"><table class="data-table"><thead><tr><th>Condutor</th><th>Placa</th><th>Vinculação</th><th>Desvinculado em</th><th>Obs.</th></tr></thead><tbody>
-      ${desvinc.map(r=>`<tr><td>${r.condutor}</td><td>${r.placa}</td><td>${formatDate(r.vinculacao)}</td><td>${formatDate(r.desvinculado)}</td><td>${r.obs}</td></tr>`).join('')}
+      ${desvinc.map(r=>`<tr><td>${esc(r.condutor)}</td><td>${esc(r.placa)}</td><td>${formatDate(r.vinculacao)}</td><td>${formatDate(r.desvinculado)}</td><td>${esc(r.obs)}</td></tr>`).join('')}
       </tbody></table></div>`;
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
@@ -12935,10 +12935,10 @@ function renderToll() {
       ${rows.slice(0,limitePed).map(r=>{
         const fora = /fora/i.test(r.status||'');
         const foraCid = enderecoForaDasCidades(r.endereco);
-        return `<tr><td>${formatDate(r.data_transacao)} ${r.hora||''}</td><td>${r.placa}</td><td>${r.marca} ${r.modelo||''}</td>
-        <td style="${fora?'color:var(--danger);font-weight:600':''}">${r.cadastro}</td>
-        <td>${r.condutor_atual==='NÃO ENCONTRADA'?`<span class="badge warn">Não encontrada</span>`:`<span style="color:${fora?'var(--danger)':'var(--text-primary)'}">${r.condutor_atual}</span>`}</td>
-        <td style="${foraCid?'color:#fb923c':''}">${r.endereco}</td><td>${formatCurrency(r.valor)}</td></tr>`;
+        return `<tr><td>${formatDate(r.data_transacao)} ${esc(r.hora)||''}</td><td>${esc(r.placa)}</td><td>${esc(r.marca)} ${esc(r.modelo)||''}</td>
+        <td style="${fora?'color:var(--danger);font-weight:600':''}">${esc(r.cadastro)}</td>
+        <td>${r.condutor_atual==='NÃO ENCONTRADA'?`<span class="badge warn">Não encontrada</span>`:`<span style="color:${fora?'var(--danger)':'var(--text-primary)'}">${esc(r.condutor_atual)}</span>`}</td>
+        <td style="${foraCid?'color:#fb923c':''}">${esc(r.endereco)}</td><td>${formatCurrency(r.valor)}</td></tr>`;
       }).join('')}
       </tbody></table></div>
       <div id="pdf-export-area"></div>
@@ -16556,7 +16556,7 @@ function renderPainelBI(alvoId = 'content') {
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
         <th>Cidade</th><th>Ordens Concluídas</th><th>Ativação</th><th>Reparo</th><th>% Prazo Reparo (24h)</th><th>% Prazo Ativação (36h)</th>
       </tr></thead><tbody>
-        ${ranking.map(r => `<tr><td class="cat-cell">${r.cidade}</td><td>${r.ordens}</td><td>${r.ativacao}</td><td>${r.reparo}</td>
+        ${ranking.map(r => `<tr><td class="cat-cell">${esc(r.cidade)}</td><td>${r.ordens}</td><td>${r.ativacao}</td><td>${r.reparo}</td>
           <td>${r.pctPrazo === null ? '-' : `<span class="badge ${r.pctPrazo >= PRAZO_META ? 'ok' : 'warn'}">${formatPct(r.pctPrazo, 1)}</span>`}</td>
           <td>${r.pctPrazoAtiv === null ? '-' : `<span class="badge ${r.pctPrazoAtiv >= PRAZO_ATIVACAO_META ? 'ok' : 'warn'}">${formatPct(r.pctPrazoAtiv, 1)}</span>`}</td></tr>`).join('')}
       </tbody></table></div>
