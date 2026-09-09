@@ -1332,17 +1332,64 @@
   .import-file-card b { color: var(--text-primary); font-size: 13px; display: block; margin-bottom: 4px; }
   .import-file-card span { color: var(--text-secondary); line-height: 1.5; display: block; }
 
-  /* filtro de múltiplas cidades */
+  /* filtro de múltiplas cidades (cidades, técnicos, ciclos...) — redesenho
+     09/09/2026, pedido do cliente: o botão era um retângulo cinza qualquer,
+     sem indicar se tinha algo marcado, e a lista de baixo era texto corrido
+     com o accent-color nativo do navegador (cada SO desenha diferente, feio
+     no tema escuro). Agora o botão vira uma pílula que fica com a cor do
+     accent quando tem seleção (dá pra ver de longe sem abrir o painel), a
+     seta gira ao abrir, e cada item ganha um checkbox desenhado por CSS
+     (quadradinho com check próprio) em vez do nativo do navegador.
+  */
   .multiselect { position: relative; }
-  .multiselect-toggle { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 13px; background: var(--bg-page); color: var(--text-primary); cursor: pointer; min-width: 140px; text-align: left; }
-  .multiselect-panel { display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--r-md); padding: 8px; min-width: 200px; max-height: 260px; overflow-y: auto; box-shadow: var(--sombra-flutuante); }
+  .multiselect-toggle {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 9px 13px; border: 1px solid var(--border); border-radius: 999px;
+    font-size: 13px; font-weight: 600; background: var(--card-bg); color: var(--text-primary);
+    cursor: pointer; min-width: 160px; text-align: left;
+    transition: border-color .15s, background-color .15s, color .15s;
+  }
+  .multiselect-toggle:hover { border-color: var(--accent); }
+  .multiselect.tem-selecao .multiselect-toggle {
+    border-color: var(--accent); color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, var(--card-bg));
+  }
+  .multiselect-toggle .ms-rotulo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .multiselect-toggle .ms-seta { flex: none; font-size: 10px; color: var(--text-muted); transition: transform .18s; }
+  .multiselect.tem-selecao .multiselect-toggle .ms-seta { color: var(--accent); }
+  .multiselect.open .multiselect-toggle .ms-seta { transform: rotate(180deg); }
+  .multiselect-panel {
+    display: none; position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 14px;
+    padding: 10px; min-width: 220px; max-height: 280px; overflow-y: auto;
+    box-shadow: 0 14px 34px rgba(0,0,0,.3);
+  }
   .multiselect-panel.open { display: block; }
-  .multiselect-actions { display: flex; gap: 6px; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
-  .multiselect-actions button { flex: 1; font-size: 11px; padding: 4px 6px; border: 1px solid var(--border); background: var(--bg-page); color: var(--text-secondary); border-radius: 5px; cursor: pointer; }
-  .multiselect-actions button:hover { color: var(--text-primary); }
-  .multiselect-item { display: flex; align-items: center; gap: 7px; font-size: 12.5px; padding: 5px 4px; color: var(--text-secondary); cursor: pointer; border-radius: 4px; }
+  .multiselect-actions { display: flex; gap: 6px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .multiselect-actions button {
+    flex: 1; font-size: 11px; font-weight: 700; padding: 6px 8px; border: 1px solid var(--border);
+    background: var(--bg-page); color: var(--text-secondary); border-radius: 999px; cursor: pointer;
+    transition: color .15s, border-color .15s;
+  }
+  .multiselect-actions button:hover { color: var(--accent); border-color: var(--accent); }
+  .multiselect-item {
+    display: flex; align-items: center; gap: 9px; font-size: 12.5px; padding: 7px 8px;
+    color: var(--text-secondary); cursor: pointer; border-radius: 8px; transition: background-color .12s;
+  }
   .multiselect-item:hover { background: var(--bg-page); }
-  .multiselect-item input { accent-color: var(--accent); }
+  /* checkbox próprio (não o nativo do SO) — quadrado com cantos arredondados,
+     preenche de accent e desenha o check em cima quando marcado */
+  .multiselect-item input[type=checkbox] {
+    appearance: none; -webkit-appearance: none; width: 16px; height: 16px; flex: none;
+    border: 1.5px solid var(--border); border-radius: 5px; background: var(--bg-page);
+    cursor: pointer; position: relative; transition: background-color .12s, border-color .12s;
+  }
+  .multiselect-item input[type=checkbox]:checked { background: var(--accent); border-color: var(--accent); }
+  .multiselect-item input[type=checkbox]:checked::after {
+    content: ''; position: absolute; left: 4.5px; top: 1.5px; width: 4px; height: 8px;
+    border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+  }
+  .multiselect-item:has(input:checked) { color: var(--text-primary); font-weight: 600; }
 
   /* sidebar responsiva: em telas estreitas vira um menu que abre/fecha */
   .menu-toggle { display: inline-block; background: transparent; border: 1px solid var(--border); color: var(--text-primary); border-radius: 7px; padding: 6px 10px; font-size: 16px; cursor: pointer; }
@@ -4376,9 +4423,11 @@ function wireMultiSelectField(id, opts = {}, onChange) {
     const boxes = [...panel.querySelectorAll('input[type=checkbox]')];
     const checked = boxes.filter(b=>b.checked);
     const noun = opts.noun || 'item(ns)';
-    toggle.textContent = (checked.length===0 ? `Nenhum(a) ${noun}` : checked.length===boxes.length ? (opts.allLabel||'Todas') : checked.length+' '+noun) + ' ▾';
+    const rotulo = checked.length===0 ? `Nenhum(a) ${noun}` : checked.length===boxes.length ? (opts.allLabel||'Todas') : checked.length+' '+noun;
+    toggle.innerHTML = `<span class="ms-rotulo">${esc(rotulo)}</span><span class="ms-seta">▾</span>`;
+    wrap.classList.toggle('tem-selecao', checked.length > 0 && checked.length < boxes.length);
   }
-  toggle.addEventListener('click', e => { e.stopPropagation(); panel.classList.toggle('open'); });
+  toggle.addEventListener('click', e => { e.stopPropagation(); panel.classList.toggle('open'); wrap.classList.toggle('open', panel.classList.contains('open')); });
   panel.querySelectorAll('input[type=checkbox]').forEach(cb => cb.addEventListener('change', () => { updateLabel(); if (onChange) onChange(); }));
   panel.querySelectorAll('button[data-action]').forEach(btn => btn.addEventListener('click', () => {
     const check = btn.dataset.action === 'all';
@@ -4394,7 +4443,7 @@ function getMultiSelectValues(id) {
 }
 document.addEventListener('click', e => {
   document.querySelectorAll('.multiselect-panel.open').forEach(p => {
-    if (!p.parentElement.contains(e.target)) p.classList.remove('open');
+    if (!p.parentElement.contains(e.target)) { p.classList.remove('open'); p.parentElement.classList.remove('open'); }
   });
 });
 
