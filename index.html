@@ -1199,6 +1199,12 @@
   .cu-pop-edit:focus { outline: none; border-color: #2563eb; }
   .cu-pop-acoes { display: flex; align-items: center; gap: 9px; margin-top: 8px; }
   .cu-pop-acoes .btn { padding: 5px 13px; font-size: 12px; }
+  .cu-pop-excluir {
+    padding: 5px 11px; font-size: 12px; font-weight: 600; cursor: pointer;
+    background: #fff; color: #b91c1c; border: 1px solid #fca5a5; border-radius: 6px;
+  }
+  .cu-pop-excluir:hover { background: #fef2f2; }
+  .cu-pop-excluir:disabled { opacity: .6; cursor: default; }
   .cu-pop-msg { font-size: 11.5px; color: #64748b; }
   /* formulário do Clean Up: os campos em grade que se acomoda sozinha — a
      "caixinha" da localização e a de observação ficam lado a lado em tela
@@ -13008,6 +13014,23 @@ async function salvarCleanUp(reg) {
   const r = await syncBatchToSupabase('cleanUp', [linha]);
   return { ok: !r || r.ok !== false, resultado: r };
 }
+// Apaga uma limpeza (pedido do cliente 09/09/2026: "quero que quando eu
+// clicar na bolinha eu consiga excluir também").
+async function excluirCleanUp(chave) {
+  const i = DB.cleanUp.findIndex(r => r.chave === chave);
+  if (i >= 0) DB.cleanUp.splice(i, 1);
+  // upsertRow guarda a POSIÇÃO da linha no array em DB_INDEX.cleanUp — tirar
+  // uma linha do meio desalinha o índice de todo mundo depois dela, então
+  // reconstrói do zero (lista de ~1.500, custa nada).
+  DB_INDEX.cleanUp.clear();
+  DB.cleanUp.forEach((r, idx) => { if (r.chave) DB_INDEX.cleanUp.set(r.chave, idx); });
+  if (!supa) return { ok: true, offline: true };
+  try {
+    const { error } = await supa.from('clean_up').delete().eq('chave', chave);
+    if (error) return { ok: false, error };
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e }; }
+}
 function renderCleanUp() {
   const pode = podeEditarCleanUp();
   // Quantas linhas a TABELA desenha (o mapa mostra sempre todas). Com a base
@@ -13136,6 +13159,12 @@ function renderCleanUp() {
     const contrato = normalizeHeader(document.getElementById('cu-contrato').value);
     const os = normalizeHeader(document.getElementById('cu-os').value);
     const de = document.getElementById('cu-de').value, ate = document.getElementById('cu-ate').value;
+    // Pesquisou algo específico (qualquer filtro, fora a coordenada — essa já
+    // tem o pino laranja próprio)? As bolinhas que sobraram no mapa ganham
+    // destaque (pedido do cliente 09/09/2026: "quando eu pesquisar um em
+    // específico a cor fique destacada") — sem isso, achar uma caixa
+    // específica entre as milhares coloridas por cidade não chamava atenção.
+    const filtroEspecifico = !!(busca || cidade || bairro || tecnico || contrato || os || de || ate);
     // A busca livre varre TODOS os campos de uma vez (coordenada, localização,
     // cidade, bairro, técnico, contrato, O.S, vagas e data) — foi o pedido:
     // "pra eu saber se tem caixa lá" sem ter que escolher em qual campo procurar.
@@ -13202,7 +13231,7 @@ function renderCleanUp() {
         <button class="btn-secundario" id="cu-descartar" disabled>Descartar alterações</button>
         <span id="cu-edit-msg" style="font-size:13px;color:var(--text-muted)"></span>
       </div>` : ''}`}`;
-    desenharMapaCleanUp('cu-mapa', comCoord, corPorCu, load, pontoBuscado);
+    desenharMapaCleanUp('cu-mapa', comCoord, corPorCu, load, pontoBuscado, filtroEspecifico);
     const selCor = document.getElementById('cu-cor-por');
     if (selCor) selCor.addEventListener('change', () => { corPorCu = selCor.value; load(); });
     const selLimite = document.getElementById('cu-limite');
@@ -13368,6 +13397,7 @@ function popupCleanUp(regs, lat, lon) {
       </dl>
       ${pode ? `<div class="cu-pop-acoes">
         <button type="button" class="btn cu-pop-salvar">Salvar</button>
+        <button type="button" class="cu-pop-excluir" title="Excluir esta limpeza">🗑 Excluir</button>
         <span class="cu-pop-msg"></span>
       </div>` : ''}
     </div>`;
@@ -13404,13 +13434,26 @@ function ligarPopupCleanUp(popup, onSalvar) {
       toast('Limpeza atualizada.', 'ok', 2000);
       if (onSalvar) onSalvar();
     });
+    const btnExcluir = bloco.querySelector('.cu-pop-excluir');
+    if (btnExcluir) btnExcluir.addEventListener('click', async () => {
+      if (!confirm('Excluir esta limpeza? Não dá pra desfazer.')) return;
+      btnExcluir.disabled = true; msg.textContent = 'Excluindo…';
+      const r = await excluirCleanUp(bloco.dataset.chave);
+      if (!r.ok) {
+        btnExcluir.disabled = false;
+        msg.innerHTML = '<span style="color:#b91c1c">não consegui excluir no servidor</span>';
+        return;
+      }
+      toast('Limpeza excluída.', 'ok', 2000);
+      if (onSalvar) onSalvar();
+    });
   });
 }
 // Mapa do Clean Up: uma bolinha por caixa limpa, com popup mostrando tudo que
 // foi registrado daquela limpeza (é o "clica na bolinha e aparece" do pedido).
 // Mesma base do renderMapaBairros (Leaflet + OpenStreetMap) — inclusive o
 // fallback quando a biblioteca não carrega.
-function desenharMapaCleanUp(elId, linhas, corPor = 'cidade', onSalvar, pontoBuscado) {
+function desenharMapaCleanUp(elId, linhas, corPor = 'cidade', onSalvar, pontoBuscado, filtroEspecifico) {
   const el = document.getElementById(elId);
   if (!el) return;
   if (el._leafletMap) { el._leafletMap.remove(); el._leafletMap = null; }
@@ -13453,8 +13496,19 @@ function desenharMapaCleanUp(elId, linhas, corPor = 'cidade', onSalvar, pontoBus
     const cor = (cores.get(grupo) || {}).cor || '#22c55e';
     // raio pela RAIZ das portas do ponto (área ∝ vagas), igual à convenção do
     // mapa de bairros — caixa sem porta informada ainda aparece, no mínimo.
-    const marcador = L.circleMarker([lat, lon], {
-      radius: 5 + Math.sqrt(portas) * 1.8, color: cor, weight: 1.5,
+    // Base subiu de 5 pra 8 e o multiplicador de 1.8 pra 2.3 (pedido do
+    // cliente 09/09/2026, "aumente mais a bolinha" — a de 5px sumia de vista
+    // com 1.500+ pontos espalhados pela Baixada inteira).
+    // Com filtro específico ativo (busca/cidade/bairro/técnico/contrato/O.S/
+    // data), o que sobrou no mapa já É o resultado da busca — ganha borda
+    // dourada grossa pra se destacar da cor normal por cidade/bairro em vez
+    // de se misturar com ela (pedido do cliente: "quando eu pesquisar um em
+    // específico a cor fique destacada").
+    const marcador = L.circleMarker([lat, lon], filtroEspecifico ? {
+      radius: 9 + Math.sqrt(portas) * 2.3, color: '#facc15', weight: 4,
+      fillColor: cor, fillOpacity: 0.85,
+    } : {
+      radius: 8 + Math.sqrt(portas) * 2.3, color: cor, weight: 1.5,
       fillColor: cor, fillOpacity: 0.7,
     }).addTo(map);
     marcador.bindPopup(() => popupCleanUp(regs, lat, lon), { maxWidth: 420, minWidth: 300, maxHeight: 460 });
