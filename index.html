@@ -1165,6 +1165,16 @@
   /* mapa de cidades (Leaflet) — altura fixa (o Leaflet precisa de uma altura
      explícita no container, não calcula sozinho a partir do conteúdo) */
   .mapa-cidades { height: 640px; border-radius: var(--r-sm); overflow: hidden; }
+  /* formulário do Clean Up: os campos em grade que se acomoda sozinha — a
+     "caixinha" da localização e a de observação ficam lado a lado em tela
+     larga (foi como o cliente descreveu) e empilham no celular. */
+  .cu-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+  .cu-form-grid textarea {
+    width: 100%; padding: 8px 10px; font: inherit; resize: vertical;
+    background: var(--bg-page); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: var(--r-sm);
+  }
+  .cu-form-grid textarea:focus { outline: none; border-color: var(--accent); }
   /* tema escuro: inverter as cores da base do mapa (truque padrão pra "dark
      mode" em cima de tiles do OpenStreetMap, que só vêm no claro) — os
      círculos das cidades não entram nesse filtro, só o painel de tiles. */
@@ -1970,6 +1980,7 @@
       <div class="sidebar-group">Frota</div>
       <a data-route="fleet"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.3" y="5.8" width="9" height="7.2" rx="1"/><path d="M10.3 8.6h3.4l2.4 2.6v1.8h-5.8Z"/><circle cx="4.8" cy="14.6" r="1.4"/><circle cx="13.2" cy="14.6" r="1.4"/></svg></i><span class="nav-txt">Frota</span></a>
       <a data-route="toll"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="6.5" y1="1.8" x2="2.8" y2="16.2"/><line x1="11.5" y1="1.8" x2="15.2" y2="16.2"/><line x1="8.9" y1="2.8" x2="8.5" y2="5.1"/><line x1="9.2" y1="7.5" x2="8.8" y2="9.8"/><line x1="8.5" y1="12.2" x2="8.1" y2="14.5"/></svg></i><span class="nav-txt">Pedágio</span></a>
+      <a data-route="cleanup"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M9 1.8c-2.9 0-5.2 2.3-5.2 5.2 0 3.9 5.2 9.2 5.2 9.2s5.2-5.3 5.2-9.2c0-2.9-2.3-5.2-5.2-5.2Z"/><circle cx="9" cy="7" r="2"/></svg></i><span class="nav-txt">Clean Up</span></a>
       <div class="sidebar-group">Financeiro</div>
       <a data-route="finance"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.8" y="4.8" width="14.4" height="10" rx="1.8"/><path d="M1.8 7.8h14.4"/><line x1="12.5" y1="11.3" x2="12.8" y2="11.3"/></svg></i><span class="nav-txt">Financeiro</span></a>
       <a data-route="folha"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.3" y="5.3" width="15.4" height="8.6" rx="1.5"/><circle cx="9" cy="9.6" r="2.2"/><line x1="3.6" y1="7.6" x2="3.8" y2="7.6"/><line x1="14.4" y1="11.6" x2="14.6" y2="11.6"/></svg></i><span class="nav-txt">Folha de Pagamento</span></a>
@@ -2039,6 +2050,12 @@ const SUPABASE_TABLES = {
   frotaRevisao:    { table: 'frota_revisao',      conflict: 'placa,data_revisao' },
   pedagio:         { table: 'pedagio',            conflict: 'data_transacao,hora,placa' },
   financeiro:      { table: 'financeiro',         conflict: 'periodo,categoria,tipo' },
+  // Clean Up (limpeza de caixa/CTO) — cada linha é UMA limpeza feita, com a
+  // coordenada que põe a bolinha no mapa. A chave é `chave` (coluna própria,
+  // montada no JS) pelo mesmo motivo do frota_links: cidade/data/O.S vêm
+  // vazios em parte do histórico, e no Postgres NULL nunca bate com NULL —
+  // com chave composta cada reimportação viraria linha nova.
+  cleanUp:         { table: 'clean_up',           conflict: 'chave' },
   // A planilha "FOLHA DE PAGAMENTO" quase nunca traz coluna de período (ver
   // SEM_PERIODO_FOLHA) — então a chave tecnico+periodo vira tecnico+NULL. O
   // Postgres nunca considera duas linhas NULL iguais, então o ON CONFLICT
@@ -2599,6 +2616,11 @@ function ehAnalista() { return !!currentUser && currentUser.role === 'analista';
 // de consulta. O valor fica salvo no Supabase e vale para todos, então não
 // pode ser mexido por quem só acompanha.
 function podeEditarMO() { return !!currentUser && currentUser.role !== 'escritorio'; }
+// Clean Up (limpeza de CTO): registrar uma limpeza nova é trabalho de campo/
+// operação, então vale a mesma régua da M.O — todo mundo lança, menos o
+// Escritório, que só consulta o mapa. A tela em si não está bloqueada pra
+// ninguém em ROUTE_PERMISSIONS (é consulta de mapa, todo perfil enxerga).
+function podeEditarCleanUp() { return !!currentUser && currentUser.role !== 'escritorio'; }
 // Cadastro financeiro (tela Financeiro): quem digita despesa do ciclo. Em
 // 03/09/2026 o cliente trancou TODO o financeiro no Analista; em 04/09/2026
 // abriu edição pro RH também (mesma lógica de podeEditarFolhaEscritorio) —
@@ -2666,6 +2688,9 @@ const DB = {
   fechamento: [], producao: [], prazo: [], folhaPagamento: [], baseDoDia: [], prazoReparoDia: [],
   frotaLinks: [], frotaTroca: [], frotaManutencao: [], frotaDesvinc: [], frotaMultas: [], frotaRevisao: [],
   pedagio: [], financeiro: [], folhaEscritorio: [], importsLog: [],
+  // Clean Up: uma linha por limpeza de CTO já feita (coordenada + contrato +
+  // O.S + técnico + portas liberadas). É o que alimenta o mapa da aba Clean Up.
+  cleanUp: [],
   pcr: [], // linhas do CSV de atividades importado na aba PCR
   // Abas "PRAZO INFORMADO REPARO (PLEITO)" e "PRAZO INFORMADO AT-ME (PLEITO)"
   // de PRAZOS_ESCRITÓRIO.xlsx — uma linha por TENTATIVA "não concluído" (não
@@ -2701,6 +2726,7 @@ const DB_INDEX = {
   frotaLinks: new Map(), frotaTroca: new Map(), frotaManutencao: new Map(), frotaDesvinc: new Map(), frotaMultas: new Map(), frotaRevisao: new Map(),
   folhaEscritorio: new Map(),
   pedagio: new Map(), financeiro: new Map(), pcr: new Map(), pleito: new Map(),
+  cleanUp: new Map(),
   presencaTecnicos: new Map(), presenca: new Map(),
   presencaEscritorioPessoas: new Map(), presencaEscritorio: new Map(),
 };
@@ -5464,6 +5490,17 @@ const SCHEMAS = {
     data_revisao: ['data de revisao','data da revisao','data revisao','data de revisão','data da revisão','data revisão','revisao','revisão','data'],
     obs: ['obs','observacao','observação'],
   }},
+  // Histórico do Clean Up. Os nomes das colunas são os do Power BI que o
+  // cliente usava ("CLEAN UP - BAIXADA & SP.pbix": LOCALIZAÇÃO CTO, PORTA,
+  // QUANTIDADE DE PORTAS LIBERADAS, CONTRATOS, TÉCNICO, CIDADE, BAIRRO,
+  // DATA), com os apelidos mais comuns de cada um por garantia.
+  cleanUp: { fields: {
+    localizacao: ['localizacao cto','localização cto','localizacao da cto','localização da cto','localizacao','localização','coordenada','coordenadas'],
+    portas: ['quantidade de portas liberadas','portas liberadas','porta','portas','vagas','quantidade de vagas'],
+    contrato: ['contratos','contrato'], os: ['os','o s','ordem de servico','ordem de serviço','numero da os','número da os'],
+    tecnico: ['tecnico','técnico','executor'], cidade: ['cidade'], bairro: ['bairro'],
+    data: ['data'], hora: ['hora'], observacao: ['observacao','observação','obs','status'],
+  }},
   pedagio: { fields: {
     data_transacao: ['data da transacao','data da transação'], mes: ['mes','mês'], hora: ['hora da transacao','hora da transação'],
     placa: ['placa'], marca: ['marca do veiculo','marca do veículo'], modelo: ['modelo do veiculo','modelo do veículo'],
@@ -5541,6 +5578,10 @@ function pickBestTarget(maps, scores) {
   if (has(maps.folhaPagamento,'total_receber') && has(maps.folhaPagamento,'total_descontos') && has(maps.folhaPagamento,'tecnico')) return 'folhaPagamento';
   if (has(maps.fechamento, 'eficiencia') && has(maps.fechamento, 'tecnico')) return 'fechamento';
   if (has(maps.pedagio, 'data_transacao') && has(maps.pedagio, 'condutor_atual')) return 'pedagio';
+  // Clean Up: o que identifica a planilha é ter a LOCALIZAÇÃO da CTO junto com
+  // a contagem de portas/vagas. Vem ANTES de producao (que aceita quase tudo
+  // por pontuação) e depois de pedagio/folha, que têm assinatura mais forte.
+  if (has(maps.cleanUp, 'localizacao') && has(maps.cleanUp, 'portas')) return 'cleanUp';
   if (has(maps.financeiro,'data_inicio') && has(maps.financeiro,'data_fim') && has(maps.financeiro,'categoria')) return 'financeiro';
   if (has(maps.frotaMultas,'data_infracao') && has(maps.frotaMultas,'valor_multa')) return 'frotaMultas';
   if (has(maps.frotaTroca,'placa_anterior') && has(maps.frotaTroca,'placa_atual')) return 'frotaTroca';
@@ -5753,6 +5794,25 @@ function insertRow(target, map, row, extra) {
     case 'pedagio': {
       const obj = { data_transacao: d('data_transacao'), mes: s('mes'), hora: excelTimeToHHMM(cell(row, map.hora)), placa: s('placa'), marca: s('marca'), modelo: s('modelo'), cadastro: s('cadastro'), condutor_atual: s('condutor_atual'), endereco: s('endereco'), valor: money('valor'), status: s('status') };
       return upsertRow(DB.pedagio, DB_INDEX.pedagio, obj.data_transacao && obj.placa ? `${obj.data_transacao}|${obj.hora}|${obj.placa}` : null, obj);
+      break;
+    }
+    case 'cleanUp': {
+      // A coluna de localização da planilha pode vir como coordenada
+      // ("-23.96, -46.33") ou como endereço. Coordenada entra direto; endereço
+      // fica sem lat/lon e a linha aparece só na TABELA da tela Clean Up, com
+      // aviso de "sem coordenada" — geocodificar na importação faria uma
+      // consulta externa por linha (planilha de centenas de linhas = banimento
+      // no Nominatim). Quem quiser o ponto no mapa reedita pela tela.
+      const localizacao = s('localizacao');
+      const ponto = parseCoordCleanUp(localizacao);
+      const obj = {
+        localizacao, lat: ponto ? ponto.lat : null, lon: ponto ? ponto.lon : null,
+        portas: n('portas') || 0, contrato: s('contrato'), os: s('os'), tecnico: s('tecnico'),
+        cidade: s('cidade'), bairro: s('bairro'), data: d('data'), hora: excelTimeToHHMM(cell(row, map.hora)),
+        observacao: s('observacao'),
+      };
+      obj.chave = chaveCleanUp(obj);
+      return upsertRow(DB.cleanUp, DB_INDEX.cleanUp, obj.chave, obj);
       break;
     }
     case 'financeiro': {
@@ -6097,6 +6157,7 @@ const PAGES = {
   relatoriosdia: { title: 'Relatórios — Excel e Imagem', render: renderRelatoriosDia },
   fleet: { title: 'Frota', render: renderFleet },
   toll: { title: 'Pedágio', render: renderToll },
+  cleanup: { title: 'Clean Up', render: renderCleanUp },
   finance: { title: 'Financeiro', render: renderFinance },
   folha: { title: 'Folha de Pagamento', render: () => renderFolhaPagamento('folha') },
   relatoriofin: { title: 'Relatório do Financeiro', render: () => renderFolhaPagamento('relatorio') },
@@ -12659,6 +12720,270 @@ function renderToll() {
   }
 }
 
+// ===================== CLEAN UP (limpeza de CTO) =====================
+// Uma linha por CAIXA (CTO) já limpa: onde fica (o que põe a bolinha no mapa),
+// quantas portas foram liberadas, qual contrato/O.S, quem fez e quando.
+// Substitui o Power BI "CLEAN UP - BAIXADA & SP" que o cliente usava (as
+// colunas abaixo são as mesmas de lá: LOCALIZAÇÃO CTO, PORTAS, CIDADE,
+// BAIRRO, CONTRATOS, TÉCNICO, DATA — mais O.S, que ele pediu a mais).
+//
+// COORDENADA x ENDEREÇO (decisão do cliente 09/09/2026): a caixinha aceita os
+// dois. Se o texto já for "lat, long" o ponto entra na hora, sem depender de
+// internet nenhuma além do mapa; se for endereço por extenso, aí sim consulta
+// o Nominatim (serviço de busca do OpenStreetMap, sem chave e sem custo) pra
+// descobrir a coordenada. Guarda SEMPRE o texto original em `localizacao`
+// junto com lat/lon — assim dá pra reconferir depois de onde o ponto veio.
+function parseCoordCleanUp(txt) {
+  const s = String(txt || '').trim();
+  if (!s) return null;
+  // Texto com LETRA é endereço, nunca coordenada — sem essa checagem
+  // "Rua 15, 20" viraria o ponto (15, 20), que cai no meio da África.
+  // (Coordenada copiada do Google Maps não tem letra nenhuma.)
+  if (/[a-zà-ú]/i.test(s)) return null;
+  // "-23.9608, -46.3336" (o que o Google Maps copia) e também "-23,9608 -46,3336".
+  // A vírgula é ambígua em pt-BR (separa os dois números OU é decimal), então
+  // só trata como decimal quando existem EXATAMENTE 2 números no texto.
+  const nums = s.replace(/[^\d,.\-\s]/g, ' ').match(/-?\d+(?:[.,]\d+)?/g) || [];
+  if (nums.length !== 2) return null;
+  const lat = parseFloat(nums[0].replace(',', '.'));
+  const lon = parseFloat(nums[1].replace(',', '.'));
+  if (!isFinite(lat) || !isFinite(lon)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  return { lat, lon };
+}
+// Endereço -> coordenada pelo Nominatim. Limitado ao Brasil pra não cair num
+// "Santos" de outro país. Se a rede/serviço falhar devolve null e a tela
+// explica — nunca inventa um ponto no mapa.
+async function geocodificarCleanUp(endereco) {
+  const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q='
+    + encodeURIComponent(endereco);
+  try {
+    const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (!j || !j.length) return null;
+    return { lat: parseFloat(j[0].lat), lon: parseFloat(j[0].lon), rotulo: j[0].display_name || '' };
+  } catch (e) { return null; }
+}
+// "Essa linha tem coordenada de verdade?" — CUIDADO com Number(null), que dá
+// 0 (e isFinite(0) é true): sem essa checagem a caixa que veio da planilha só
+// com ENDEREÇO entrava no mapa no ponto (0, 0), no meio do Golfo da Guiné.
+// Foi exatamente isso que apareceu no teste com dado de exemplo.
+function temCoordCleanUp(r) {
+  const ok = v => v !== null && v !== undefined && v !== '' && isFinite(Number(v));
+  return ok(r.lat) && ok(r.lon);
+}
+// Chave natural de uma limpeza: a coordenada arredondada (6 casas ~ 11cm) +
+// a data. Mesma CTO limpa de novo noutro dia é registro NOVO (é outro
+// serviço); reimportar a mesma planilha atualiza o que já existe.
+function chaveCleanUp(r) {
+  const lat = Number(r.lat), lon = Number(r.lon);
+  const coord = isFinite(lat) && isFinite(lon) ? `${lat.toFixed(6)},${lon.toFixed(6)}` : normalizeHeader(r.localizacao);
+  return `${coord}|${r.data || ''}`;
+}
+async function salvarCleanUp(reg) {
+  const linha = { ...reg, chave: chaveCleanUp(reg) };
+  upsertRow(DB.cleanUp, DB_INDEX.cleanUp, linha.chave, linha);
+  const r = await syncBatchToSupabase('cleanUp', [linha]);
+  return { ok: !r || r.ok !== false, resultado: r };
+}
+function renderCleanUp() {
+  const pode = podeEditarCleanUp();
+  document.getElementById('content').innerHTML = `
+    <div class="toolbar">
+      <div class="field" style="flex:1 1 320px"><label>Buscar</label>
+        <input type="text" id="cu-busca" placeholder="Coordenada, localização, cidade, bairro, técnico, contrato, O.S, vagas ou data..."></div>
+      <div class="field"><label>Cidade</label><input type="text" id="cu-cidade" placeholder="Cidade" list="city-list"></div>
+      <div class="field"><label>Técnico</label><input type="text" id="cu-tecnico" placeholder="Nome" list="tech-list"></div>
+      <div class="field"><label>De</label><input type="date" id="cu-de"></div>
+      <div class="field"><label>Até</label><input type="date" id="cu-ate"></div>
+      <button class="btn" id="cu-filtrar">Filtrar</button>
+      <button type="button" class="btn-secundario" id="cu-limpar">Limpar</button>
+      ${pode ? '<button type="button" class="btn-secundario" id="cu-novo">+ Adicionar novo</button>' : ''}
+    </div>
+    <div id="cu-form-painel" class="panel" style="display:none;margin:0 0 1rem">
+      <h3 style="margin:0 0 4px">Nova limpeza de CTO</h3>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">
+        A <b>localização é obrigatória</b> — é ela que põe a bolinha no mapa. Pode ser a coordenada
+        (cole do Google Maps: <i>-23.9608, -46.3336</i>) ou o endereço por extenso, que o sistema
+        converte sozinho.
+      </p>
+      <div class="cu-form-grid">
+        <div class="field" style="margin:0">
+          <label>Localização da CTO (obrigatório)</label>
+          <input type="text" id="cu-f-local" placeholder="-23.9608, -46.3336  ou  Av. Ana Costa, 100, Santos">
+        </div>
+        <div class="field" style="margin:0">
+          <label>Observação</label>
+          <textarea id="cu-f-obs" rows="3" placeholder="Contrato, O.S, localização, vagas, quem fez a limpeza — o que mais precisar registrar sobre essa limpeza."></textarea>
+        </div>
+      </div>
+      <div class="cu-form-grid" style="margin-top:10px">
+        <div class="field" style="margin:0"><label>Contrato</label><input type="text" id="cu-f-contrato" placeholder="Contrato"></div>
+        <div class="field" style="margin:0"><label>O.S</label><input type="text" id="cu-f-os" placeholder="Número da O.S"></div>
+        <div class="field" style="margin:0"><label>Técnico (quem fez)</label><input type="text" id="cu-f-tecnico" placeholder="Nome" list="tech-list"></div>
+        <div class="field" style="margin:0"><label>Vagas / portas liberadas</label><input type="number" id="cu-f-portas" min="0" step="1" placeholder="0"></div>
+        <div class="field" style="margin:0"><label>Cidade</label><input type="text" id="cu-f-cidade" placeholder="Cidade" list="city-list"></div>
+        <div class="field" style="margin:0"><label>Bairro</label><input type="text" id="cu-f-bairro" placeholder="Bairro"></div>
+        <div class="field" style="margin:0"><label>Data</label><input type="date" id="cu-f-data" value="${hojeISOLocal()}"></div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
+        <button class="btn" id="cu-f-salvar">Salvar limpeza</button>
+        <button type="button" class="btn-secundario" id="cu-f-cancelar">Cancelar</button>
+        <span id="cu-f-msg" style="font-size:13px"></span>
+      </div>
+    </div>
+    <div id="cu-body"></div>`;
+  document.getElementById('cu-filtrar').addEventListener('click', load);
+  document.getElementById('cu-busca').addEventListener('keydown', e => { if (e.key === 'Enter') load(); });
+  document.getElementById('cu-limpar').addEventListener('click', () => {
+    ['cu-busca', 'cu-cidade', 'cu-tecnico', 'cu-de', 'cu-ate'].forEach(id => { document.getElementById(id).value = ''; });
+    load();
+  });
+  const painel = document.getElementById('cu-form-painel');
+  const btnNovo = document.getElementById('cu-novo');
+  if (btnNovo) {
+    btnNovo.addEventListener('click', () => { painel.style.display = painel.style.display === 'none' ? '' : 'none'; });
+    document.getElementById('cu-f-cancelar').addEventListener('click', () => { painel.style.display = 'none'; });
+    document.getElementById('cu-f-salvar').addEventListener('click', salvar);
+  }
+  load();
+
+  async function salvar() {
+    const msg = document.getElementById('cu-f-msg');
+    const btn = document.getElementById('cu-f-salvar');
+    const textoLocal = document.getElementById('cu-f-local').value.trim();
+    if (!textoLocal) { msg.innerHTML = '<span style="color:var(--danger)">A localização da CTO é obrigatória.</span>'; return; }
+    btn.disabled = true;
+    let ponto = parseCoordCleanUp(textoLocal);
+    if (!ponto) {
+      msg.innerHTML = '<span style="color:var(--text-muted)">Convertendo o endereço em coordenada…</span>';
+      ponto = await geocodificarCleanUp(textoLocal);
+      if (!ponto) {
+        btn.disabled = false;
+        msg.innerHTML = '<span style="color:var(--danger)">Não achei esse endereço no mapa. Tente com cidade/estado no fim, ou cole a coordenada direto (ex.: -23.9608, -46.3336).</span>';
+        return;
+      }
+    }
+    const reg = {
+      localizacao: textoLocal, lat: ponto.lat, lon: ponto.lon,
+      observacao: document.getElementById('cu-f-obs').value.trim(),
+      contrato: document.getElementById('cu-f-contrato').value.trim(),
+      os: document.getElementById('cu-f-os').value.trim(),
+      tecnico: document.getElementById('cu-f-tecnico').value.trim(),
+      portas: Number(document.getElementById('cu-f-portas').value) || 0,
+      cidade: document.getElementById('cu-f-cidade').value.trim(),
+      bairro: document.getElementById('cu-f-bairro').value.trim(),
+      data: document.getElementById('cu-f-data').value || hojeISOLocal(),
+      registrado_por: currentUser ? (currentUser.nome || currentUser.login) : null,
+    };
+    const r = await salvarCleanUp(reg);
+    btn.disabled = false;
+    if (!r.ok) {
+      const e = r.resultado && r.resultado.error;
+      msg.innerHTML = `<span style="color:var(--danger)">Salvou aqui na tela, mas não gravou no servidor: ${esc((e && e.message) || 'erro desconhecido')}</span>`;
+    } else {
+      msg.innerHTML = '<span style="color:var(--success)">Limpeza registrada — a bolinha já está no mapa.</span>';
+      ['cu-f-local', 'cu-f-obs', 'cu-f-contrato', 'cu-f-os', 'cu-f-portas', 'cu-f-bairro'].forEach(id => { document.getElementById(id).value = ''; });
+    }
+    load();
+  }
+
+  function load() {
+    const busca = normalizeHeader(document.getElementById('cu-busca').value);
+    const cidade = normalizeHeader(document.getElementById('cu-cidade').value);
+    const tecnico = normalizeHeader(document.getElementById('cu-tecnico').value);
+    const de = document.getElementById('cu-de').value, ate = document.getElementById('cu-ate').value;
+    // A busca livre varre TODOS os campos de uma vez (coordenada, localização,
+    // cidade, bairro, técnico, contrato, O.S, vagas e data) — foi o pedido:
+    // "pra eu saber se tem caixa lá" sem ter que escolher em qual campo procurar.
+    const textoDaLinha = r => normalizeHeader([
+      r.localizacao, r.cidade, r.bairro, r.tecnico, r.contrato, r.os, r.observacao,
+      r.portas, r.data ? formatDate(r.data) : '', r.lat, r.lon,
+    ].filter(v => v !== null && v !== undefined && v !== '').join(' '));
+    const linhas = (DB.cleanUp || []).filter(r =>
+      (!busca || textoDaLinha(r).includes(busca))
+      && (!cidade || normalizeHeader(r.cidade).includes(cidade))
+      && (!tecnico || normalizeHeader(r.tecnico).includes(tecnico))
+      && (!de || !r.data || r.data >= de) && (!ate || !r.data || r.data <= ate)
+    ).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+    const comCoord = linhas.filter(temCoordCleanUp);
+    const totalPortas = linhas.reduce((a, r) => a + (Number(r.portas) || 0), 0);
+    const corpo = document.getElementById('cu-body');
+    corpo.innerHTML = `
+      <div class="cards-grid">
+        ${metricCard('Caixas limpas', linhas.length)}
+        ${metricCard('Vagas liberadas', totalPortas)}
+        ${metricCard('Técnicos envolvidos', new Set(linhas.map(r => normalizeHeader(r.tecnico)).filter(Boolean)).size)}
+        ${metricCard('Cidades', new Set(linhas.map(r => normalizeHeader(r.cidade)).filter(Boolean)).size)}
+      </div>
+      <div class="section-heading sem-toggle">Mapa das caixas limpas<span class="sec-nota">${comCoord.length} de ${linhas.length} com coordenada — clique na bolinha pra ver os dados</span></div>
+      <div class="panel" style="margin-bottom:1.5rem"><div id="cu-mapa" class="mapa-cidades"></div></div>
+      <div class="section-heading">Limpezas registradas</div>
+      ${!linhas.length ? `<div class="panel"><div class="empty">${(DB.cleanUp || []).length ? 'Nenhuma limpeza com esse filtro.' : 'Nenhuma limpeza registrada ainda — use "+ Adicionar novo" ou importe a planilha do Clean Up em "Importar Excel".'}</div></div>` : `
+      <div class="table-wrap"><table class="data-table"><thead><tr>
+        <th>Data</th><th>Localização</th><th>Cidade</th><th>Bairro</th><th>Técnico</th><th>Contrato</th><th>O.S</th><th>Vagas</th><th>Coordenada</th>
+      </tr></thead><tbody>
+        ${linhas.map(r => `<tr><td class="cat-cell">${r.data ? formatDate(r.data) : '-'}</td>
+          <td>${esc(r.localizacao || '-')}${r.observacao ? `<br><span style="font-size:11.5px;color:var(--text-muted)">${esc(r.observacao)}</span>` : ''}</td>
+          <td>${esc(r.cidade || '-')}</td><td>${esc(r.bairro || '-')}</td><td>${esc(r.tecnico || '-')}</td>
+          <td>${esc(r.contrato || '-')}</td><td>${esc(r.os || '-')}</td>
+          <td style="text-align:center;font-weight:600">${Number(r.portas) || 0}</td>
+          <td style="font-size:11.5px;color:${temCoordCleanUp(r) ? 'var(--text-muted)' : 'var(--warn-text)'}">${temCoordCleanUp(r) ? `${Number(r.lat).toFixed(5)}, ${Number(r.lon).toFixed(5)}` : 'sem coordenada — não aparece no mapa'}</td></tr>`).join('')}
+        <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${linhas.length} limpeza(s)</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
+          <td style="text-align:center">${totalPortas}</td><td>-</td></tr>
+      </tbody></table></div>`}`;
+    desenharMapaCleanUp('cu-mapa', comCoord);
+  }
+}
+// Mapa do Clean Up: uma bolinha por caixa limpa, com popup mostrando tudo que
+// foi registrado daquela limpeza (é o "clica na bolinha e aparece" do pedido).
+// Mesma base do renderMapaBairros (Leaflet + OpenStreetMap) — inclusive o
+// fallback quando a biblioteca não carrega.
+function desenharMapaCleanUp(elId, linhas) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (el._leafletMap) { el._leafletMap.remove(); el._leafletMap = null; }
+  if (typeof L === 'undefined') {
+    el.innerHTML = '<div class="empty">Não foi possível carregar o mapa (biblioteca bloqueada ou sem internet) — a tabela abaixo continua disponível.</div>';
+    return;
+  }
+  if (!linhas.length) {
+    el.innerHTML = '<div class="empty">Nenhuma caixa com coordenada nesse filtro — o mapa aparece assim que houver ao menos uma.</div>';
+    return;
+  }
+  el.innerHTML = '';
+  const map = L.map(el, { scrollWheelZoom: true }).setView([-23.94, -46.30], 11);
+  el._leafletMap = map;
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19,
+  }).addTo(map);
+  const pontos = [];
+  linhas.forEach(r => {
+    const lat = Number(r.lat), lon = Number(r.lon);
+    pontos.push([lat, lon]);
+    const portas = Number(r.portas) || 0;
+    // raio pela RAIZ das portas (área ∝ vagas), igual à convenção do mapa de
+    // bairros — caixa sem porta informada ainda aparece, no tamanho mínimo.
+    L.circleMarker([lat, lon], {
+      radius: 5 + Math.sqrt(portas) * 1.8, color: '#15803d', weight: 1.5,
+      fillColor: '#22c55e', fillOpacity: 0.75,
+    }).addTo(map).bindPopup(`
+      <b>${esc(r.localizacao || 'CTO sem descrição')}</b><br>
+      ${r.data ? `Data: <b>${formatDate(r.data)}</b><br>` : ''}
+      ${r.cidade || r.bairro ? `Local: ${esc([r.bairro, r.cidade].filter(Boolean).join(' — '))}<br>` : ''}
+      Vagas liberadas: <b>${portas}</b><br>
+      ${r.tecnico ? `Técnico: ${esc(r.tecnico)}<br>` : ''}
+      ${r.contrato ? `Contrato: ${esc(r.contrato)}<br>` : ''}
+      ${r.os ? `O.S: ${esc(r.os)}<br>` : ''}
+      ${r.observacao ? `<br>${esc(r.observacao)}<br>` : ''}
+      <span style="color:#5b6780">${lat.toFixed(5)}, ${lon.toFixed(5)}</span>`);
+  });
+  // enquadra o mapa no que existe (uma caixa só = zoom fechado nela)
+  if (pontos.length === 1) map.setView(pontos[0], 16);
+  else map.fitBounds(L.latLngBounds(pontos).pad(0.15));
+}
+
 // ===================== FINANCEIRO =====================
 // ===================== CADASTRO FINANCEIRO (por período) =====================
 // Antes, as despesas do ciclo só existiam se alguém importasse
@@ -15567,6 +15892,10 @@ const ARQUIVOS_IMPORT = [
   { nome: 'PRAZOS_ESCRITÓRIO.xlsx', desc: 'Abas BASE DE DADOS, BASE DO DIA, PRAZO REPARO DO DIA (parcial do dia) e PRAZO INFORMADO REPARO/AT-ME (PLEITO)', assinaturas: [{sheet:'BASE DE DADOS', target:'prazo'}, {sheet:'BASE DO DIA', target:'baseDoDia'}, {sheet:'PRAZO REPARO DO DIA', target:'prazoReparoDia'}, {sheet:'PRAZO INFORMADO REPARO (PLEITO)', target:'pleito'}, {sheet:'PRAZO INFORMADO AT-ME (PLEITO)', target:'pleito'}] },
   { nome: 'FROTA_LITORAL.xlsx', desc: 'Abas FROTA LITORAL, TROCA DE VEICULO, MANUTENÇÕES, DESVINCULAÇÕES, MULTAS', assinaturas: [{sheet:'FROTA LITORAL', target:'frotaLinks'}] },
   { nome: 'GESTAO_PEDAGIO.xlsx', desc: 'Passagens de pedágio (Taggy)', assinaturas: [{target:'pedagio'}] },
+  // Sem "sheet" de propósito (mesmo padrão do Pedágio): a planilha do Clean Up
+  // vinha do Power BI e o nome da aba varia ("Tabela1", "Planilha1", "BAIXADA"…).
+  // Quem decide o destino é o conteúdo das colunas (ver pickBestTarget).
+  { nome: 'CLEAN_UP.xlsx', desc: 'Histórico de limpeza de CTO — localização, portas liberadas, contrato, técnico e data (alimenta o mapa da aba Clean Up)', assinaturas: [{target:'cleanUp'}] },
   // base_dados_financeiro.xlsx saiu daqui em 04/09/2026 (pedido do cliente):
   // despesa do ciclo agora é digitada direto na tela Financeiro (cadastro
   // por período, RH/Analista) — a planilha de comparação (COMPARATIVO.xlsx,
