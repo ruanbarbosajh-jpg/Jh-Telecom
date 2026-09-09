@@ -9996,6 +9996,16 @@ function renderPCR() {
     // já iniciada/em rota sumia da conta até ser concluída. Cancelado e não
     // concluído continuam de fora — não são nem entrega nem pendência.
     const ehAExecutar = bucket => bucket === 'pendente' || bucket === 'em_rota' || bucket === 'iniciado';
+    // Os 5 tipos que nomeTipoPCR reconhece (pedido do cliente 09/09/2026:
+    // "quero que apareça os outros serviços também, mesmo que seja 0") —
+    // antes só entrava tipo que tivesse pelo menos 1 ordem naquela cidade, e
+    // cidade pequena (ex.: Bertioga, Cubatão) sumia com "Mudança de Cômodo"
+    // ou "Upgrade/Downgrade" da lista, como se o serviço não existisse ali.
+    // Fica de fora só o "Não informado"/nome cru (fallback de nomeTipoPCR
+    // pra tipo que não bate com nenhum dos 5) — esse continua entrando só
+    // quando tem ordem de verdade, senão toda cidade ganharia uma linha
+    // "Não informado 0" sem sentido nenhum.
+    const TIPOS_PCR_CONHECIDOS = ['Ativação', 'Mudança de Cômodo', 'Mudança de Endereço', 'Reparo Corretivo', 'Upgrade/Downgrade'];
     const mapaExec = {};
     rows.forEach(r => {
       const bucket = classifyStatusGranular(r.status);
@@ -10007,6 +10017,7 @@ function renderPCR() {
     });
     const aExecutar = {
       grupos: Object.keys(mapaExec).sort((a, b) => a.localeCompare(b, 'pt-BR')).map(c => {
+        TIPOS_PCR_CONHECIDOS.forEach(t => { if (!mapaExec[c][t]) mapaExec[c][t] = { concluido: 0, pendente: 0 }; });
         const tipos = Object.entries(mapaExec[c]).sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'))
           .map(([tipo, v]) => ({ tipo, concluido: v.concluido, pendente: v.pendente, total: v.concluido + v.pendente }));
         return {
