@@ -1574,6 +1574,15 @@
   }
   /* abaixo disso a tabela fica estreita demais e os cartões passam pra baixo */
   @media (max-width: 1100px) { .dash-duas { grid-template-columns: 1fr; } }
+  /* "Resumo financeiro do ciclo" virou seção de largura cheia (pedido do
+     cliente, 09/09/2026 — antes dividia espaço com "Operação do ciclo" na
+     coluna da direita). Com só 1 ciclo selecionado a tabela tem poucas
+     colunas (rótulo + 1 período) e o .table-wrap, sendo um <div> comum,
+     estica pra 100% da largura da seção mesmo assim — sobra um vão vazio
+     enorme do lado. width:fit-content encolhe o quadro pro tamanho real da
+     tabela, e margin:auto centraliza. Com "Todos os ciclos" (várias
+     colunas) NÃO centraliza — a tabela já usa o espaço todo sozinha. */
+  .dash-resumo-fin.centralizado .table-wrap { width: fit-content; max-width: 100%; margin: 0 auto; }
   .dash-op {
     background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--r-md);
     padding: 17px 19px; display: flex; flex-direction: column; gap: 9px;
@@ -6659,9 +6668,17 @@ function renderDashboard() {
     const periodosOrdenados = pivotDash ? [...pivotDash.periodos].sort((a, b) =>
       String(datasDoPeriodoFolha(a).fim || '').localeCompare(String(datasDoPeriodoFolha(b).fim || ''))) : [];
     const periodosParaResumo = todos ? periodosOrdenados : (periodosOrdenados.includes(rotuloPeriodo) ? [rotuloPeriodo] : []);
+    // pedido do cliente 09/09/2026: tira a coluna Total (comTotal sempre
+    // false agora) — e centraliza a tabela quando é só 1 ciclo, senão ela
+    // ocupa a largura inteira da seção mesmo tendo só 3 colunas (rótulo +
+    // 1 período), deixando um vão vazio enorme do lado. Com "Todos os
+    // ciclos" (várias colunas) a tabela já usa o espaço naturalmente, então
+    // NÃO centraliza — ver `.dash-resumo-fin.centralizado` no CSS.
     const resumoFinanceiro = !periodosParaResumo.length ? '' : `
-      <div class="section-heading sem-toggle">Resumo financeiro do ciclo<span class="sec-nota">${todos ? 'todos os ciclos importados, com total' : 'só o ciclo selecionado'}</span></div>
-      ${tabelaFinanceiraComparativa(periodosParaResumo, pivotDash, { comSetas: false, comTotal: todos })}`;
+      <div class="dash-resumo-fin${todos ? '' : ' centralizado'}">
+        <div class="section-heading sem-toggle">Resumo financeiro do ciclo<span class="sec-nota">${todos ? 'todos os ciclos importados' : 'só o ciclo selecionado'}</span></div>
+        ${tabelaFinanceiraComparativa(periodosParaResumo, pivotDash, { comSetas: false, comTotal: false })}
+      </div>`;
 
     if (!fech.length) {
       const ciclos = ciclosDoFechamento().lista;
@@ -6863,10 +6880,26 @@ function renderDashboard() {
     // nunca foi reimportado) não tem `fech` nenhum — usar valorPagoGiga aí
     // dava R$ 0,00 e apagava a receita real do histórico. Só troca de fonte
     // quando há fechamento de verdade pra esse período.
-    const receitaFinal  = fech.length ? valorPagoGiga : (cmpTem ? cmp.receitaOrdens[rotuloPeriodo] : valorPagoGiga);
+    // ACHADO 09/09/2026: ciclo 21/05/2026 a 20/06/2026 tinha fechamento
+    // importado (fech.length > 0, então caía na 1ª metade do `? :` de baixo)
+    // mas com VALOR PAGO GIGA zerado/vazio em TODAS as linhas — import feito
+    // antes de essa coluna existir na planilha do cliente, provavelmente.
+    // `fech.length` sozinho não pega esse caso: a receita virava R$ 0,00 e o
+    // lucro -R$427.322,69, enquanto a planilha de Comparação já tinha
+    // R$474.623,30 de receita pra esse ciclo. Troca a checagem pra "tem
+    // ALGUM valor pago giga de verdade", não só "tem linha de fechamento".
+    // Cobre também o caso mais simples (ciclo velho sem fechamento nenhum,
+    // fech.length === 0 direto). Receita das Ordens nunca é digitada no
+    // cadastro do Financeiro (só despesa) — por isso não depende de cadTem,
+    // diferente de `cmpTem` (despesa): as duas têm fonte independente.
+    const temValorPagoGiga = fech.some(f => (f.valor_pago_giga || 0) > 0);
+    const cmpTemReceita = !temValorPagoGiga && !!(cmp && cmp.receitaOrdens && cmp.receitaOrdens[rotuloPeriodo] !== undefined);
+    const receitaFinal  = temValorPagoGiga ? valorPagoGiga : (cmpTemReceita ? cmp.receitaOrdens[rotuloPeriodo] : valorPagoGiga);
     const despesaFinal  = cadTem ? cadDespesa    : (cmpTem ? cmp.totalDespesas[rotuloPeriodo]  : despesasTotal);
     const lucroFinal    = receitaFinal - despesaFinal;
-    const fonteFin = cadTem ? 'cadastro do Financeiro' : (cmpTem ? 'despesa da planilha de Comparação' + (fech.length ? ' (receita do fechamento por técnico)' : ' (sem fechamento importado pra esse ciclo — receita também da planilha)') : 'fechamento por técnico');
+    const fonteFin = cadTem
+      ? 'cadastro do Financeiro' + (cmpTemReceita ? ' (despesa) e da planilha de Comparação (receita — sem valor pago GIGA no fechamento desse ciclo)' : '')
+      : (cmpTem ? 'despesa da planilha de Comparação' + (temValorPagoGiga ? ' (receita do fechamento por técnico)' : ' (sem valor pago GIGA no fechamento desse ciclo — receita também da planilha)') : 'fechamento por técnico');
     const lucroTotal = lucroFinal;
 
     // ---- variação vs. ciclo ANTERIOR (só apresentação: usa os mesmos
@@ -6964,28 +6997,13 @@ function renderDashboard() {
 
     body.innerHTML = `
       <div class="section-heading sem-toggle">Resultado do ciclo</div>
-      <div class="dash-duas" style="margin-bottom:1.25rem">
+      <div class="dash-duas" style="margin-bottom:12px">
         <div class="dash-duas-esq">${resumoFinCards([
           { tipo: 'receita', rot: 'Receita — pago pela GIGA', val: formatCurrency(receitaFinal),
             sub: `<b>${totalOrdens.toLocaleString('pt-BR')}</b> ordens no ciclo${varGiga ? ` · ${varGiga.pct >= 0 ? '▲' : '▼'} ${formatPct(Math.abs(varGiga.pct))} vs. anterior` : ''}` },
           { tipo: 'despesa', rot: 'Despesa total', val: formatCurrency(despesaFinal), sub: 'a quebra por categoria está logo abaixo' },
           { tipo: 'lucro', rot: 'Lucro', val: formatCurrency(lucroFinal), sub: `margem de <b>${formatPct(margem)}</b> sobre a receita` },
         ])}</div>
-        <div class="dash-duas-dir">
-          <p style="margin:0 0 12px;font-size:var(--fs-sm);color:var(--text-muted)">
-            Receita, despesa e lucro pela <b>${esc(fonteFin)}</b>${cadTem || cmpTem
-              ? ' — inclui folha do escritório, imposto, aluguel da base e demais custos da empresa, que não aparecem no fechamento por técnico.'
-              : '. Cadastre as despesas deste ciclo na tela Financeiro para ver o resultado da empresa inteira.'}
-          </p>
-          ${cadFaltando.length ? `<p style="margin:0;font-size:var(--fs-sm);color:var(--warn-text);background:color-mix(in srgb, var(--warn-text) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn-text) 35%, transparent);border-radius:var(--r-sm);padding:10px 12px">
-            Cadastro do Financeiro <b>incompleto</b> pra ${esc(rotuloPeriodo)}: ${cadFaltando.length} categoria(s) zerada(s) aqui mas com valor na planilha de Comparação
-            (${cadFaltando.map(esc).join(', ')}) — a "Despesa total" e o "Lucro" acima estão contando essas categorias como R$ 0,00.
-            Complete o cadastro na tela <b>Financeiro</b> (botão "Usar do Comparativo (Excel)") pra corrigir.
-          </p>` : ''}
-        </div>
-      </div>
-      <div class="dash-duas">
-        <div class="dash-duas-esq">${resumoFinanceiro}</div>
         <div class="dash-duas-dir">
           <div class="section-heading sem-toggle">Operação do ciclo</div>
           <div class="dash-duas-dir-corpo">
@@ -7014,13 +7032,17 @@ function renderDashboard() {
           </div>
         </div>
       </div>
-      ${periodosOrdenados.length >= 2 ? `
-      <div class="section-heading sem-toggle">Comparativo entre Ciclos<span class="sec-nota">escolha 2 ou mais ciclos pra comparar</span></div>
-      <div class="toolbar" style="margin-bottom:0">
-        ${multiSelectField('dash-cmp-periodos', 'Ciclos', periodosOrdenados, { noun: 'ciclo(s)', allLabel: 'Todos os ciclos', preset: periodosOrdenados.slice(-2) })}
-        <button class="btn" id="dash-cmp-aplicar">Comparar</button>
-      </div>
-      <div id="dash-cmp-body" style="margin-top:12px;margin-bottom:1.5rem"></div>` : ''}
+      <p style="margin:0 0 12px;font-size:var(--fs-sm);color:var(--text-muted)">
+        Receita, despesa e lucro pela <b>${esc(fonteFin)}</b>${cadTem || cmpTem
+          ? ' — inclui folha do escritório, imposto, aluguel da base e demais custos da empresa, que não aparecem no fechamento por técnico.'
+          : '. Cadastre as despesas deste ciclo na tela Financeiro para ver o resultado da empresa inteira.'}
+      </p>
+      ${cadFaltando.length ? `<p style="margin:0 0 20px;font-size:var(--fs-sm);color:var(--warn-text);background:color-mix(in srgb, var(--warn-text) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn-text) 35%, transparent);border-radius:var(--r-sm);padding:10px 12px">
+        Cadastro do Financeiro <b>incompleto</b> pra ${esc(rotuloPeriodo)}: ${cadFaltando.length} categoria(s) zerada(s) aqui mas com valor na planilha de Comparação
+        (${cadFaltando.map(esc).join(', ')}) — a "Despesa total" e o "Lucro" acima estão contando essas categorias como R$ 0,00.
+        Complete o cadastro na tela <b>Financeiro</b> (botão "Usar do Comparativo (Excel)") pra corrigir.
+      </p>` : ''}
+      ${resumoFinanceiro}
       <div class="section-heading sem-toggle">Produção por tipo de serviço<span class="sec-nota">${totalOrdens.toLocaleString('pt-BR')} ordens concluídas no ciclo</span></div>
       <div class="panel" style="margin-bottom:1.5rem"><div id="dash-prod-tipo"></div></div>
       ${painelValorGiga(itensGiga, { centralizar: true, nota: 'Contagem da aba RELATORIO (fechamento do ciclo) × valor de contrato por serviço.' })}
@@ -7109,24 +7131,6 @@ function renderDashboard() {
       </div>
       <div id="dash-complementar"></div>
     `;
-    // ---- Comparativo entre Ciclos: pedido do cliente 04/09/2026, separado
-    // do "Resumo financeiro do ciclo" (esse mostra só o escolhido no topo) —
-    // aqui a pessoa escolhe à mão 2 ou mais ciclos pra comparar lado a lado,
-    // com seta de tendência entre eles.
-    if (document.getElementById('dash-cmp-periodos')) {
-      const atualizarComparativoCiclos = () => {
-        const corpo = document.getElementById('dash-cmp-body');
-        const selecionados = getMultiSelectValues('dash-cmp-periodos');
-        if (selecionados.length < 2) { corpo.innerHTML = '<div class="empty">Selecione 2 ou mais ciclos pra comparar.</div>'; return; }
-        // mais novo pro mais antigo — mesma convenção da seta (compara com a PRÓXIMA coluna)
-        const ordenados = [...selecionados].sort((a, b) =>
-          String(datasDoPeriodoFolha(b).fim || '').localeCompare(String(datasDoPeriodoFolha(a).fim || '')));
-        corpo.innerHTML = tabelaFinanceiraComparativa(ordenados, pivotDash, { comSetas: true, comTotal: true });
-      };
-      wireMultiSelectField('dash-cmp-periodos', { noun: 'ciclo(s)', allLabel: 'Todos os ciclos' }, atualizarComparativoCiclos);
-      document.getElementById('dash-cmp-aplicar').addEventListener('click', atualizarComparativoCiclos);
-      atualizarComparativoCiclos();
-    }
 
     // produção por tipo de serviço — barras, com a contagem no fim de cada uma
     barsChart('dash-prod-tipo', tipos.map(t => ({
