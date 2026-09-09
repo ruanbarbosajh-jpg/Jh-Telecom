@@ -1170,6 +1170,13 @@
      09/09/2026: "aumente o tamanho do mapa". min/max seguram os extremos:
      num monitor baixo não espreme, num 4K não vira uma tira infinita. */
   #cu-mapa { height: clamp(560px, calc(100vh - 250px), 1100px); }
+  /* legenda de cores por cidade, embaixo do mapa */
+  .cu-legenda { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 12px; padding-top: 12px;
+    border-top: 1px solid var(--border); font-size: var(--fs-sm); }
+  .cu-legenda-item { display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary); }
+  .cu-legenda-item i { width: 12px; height: 12px; border-radius: 50%; flex: none;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-primary) 20%, transparent); }
+  .cu-legenda-item b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
   /* popup do Clean Up: com todos os campos, o padrão do Leaflet (300px) corta
      endereço e vira uma coluna estreita e alta */
   .cu-popup { min-width: 250px; font-size: 12.5px; line-height: 1.5; }
@@ -1180,6 +1187,19 @@
   .cu-popup .cu-popup-rodape { margin-top: 8px; padding-top: 7px; border-top: 1px solid #e2e8f0;
     color: #64748b; font-size: 11.5px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .cu-popup .cu-popup-rodape a { color: #2563eb; font-weight: 700; text-decoration: none; }
+  /* limpezas no MESMO ponto: uma embaixo da outra, cada uma editável */
+  .cu-pop-conta { margin: 0 0 8px; font-size: 11.5px; color: #64748b; }
+  .cu-pop-reg + .cu-pop-reg { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #cbd5e1; }
+  .cu-pop-reg dl { align-items: center; }
+  .cu-pop-reg dt label { color: #64748b; font-weight: 600; }
+  .cu-pop-edit {
+    width: 100%; padding: 4px 7px; font: inherit; font-size: 12px;
+    background: #fff; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 4px;
+  }
+  .cu-pop-edit:focus { outline: none; border-color: #2563eb; }
+  .cu-pop-acoes { display: flex; align-items: center; gap: 9px; margin-top: 8px; }
+  .cu-pop-acoes .btn { padding: 5px 13px; font-size: 12px; }
+  .cu-pop-msg { font-size: 11.5px; color: #64748b; }
   /* formulário do Clean Up: os campos em grade que se acomoda sozinha — a
      "caixinha" da localização e a de observação ficam lado a lado em tela
      larga (foi como o cliente descreveu) e empilham no celular. */
@@ -12995,6 +13015,8 @@ function renderCleanUp() {
   // tabela inteira criava ~12 mil <input> de uma vez e a tela levava 2,5s pra
   // abrir. Mesmo remédio que o Pedágio já usa.
   let limiteCu = 100;
+  // por qual campo as bolinhas ganham cor: 'cidade' (padrão) ou 'bairro'
+  let corPorCu = 'cidade';
   document.getElementById('content').innerHTML = `
     <div class="toolbar">
       <div class="field" style="flex:1 1 320px"><label>Buscar</label>
@@ -13122,7 +13144,17 @@ function renderCleanUp() {
         ${metricCard('Cidades', new Set(linhas.map(r => normalizeHeader(r.cidade)).filter(Boolean)).size)}
       </div>
       <div class="section-heading sem-toggle">Mapa das caixas limpas<span class="sec-nota">${comCoord.length} de ${linhas.length} com coordenada — clique na bolinha pra ver os dados</span></div>
-      <div class="panel" style="margin-bottom:1.5rem"><div id="cu-mapa" class="mapa-cidades"></div></div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-bottom:10px">
+          <label for="cu-cor-por" style="font-size:var(--fs-sm);color:var(--text-secondary)">Cor por</label>
+          <select class="topn-select" id="cu-cor-por">
+            <option value="cidade"${corPorCu === 'cidade' ? ' selected' : ''}>Cidade</option>
+            <option value="bairro"${corPorCu === 'bairro' ? ' selected' : ''}>Bairro</option>
+          </select>
+        </div>
+        <div id="cu-mapa" class="mapa-cidades"></div>
+        ${legendaCleanUp(comCoord, corPorCu)}
+      </div>
       <div class="section-heading">Limpezas registradas${pode ? '<span class="sec-nota">clique em qualquer célula pra corrigir — inclusive a coordenada</span>' : ''}</div>
       ${!linhas.length ? `<div class="panel"><div class="empty">${(DB.cleanUp || []).length ? 'Nenhuma limpeza com esse filtro.' : 'Nenhuma limpeza registrada ainda — use "+ Adicionar novo" ou importe a planilha do Clean Up em "Importar Excel".'}</div></div>` : `
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
@@ -13149,7 +13181,9 @@ function renderCleanUp() {
         <button class="btn-secundario" id="cu-descartar" disabled>Descartar alterações</button>
         <span id="cu-edit-msg" style="font-size:13px;color:var(--text-muted)"></span>
       </div>` : ''}`}`;
-    desenharMapaCleanUp('cu-mapa', comCoord);
+    desenharMapaCleanUp('cu-mapa', comCoord, corPorCu, load);
+    const selCor = document.getElementById('cu-cor-por');
+    if (selCor) selCor.addEventListener('change', () => { corPorCu = selCor.value; load(); });
     const selLimite = document.getElementById('cu-limite');
     if (selLimite) selLimite.addEventListener('change', () => { limiteCu = parseInt(selLimite.value, 10); load(); });
     if (pode && linhas.length) ligarEdicaoTabela(linhas);
@@ -13240,11 +13274,122 @@ function renderCleanUp() {
     atualizarBarra();
   }
 }
+// Uma cor por CIDADE ou por BAIRRO no mapa do Clean Up (pedido do cliente
+// 09/09/2026). Usa a PALETTE_CATEGORICA — a mesma dos gráficos, já pensada
+// pra vizinhos nunca caírem na mesma família de cor. Ordena por VOLUME (quem
+// tem mais limpeza pega a primeira cor): assim a cor não fica dançando quando
+// o filtro muda um pouco, e o cinza do fim da paleta sobra pro "não
+// informado". Por bairro são ~200 valores pra 10 cores, então a cor repete —
+// mas bairro é sempre dentro de uma cidade, e a legenda + o popup dizem qual
+// é qual; o que importa é separar visualmente um bairro do vizinho.
+function coresCleanUp(linhas, campo) {
+  const conta = new Map();
+  linhas.forEach(r => {
+    const c = (r[campo] || '').trim() || 'Não informado';
+    conta.set(c, (conta.get(c) || 0) + 1);
+  });
+  const ordenadas = [...conta.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'pt-BR'));
+  const cores = new Map();
+  let i = 0;
+  ordenadas.forEach(([nome, qtd]) => {
+    const semValor = /^nao informado$/.test(normalizeHeader(nome));
+    cores.set(nome, { cor: semValor ? '#94a3b8' : corCategorica(i++), qtd });
+  });
+  return cores;
+}
+// Legenda do mapa: qual cor é qual cidade/bairro, com quantas caixas cada uma
+// tem. Sem ela as cores não querem dizer nada — é a legenda que transforma
+// "bolinha azul" em "Guarujá". Com muitos valores (bairro), mostra os
+// maiores e resume o resto num item só, senão a legenda fica maior que o mapa.
+function legendaCleanUp(linhas, campo, limite = 14) {
+  const cores = coresCleanUp(linhas, campo);
+  if (!cores.size) return '';
+  const itens = [...cores.entries()];
+  const mostrados = itens.slice(0, limite);
+  const resto = itens.slice(limite);
+  const restoQtd = resto.reduce((a, [, v]) => a + v.qtd, 0);
+  return `<div class="cu-legenda">${mostrados.map(([nome, { cor, qtd }]) => `
+    <span class="cu-legenda-item"><i style="background:${cor}"></i>${esc(nome)}
+      <b>${qtd.toLocaleString('pt-BR')}</b></span>`).join('')}
+    ${resto.length ? `<span class="cu-legenda-item" style="color:var(--text-muted)">+ ${resto.length} ${campo === 'bairro' ? 'bairro(s)' : 'cidade(s)'} — ${restoQtd.toLocaleString('pt-BR')} caixa(s)</span>` : ''}
+  </div>`;
+}
+// Conteúdo do popup de um PONTO do mapa: todas as limpezas registradas
+// naquela coordenada, cada uma com seus campos editáveis (pedido do cliente
+// 09/09/2026: "se tiver uma limpeza na mesma coordenada, que seja possível
+// editar, e quando clicar na bolinha que seja possível eu editar também").
+// Quem não pode editar vê os mesmos dados em texto.
+function popupCleanUp(regs, lat, lon) {
+  const pode = podeEditarCleanUp();
+  const campo = (r, rot, nome, tipo) => {
+    const v = r[nome] === null || r[nome] === undefined ? '' : r[nome];
+    if (!pode) {
+      const txt = nome === 'data' ? (v ? formatDate(v) : '') : String(v);
+      return txt === '' || txt === '0' && nome !== 'portas' ? '' : `<dt>${rot}</dt><dd>${esc(txt)}</dd>`;
+    }
+    const extra = tipo === 'number' ? ' min="0" step="1"' : '';
+    return `<dt><label for="cu-p-${nome}">${rot}</label></dt>
+      <dd><input type="${tipo}" class="cu-pop-edit" data-campo="${nome}" value="${esc(String(v))}"${extra}></dd>`;
+  };
+  const bloco = r => `
+    <div class="cu-pop-reg" data-chave="${esc(r.chave || '')}">
+      <dl>
+        ${campo(r, 'Data', 'data', 'date')}
+        ${campo(r, 'Hora', 'hora', 'text')}
+        ${campo(r, 'Vagas', 'portas', 'number')}
+        ${campo(r, 'Cidade', 'cidade', 'text')}
+        ${campo(r, 'Bairro', 'bairro', 'text')}
+        ${campo(r, 'Técnico', 'tecnico', 'text')}
+        ${campo(r, 'Contrato', 'contrato', 'text')}
+        ${campo(r, 'O.S', 'os', 'text')}
+        ${campo(r, 'Observação', 'observacao', 'text')}
+        ${r.id_registro ? `<dt>ID</dt><dd>${esc(String(r.id_registro))}</dd>` : ''}
+      </dl>
+      ${pode ? `<div class="cu-pop-acoes">
+        <button type="button" class="btn cu-pop-salvar">Salvar</button>
+        <span class="cu-pop-msg"></span>
+      </div>` : ''}
+    </div>`;
+  return `<div class="cu-popup">
+    <h4>${esc(regs[0].localizacao || 'CTO sem descrição')}</h4>
+    ${regs.length > 1 ? `<p class="cu-pop-conta"><b>${regs.length} limpezas</b> registradas nesta coordenada — da mais recente pra mais antiga.</p>` : ''}
+    ${regs.map(bloco).join('')}
+    <div class="cu-popup-rodape">
+      <span>${lat.toFixed(6)}, ${lon.toFixed(6)}</span>
+      <a href="https://www.google.com/maps/search/?api=1&query=${lat},${lon}" target="_blank" rel="noopener">abrir no Google Maps ↗</a>
+    </div>
+  </div>`;
+}
+// Liga os botões "Salvar" de dentro de um popup aberto. `onSalvar` é o
+// callback da tela (recarrega a lista e o mapa depois de gravar).
+function ligarPopupCleanUp(popup, onSalvar) {
+  const raiz = popup.getElement();
+  if (!raiz) return;
+  raiz.querySelectorAll('.cu-pop-reg').forEach(bloco => {
+    const btn = bloco.querySelector('.cu-pop-salvar');
+    if (!btn) return;
+    const msg = bloco.querySelector('.cu-pop-msg');
+    btn.addEventListener('click', async () => {
+      const linha = (DB.cleanUp || []).find(r => r.chave === bloco.dataset.chave);
+      if (!linha) { msg.textContent = 'Registro não encontrado.'; return; }
+      bloco.querySelectorAll('.cu-pop-edit').forEach(inp => {
+        linha[inp.dataset.campo] = inp.dataset.campo === 'portas' ? (Number(inp.value) || 0) : inp.value.trim();
+      });
+      btn.disabled = true; msg.textContent = 'Salvando…';
+      const r = await salvarCleanUp(linha);
+      btn.disabled = false;
+      if (!r.ok) { msg.innerHTML = '<span style="color:#b91c1c">não gravou no servidor</span>'; return; }
+      msg.innerHTML = '<span style="color:#15803d">salvo</span>';
+      toast('Limpeza atualizada.', 'ok', 2000);
+      if (onSalvar) onSalvar();
+    });
+  });
+}
 // Mapa do Clean Up: uma bolinha por caixa limpa, com popup mostrando tudo que
 // foi registrado daquela limpeza (é o "clica na bolinha e aparece" do pedido).
 // Mesma base do renderMapaBairros (Leaflet + OpenStreetMap) — inclusive o
 // fallback quando a biblioteca não carrega.
-function desenharMapaCleanUp(elId, linhas) {
+function desenharMapaCleanUp(elId, linhas, corPor = 'cidade', onSalvar) {
   const el = document.getElementById(elId);
   if (!el) return;
   if (el._leafletMap) { el._leafletMap.remove(); el._leafletMap = null; }
@@ -13262,43 +13407,39 @@ function desenharMapaCleanUp(elId, linhas) {
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19,
   }).addTo(map);
-  const pontos = [];
+  const cores = coresCleanUp(linhas, corPor);
+  // AGRUPA POR COORDENADA: a mesma CTO costuma ser limpa várias vezes (e a
+  // planilha do cliente tem até 16 limpezas no mesmo ponto). Uma bolinha por
+  // registro empilhava tudo no mesmo pixel — só dava pra clicar na de cima e
+  // as outras ficavam inalcançáveis. Agora é uma bolinha por PONTO, e o popup
+  // lista todas as limpezas dali (pedido do cliente 09/09/2026).
+  const porPonto = new Map();
   linhas.forEach(r => {
-    const lat = Number(r.lat), lon = Number(r.lon);
-    pontos.push([lat, lon]);
-    const portas = Number(r.portas) || 0;
-    // raio pela RAIZ das portas (área ∝ vagas), igual à convenção do mapa de
-    // bairros — caixa sem porta informada ainda aparece, no tamanho mínimo.
-    // TODAS as informações da limpeza no popup (pedido do cliente 09/09/2026:
-    // "quando eu clicar na bolinha quero que apareça todas as informações").
-    // Campo vazio não vira linha — senão o popup enche de "-" sem conteúdo.
-    const linha = (rot, val) => (val === null || val === undefined || val === '' || val === 0 && rot !== 'Vagas liberadas')
-      ? '' : `<dt>${rot}</dt><dd>${esc(String(val))}</dd>`;
-    const dataHora = [r.data ? formatDate(r.data) : '', r.hora || ''].filter(Boolean).join(' às ');
-    L.circleMarker([lat, lon], {
-      radius: 5 + Math.sqrt(portas) * 1.8, color: '#15803d', weight: 1.5,
-      fillColor: '#22c55e', fillOpacity: 0.75,
-    }).addTo(map).bindPopup(`
-      <div class="cu-popup">
-        <h4>${esc(r.localizacao || 'CTO sem descrição')}</h4>
-        <dl>
-          ${linha('Data', dataHora)}
-          ${linha('Vagas liberadas', r.portas_total ? `${portas} de ${r.portas_total} portas` : portas)}
-          ${linha('Cidade', r.cidade)}
-          ${linha('Bairro', r.bairro)}
-          ${linha('Técnico', r.tecnico)}
-          ${linha('Contrato', r.contrato)}
-          ${linha('O.S', r.os)}
-          ${linha('ID', r.id_registro)}
-          ${linha('Registrado por', r.registrado_por)}
-          ${linha('Observação', r.observacao)}
-        </dl>
-        <div class="cu-popup-rodape">
-          <span>${lat.toFixed(6)}, ${lon.toFixed(6)}</span>
-          <a href="https://www.google.com/maps/search/?api=1&query=${lat},${lon}" target="_blank" rel="noopener">abrir no Google Maps ↗</a>
-        </div>
-      </div>`, { maxWidth: 380 });
+    const k = `${Number(r.lat).toFixed(6)},${Number(r.lon).toFixed(6)}`;
+    if (!porPonto.has(k)) porPonto.set(k, []);
+    porPonto.get(k).push(r);
   });
+  const pontos = [];
+  porPonto.forEach((regs, k) => {
+    const [lat, lon] = k.split(',').map(Number);
+    pontos.push([lat, lon]);
+    // mais recente primeiro — é a limpeza que interessa de cara
+    regs.sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+    const portas = regs.reduce((a, r) => a + (Number(r.portas) || 0), 0);
+    const grupo = (regs[0][corPor] || '').trim() || 'Não informado';
+    const cor = (cores.get(grupo) || {}).cor || '#22c55e';
+    // raio pela RAIZ das portas do ponto (área ∝ vagas), igual à convenção do
+    // mapa de bairros — caixa sem porta informada ainda aparece, no mínimo.
+    const marcador = L.circleMarker([lat, lon], {
+      radius: 5 + Math.sqrt(portas) * 1.8, color: cor, weight: 1.5,
+      fillColor: cor, fillOpacity: 0.7,
+    }).addTo(map);
+    marcador.bindPopup(() => popupCleanUp(regs, lat, lon), { maxWidth: 420, minWidth: 300, maxHeight: 460 });
+  });
+  // Liga os campos do popup DEPOIS que ele abre — o HTML só existe a partir
+  // daí (o Leaflet monta na hora). Um listener no mapa cobre todos os popups,
+  // em vez de um por bolinha.
+  map.on('popupopen', ev => ligarPopupCleanUp(ev.popup, onSalvar));
   // enquadra o mapa no que existe (uma caixa só = zoom fechado nela)
   // animate:false de propósito — com animação o Leaflet agenda o movimento e
   // o zoom só chega no fim; quem chama logo depois (ou o observer abaixo) lia
