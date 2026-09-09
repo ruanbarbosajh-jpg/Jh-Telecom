@@ -9310,6 +9310,15 @@ function textoCelulaExport(td) {
   if (campo) return String(campo.value == null ? '' : campo.value).trim();
   return (td.textContent || '').trim();
 }
+// Paleta do canvas (exportarTabelaImagem): antes era fixa no tom escuro,
+// então no tema claro a imagem baixada saía sempre escura — destoando do
+// que a pessoa estava olhando na tela (achado 09/09/2026, aviso do
+// cliente). Os dois conjuntos abaixo são os MESMOS tons dos tokens
+// --bg-page/--text-primary/--tab-cab/--border de cada tema (ver :root e
+// :root[data-theme="light"]) — não dá pra ler var(--x) direto no canvas
+// (ele não segue CSS custom property), por isso duplicado aqui como hex.
+const PALETA_IMG_ESCURO = { fundo: '#0b1220', titulo: '#e8ecf7', cabFundo: '#1a2540', cabTexto: '#93a0bd', zebra1: '#0f1830', zebra2: '#131c30', texto: '#e8ecf7', borda: '#223054' };
+const PALETA_IMG_CLARO  = { fundo: '#ffffff', titulo: '#0d1526', cabFundo: '#e4eaf6', cabTexto: '#3a4763', zebra1: '#ffffff', zebra2: '#f1f4fa', texto: '#0d1526', borda: '#d5ddec' };
 function exportarTabelaImagem(tabela, nomeArquivo, titulo) {
   if (!tabela) return null;
   const cabLinha = [...tabela.querySelectorAll('thead tr')].filter(tr => tr.querySelector('th')).pop();
@@ -9318,6 +9327,7 @@ function exportarTabelaImagem(tabela, nomeArquivo, titulo) {
     .filter(tr => tr.style.display !== 'none' && tr.querySelector('td'))
     .map(tr => [...tr.querySelectorAll('td')].map(textoCelulaExport));
   if (!corpo.length) return null;
+  const cores = document.documentElement.getAttribute('data-theme') === 'light' ? PALETA_IMG_CLARO : PALETA_IMG_ESCURO;
   const PAD = 14, LINHA = 30, FONTE = 13, TOPO = titulo ? 58 : 20;
   const cv = document.createElement('canvas');
   const ctx = cv.getContext('2d');
@@ -9332,28 +9342,28 @@ function exportarTabelaImagem(tabela, nomeArquivo, titulo) {
   cv.width = larg * escala; cv.height = alt * escala;
   ctx.scale(escala, escala);
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#0b1220'; ctx.fillRect(0, 0, larg, alt);
+  ctx.fillStyle = cores.fundo; ctx.fillRect(0, 0, larg, alt);
   if (titulo) {
-    ctx.fillStyle = '#e8ecf7'; ctx.font = 'bold 17px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
+    ctx.fillStyle = cores.titulo; ctx.font = 'bold 17px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
     ctx.fillText(titulo, PAD, 30);
   }
   ctx.font = 'bold ' + FONTE + 'px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
   let y = TOPO;
-  ctx.fillStyle = '#1a2540'; ctx.fillRect(0, y, larg, LINHA);
+  ctx.fillStyle = cores.cabFundo; ctx.fillRect(0, y, larg, LINHA);
   let x = 0;
-  cab.forEach((c, i) => { ctx.fillStyle = '#93a0bd'; ctx.fillText(c, x + PAD, y + LINHA / 2, larguras[i] - PAD * 2); x += larguras[i]; });
+  cab.forEach((c, i) => { ctx.fillStyle = cores.cabTexto; ctx.fillText(c, x + PAD, y + LINHA / 2, larguras[i] - PAD * 2); x += larguras[i]; });
   ctx.font = FONTE + 'px -apple-system, Segoe UI, Roboto, Arial, sans-serif';
   corpo.forEach((linha, li) => {
     y += LINHA;
-    ctx.fillStyle = li % 2 ? '#0f1830' : '#131c30'; ctx.fillRect(0, y, larg, LINHA);
+    ctx.fillStyle = li % 2 ? cores.zebra1 : cores.zebra2; ctx.fillRect(0, y, larg, LINHA);
     x = 0;
     linha.forEach((cel, i) => {
-      ctx.fillStyle = '#e8ecf7';
+      ctx.fillStyle = cores.texto;
       ctx.fillText(String(cel), x + PAD, y + LINHA / 2, larguras[i] - PAD * 2);
       x += larguras[i];
     });
   });
-  ctx.strokeStyle = '#223054'; ctx.lineWidth = 1;
+  ctx.strokeStyle = cores.borda; ctx.lineWidth = 1;
   ctx.strokeRect(0.5, TOPO + 0.5, larg - 1, LINHA * (corpo.length + 1));
   cv.toBlob(blob => {
     const url = URL.createObjectURL(blob);
