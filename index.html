@@ -13116,7 +13116,17 @@ function renderCleanUp() {
   }
 
   function load() {
-    const busca = normalizeHeader(document.getElementById('cu-busca').value);
+    const buscaTexto = document.getElementById('cu-busca').value;
+    // Coordenada digitada na busca (pedido do cliente 09/09/2026): "quando eu
+    // pesquisar a coordenada quero que apareça no mapa a coordenada que
+    // coloquei, mesmo que não tenha CTO ali — pra eu ver se tem CTO próxima".
+    // Aceita os mesmos 3 formatos do formulário (graus, decimal, endereço já
+    // não entra aqui — geocode é chamada de rede, não dá pra rodar a cada
+    // tecla). Quando é coordenada, a busca NÃO filtra a lista (senão as CTOs
+    // de verdade ao redor, que é o que a pessoa quer comparar, sumiam da
+    // tela) — só marca o ponto no mapa e dá zoom nele.
+    const pontoBuscado = parseCoordCleanUp(buscaTexto);
+    const busca = pontoBuscado ? '' : normalizeHeader(buscaTexto);
     const cidade = normalizeHeader(document.getElementById('cu-cidade').value);
     const tecnico = normalizeHeader(document.getElementById('cu-tecnico').value);
     const de = document.getElementById('cu-de').value, ate = document.getElementById('cu-ate').value;
@@ -13143,7 +13153,7 @@ function renderCleanUp() {
         ${metricCard('Técnicos envolvidos', new Set(linhas.map(r => normalizeHeader(r.tecnico)).filter(Boolean)).size)}
         ${metricCard('Cidades', new Set(linhas.map(r => normalizeHeader(r.cidade)).filter(Boolean)).size)}
       </div>
-      <div class="section-heading sem-toggle">Mapa das caixas limpas<span class="sec-nota">${comCoord.length} de ${linhas.length} com coordenada — clique na bolinha pra ver os dados</span></div>
+      <div class="section-heading sem-toggle">Mapa das caixas limpas<span class="sec-nota">${pontoBuscado ? `mostrando a coordenada pesquisada — ${comCoord.length} caixa(s) no total pra comparar` : `${comCoord.length} de ${linhas.length} com coordenada — clique na bolinha pra ver os dados`}</span></div>
       <div class="panel" style="margin-bottom:1.5rem">
         <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-bottom:10px">
           <label for="cu-cor-por" style="font-size:var(--fs-sm);color:var(--text-secondary)">Cor por</label>
@@ -13181,7 +13191,7 @@ function renderCleanUp() {
         <button class="btn-secundario" id="cu-descartar" disabled>Descartar alterações</button>
         <span id="cu-edit-msg" style="font-size:13px;color:var(--text-muted)"></span>
       </div>` : ''}`}`;
-    desenharMapaCleanUp('cu-mapa', comCoord, corPorCu, load);
+    desenharMapaCleanUp('cu-mapa', comCoord, corPorCu, load, pontoBuscado);
     const selCor = document.getElementById('cu-cor-por');
     if (selCor) selCor.addEventListener('change', () => { corPorCu = selCor.value; load(); });
     const selLimite = document.getElementById('cu-limite');
@@ -13389,7 +13399,7 @@ function ligarPopupCleanUp(popup, onSalvar) {
 // foi registrado daquela limpeza (é o "clica na bolinha e aparece" do pedido).
 // Mesma base do renderMapaBairros (Leaflet + OpenStreetMap) — inclusive o
 // fallback quando a biblioteca não carrega.
-function desenharMapaCleanUp(elId, linhas, corPor = 'cidade', onSalvar) {
+function desenharMapaCleanUp(elId, linhas, corPor = 'cidade', onSalvar, pontoBuscado) {
   const el = document.getElementById(elId);
   if (!el) return;
   if (el._leafletMap) { el._leafletMap.remove(); el._leafletMap = null; }
@@ -13397,7 +13407,9 @@ function desenharMapaCleanUp(elId, linhas, corPor = 'cidade', onSalvar) {
     el.innerHTML = '<div class="empty">Não foi possível carregar o mapa (biblioteca bloqueada ou sem internet) — a tabela abaixo continua disponível.</div>';
     return;
   }
-  if (!linhas.length) {
+  // Sem CTO nenhuma mas COM coordenada pesquisada: o mapa continua abrindo —
+  // é exatamente o caso "pesquisei um ponto vazio pra ver se tem algo perto".
+  if (!linhas.length && !pontoBuscado) {
     el.innerHTML = '<div class="empty">Nenhuma caixa com coordenada nesse filtro — o mapa aparece assim que houver ao menos uma.</div>';
     return;
   }
@@ -13436,16 +13448,40 @@ function desenharMapaCleanUp(elId, linhas, corPor = 'cidade', onSalvar) {
     }).addTo(map);
     marcador.bindPopup(() => popupCleanUp(regs, lat, lon), { maxWidth: 420, minWidth: 300, maxHeight: 460 });
   });
+  // Pino da coordenada PESQUISADA — visual bem diferente das CTOs (estrela
+  // laranja tracejada, sem preenchimento) pra não se confundir com uma caixa
+  // de verdade, já que pode não existir CTO nenhuma ali.
+  if (pontoBuscado) {
+    const { lat, lon } = pontoBuscado;
+    pontos.push([lat, lon]);
+    L.circleMarker([lat, lon], {
+      radius: 11, color: '#f97316', weight: 3, dashArray: '4 3',
+      fillColor: '#f97316', fillOpacity: 0.18,
+    }).addTo(map).bindPopup(`
+      <div class="cu-popup">
+        <h4 style="color:#ea580c">📍 Coordenada pesquisada</h4>
+        <p style="margin:0 0 6px;color:#64748b">Não é necessariamente uma CTO cadastrada — é o ponto que você digitou na busca, pra comparar com as caixas ao redor.</p>
+        <div class="cu-popup-rodape" style="margin-top:0;padding-top:0;border-top:none">
+          <span>${lat.toFixed(6)}, ${lon.toFixed(6)}</span>
+          <a href="https://www.google.com/maps/search/?api=1&query=${lat},${lon}" target="_blank" rel="noopener">abrir no Google Maps ↗</a>
+        </div>
+      </div>`).openPopup();
+  }
   // Liga os campos do popup DEPOIS que ele abre — o HTML só existe a partir
   // daí (o Leaflet monta na hora). Um listener no mapa cobre todos os popups,
   // em vez de um por bolinha.
   map.on('popupopen', ev => ligarPopupCleanUp(ev.popup, onSalvar));
-  // enquadra o mapa no que existe (uma caixa só = zoom fechado nela)
+  // enquadra o mapa no que existe (uma caixa só = zoom fechado nela).
+  // Coordenada pesquisada manda no enquadramento: zoom fechado NELA, não no
+  // conjunto todo — senão, com CTO espalhada pela Baixada inteira, o
+  // fitBounds abria a região toda de novo e a comparação "tem CTO perto?"
+  // ficava impossível de ver.
   // animate:false de propósito — com animação o Leaflet agenda o movimento e
   // o zoom só chega no fim; quem chama logo depois (ou o observer abaixo) lia
   // um estado pela metade.
   const enquadrar = () => {
-    if (pontos.length === 1) map.setView(pontos[0], 16, { animate: false });
+    if (pontoBuscado) map.setView([pontoBuscado.lat, pontoBuscado.lon], 17, { animate: false });
+    else if (pontos.length === 1) map.setView(pontos[0], 16, { animate: false });
     else map.fitBounds(L.latLngBounds(pontos).pad(0.15), { animate: false });
   };
   enquadrar();
