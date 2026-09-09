@@ -1694,6 +1694,19 @@
      e comia os 10px que separam o título "Resumo financeiro do ciclo" da
      tabela, deixando o título grudado nela */
   .dash-duas-esq > *:last-child { margin-bottom: 0 !important; }
+  /* "Resultado do ciclo": Receita/Despesa/Lucro (esquerda) contra "Operação do
+     ciclo" (direita, 3 blocos + aviso de carros parados — quase sempre mais
+     alto). align-items:stretch já iguala a ALTURA DA CÉLULA do grid, mas os 3
+     cartões da esquerda, sendo baixos, sobravam um vão vazio enorme embaixo
+     deles dentro dessa célula (pedido do cliente 09/09/2026: "arrume o
+     espaçamento"). Vira coluna flex que estica os 3 cartões pra preencherem
+     a altura toda — cresce o padding interno de cada um, não o espaço entre
+     eles. Só dentro do Dashboard: no Financeiro (.fin-resumo sozinho, sem
+     grid ao lado) isso não tem efeito nenhum, porque não sobra altura extra
+     pra distribuir num fluxo normal de bloco. */
+  .dash-duas-esq { display: flex; flex-direction: column; }
+  .dash-duas-esq .fin-resumo { flex: 1 1 auto; }
+  .dash-duas-esq .fin-resumo-linha { flex: 1 1 auto; }
   /* os cartões esticam para acompanhar a altura da tabela ao lado, em vez de
      terminarem no meio e deixarem um vão vazio embaixo. O conteúdo de cada
      bloco fica no TOPO (não centralizado): centralizando, sobrava um vazio
@@ -13075,6 +13088,8 @@ function renderCleanUp() {
           <div><label for="cu-f-bairro">Bairro</label><input type="text" id="cu-f-bairro" placeholder="Bairro"></div>
           <div><label for="cu-f-contrato">Contrato</label><input type="text" id="cu-f-contrato" placeholder="Contrato"></div>
           <div><label for="cu-f-os">O.S</label><input type="text" id="cu-f-os" placeholder="Número da O.S"></div>
+          <div><label for="cu-f-registrado-por">Feito por / Atendente</label>
+            <input type="text" id="cu-f-registrado-por" placeholder="Nome" value="${esc(currentUser ? (currentUser.nome || currentUser.login) : '')}"></div>
           <div class="col-larga"><label for="cu-f-obs">Observação</label>
             <textarea id="cu-f-obs" rows="2" placeholder="O que mais precisar registrar sobre essa limpeza."></textarea></div>
         </div>
@@ -13127,7 +13142,10 @@ function renderCleanUp() {
       cidade: document.getElementById('cu-f-cidade').value.trim(),
       bairro: document.getElementById('cu-f-bairro').value.trim(),
       data: document.getElementById('cu-f-data').value || hojeISOLocal(),
-      registrado_por: currentUser ? (currentUser.nome || currentUser.login) : null,
+      // "Feito por / Atendente" (pedido do cliente 09/09/2026): já vem
+      // preenchido com quem está logado, mas dá pra trocar — quem cadastra
+      // nem sempre é quem fez ou atendeu a limpeza.
+      registrado_por: document.getElementById('cu-f-registrado-por').value.trim() || (currentUser ? (currentUser.nome || currentUser.login) : null),
     };
     const r = await salvarCleanUp(reg);
     btn.disabled = false;
@@ -13171,7 +13189,7 @@ function renderCleanUp() {
     // Os campos de Bairro/Contrato/O.S abaixo são pra quando já se sabe
     // exatamente o que procurar (pedido do cliente 09/09/2026).
     const textoDaLinha = r => normalizeHeader([
-      r.localizacao, r.cidade, r.bairro, r.tecnico, r.contrato, r.os, r.observacao,
+      r.localizacao, r.cidade, r.bairro, r.tecnico, r.contrato, r.os, r.observacao, r.registrado_por,
       r.portas, r.data ? formatDate(r.data) : '', r.lat, r.lon,
     ].filter(v => v !== null && v !== undefined && v !== '').join(' '));
     const linhas = (DB.cleanUp || []).filter(r =>
@@ -13392,6 +13410,7 @@ function popupCleanUp(regs, lat, lon) {
         ${campo(r, 'Técnico', 'tecnico', 'text')}
         ${campo(r, 'Contrato', 'contrato', 'text')}
         ${campo(r, 'O.S', 'os', 'text')}
+        ${campo(r, 'Feito por', 'registrado_por', 'text')}
         ${campo(r, 'Observação', 'observacao', 'text')}
         ${r.id_registro ? `<dt>ID</dt><dd>${esc(String(r.id_registro))}</dd>` : ''}
       </dl>
