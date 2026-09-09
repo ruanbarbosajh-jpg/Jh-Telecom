@@ -6593,18 +6593,21 @@ function renderDashboard() {
     if (inicio && fim && !vistosCiclo.has(inicio + '|' + fim)) vistosCiclo.set(inicio + '|' + fim, { start: inicio, end: fim });
   });
   const ciclos = [...vistosCiclo.values()].sort((a, b) => String(b.end).localeCompare(String(a.end)));
-  const comDado = ciclosFech.find(c => DB.fechamento.some(f => f.inicio === c.start && f.ate_o_dia === c.end));
-  const { start, end } = comDado || ciclosDoFechamento().atual;
   const curto = iso => { const [a, m, d] = String(iso).split('-'); return `${d}.${m}`; };
+  // "Todos os ciclos" selecionado de cara ao entrar no Dashboard (pedido do
+  // cliente, 09/09/2026 — antes abria sozinho no ciclo mais recente com
+  // dado). f-start/f-end ficam em branco de propósito, é o sinal que o
+  // load() já usa pra "todos" (ver mais abaixo). Ainda dá pra trocar pra
+  // um ciclo só no seletor.
   document.getElementById('content').innerHTML = `
-    <input type="hidden" id="f-start" value="${start}"><input type="hidden" id="f-end" value="${end}">
+    <input type="hidden" id="f-start" value=""><input type="hidden" id="f-end" value="">
     <input type="hidden" id="dash-tech-a" value=""><input type="hidden" id="dash-tech-b" value="">
     <div class="dash-cabecalho">
       <h2>Painel de Gestão</h2>
       <div class="toolbar" style="margin:10px 0 8px">
         <div class="field"><label>Ciclo</label><select id="dash-ciclo">
-          <option value="todos">— Todos os ciclos —</option>
-          ${ciclos.map(c => `<option value="${c.start}|${c.end}"${c.start === start && c.end === end ? ' selected' : ''}>${formatDate(c.start)} a ${formatDate(c.end)}</option>`).join('')}
+          <option value="todos" selected>— Todos os ciclos —</option>
+          ${ciclos.map(c => `<option value="${c.start}|${c.end}">${formatDate(c.start)} a ${formatDate(c.end)}</option>`).join('')}
         </select></div>
       </div>
       <p id="dash-ciclo-desc"></p>
@@ -12700,10 +12703,19 @@ async function salvarFinanceiroDoPeriodo(inicioISO, fimISO, valores) {
 }
 // Períodos que aparecem no seletor: os ciclos do fechamento importado + os que
 // já têm cadastro (um período pode ter sido cadastrado antes de a produção
-// daquele ciclo entrar no sistema).
+// daquele ciclo entrar no sistema) + os que só existem na planilha de
+// Comparação (pedido do cliente 09/09/2026: a lista tem que ficar igual à
+// planilha — ciclos antigos, de antes do cadastro pelo sistema existir, sem
+// fechamento nem cadastro nenhum, mas com dado real lá).
 function periodosDoCadastroFin() {
   const mapa = new Map();
   ciclosDoFechamento().lista.forEach(c => mapa.set(rotuloPeriodoFin(c.start, c.end), { start: c.start, end: c.end }));
+  const cmpPer = DB.comparativoFinanceiro;
+  (cmpPer ? cmpPer.periodos : []).forEach(rotulo => {
+    if (mapa.has(rotulo)) return;
+    const { inicio, fim } = datasDoPeriodoFolha(rotulo);
+    if (inicio && fim) mapa.set(rotulo, { start: inicio, end: fim });
+  });
   (DB.financeiro || []).forEach(r => {
     if (!r.periodo || mapa.has(r.periodo)) return;
     if (r.data_inicio && r.data_fim) mapa.set(r.periodo, { start: r.data_inicio, end: r.data_fim });
@@ -12739,6 +12751,7 @@ function renderFinance() {
     </select></div>
     <button class="btn" id="fin-carregar">Carregar período</button>
     ${podeEditarFinanceiro() ? '<button type="button" class="btn-secundario" id="fin-novo-periodo">+ Criar novo período</button>' : ''}
+    <button type="button" class="btn-secundario" id="fin-criar-fechamento">Criar Fechamento</button>
   </div>
   <div id="fin-novo-painel" class="panel" style="display:none;margin:0 0 1rem">
     <div class="toolbar" style="margin:0">
@@ -12749,6 +12762,14 @@ function renderFinance() {
     </div>
     <p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">O ciclo normal vai do dia 21 de um mês ao dia 20 do seguinte — as datas já vêm sugeridas assim, mas dá pra digitar qualquer intervalo.</p>
     <p id="fin-novo-msg" style="font-size:12px;color:var(--warn-text);margin:6px 0 0"></p>
+  </div>
+  <div id="fin-fech-painel" class="panel" style="display:none;margin:0 0 1rem">
+    <div class="toolbar" style="margin:0">
+      ${multiSelectField('fin-fech-periodos', 'Ciclos', lista.map(p => p.rotulo), { noun: 'ciclo(s)', allLabel: 'Todos os ciclos', preset: [atual] })}
+      <button class="btn" id="fin-fech-gerar">Gerar relatório (PDF)</button>
+      <button type="button" class="btn-secundario" id="fin-fech-cancelar">Cancelar</button>
+    </div>
+    <p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">Gera um PDF com a mesma tabela de Despesas/Receitas por categoria — TOTAL DESPESAS, RECEITA DAS ORDENS e LUCRO — dos ciclos escolhidos acima (um só, alguns ou todos).</p>
   </div>
   <p style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">
     Os valores ficam salvos por período no banco. Trocar de período aqui não altera
@@ -12783,6 +12804,28 @@ function renderFinance() {
       load();
     });
   }
+  // "Criar Fechamento": relatório em PDF da tabela de Despesas/Receitas por
+  // categoria (a mesma do "Resumo financeiro do ciclo" no Dashboard), pra 1
+  // ciclo, alguns ou todos — pedido do cliente 09/09/2026. Fica só aqui na
+  // tela Financeiro, não mexe em nada do Dashboard.
+  const painelFech = document.getElementById('fin-fech-painel');
+  document.getElementById('fin-criar-fechamento').addEventListener('click', () => {
+    painelFech.style.display = painelFech.style.display === 'none' ? '' : 'none';
+  });
+  document.getElementById('fin-fech-cancelar').addEventListener('click', () => { painelFech.style.display = 'none'; });
+  wireMultiSelectField('fin-fech-periodos', { noun: 'ciclo(s)', allLabel: 'Todos os ciclos' });
+  document.getElementById('fin-fech-gerar').addEventListener('click', () => {
+    const selecionados = getMultiSelectValues('fin-fech-periodos');
+    if (!selecionados.length) { toast('Escolha ao menos 1 ciclo.', 'aviso'); return; }
+    if (typeof window.jspdf === 'undefined') { toast('A biblioteca de PDF não carregou (sem internet?).', 'erro'); return; }
+    // cronológico (mais antigo primeiro), igual à tabela "Todos os ciclos" do
+    // Dashboard — mais fácil de ler num papel do que mais-novo-primeiro
+    const ordenados = [...selecionados].sort((a, b) =>
+      String(datasDoPeriodoFolha(a).fim || '').localeCompare(String(datasDoPeriodoFolha(b).fim || '')));
+    const pivotFech = pivotDoCadastroFin();
+    const escopo = ordenados.length === lista.length ? 'Todos os ciclos' : ordenados.length === 1 ? ordenados[0] : `${ordenados.length} ciclos`;
+    gerarPDFMultiSecoes('Fechamento — ' + escopo, [secaoFinanceiraComparativa('Despesas / Receitas por Categoria', ordenados, pivotFech)]);
+  });
   load();
 
   function load() {
@@ -13238,6 +13281,33 @@ function tabelaFinanceiraComparativa(periodos, pivotDash, opts = {}) {
       }).join('')}${celTotal(pivotDash.lucro, totalLucro < 0 ? 'var(--tab-alerta)' : 'var(--tab-sucesso)')}</tr>
     </tbody>
   </table></div>`;
+}
+// Versão "linhas de dados" de tabelaFinanceiraComparativa, pra alimentar
+// secaoTabela/gerarPDFMultiSecoes (que esperam array simples, não HTML) — usada
+// pelo botão "Criar Fechamento" da tela Financeiro. Mesma fonte (pivotDash),
+// mesmas linhas (categorias + TOTAL DESPESAS/RECEITA DAS ORDENS/LUCRO); sem
+// seta de tendência (não faz sentido em papel) e sempre com a coluna Total.
+function secaoFinanceiraComparativa(titulo, periodos, pivotDash) {
+  const valDash = (obj, p) => (obj && obj[p]) || 0;
+  const somaTotal = obj => periodos.reduce((a, p) => a + valDash(obj, p), 0);
+  const categorias = pivotDash && pivotDash.porCategoria
+    ? Object.keys(pivotDash.porCategoria).filter(c => periodos.some(p => pivotDash.porCategoria[c][p])) : [];
+  const linhas = categorias.map(cat => {
+    const linha = { cat };
+    periodos.forEach(p => { linha[p] = valDash(pivotDash.porCategoria[cat], p); });
+    return linha;
+  });
+  const columns = [{ header: 'Despesas / Receitas', get: r => r.cat }]
+    .concat(periodos.map(p => ({ header: p, get: r => formatCurrency(r[p]), align: 'right' })))
+    .concat([{ header: 'Total', get: r => formatCurrency(periodos.reduce((a, p) => a + r[p], 0)), align: 'right' }]);
+  const linhaTotal = (rot, obj) => [rot, ...periodos.map(p => formatCurrency(valDash(obj, p))), formatCurrency(somaTotal(obj))];
+  return secaoTabela(titulo, linhas, columns, {
+    totalRows: [
+      linhaTotal('TOTAL DESPESAS', pivotDash.totalDespesas),
+      linhaTotal('RECEITA DAS ORDENS', pivotDash.receitaOrdens),
+      linhaTotal('LUCRO', pivotDash.lucro),
+    ],
+  });
 }
 function diffMoney(x,y,invert) {
   const d = y-x; const sign = d>=0?'+':''; const arrow = d>=0?'▲':'▼';
