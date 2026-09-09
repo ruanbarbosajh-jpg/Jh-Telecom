@@ -10977,15 +10977,20 @@ function renderParcialDoDia() {
     });
 
     // ---- Tabela: status detalhado por técnico (mesmos baldes, agrupado por técnico) ----
-    // Filtro de Tipo de Serviço (pedido do cliente 09/09/2026) — só entra
-    // NESTA tabela, de propósito: Mão de Obra/Tipo/Cidade continuam somando
-    // tudo, senão trocar o filtro aqui mudaria número que a pessoa não pediu
-    // pra mudar. Reaproveita os mesmos tiposFixos/regex de "Status Detalhado
-    // por Tipo de Serviço", pra não ter uma segunda lista de tipos pra manter.
-    const filtroTipoTecEl = document.getElementById('pd-tec-tipo');
-    const filtroTipoTec = filtroTipoTecEl ? filtroTipoTecEl.value : '';
-    const tipoTecRe = filtroTipoTec ? (tiposFixos.find(([l]) => l === filtroTipoTec) || [])[1] : null;
-    const rowsPorTecnico = tipoTecRe ? rows.filter(r => tipoTecRe.test(normalizeHeader(r.tipo_atividade))) : rows;
+    // Filtro de Tipo de Serviço (pedido do cliente 09/09/2026, depois trocado
+    // de select único pra múltipla escolha — "quero que seja possível
+    // escolher mais de um") — só entra NESTA tabela, de propósito: Mão de
+    // Obra/Tipo/Cidade continuam somando tudo, senão trocar o filtro aqui
+    // mudaria número que a pessoa não pediu pra mudar. Reaproveita os mesmos
+    // tiposFixos/regex de "Status Detalhado por Tipo de Serviço" (mesmo
+    // componente de checkbox já usado no Clean Up/Financeiro/Dashboard), pra
+    // não ter uma segunda lista de tipos pra manter nem um filtro diferente
+    // em cada tela.
+    const nomesTiposTec = tiposFixos.map(([l]) => l);
+    const tiposTecMarcados = document.getElementById('pd-tec-tipo-panel') ? getMultiSelectValues('pd-tec-tipo') : nomesTiposTec;
+    const todosTiposTecMarcados = tiposTecMarcados.length === nomesTiposTec.length;
+    const regexTiposTec = tiposFixos.filter(([l]) => tiposTecMarcados.includes(l)).map(([, re]) => re);
+    const rowsPorTecnico = todosTiposTecMarcados ? rows : rows.filter(r => regexTiposTec.some(re => re.test(normalizeHeader(r.tipo_atividade))));
     const porTecnicoStatus = {};
     rowsPorTecnico.forEach(r => { if (ehRecursoTecnico(r.recurso)) (porTecnicoStatus[r.recurso] = porTecnicoStatus[r.recurso] || []).push(r); });
     const statusPorTecnicoTable = Object.keys(porTecnicoStatus).sort((a,b)=>porTecnicoStatus[b].length-porTecnicoStatus[a].length).map(t => {
@@ -11125,12 +11130,10 @@ function renderParcialDoDia() {
         <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="font-weight:700">${formatPct(efetividade(totalStatus), 0)}</td></tr>
       </tbody></table></div>
 
-      <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <span>Status Detalhado por Técnico</span>
-        <select id="pd-tec-tipo" class="topn-select">
-          <option value=""${!filtroTipoTec ? ' selected' : ''}>Todos os tipos de serviço</option>
-          ${tiposFixos.map(([l]) => `<option value="${esc(l)}"${filtroTipoTec === l ? ' selected' : ''}>${esc(l)}</option>`).join('')}
-        </select>
+      <div class="section-heading">Status Detalhado por Técnico</div>
+      <div class="toolbar" style="margin-bottom:12px">
+        ${multiSelectField('pd-tec-tipo', 'Tipo de Serviço', nomesTiposTec, { noun: 'tipo(s)', allLabel: 'Todos os tipos', preset: tiposTecMarcados })}
+        <button class="btn" id="pd-tec-tipo-aplicar">Aplicar</button>
         <button type="button" class="btn-export-img" id="pd-tec-img">🖼 Gerar imagem</button>
       </div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="tab-status-tecnico"><thead><tr>
@@ -11298,12 +11301,20 @@ function renderParcialDoDia() {
     ativarTogglesDeSecao(document.getElementById('pd-body'));
     ativarBotoesImagem(document.getElementById('pd-body'));
 
-    // ---- Status Detalhado por Técnico: filtro de Tipo de Serviço + imagem ----
-    const selTecTipo = document.getElementById('pd-tec-tipo');
-    if (selTecTipo) selTecTipo.addEventListener('change', load);
+    // ---- Status Detalhado por Técnico: filtro de Tipo de Serviço (múltipla
+    // escolha, mesmo componente do Clean Up/Financeiro) + imagem ----
+    // SEM onChange a cada clique de propósito: load() reconstrói a tela
+    // inteira, e recarregar a cada checkbox marcado fechava o painel no meio
+    // da seleção (achado testando "marca 2 tipos" — só o primeiro clique
+    // sobrevivia). Precisa do botão "Aplicar", mesmo padrão do "Criar
+    // Fechamento" do Financeiro.
+    if (document.getElementById('pd-tec-tipo-panel')) {
+      wireMultiSelectField('pd-tec-tipo', { noun: 'tipo(s)', allLabel: 'Todos os tipos' });
+      document.getElementById('pd-tec-tipo-aplicar').addEventListener('click', load);
+    }
     const btnTecImg = document.getElementById('pd-tec-img');
     if (btnTecImg) btnTecImg.addEventListener('click', () => {
-      const sufixoTipo = filtroTipoTec ? ' — ' + filtroTipoTec : '';
+      const sufixoTipo = todosTiposTecMarcados ? '' : ' — ' + tiposTecMarcados.join(', ');
       const r = exportarTabelaImagem(document.getElementById('tab-status-tecnico'), 'status-por-tecnico-' + data, 'Status Detalhado por Técnico' + sufixoTipo + ' — ' + formatDate(data));
       avisoBotao(btnTecImg, r ? `🖼 ${r.linhas} linha(s)` : '🖼 nada visível', '🖼 Gerar imagem');
     });
