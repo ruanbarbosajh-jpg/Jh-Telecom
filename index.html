@@ -10977,8 +10977,17 @@ function renderParcialDoDia() {
     });
 
     // ---- Tabela: status detalhado por técnico (mesmos baldes, agrupado por técnico) ----
+    // Filtro de Tipo de Serviço (pedido do cliente 09/09/2026) — só entra
+    // NESTA tabela, de propósito: Mão de Obra/Tipo/Cidade continuam somando
+    // tudo, senão trocar o filtro aqui mudaria número que a pessoa não pediu
+    // pra mudar. Reaproveita os mesmos tiposFixos/regex de "Status Detalhado
+    // por Tipo de Serviço", pra não ter uma segunda lista de tipos pra manter.
+    const filtroTipoTecEl = document.getElementById('pd-tec-tipo');
+    const filtroTipoTec = filtroTipoTecEl ? filtroTipoTecEl.value : '';
+    const tipoTecRe = filtroTipoTec ? (tiposFixos.find(([l]) => l === filtroTipoTec) || [])[1] : null;
+    const rowsPorTecnico = tipoTecRe ? rows.filter(r => tipoTecRe.test(normalizeHeader(r.tipo_atividade))) : rows;
     const porTecnicoStatus = {};
-    rows.forEach(r => { if (ehRecursoTecnico(r.recurso)) (porTecnicoStatus[r.recurso] = porTecnicoStatus[r.recurso] || []).push(r); });
+    rowsPorTecnico.forEach(r => { if (ehRecursoTecnico(r.recurso)) (porTecnicoStatus[r.recurso] = porTecnicoStatus[r.recurso] || []).push(r); });
     const statusPorTecnicoTable = Object.keys(porTecnicoStatus).sort((a,b)=>porTecnicoStatus[b].length-porTecnicoStatus[a].length).map(t => {
       const linhas = porTecnicoStatus[t];
       const linha = { label: t, total: linhas.length };
@@ -11116,8 +11125,15 @@ function renderParcialDoDia() {
         <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="font-weight:700">${formatPct(efetividade(totalStatus), 0)}</td></tr>
       </tbody></table></div>
 
-      <div class="section-heading">Status Detalhado por Técnico</div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+      <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span>Status Detalhado por Técnico</span>
+        <select id="pd-tec-tipo" class="topn-select">
+          <option value=""${!filtroTipoTec ? ' selected' : ''}>Todos os tipos de serviço</option>
+          ${tiposFixos.map(([l]) => `<option value="${esc(l)}"${filtroTipoTec === l ? ' selected' : ''}>${esc(l)}</option>`).join('')}
+        </select>
+        <button type="button" class="btn-export-img" id="pd-tec-img">🖼 Gerar imagem</button>
+      </div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="tab-status-tecnico"><thead><tr>
         <th>Técnico</th>${buckets.map(b=>`<th>${bucketLabel[b]}</th>`).join('')}<th>Total O.S</th><th>Efetividade</th>
       </tr></thead><tbody>
         ${statusPorTecnicoTable.map(l=>{
@@ -11281,6 +11297,16 @@ function renderParcialDoDia() {
     // ---- ocultar/reexibir cada tabela da página (mesmo padrão da PCR) ----
     ativarTogglesDeSecao(document.getElementById('pd-body'));
     ativarBotoesImagem(document.getElementById('pd-body'));
+
+    // ---- Status Detalhado por Técnico: filtro de Tipo de Serviço + imagem ----
+    const selTecTipo = document.getElementById('pd-tec-tipo');
+    if (selTecTipo) selTecTipo.addEventListener('change', load);
+    const btnTecImg = document.getElementById('pd-tec-img');
+    if (btnTecImg) btnTecImg.addEventListener('click', () => {
+      const sufixoTipo = filtroTipoTec ? ' — ' + filtroTipoTec : '';
+      const r = exportarTabelaImagem(document.getElementById('tab-status-tecnico'), 'status-por-tecnico-' + data, 'Status Detalhado por Técnico' + sufixoTipo + ' — ' + formatDate(data));
+      avisoBotao(btnTecImg, r ? `🖼 ${r.linhas} linha(s)` : '🖼 nada visível', '🖼 Gerar imagem');
+    });
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'maodeobra', label: 'Mão de obra e produção do dia' },
