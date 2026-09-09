@@ -14290,12 +14290,11 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
   // liberar); os 8 descontos de MATERIAL abaixo são de quem sabe o que o
   // técnico levou e não devolveu (Almoxarifado + RH + Analista). O input só
   // aparece pra quem tem a permissão — quem não tem vê o valor de sempre.
-  // Só o período ATUAL pode ser editado (pedido do cliente 04/09/2026) — um
-  // período antigo já foi fechado e pago, editar ali de novo bagunçaria um
-  // fechamento que já saiu (ver periodoMaisRecenteFolha).
-  const periodoAtualFolha = periodoMaisRecenteFolha();
-  const podePagamento = r => podeEditarFolhaPagamento() && r.periodo === periodoAtualFolha;
-  const podeMaterial = r => podeEditarFolhaMaterial() && r.periodo === periodoAtualFolha;
+  // ATÉ 04/09/2026 só o período ATUAL podia ser editado — o cliente voltou
+  // atrás em 09/09/2026 ("não é possível alterar os períodos passados"):
+  // agora qualquer período editável entra, não só periodoMaisRecenteFolha().
+  const podePagamento = () => podeEditarFolhaPagamento();
+  const podeMaterial = () => podeEditarFolhaMaterial();
   const attrsChave = r => `data-tecnico="${esc(r.tecnico)}" data-periodo="${esc(r.periodo)}"`;
   // Quantas ordens de CADA tipo (mesmas 5 categorias da tabela de preço fixa —
   // VALORES_ORDENS_FIXOS) o técnico teve CONCLUÍDAS no período da linha.
@@ -14490,6 +14489,23 @@ const QUADRO_ESCRITORIO = [
   { pessoa: 'Vitória Professor',            cargo: 'Supervisora escritório',     salario: 2630.00, vt: 275.60 },
 ];
 const DIAS_MES_ESCRITORIO = 30;   // o cliente calcula sempre sobre 30, não sobre o mês corrido
+// Quantos dias já passaram do período até HOJE — só serve pro "Dias trab."
+// PADRÃO de quem ainda não tem linha salva (ver linhasFolhaEscritorio). Achado
+// 09/09/2026: linha nova sempre nascia com 30 dias, mesmo num mês em
+// andamento (setembro no dia 9 mostrava 30 dias trabalhados, não 9) — dá a
+// entender que o mês já fechou quando ele nem chegou na metade. Mês já
+// encerrado (hoje depois do fim) continua contando os 30 cheios; mês futuro
+// (não deveria aparecer na lista, mas por garantia) fica em 0. Assim que
+// alguém EDITA e salva a linha, esse cálculo para de valer pra ela — o valor
+// salvo manda, do jeito que já era (edição sempre venceu o padrão).
+function diasDecorridosNoPeriodoEscritorio(periodo) {
+  const { inicio, fim } = datasDoPeriodoFolha(periodo);
+  if (!inicio || !fim) return DIAS_MES_ESCRITORIO;
+  const hoje = hojeISOLocal();
+  if (hoje > fim) return DIAS_MES_ESCRITORIO;
+  if (hoje < inicio) return 0;
+  return Math.min(DIAS_MES_ESCRITORIO, diasEntre(hoje, inicio) + 1);
+}
 function recalcularLinhaEscritorio(l) {
   const n = v => Number(v) || 0;
   l.liquido = +(n(l.salario_base) * (n(l.dias_trab) / DIAS_MES_ESCRITORIO)).toFixed(2);
@@ -14526,7 +14542,7 @@ function linhasFolhaEscritorio(periodo) {
     if (achada) { porNome.delete(normalizeHeader(q.pessoa)); return recalcularLinhaEscritorio({ ...achada }); }
     return recalcularLinhaEscritorio({
       pessoa: q.pessoa, periodo, cargo: q.cargo, operacao: 'Casa Cliente',
-      salario_base: q.salario, dias_trab: DIAS_MES_ESCRITORIO, vt: q.vt || 0,
+      salario_base: q.salario, dias_trab: diasDecorridosNoPeriodoEscritorio(periodo), vt: q.vt || 0,
     });
   });
   // gente cadastrada só no banco (contratada depois) continua aparecendo
