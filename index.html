@@ -2824,19 +2824,21 @@ function podeExcluirTecnicoPresenca() { return !!currentUser && currentUser.role
 // Espelho disso na outra tela: Matheus e Sebastião editam a Presença dos
 // TÉCNICOS (NOMES_PRESENCA_EDITAM) e Thaís/Rebeca só olham.
 const NOMES_ESCRITORIO_EDITAM = ['Thaís', 'Rebeca'];
-// Presença — Escritório é exclusiva do Analista desde 04/09/2026 (ver
-// podeAcessar) — ninguém mais entra na tela, então só o primeiro lado deste
-// OR (role === 'analista') é alcançável na prática. NOMES_ESCRITORIO_EDITAM
-// fica pra trás só como registro de quem editava antes da tela fechar.
+// Presença — Escritório: fechada pra todo mundo menos Analista em 04/09/2026,
+// reaberta pra Thaís/Rebeca por nome em 10/09/2026 (ver podeAcessar) — RH,
+// Almoxarifado, Escritório e o resto do perfil "admin" (Matheus, Sebastião)
+// continuam de fora.
 function podeEditarPresencaEscritorio() { return !!currentUser && (currentUser.role === 'analista' || NOMES_ESCRITORIO_EDITAM.includes(currentUser.nome)); }
 function podeAcessar(role, route) {
-  // Presença — Escritório (04/09/2026, pedido do cliente): ficou EXCLUSIVA do
-  // Analista — ninguém mais vê nem edita, nem quem editava antes por nome
-  // (Thaís/Rebeca) nem quem só consultava (Supervisor/Coordenador, RH,
-  // Almoxarifado, Escritório). Antes disso a tela separava VER de EDITAR por
-  // fora do ROUTE_PERMISSIONS comum — isso não existe mais.
+  // Presença — Escritório: ficou EXCLUSIVA do Analista em 04/09/2026, e o
+  // cliente reabriu em 10/09/2026 — mas só pra Thaís e Rebeca por nome
+  // (NOMES_ESCRITORIO_EDITAM), não pro perfil "admin" inteiro: Matheus e
+  // Sebastião têm o mesmo perfil e cuidam do quadro de TÉCNICOS, não do
+  // Escritório. Continuam de fora RH, Almoxarifado e Escritório. Como a
+  // rota já libera acesso = edição aqui (ver podeEditarPresencaEscritorio,
+  // mesmo NOMES_ESCRITORIO_EDITAM), Thaís/Rebeca voltam a poder editar.
   const perfil = perfilValido(role);
-  if (route === 'presencaescritorio') return perfil === 'analista';
+  if (route === 'presencaescritorio') return perfil === 'analista' || (!!currentUser && NOMES_ESCRITORIO_EDITAM.includes(currentUser.nome));
   const bloqueadas = ROUTE_PERMISSIONS[perfil];
   return !bloqueadas || !bloqueadas.includes(route);
 }
