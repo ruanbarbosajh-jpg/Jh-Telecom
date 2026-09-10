@@ -7286,11 +7286,26 @@ function renderDashboard() {
     // não foi cadastrado, e o fechamento por técnico continua sendo o último
     // recurso (não tem folha de escritório, imposto, aluguel da base…).
     const cadTem = temCadastroFin(rotuloPeriodo);
-    const cadDespesa = cadTem ? FIN_CATEGORIAS.reduce((a, c) => a + (despesasDoPeriodoFin(rotuloPeriodo)[c] || 0), 0) : 0;
-    // cadastro incompleto (algumas categorias zeradas aqui, mas com valor na
-    // planilha de Comparação) infla o lucro deste ciclo silenciosamente — ver
-    // categoriasFaltantesFin(). Só faz sentido avisar quando é 1 ciclo (o card
-    // some em "Todos os ciclos", que soma vários períodos de uma vez).
+    // ATÉ 10/09/2026 o cadastro incompleto (algumas categorias zeradas aqui,
+    // mas com valor na planilha de Comparação) inflava o lucro do ciclo
+    // silenciosamente: cadTem virava true com QUALQUER categoria > 0, e a
+    // despesa somava só o que estava no cadastro, contando o resto como
+    // R$ 0,00 mesmo tendo valor pronto na planilha (achado real: ciclo 21/06
+    // a 20/07/2026 com R$ 90,54 cadastrados contra R$ 394.190,44 na
+    // planilha). Pedido do cliente (10/09/2026, depois de reportar o caso):
+    // preencher categoria por categoria — cadastro manda quando tem valor,
+    // e só cai pra planilha de Comparação na categoria que o cadastro
+    // deixou zerada. Isso também é o que valoresDoComparativoFin() já
+    // buscava pro botão "Usar do Comparativo": mesma fonte, agora usada
+    // como reforço automático, não só como preenchimento manual sob pedido.
+    const doCadastroFin = despesasDoPeriodoFin(rotuloPeriodo);
+    const doComparativoFin = valoresDoComparativoFin(rotuloPeriodo);
+    const cadDespesa = cadTem ? FIN_CATEGORIAS.reduce((a, c) => a + (doCadastroFin[c] || doComparativoFin[c] || 0), 0) : 0;
+    // Categorias que vieram da planilha porque o cadastro estava vazio nelas
+    // — antes era um AVISO de número errado; agora é só um informe de
+    // proveniência, porque o valor já entra certo na conta. Só faz sentido
+    // mostrar quando é 1 ciclo (o card some em "Todos os ciclos", que soma
+    // vários períodos de uma vez).
     const cadFaltando = (cadTem && !todos) ? categoriasFaltantesFin(rotuloPeriodo) : [];
     const cmpTem = !cadTem && !!(cmp && cmp.totalDespesas && cmp.totalDespesas[rotuloPeriodo] !== undefined);
     // AUDITORIA 04/09/2026: receita usa o fechamento (valorPagoGiga) sempre
@@ -7458,10 +7473,10 @@ function renderDashboard() {
           ? ' — inclui folha do escritório, imposto, aluguel da base e demais custos da empresa, que não aparecem no fechamento por técnico.'
           : '. Cadastre as despesas deste ciclo na tela Financeiro para ver o resultado da empresa inteira.'}
       </p>
-      ${cadFaltando.length ? `<p style="margin:0 0 20px;font-size:var(--fs-sm);color:var(--warn-text);background:color-mix(in srgb, var(--warn-text) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn-text) 35%, transparent);border-radius:var(--r-sm);padding:10px 12px">
-        Cadastro do Financeiro <b>incompleto</b> pra ${esc(rotuloPeriodo)}: ${cadFaltando.length} categoria(s) zerada(s) aqui mas com valor na planilha de Comparação
-        (${cadFaltando.map(esc).join(', ')}) — a "Despesa total" e o "Lucro" acima estão contando essas categorias como R$ 0,00.
-        Complete o cadastro na tela <b>Financeiro</b> (botão "Usar do Comparativo (Excel)") pra corrigir.
+      ${cadFaltando.length ? `<p style="margin:0 0 20px;font-size:var(--fs-sm);color:var(--text-secondary);background:color-mix(in srgb, var(--accent) 7%, transparent);border:1px solid color-mix(in srgb, var(--accent) 30%, transparent);border-radius:var(--r-sm);padding:10px 12px">
+        Cadastro do Financeiro <b>incompleto</b> pra ${esc(rotuloPeriodo)}: ${cadFaltando.length} categoria(s) sem valor digitado aqui
+        (${cadFaltando.map(esc).join(', ')}) — a "Despesa total" e o "Lucro" acima já estão usando o valor da <b>planilha de Comparação</b> pra essas categorias, então a conta está certa.
+        Pra deixar o cadastro completo (e não depender mais da planilha), use o botão "Usar do Comparativo (Excel)" na tela <b>Financeiro</b>.
       </p>` : ''}
       ${resumoFinanceiro}
       <div class="section-heading sem-toggle">Produção por tipo de serviço<span class="sec-nota">${totalOrdens.toLocaleString('pt-BR')} ordens concluídas no ciclo</span></div>
@@ -16125,8 +16140,16 @@ function pivotDoCadastroFin() {
   });
   doCadastro.forEach(p => {
     const d = despesasDoPeriodoFin(p.rotulo);
+    // Categoria que o cadastro deixou zerada usa a planilha de Comparação
+    // como reforço, em vez de contar R$ 0,00 (pedido do cliente 10/09/2026
+    // — mesmo achado do "Resultado do Ciclo" no Dashboard: cadastro parcial
+    // inflava o lucro silenciosamente. Ver comentário em renderDashboard).
+    const doCmp = planilha ? valoresDoComparativoFin(p.rotulo) : {};
     let soma = 0;
-    FIN_CATEGORIAS.forEach(cat => { põe(porCategoria, cat, p.rotulo, d[cat]); soma += d[cat] || 0; });
+    FIN_CATEGORIAS.forEach(cat => {
+      const v = d[cat] || doCmp[cat] || 0;
+      põe(porCategoria, cat, p.rotulo, v); soma += v;
+    });
     const receita = receitaDoPeriodoFin(p.start, p.end);
     totalDespesas[p.rotulo] = soma;
     receitaOrdens[p.rotulo] = receita;
