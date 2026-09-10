@@ -4,7 +4,13 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>JH TELECOM · Nexus System</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- xlsx-js-style: mesmo SheetJS 0.18.5 de sempre, só que com suporte a
+     estilo de célula (cor, negrito, borda) no arquivo exportado — a
+     "xlsx" comum (cdnjs) nunca escreve estilo, só valor puro. Substituída
+     em 10/09/2026 (pedido do cliente: Excel da Folha "colorido e já
+     formatado") — mesma API (XLSX.utils.*, XLSX.writeFile), então toda
+     exportação que já existia continua igual; só a Folha ganhou estilo novo. -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
@@ -9433,6 +9439,71 @@ function exportarTabelaVisivel(tabela, nomeArquivo, ordemColunas) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   return { linhas: corpo.length, formato: 'csv' };
 }
+// Mesmas cores dos cabeçalhos coloridos da tela da Folha (ver CSS .col-g-*
+// e grupoDaColuna() em renderTabelaFolha) — vêm da planilha em papel do
+// cliente. Repetidas aqui como hex puro porque célula de Excel não lê
+// variável CSS nem classe, só valor.
+const CORES_GRUPO_FOLHA = { prod: '12509B', valor: '0B3040', frota: '104861', desc: '680000', parc: '960000', receb: '0D3512' };
+// Mesma conta do clarearCor() (mistura o canal com branco), só que devolve
+// hex sem "#" — é o formato que o estilo de célula do xlsx-js-style espera.
+function hexClaro(hex, fracaoBranco) {
+  const canal = i => {
+    const v = parseInt(hex.substr(i * 2, 2), 16);
+    return Math.round(v + (255 - v) * fracaoBranco).toString(16).padStart(2, '0').toUpperCase();
+  };
+  return canal(0) + canal(1) + canal(2);
+}
+// Excel da Folha "já formatado" (pedido do cliente, 10/09/2026): cabeçalho
+// colorido por bloco (produção/valor/frota/descontos/parcelas/a receber —
+// as MESMAS cores da tela), linhas do corpo com o mesmo tom claro, borda
+// fina e filtro automático no cabeçalho. Só funciona de verdade com
+// xlsx-js-style (ver <script> no topo) — a xlsx comum ignora `cell.s` e
+// sai tudo em branco e chapado, sem quebrar (só perde o estilo).
+function exportarFolhaXlsxFormatada(tabela, nomeArquivo) {
+  if (!tabela) return null;
+  const thead = [...tabela.querySelectorAll('thead th')];
+  const cab = thead.map(th => th.textContent.replace('▾', '').trim());
+  const grupoPorColuna = thead.map(th => {
+    const cls = [...th.classList].find(c => c.startsWith('col-g-') && c !== 'col-g-ini' && c !== 'col-g-fim');
+    return cls ? cls.replace('col-g-', '') : null;
+  });
+  const corpo = [...tabela.querySelectorAll('tbody tr')]
+    .filter(tr => tr.style.display !== 'none' && tr.querySelector('td'))
+    .map(tr => [...tr.querySelectorAll('td')].map(textoCelulaExport));
+  if (!corpo.length) return null;
+  const ws = XLSX.utils.aoa_to_sheet([cab, ...corpo]);
+  ws['!cols'] = cab.map((c, i) => ({ wch: Math.min(40, Math.max(String(c).length + 2, ...corpo.map(l => String(l[i] || '').length + 2))) }));
+  ws['!autofilter'] = { ref: ws['!ref'] };
+  const bordaFina = { style: 'thin', color: { rgb: 'B0B0B0' } };
+  const borda = { top: bordaFina, bottom: bordaFina, left: bordaFina, right: bordaFina };
+  cab.forEach((titulo, i) => {
+    const grupo = grupoPorColuna[i];
+    const corFundo = grupo ? CORES_GRUPO_FOLHA[grupo] : '334155';
+    const endCab = XLSX.utils.encode_cell({ r: 0, c: i });
+    if (ws[endCab]) ws[endCab].s = {
+      font: { bold: true, color: { rgb: 'FFFFFF' } },
+      fill: { patternType: 'solid', fgColor: { rgb: corFundo } },
+      border: borda, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }
+    };
+    // TOTAL DESCONTOS/TOTAL A RECEBER continuam se destacando em vermelho/
+    // verde, igual à tela — as demais células só levam o tom claro do bloco.
+    const destaque = /^total a receber$/i.test(titulo) ? '0D6B1F' : /^total descontos$/i.test(titulo) ? 'A30000' : null;
+    const corClaro = grupo ? hexClaro(corFundo, 0.88) : 'FFFFFF';
+    for (let r = 0; r < corpo.length; r++) {
+      const cel = ws[XLSX.utils.encode_cell({ r: r + 1, c: i })];
+      if (!cel) continue;
+      cel.s = {
+        fill: { patternType: 'solid', fgColor: { rgb: corClaro } },
+        border: borda, alignment: { vertical: 'center' },
+        ...(destaque ? { font: { bold: true, color: { rgb: destaque } } } : {})
+      };
+    }
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Folha');
+  XLSX.writeFile(wb, nomeArquivo + '.xlsx');
+  return { linhas: corpo.length };
+}
 // Export dos quadros de Presença (técnicos/escritório): não dá pra usar
 // exportarTabelaVisivel direto porque as células do dia têm um <select>
 // dentro — o mesmo problema do filtro por coluna (textContent junta todas as
@@ -15064,7 +15135,7 @@ function renderFolhaPagamento(modo) {
     const btnImg = document.getElementById('folha-export-img');
     if (btnXls) btnXls.addEventListener('click', () => {
       if (!tabelaFolha()) { toast('Sem folha na tela pra exportar.', 'aviso'); return; }
-      exportarTabelaVisivel(tabelaFolha(), nomeArqFolha);
+      exportarFolhaXlsxFormatada(tabelaFolha(), nomeArqFolha);
       exportacaoPendente = false; atualizarAvisoExport();
       toast('Excel da folha gerado.', 'ok', 2000);
     });
