@@ -13188,6 +13188,7 @@ function renderCleanUp() {
       <div class="field"><label>Cidade</label><input type="text" id="cu-cidade" placeholder="Cidade" list="city-list"></div>
       <div class="field"><label>Bairro</label><input type="text" id="cu-bairro" placeholder="Bairro"></div>
       <div class="field"><label>Técnico</label><input type="text" id="cu-tecnico" placeholder="Nome" list="tech-list"></div>
+      <div class="field"><label>Atendente</label><input type="text" id="cu-atendente" placeholder="Nome"></div>
       <div class="field"><label>Contrato</label><input type="text" id="cu-contrato" placeholder="Contrato"></div>
       <div class="field"><label>O.S</label><input type="text" id="cu-os" placeholder="Número da O.S"></div>
       <div class="field"><label>De</label><input type="date" id="cu-de"></div>
@@ -13210,7 +13211,7 @@ function renderCleanUp() {
         </div>
         <div class="cu-form-campos">
           <div><label for="cu-f-data">Data</label><input type="date" id="cu-f-data" value="${hojeISOLocal()}"></div>
-          <div><label for="cu-f-tecnico">Técnico (quem fez)</label><input type="text" id="cu-f-tecnico" placeholder="Nome" list="tech-list"></div>
+          <div><label for="cu-f-tecnico">Técnico</label><input type="text" id="cu-f-tecnico" placeholder="Nome" list="tech-list"></div>
           <div><label for="cu-f-portas">Vagas liberadas</label><input type="number" id="cu-f-portas" min="0" step="1" placeholder="0"></div>
           <div><label for="cu-f-cidade">Cidade</label><input type="text" id="cu-f-cidade" placeholder="Cidade" list="city-list"></div>
           <div><label for="cu-f-bairro">Bairro</label><input type="text" id="cu-f-bairro" placeholder="Bairro"></div>
@@ -13232,7 +13233,7 @@ function renderCleanUp() {
   document.getElementById('cu-filtrar').addEventListener('click', load);
   document.getElementById('cu-busca').addEventListener('keydown', e => { if (e.key === 'Enter') load(); });
   document.getElementById('cu-limpar').addEventListener('click', () => {
-    ['cu-busca', 'cu-cidade', 'cu-bairro', 'cu-tecnico', 'cu-contrato', 'cu-os', 'cu-de', 'cu-ate'].forEach(id => { document.getElementById(id).value = ''; });
+    ['cu-busca', 'cu-cidade', 'cu-bairro', 'cu-tecnico', 'cu-atendente', 'cu-contrato', 'cu-os', 'cu-de', 'cu-ate'].forEach(id => { document.getElementById(id).value = ''; });
     load();
   });
   const painel = document.getElementById('cu-form-painel');
@@ -13302,6 +13303,7 @@ function renderCleanUp() {
     const cidade = normalizeHeader(document.getElementById('cu-cidade').value);
     const bairro = normalizeHeader(document.getElementById('cu-bairro').value);
     const tecnico = normalizeHeader(document.getElementById('cu-tecnico').value);
+    const atendente = normalizeHeader(document.getElementById('cu-atendente').value);
     const contrato = normalizeHeader(document.getElementById('cu-contrato').value);
     const os = normalizeHeader(document.getElementById('cu-os').value);
     const de = document.getElementById('cu-de').value, ate = document.getElementById('cu-ate').value;
@@ -13310,7 +13312,7 @@ function renderCleanUp() {
     // destaque (pedido do cliente 09/09/2026: "quando eu pesquisar um em
     // específico a cor fique destacada") — sem isso, achar uma caixa
     // específica entre as milhares coloridas por cidade não chamava atenção.
-    const filtroEspecifico = !!(busca || cidade || bairro || tecnico || contrato || os || de || ate);
+    const filtroEspecifico = !!(busca || cidade || bairro || tecnico || atendente || contrato || os || de || ate);
     // A busca livre varre TODOS os campos de uma vez (coordenada, localização,
     // cidade, bairro, técnico, contrato, O.S, vagas e data) — foi o pedido:
     // "pra eu saber se tem caixa lá" sem ter que escolher em qual campo procurar.
@@ -13325,6 +13327,7 @@ function renderCleanUp() {
       && (!cidade || normalizeHeader(r.cidade).includes(cidade))
       && (!bairro || normalizeHeader(r.bairro).includes(bairro))
       && (!tecnico || normalizeHeader(r.tecnico).includes(tecnico))
+      && (!atendente || normalizeHeader(r.registrado_por).includes(atendente))
       && (!contrato || normalizeHeader(r.contrato).includes(contrato))
       && (!os || normalizeHeader(r.os).includes(os))
       && (!de || !r.data || r.data >= de) && (!ate || !r.data || r.data <= ate)
@@ -13360,16 +13363,17 @@ function renderCleanUp() {
         </select>
       </div>
       <div class="table-wrap"><table class="data-table" id="cu-tab"><thead><tr>
-        <th>Data</th><th>Localização</th><th>Cidade</th><th>Bairro</th><th>Técnico</th><th>Contrato</th><th>O.S</th><th>Vagas</th><th>Coordenada</th>
+        <th>Data</th><th>Localização</th><th>Cidade</th><th>Bairro</th><th>Técnico</th><th>Atendente</th><th>Contrato</th><th>O.S</th><th>Vagas</th><th>Coordenada</th>
       </tr></thead><tbody>
         ${linhas.slice(0, limiteCu).map(r => `<tr data-chave="${esc(r.chave || '')}">
           <td class="cat-cell">${campoCu(r, 'data', 'date')}</td>
           <td>${campoCu(r, 'localizacao', 'text')}${r.observacao ? `<br><span style="font-size:11.5px;color:var(--text-muted)">${esc(r.observacao)}</span>` : ''}</td>
           <td>${campoCu(r, 'cidade', 'text')}</td><td>${campoCu(r, 'bairro', 'text')}</td><td>${campoCu(r, 'tecnico', 'text')}</td>
+          <td>${campoCu(r, 'registrado_por', 'text')}</td>
           <td>${campoCu(r, 'contrato', 'text')}</td><td>${campoCu(r, 'os', 'text')}</td>
           <td style="text-align:center;font-weight:600">${campoCu(r, 'portas', 'number')}</td>
           <td class="cu-coord" style="font-size:11.5px;color:${temCoordCleanUp(r) ? 'var(--text-muted)' : 'var(--warn-text)'}">${temCoordCleanUp(r) ? `${Number(r.lat).toFixed(5)}, ${Number(r.lon).toFixed(5)}` : 'sem coordenada — não aparece no mapa'}</td></tr>`).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${linhas.length} limpeza(s)</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${linhas.length} limpeza(s)</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
           <td style="text-align:center">${totalPortas}</td><td>-</td></tr>
       </tbody></table></div>
       ${pode ? `<div class="fin-salvar-barra">
