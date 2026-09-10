@@ -8242,6 +8242,12 @@ function renderBonusAoVivo(inicio, fim, filtroTecnico) {
 // ===================== PRODUÇÃO =====================
 function renderProduction() {
   const { start, end } = defaultPeriod();
+  // Quantas linhas a tabela "Ordens do Período — Detalhamento" desenha.
+  // Sem limite, um mês cheio sem filtrar cidade/técnico jogava milhares de
+  // <tr> de uma vez no innerHTML e travava a aba (achado em auditoria,
+  // 10/09/2026) — mesmo remédio que Pedágio, Clean Up e Acompanhamento
+  // Técnico já usam pra tabelas grandes.
+  let limiteProd = 300;
   document.getElementById('content').innerHTML = `${periodToolbar(start,end,`
     <div class="field"><label>Técnico</label><input type="text" id="f-tech" placeholder="Nome" list="tech-list"></div>
     ${multiCityField('prod-cidades', 'Cidades')}
@@ -8369,10 +8375,15 @@ function renderProduction() {
       <div id="desloc-detalhe"></div>
       ` : ''}
       <div class="section-heading">Ordens do Período — Detalhamento</div>
-      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">${rows.length} registro(s) exibido(s). Retornos IFI/IRR aparecem nas páginas Ofensor e Detalhe de Retornos.</p>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+        <p style="font-size:13px;color:var(--text-secondary);margin:0">${rows.length} registro(s) no filtro${rows.length > limiteProd ? ` — mostrando os ${limiteProd} mais recentes na tabela` : ''}. Retornos IFI/IRR aparecem nas páginas Ofensor e Detalhe de Retornos.</p>
+        <select class="topn-select" id="prod-det-limite">
+          ${[300, 1000, 3000, 99999].map(n => `<option value="${n}"${limiteProd === n ? ' selected' : ''}>${n >= 99999 ? 'Mostrar todas' : 'Mostrar ' + n}</option>`).join('')}
+        </select>
+      </div>
       <div class="cards-grid" id="prod-det-cards" style="margin-bottom:1rem"></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="prod-tab-periodo"><thead><tr><th>Data</th><th>Técnico</th><th>Cidade</th><th>Tipo</th><th>Status</th><th>Motivo da Baixa</th><th>OS</th><th>Contrato</th></tr></thead><tbody>
-      ${rows.map(r=>`<tr><td>${formatDate(r.data)}</td><td>${esc(r.recurso)}</td><td>${esc(r.cidade)}</td><td>${esc(r.tipo_atividade)}</td><td>${statusBadge(r.status)}</td><td>${esc(r.motivo) || '-'}</td><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td></tr>`).join('')}
+      ${[...rows].sort((a,b) => (b.data||'').localeCompare(a.data||'')).slice(0, limiteProd).map(r=>`<tr><td>${formatDate(r.data)}</td><td>${esc(r.recurso)}</td><td>${esc(r.cidade)}</td><td>${esc(r.tipo_atividade)}</td><td>${statusBadge(r.status)}</td><td>${esc(r.motivo) || '-'}</td><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td></tr>`).join('')}
       </tbody></table></div>
       ${prodCompleta ? `
       <div class="panel" style="margin-bottom:1.5rem">
@@ -8409,6 +8420,8 @@ function renderProduction() {
       tabPeriodo.addEventListener('filtro-aplicado', atualizarCardsDetalhe);
       atualizarCardsDetalhe();
     }
+    const selLimiteProd = document.getElementById('prod-det-limite');
+    if (selLimiteProd) selLimiteProd.addEventListener('change', () => { limiteProd = parseInt(selLimiteProd.value, 10); load(); });
 
     // A Tabela de Bônus saiu daqui (cliente, 02/09/2026): agora ela vive no
     // Acompanhamento Técnico, calculada ao vivo da produção do dia
