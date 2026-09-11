@@ -10213,11 +10213,6 @@ function chamadosGigaParseDataHora(s) {
 function chamadoGigaEmAberto(status) {
   return !/CONCLUID|CANCELAD/i.test(String(status || ''));
 }
-// Rótulo em português pros status brutos da GIGA — só pra exibição na tabela.
-const ROTULO_STATUS_GIGA = {
-  ST_OS_CRIADA: 'Criada', ST_OS_INICIADA: 'Iniciada',
-  ST_OS_TECNICO_A_CAMINHO: 'Técnico a caminho', ST_OS_CONCLUIDA: 'Concluída',
-};
 function importarCsvChamadosGiga(texto) {
   const linhas = parseCSV(texto);
   if (linhas.length < 2) return { erro: 'CSV vazio ou sem linhas de dados.' };
@@ -11291,33 +11286,34 @@ function renderChamadosGiga() {
     const semOS = abertos.filter(r => !contratosEmCampo.has(soDigitos(r.contrato)));
     const comOS = abertos.length - semOS.length;
 
-    const infoImprodutiva = contrato => {
-      const tentativas = (porContratoPCR.get(soDigitos(contrato)) || []).filter(r => ehNaoConcluidaEspecifico(r.status));
-      if (!tentativas.length) return null;
-      const maisRecente = [...tentativas].sort((a, b) => (b.data || '').localeCompare(a.data || ''))[0];
-      return { qtd: tentativas.length, motivo: (maisRecente.motivo || '').trim(), data: maisRecente.data };
-    };
+    // "Já visitada hoje?" — pedido do cliente: quer saber se JÁ saiu técnico
+    // HOJE pra esse contrato e a tentativa de hoje foi Não Concluída
+    // (improdutiva). É diferente de "em campo": em campo olha o histórico
+    // inteiro; isso aqui é só hoje — sinaliza pra quem despacha "já tentamos
+    // hoje e não resolveu, não manda de novo sem saber disso".
+    const hoje = hojeISOLocal();
+    const visitadaHojeImprodutiva = contrato =>
+      (porContratoPCR.get(soDigitos(contrato)) || []).some(r => r.data === hoje && ehNaoConcluidaEspecifico(r.status));
 
     body.innerHTML = `
       <div class="cards-grid">
         ${metricCard('Sem O.S. em campo', semOS.length, semOS.length > 0)}
         ${metricCard('Já em campo (PCR)', comOS)}
       </div>
-      <div class="section-heading">Sem O.S. em campo — aberto na GIGA e ainda não puxado</div>
-      <p style="font-size:13px;color:var(--text-secondary);margin:0 0 10px">Cruza o CONTRATO de cada chamado aberto contra o contrato que já apareceu no PCR (${esc(String(DB.pcr.length))} linhas carregadas — o CSV de atividades diário). Não achou = ainda não foi puxado pro campo. "Já foi improdutiva" olha se ESSE contrato já teve alguma tentativa Não Concluída no PCR, mesmo em O.S. anterior.</p>
-      ${!semOS.length ? '<div class="panel"><div class="empty">Nenhum chamado aberto ficou de fora — tudo que está aberto na GIGA já apareceu no PCR.</div></div>' : `
+      <div class="section-heading">Chamados em aberto na GIGA</div>
+      <p style="font-size:13px;color:var(--text-secondary);margin:0 0 10px">Cruza o CONTRATO de cada chamado aberto contra o PCR (${esc(String(DB.pcr.length))} linhas carregadas — o CSV de atividades diário). Status = EM CAMPO quando o contrato já tem alguma linha ativa (não Não Concluída) no PCR. "Já visitada hoje" = teve tentativa Não Concluída HOJE pra esse contrato.</p>
+      ${!abertos.length ? '<div class="panel"><div class="empty">Nenhum chamado em aberto no export importado.</div></div>' : `
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
-        <th>Abertura</th><th>Protocolo</th><th>Fila</th><th>Unidade</th><th>Contrato</th><th>Cliente</th><th>Bairro</th><th>Status</th><th>Já foi improdutiva?</th>
+        <th>Abertura</th><th>Protocolo</th><th>Fila</th><th>Unidade</th><th>Contrato</th><th>Cliente</th><th>Bairro</th><th>Status</th><th>Já visitada hoje?</th>
       </tr></thead><tbody>
-        ${[...semOS].sort((a,b) => (a.data_abertura||'').localeCompare(b.data_abertura||'')).map(r => {
-          const imp = infoImprodutiva(r.contrato);
+        ${[...abertos].sort((a,b) => (a.data_abertura||'').localeCompare(b.data_abertura||'')).map(r => {
+          const emCampo = contratosEmCampo.has(soDigitos(r.contrato));
+          const visitadaHoje = visitadaHojeImprodutiva(r.contrato);
           return `<tr>
           <td>${formatDate(r.data_abertura)}</td><td class="cat-cell">${esc(r.protocolo)}</td><td>${esc(r.fila)}</td>
           <td>${esc(r.unidade)}</td><td>${esc(r.contrato)}</td><td>${esc(r.cliente)}</td><td>${esc(r.bairro)}</td>
-          <td style="color:var(--warn-text);font-weight:600">${esc(ROTULO_STATUS_GIGA[r.status] || r.status)}</td>
-          <td>${imp
-            ? `<span style="color:var(--danger);font-weight:700">Sim (${imp.qtd}×)</span>${imp.motivo ? `<br><span style="font-size:11px;color:var(--text-secondary)">${esc(imp.motivo)} — ${formatDate(imp.data)}</span>` : ''}`
-            : '<span style="color:var(--text-secondary)">Não</span>'}</td>
+          <td style="color:${emCampo ? 'var(--success)' : 'var(--danger)'};font-weight:700">${emCampo ? 'EM CAMPO' : 'NÃO ESTÁ EM CAMPO'}</td>
+          <td>${visitadaHoje ? '<span style="color:var(--danger);font-weight:700">Sim</span>' : '<span style="color:var(--text-secondary)">Não</span>'}</td>
         </tr>`;
         }).join('')}
       </tbody></table></div>`}`;
