@@ -2578,6 +2578,14 @@ function comLimite(fn) {
     if (supaEmVoo < SUPA_MAX_PARALELO) roda(); else supaFila.push(roda);
   });
 }
+// Tabelas de Presença (roster e status por dia) não têm coluna "id" — a chave
+// primária é o próprio nome/técnico (+ data). Pedir a 1ª página já ordenada
+// por "id" nelas sempre dá erro 42703 e gasta uma requisição à toa em todo
+// login (achado auditando egress do Supabase em 11/09/2026); como já se sabe
+// de antemão, pula direto pro modo sem ordenação em vez de descobrir errando.
+const TABELAS_SEM_COLUNA_ID = new Set([
+  'presenca', 'presenca_tecnicos', 'presenca_escritorio_pessoas', 'presenca_escritorio'
+]);
 // Busca TODAS as linhas de uma tabela. Primeiro pergunta só o TAMANHO da tabela
 // (head: true = traz a contagem sem trazer linha nenhuma); sabendo o total, pede
 // todas as páginas em paralelo em vez de descobrir o fim tentando.
@@ -2585,7 +2593,7 @@ async function fetchAllRows(table, onPagina) {
   const pageSize = 1000;
   // ordena por "id" pra garantir que as páginas pedidas em paralelo não se
   // sobreponham. Se a tabela não tiver essa coluna, cai pro modo sem ordenação.
-  let ordenar = true;
+  let ordenar = !TABELAS_SEM_COLUNA_ID.has(table);
   const pedirPagina = (from) => comLimite(async () => {
     let q = supa.from(table).select('*');
     if (ordenar) q = q.order('id', { ascending: true });
