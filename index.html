@@ -14028,7 +14028,13 @@ function renderCleanUp() {
       && (!atendente || normalizeHeader(r.registrado_por).includes(atendente))
       && (!contrato || normalizeHeader(r.contrato).includes(contrato))
       && (!os || normalizeHeader(r.os).includes(os))
-      && (!de || !r.data || r.data >= de) && (!ate || !r.data || r.data <= ate)
+      // De/Até filtram pela DATA que a limpeza foi feita (não a data em que foi
+      // digitada no sistema). Antes, linha SEM data preenchida (histórico
+      // antigo, importado sem essa coluna) passava direto em qualquer
+      // intervalo — quem filtrava um período específico via limpeza de fora
+      // dele sobrando na lista. Agora, com filtro de data ativo, só entra
+      // quem TEM data e cai dentro do intervalo.
+      && (!de || (r.data && r.data >= de)) && (!ate || (r.data && r.data <= ate))
     ).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
     const comCoord = linhas.filter(temCoordCleanUp);
     const totalPortas = linhas.reduce((a, r) => a + (Number(r.portas) || 0), 0);
