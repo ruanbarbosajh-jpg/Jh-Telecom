@@ -4864,6 +4864,10 @@ function barsChart(elId, items, opts = {}) {
   // opts.clicavel: marca as linhas como clicáveis (data-label) — quem chamou
   // escuta o clique no próprio container e decide o que fazer (ex.: abrir o
   // detalhe das cidades de um técnico no gráfico de deslocamento).
+  // item.labelColor: pinta SÓ o nome daquela linha (a barra continua na cor do
+  // gráfico). Usado pra destacar o técnico que roda com carro da frota da JH
+  // nos rankings da Produção. Sempre por token de cor, nunca hex fixo — senão
+  // some no tema claro.
   // largura do valor reservada em "ch" pelo MAIOR texto do conjunto — sem isso
   // cada linha calculava seu próprio espaço sobrando (flex:0 0 auto no
   // .bar-value) e a barra do 1º lugar não terminava no mesmo x das outras,
@@ -4871,7 +4875,7 @@ function barsChart(elId, items, opts = {}) {
   const maiorValor = Math.max(...items.map(i => String(i.display !== undefined ? i.display : i.value).length));
   el.innerHTML = `<div class="bars-chart${opts.fill?' fill':''}">${items.map(i => `
     <div class="bar-row${opts.clicavel?' bar-row-clicavel':''}"${opts.clicavel?` data-label="${esc(i.label)}" title="Clique para ver o detalhe"`:''}>
-      <div class="bar-label"${opts.clicavel?'':` title="${i.label}"`}>${i.label}</div>
+      <div class="bar-label"${i.labelColor?` style="color:${i.labelColor};font-weight:600"`:''}${opts.clicavel?'':` title="${i.label}"`}>${i.label}</div>
       <div class="bar-track"><div class="bar-fill" style="--bar-final:${Math.max((i.value/max)*100,2)}%;background:${i.color||color}"></div></div>
       <div class="bar-value" style="min-width:${maiorValor}ch">${i.display !== undefined ? i.display : i.value}</div>
     </div>`).join('')}</div>`;
@@ -8413,6 +8417,10 @@ function renderBonusAoVivo(inicio, fim, filtroTecnico) {
 }
 
 // ===================== PRODUÇÃO =====================
+// Texto do filtro de status como ele aparece pro usuário — o título do gráfico
+// dizia só "(filtro aplicado)" e quem batia o olho no painel não sabia QUAL
+// status estava valendo. As chaves são os values do <select> do topo.
+const ROTULO_STATUS_FILTRO = { concluido: 'Concluído', naoconcluido: 'Não concluído', cancelado: 'Cancelado' };
 function renderProduction() {
   const { start, end } = defaultPeriod();
   // Quantas linhas a tabela "Ordens do Período — Detalhamento" desenha.
@@ -8485,6 +8493,20 @@ function renderProduction() {
     const deslocList = Object.entries(techCities).map(([label,set])=>({label,value:set.size})).sort((a,b)=>b.value-a.value);
     const bottomDeslocList = [...deslocList].sort((a,b)=>a.value-b.value);
 
+    // Técnico que roda com carro da FROTA DA JH sai com o nome em laranja nos
+    // rankings — ajuda a ler o deslocamento de bate-pronto (quem atende muita
+    // cidade tem carro da empresa?). PRÓPRIO fica sem destaque de propósito:
+    // nesse caso o carro é do técnico, não da frota (ver o comentário do
+    // ALUGUEL DE CARRO no Financeiro — são duas naturezas diferentes).
+    // A fonte é frotaDoTecnico: o fechamento do ciclo manda, o cadastro da
+    // Frota é o reserva. Calculado uma vez por load() e reaproveitado nas 4
+    // listas (as de baixo são as mesmas, só reordenadas).
+    const comFrotaJH = new Set();
+    [...techList, ...deslocList].forEach(t => {
+      if (!comFrotaJH.has(t.label) && frotaDoTecnico(t.label, s, e) === 'JH') comFrotaJH.add(t.label);
+    });
+    const marcarFrota = lista => lista.map(t => comFrotaJH.has(t.label) ? { ...t, labelColor: 'var(--warn-text)' } : t);
+
     // Evolução no tempo: segue TODOS os filtros do topo. Data de ponta a ponta
     // (ver caixasDeTempo), e também técnico/cidade, porque as séries saem de
     // baseRows. O filtro de STATUS entra logo abaixo: com um status escolhido,
@@ -8534,16 +8556,16 @@ function renderProduction() {
       ${diagnostico}
       <div class="panels-grid">
         <div class="panel"><h3>Ordens por Status</h3><p class="panel-subtitle">Distribuição geral das ordens registradas</p><div id="c-status"></div></div>
-        <div class="panel" style="display:flex;flex-direction:column"><h3>Ordens por Tipo de Atividade${statusFilter?' (filtro aplicado)':''}</h3><div id="c-tipo" style="flex:1;display:flex;flex-direction:column"></div></div>
+        <div class="panel" style="display:flex;flex-direction:column"><h3>Ordens por Tipo de Atividade${statusFilter?` (somente ${ROTULO_STATUS_FILTRO[statusFilter] || statusFilter})`:''}</h3><div id="c-tipo" style="flex:1;display:flex;flex-direction:column"></div></div>
       </div>
       <div class="panel" style="margin-bottom:1.5rem"><h3>Produção por Cidade (concluído)</h3><div id="c-city-rank"></div></div>
       <div class="panels-grid">
-        <div class="panel"><h3>Técnicos que mais produzem (concluído)</h3><div id="c-tech-top"></div></div>
-        <div class="panel"><h3>Técnicos que menos produzem (concluído)</h3><div id="c-tech-bottom"></div></div>
+        <div class="panel"><h3>Técnicos que mais produzem (concluído)</h3><p class="panel-subtitle">Nome em laranja: técnico com carro da frota da JH</p><div id="c-tech-top"></div></div>
+        <div class="panel"><h3>Técnicos que menos produzem (concluído)</h3><p class="panel-subtitle">Nome em laranja: técnico com carro da frota da JH</p><div id="c-tech-bottom"></div></div>
       </div>
       <div class="panels-grid">
-        <div class="panel"><h3>Técnicos que mais se deslocam (nº de cidades atendidas)</h3><div id="c-desloc-mais"></div></div>
-        <div class="panel"><h3>Técnicos que menos se deslocam (nº de cidades atendidas)</h3><div id="c-desloc-menos"></div></div>
+        <div class="panel"><h3>Técnicos que mais se deslocam (nº de cidades atendidas)</h3><p class="panel-subtitle">Nome em laranja: técnico com carro da frota da JH</p><div id="c-desloc-mais"></div></div>
+        <div class="panel"><h3>Técnicos que menos se deslocam (nº de cidades atendidas)</h3><p class="panel-subtitle">Nome em laranja: técnico com carro da frota da JH</p><div id="c-desloc-menos"></div></div>
       </div>
       <div id="desloc-detalhe"></div>
       ` : ''}
@@ -8609,10 +8631,10 @@ function renderProduction() {
     ], { centroLabel: 'Ordens' });
     barsChart('c-tipo', byTipo, { fill: true });
     barsChart('c-city-rank', cityRankColored);
-    barsChartTopN('c-tech-top', techList, {color:'#22c55e', defaultN:5});
-    barsChartTopN('c-tech-bottom', bottomTechList, {color:'#ef4444', defaultN:5});
-    barsChartTopN('c-desloc-mais', deslocList, {color:'#38bdf8', defaultN:5, clicavel:true});
-    barsChartTopN('c-desloc-menos', bottomDeslocList, {color:'#94a3c4', defaultN:5, clicavel:true});
+    barsChartTopN('c-tech-top', marcarFrota(techList), {color:'#22c55e', defaultN:5});
+    barsChartTopN('c-tech-bottom', marcarFrota(bottomTechList), {color:'#ef4444', defaultN:5});
+    barsChartTopN('c-desloc-mais', marcarFrota(deslocList), {color:'#38bdf8', defaultN:5, clicavel:true});
+    barsChartTopN('c-desloc-menos', marcarFrota(bottomDeslocList), {color:'#94a3c4', defaultN:5, clicavel:true});
     wireDeslocDetalhe();
 
     // Clicar no nome do técnico abre um card com as cidades que ele atendeu no
