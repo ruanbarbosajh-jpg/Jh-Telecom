@@ -2274,6 +2274,7 @@
       <a data-route="prazoativacao"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="7" y1="1.6" x2="11" y2="1.6"/><line x1="9" y1="1.6" x2="9" y2="3.6"/><circle cx="9" cy="10.6" r="6.3"/><line x1="9" y1="10.6" x2="9" y2="7.3"/><line x1="9" y1="10.6" x2="11.3" y2="12"/></svg></i><span class="nav-txt">Prazo Ativações (36h)</span></a>
       <a data-route="parcialdia"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2" y="3.8" width="14" height="12" rx="1.5"/><line x1="2" y1="7.2" x2="16" y2="7.2"/><line x1="5.5" y1="1.8" x2="5.5" y2="4.8"/><line x1="12.5" y1="1.8" x2="12.5" y2="4.8"/><path d="M5.7 11.2 7.4 12.9 11 9"/></svg></i><span class="nav-txt">Parcial do Dia</span></a>
       <a data-route="pcr"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M1.5 9.3h3.3l1.5-5 3 10 1.5-5h5.7"/></svg></i><span class="nav-txt">PCR</span></a>
+      <a data-route="chamadosgiga"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2" y="3" width="14" height="12" rx="1.5"/><line x1="2" y1="6.6" x2="16" y2="6.6"/><line x1="5.5" y1="1.3" x2="5.5" y2="4.3"/><line x1="12.5" y1="1.3" x2="12.5" y2="4.3"/><line x1="9" y1="10" x2="9" y2="10.02"/><line x1="9" y1="8.6" x2="9" y2="9.3"/></svg></i><span class="nav-txt">Chamados em Aberto (GIGA)</span></a>
       <a data-route="ofensoresprazo"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="4" y1="1.8" x2="4" y2="16.2"/><path d="M4 2.8h10l-2.6 3.5L14 9.8H4"/></svg></i><span class="nav-txt">Ofensores de Prazo</span></a>
       <a data-route="relatoriosdia"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M9 2.2v9"/><path d="M5.5 7.7 9 11.2l3.5-3.5"/><line x1="3" y1="15.2" x2="15" y2="15.2"/></svg></i><span class="nav-txt">Relatórios (Excel/Imagem)</span></a>
       <div class="sidebar-group">Frota</div>
@@ -2400,6 +2401,12 @@ const SUPABASE_TABLES = {
   presencaEscritorio:        { table: 'presenca_escritorio',         conflict: 'pessoa,data' },
   presencaEscritorioLog:     { table: 'presenca_escritorio_log',     conflict: 'id' },
   presencaEscritorioFolgas:  { table: 'presenca_escritorio_folgas',  conflict: 'id' },
+  // Chamados abertos/agendados no sistema da GIGA (export_chamados.csv) —
+  // alimenta "Chamados em Aberto (GIGA)". Igual ao PCR: cada import é uma
+  // FOTOGRAFIA do momento, então reimportar apaga o protocolo que saiu do
+  // CSV novo (ver sincronizarChamadosGiga) — por isso fica em
+  // TABELAS_SEM_CACHE, não entra no cache incremental.
+  chamadosGiga:    { table: 'chamados_giga',        conflict: 'protocolo' },
 };
 // devolve os campos de data de uma linha do PCR ao formato Date
 function hidratarLinhaPCR(r) {
@@ -2677,7 +2684,7 @@ const CACHE_STORE = 'tabelas';
 const CACHE_VERSAO = 1;
 // de quanto em quanto tempo a tabela volta do zero mesmo estando tudo certo
 const CACHE_VALIDADE_MS = 12 * 60 * 60 * 1000;
-const TABELAS_SEM_CACHE = new Set(['pcr', 'clean_up', 'presenca_escritorio_folgas']);
+const TABELAS_SEM_CACHE = new Set(['pcr', 'clean_up', 'presenca_escritorio_folgas', 'chamados_giga']);
 
 let cacheDbPromessa = null;
 function cacheAbrir() {
@@ -2879,6 +2886,7 @@ const SCRIPT_DA_TABELA = {
   presenca_escritorio_pessoas: 'PASSO-5', presenca_escritorio: 'PASSO-5',
   presenca_escritorio_log: 'PASSO-5', presenca_escritorio_folgas: 'PASSO-5',
   folha_escritorio: 'PASSO-18',
+  chamados_giga: 'PASSO-25',
 };
 // Barra de aviso do topo. Substitui o alerta que travava a tela a cada login:
 // tabela que falta não impede nada, então vira uma linha discreta com o que
@@ -3210,6 +3218,10 @@ const DB = {
   // Gestão Presença — Escritório: mesma ideia, pra Thaís/Rebeca e as
   // atendentes, mais o log de folgas (quem tá devendo folga do fds trabalhado).
   presencaEscritorioPessoas: [], presencaEscritorio: [], presencaEscritorioLog: [], presencaEscritorioFolgas: [],
+  // Chamados abertos/agendados no sistema da GIGA (export_chamados.csv) —
+  // não confundir com retornosGiga acima (aquele é a planilha de retorno
+  // IFI/IRR do fechamento; este é o chamado de atendimento em aberto).
+  chamadosGiga: [],
 };
 // Índices por "chave natural" — permitem que reimportar a mesma planilha (ou uma
 // versão atualizada dela) SUBSTITUA os registros já existentes em vez de duplicar.
@@ -3223,6 +3235,7 @@ const DB_INDEX = {
   cleanUp: new Map(),
   presencaTecnicos: new Map(), presenca: new Map(),
   presencaEscritorioPessoas: new Map(), presencaEscritorio: new Map(),
+  chamadosGiga: new Map(),
 };
 
 // ===================== CLEAN UP — BASE JÁ EMBUTIDA =====================
@@ -6650,6 +6663,7 @@ const DESCRICAO_ROTAS = {
   relatorios: 'Montagem de relatório em PDF escolhendo as seções.',
   import: 'Importação das planilhas e do CSV de atividades.',
   retornosgiga: 'Conferência da planilha de retornos enviada pela GIGA.',
+  chamadosgiga: 'Chamados abertos na GIGA que ainda não têm O.S. na Produção.',
 };
 // Lê o MENU LATERAL pra descobrir ícone, nome e área de cada rota. Fazendo
 // assim, uma rota nova entra no Menu Inicial só de existir no menu — não tem
@@ -6756,6 +6770,7 @@ const PAGES = {
   prazoativacao: { title: 'Prazo Ativações (36h)', render: renderPrazoAtivacao },
   parcialdia: { title: 'Parcial do Dia', render: renderParcialDoDia },
   pcr: { title: 'PCR — Prazo Controle Real', render: renderPCR },
+  chamadosgiga: { title: 'Chamados em Aberto (GIGA)', render: renderChamadosGiga },
   ofensoresprazo: { title: 'Ofensores de Prazo', render: renderOfensoresPrazo },
   relatoriosdia: { title: 'Relatórios — Excel e Imagem', render: renderRelatoriosDia },
   fleet: { title: 'Frota', render: renderFleet },
@@ -10176,6 +10191,97 @@ async function sincronizarPCR(linhas, dias) {
   logImportToSupabase({ ...logEntry, imported_by: currentUser ? (currentUser.nome || currentUser.login) : null });
   return res;
 }
+
+// ===================== CHAMADOS GIGA (export_chamados.csv) =====================
+// "11/09/2026" -> "2026-09-11". Devolve null pra "-" ou vazio (muita coluna
+// desse CSV vem sem data quando o chamado ainda não passou por aquela etapa).
+function chamadosGigaParseData(s) {
+  const m = String(s || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+}
+// "11/09/2026 09:02" -> Date. Também devolve null pra "-"/vazio.
+function chamadosGigaParseDataHora(s) {
+  const m = String(s || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  return new Date(+m[3], (+m[2]) - 1, +m[1], +m[4], +m[5]);
+}
+// Status que a GIGA usa pra "já resolvido" — o resto (criada, iniciada, técnico
+// a caminho) conta como EM ABERTO pra fins desta tela. Regex em vez de lista
+// fechada: se a GIGA um dia mandar "ST_OS_CANCELADA" ou parecido, já cai fora
+// do "aberto" sem precisar mexer no código.
+function chamadoGigaEmAberto(status) {
+  return !/CONCLUID|CANCELAD/i.test(String(status || ''));
+}
+// Rótulo em português pros status brutos da GIGA — só pra exibição na tabela.
+const ROTULO_STATUS_GIGA = {
+  ST_OS_CRIADA: 'Criada', ST_OS_INICIADA: 'Iniciada',
+  ST_OS_TECNICO_A_CAMINHO: 'Técnico a caminho', ST_OS_CONCLUIDA: 'Concluída',
+};
+function importarCsvChamadosGiga(texto) {
+  const linhas = parseCSV(texto);
+  if (linhas.length < 2) return { erro: 'CSV vazio ou sem linhas de dados.' };
+  const cab = linhas[0].map(normalizeHeader);
+  const col = nome => cab.indexOf(nome);
+  const iData = col('data abertura'), iProt = col('protocolo'), iFila = col('fila'), iUnid = col('unidade'),
+    iCtt = col('contrato'), iCli = col('cliente'), iBai = col('bairro'), iLog = col('logradouro'),
+    iAtr = col('atribuido'), iPrior = col('prioridade'), iIdent = col('identificador'),
+    iStatus = col('status'), iStCtt = col('status contrato'),
+    iAgenda = col('data confirmacao agendamento'), iTransf = col('data transferencia');
+  if (iProt < 0 || iCtt < 0 || iStatus < 0) return { erro: 'Não encontrei as colunas "protocolo", "contrato" e "status" nesse CSV.' };
+
+  const out = [];
+  for (const l of linhas.slice(1)) {
+    const protocolo = (l[iProt] || '').trim();
+    if (!protocolo) continue;
+    out.push({
+      protocolo, data_abertura: chamadosGigaParseData(l[iData]),
+      fila: (l[iFila] || '').trim(), unidade: (l[iUnid] || '').trim(),
+      contrato: (l[iCtt] || '').trim(), cliente: (l[iCli] || '').trim(),
+      bairro: (l[iBai] || '').trim(), logradouro: (l[iLog] || '').trim(),
+      atribuido: (l[iAtr] || '').trim(), prioridade: (l[iPrior] || '').trim(),
+      identificador: (l[iIdent] || '').trim(), status: (l[iStatus] || '').trim(),
+      status_contrato: (l[iStCtt] || '').trim(),
+      data_confirmacao_agendamento: chamadosGigaParseData(l[iAgenda]),
+      data_transferencia: (() => { const d = chamadosGigaParseDataHora(l[iTransf]); return d ? d.toISOString() : null; })(),
+    });
+  }
+  if (!out.length) return { erro: 'Nenhuma linha válida encontrada (confira se o protocolo/contrato estão preenchidos).' };
+  out.forEach(r => upsertRow(DB.chamadosGiga, DB_INDEX.chamadosGiga, r.protocolo, r));
+  return { total: out.length, syncPromise: sincronizarChamadosGiga(out) };
+}
+// Igual ao sincronizarPCR: depois de gravar o que veio no CSV, apaga do banco
+// qualquer protocolo que JÁ estava salvo e não apareceu neste export — o
+// export é sempre uma fotografia do momento (ver comentário no
+// PASSO-25-chamados-giga.sql), então sumir do CSV novo = fechado na GIGA.
+async function sincronizarChamadosGiga(linhas) {
+  if (!supa || !linhas.length) return { ok: true, skipped: !supa };
+  const res = await syncBatchToSupabase('chamadosGiga', linhas);
+  if (!res.ok) return res;
+  try {
+    const atuais = new Set(linhas.map(r => r.protocolo));
+    const existentes = [];
+    for (let inicio = 0; ; inicio += 1000) {
+      const { data, error } = await supa.from('chamados_giga').select('protocolo')
+        .order('protocolo', { ascending: true }).range(inicio, inicio + 999);
+      if (error || !data) break;
+      existentes.push(...data.map(r => r.protocolo));
+      if (data.length < 1000) break;
+    }
+    const sobrando = existentes.filter(p => !atuais.has(p));
+    for (let i = 0; i < sobrando.length; i += 100) {
+      await supa.from('chamados_giga').delete().in('protocolo', sobrando.slice(i, i + 100));
+    }
+    // reflete a limpeza também na cópia em memória, senão a tela mostraria o
+    // protocolo fechado até o próximo F5
+    DB.chamadosGiga = DB.chamadosGiga.filter(r => atuais.has(r.protocolo));
+    DB_INDEX.chamadosGiga = new Map(DB.chamadosGiga.map((r,i) => [r.protocolo, i]));
+  } catch (e) { /* limpeza é melhor-esforço: não pode derrubar a importação */ }
+  const logEntry = { sheet_name: 'export_chamados.csv (GIGA)', target_table: 'chamados_giga', row_count: linhas.length, imported_at: new Date().toLocaleString('pt-BR') };
+  DB.importsLog.unshift(logEntry);
+  logImportToSupabase({ ...logEntry, imported_by: currentUser ? (currentUser.nome || currentUser.login) : null });
+  return res;
+}
 // "há 12 min", "há 3 h", "há 2 dias" — dá a noção de frescor do dado sem
 // obrigar a fazer a conta de cabeça.
 function tempoDesde(d) {
@@ -11092,6 +11198,86 @@ function montarPrazoAtivacaoDoDia(dia, cidades, incluirME) {
       ${abertas.length > 40 ? `<p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">Mostrando as 40 mais urgentes de ${abertas.length}.</p>` : ''}
     </div>`}`;
 }
+
+// ===================== CHAMADOS EM ABERTO (GIGA) =====================
+// Cruza os chamados abertos no sistema da GIGA (export_chamados.csv) contra
+// os contratos que já existem na Produção — quem não tem contrato lá ainda
+// não foi puxado pro campo. Achado/pedido do cliente em 11/09/2026.
+function renderChamadosGiga() {
+  document.getElementById('content').innerHTML = `
+    <div class="toolbar">
+      <div class="field"><label>Arquivo CSV de chamados (GIGA)</label><input type="file" id="giga-file" accept=".csv,text/csv"></div>
+    </div>
+    <p id="giga-msg" style="font-size:13px;color:var(--text-secondary);margin:0 0 6px"></p>
+    <div id="giga-body"></div>`;
+
+  document.getElementById('giga-file').addEventListener('change', ev => {
+    const f = ev.target.files[0];
+    if (!f) return;
+    const msg = document.getElementById('giga-msg');
+    msg.textContent = 'Lendo ' + f.name + '...';
+    const leitor = new FileReader();
+    leitor.onload = () => {
+      const r = importarCsvChamadosGiga(String(leitor.result));
+      if (r.erro) { msg.innerHTML = `<span style="color:var(--danger)">${r.erro}</span>`; return; }
+      load();
+      const msg2 = document.getElementById('giga-msg');
+      msg2.innerHTML = `<span style="color:var(--success)">${r.total} chamados importados de ${f.name}</span>`
+        + (supa ? ' — <span style="color:var(--text-muted)">salvando no Supabase...</span>' : '');
+      if (r.syncPromise) r.syncPromise.then(res => {
+        const el = document.getElementById('giga-msg');
+        if (!el) return;
+        el.innerHTML = `<span style="color:var(--success)">${r.total} chamados importados de ${f.name}</span> — `
+          + (res && res.ok
+            ? '<span style="color:var(--success)">salvo no Supabase (fica disponível pra todo mundo)</span>'
+            : `<span style="color:var(--danger)">${ehAnalista()
+              ? 'não consegui salvar no Supabase: ' + ((res && res.error && res.error.message) || 'erro desconhecido')
+              : 'não consegui salvar no servidor — vale só nesta sessão. Avise o Analista.'}</span>`);
+        // a sincronização pode ter apagado protocolo fechado na GIGA — recarrega
+        // a tabela pra refletir isso sem esperar um F5
+        load();
+      });
+    };
+    leitor.readAsText(f, 'utf-8');
+  });
+
+  load();
+  function load() {
+    const body = document.getElementById('giga-body');
+    if (!DB.chamadosGiga.length) {
+      body.innerHTML = '<div class="panel"><div class="empty">Nenhum chamado importado ainda. Exporte o CSV do sistema da GIGA e importe acima.</div></div>';
+      return;
+    }
+    const abertos = DB.chamadosGiga.filter(r => chamadoGigaEmAberto(r.status));
+    // contrato como só-dígitos dos dois lados, pra não depender de máscara/
+    // espaço em branco batendo igual nas duas fontes
+    const soDigitos = v => String(v || '').replace(/\D/g, '');
+    const contratosEmCampo = new Set(DB.producao.map(p => soDigitos(p.contrato)).filter(Boolean));
+    const semOS = abertos.filter(r => !contratosEmCampo.has(soDigitos(r.contrato)));
+    const comOS = abertos.length - semOS.length;
+
+    body.innerHTML = `
+      <div class="cards-grid">
+        ${metricCard('Chamados no export', DB.chamadosGiga.length)}
+        ${metricCard('Em aberto na GIGA', abertos.length)}
+        ${metricCard('Sem O.S. em campo', semOS.length, semOS.length > 0)}
+        ${metricCard('Já em campo', comOS)}
+      </div>
+      <div class="section-heading">Sem O.S. em campo — aberto na GIGA e ainda não puxado</div>
+      <p style="font-size:13px;color:var(--text-secondary);margin:0 0 10px">Cruza o CONTRATO de cada chamado aberto contra o contrato já lançado na Produção (${esc(String(DB.producao.length))} ordens carregadas). Não achou = ainda não foi puxado pro campo.</p>
+      ${!semOS.length ? '<div class="panel"><div class="empty">Nenhum chamado aberto ficou de fora — tudo que está aberto na GIGA já tem O.S. na Produção.</div></div>' : `
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+        <th>Abertura</th><th>Protocolo</th><th>Fila</th><th>Unidade</th><th>Contrato</th><th>Cliente</th><th>Bairro</th><th>Status</th>
+      </tr></thead><tbody>
+        ${[...semOS].sort((a,b) => (a.data_abertura||'').localeCompare(b.data_abertura||'')).map(r => `<tr>
+          <td>${formatDate(r.data_abertura)}</td><td class="cat-cell">${esc(r.protocolo)}</td><td>${esc(r.fila)}</td>
+          <td>${esc(r.unidade)}</td><td>${esc(r.contrato)}</td><td>${esc(r.cliente)}</td><td>${esc(r.bairro)}</td>
+          <td style="color:var(--warn-text);font-weight:600">${esc(ROTULO_STATUS_GIGA[r.status] || r.status)}</td>
+        </tr>`).join('')}
+      </tbody></table></div>`}`;
+  }
+}
+
 function renderPrazoAtivacao() {
   const base = DB.prazo.filter(p => ehPrazoDeAtivacao(p, true));
   const mesesDisponiveis = getAvailableMonths(base);
