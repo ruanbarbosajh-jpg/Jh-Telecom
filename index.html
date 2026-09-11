@@ -2307,6 +2307,10 @@
         <h2 id="page-title">Relatório de Eficiência</h2>
       </div>
       <div class="topbar-actions">
+        <!-- Escape hatch do cache local: joga fora a cópia guardada no
+             navegador e busca tudo de novo do Supabase. Serve pra "tá
+             estranho, recarrega do zero" sem precisar de suporte. -->
+        <button class="icon-btn" id="btn-recarregar-dados" title="Descartar a cópia local e buscar tudo de novo do banco">↻ Atualizar dados</button>
         <button class="icon-btn" id="btn-tema" title="Alternar tema claro/escuro"><span id="btn-tema-icone">☀</span><span id="btn-tema-texto">Tema claro</span></button>
         <button class="icon-btn" id="btn-trocar-usuario" title="Entrar com outro perfil">⇄ Alterar usuário</button>
         <div class="topbar-user" id="user-name"></div>
@@ -2640,6 +2644,178 @@ async function fetchAllRows(table, onPagina) {
   );
   return primeira.data.concat(...restantes);
 }
+
+// ===================== CACHE LOCAL (IndexedDB) =====================
+// POR QUE ISSO EXISTE
+// Todo login/F5 rebaixava as ~25 tabelas inteiras do Supabase. Com o banco em
+// 76 MB e 9 pessoas usando, isso consumiu 2,03 GB dos 5 GB de EGRESS do plano
+// gratuito num único ciclo (achado em 11/09/2026 olhando o painel do Supabase)
+// — dado relido, não dado guardado. Aqui o navegador passa a guardar a cópia
+// dele e, na entrada seguinte, pede só as linhas que MUDARAM desde a última
+// vez (coluna atualizado_em, carimbada por gatilho no Postgres — ver
+// sql/PASSO-24-atualizado-em.sql).
+//
+// O QUE NÃO DÁ PRA FAZER COM DELTA
+// Quem pede "o que mudou desde X" nunca fica sabendo do que foi APAGADO. Três
+// tabelas apagam linha de verdade e por isso continuam recarregando inteiras:
+//   pcr                        -> a reimportação do CSV apaga a O.S. que saiu
+//                                 do dia (remanejamento), ver sincronizarPCR
+//   clean_up                   -> exclusão pela tela
+//   presenca_escritorio_folgas -> exclusão pela tela
+// Nas outras, a rede de segurança é a CONFERÊNCIA DE TOTAL: depois de aplicar
+// o delta, compara a contagem local com a do banco (HEAD, não traz linha
+// nenhuma). Se não bate, alguém apagou/mexeu por fora e a tabela é recarregada
+// inteira. Além disso, a cada CACHE_VALIDADE_MS tudo volta do zero de qualquer
+// jeito — teto para qualquer desencontro que passe por essas duas peneiras.
+//
+// Enquanto o PASSO-24 não for rodado, a coluna não existe, o delta falha e
+// tudo continua carregando como antes: o sistema não quebra sem o SQL.
+const CACHE_DB_NOME = 'jh_telecom_cache';
+const CACHE_STORE = 'tabelas';
+// subir este número invalida todo cache já salvo nos navegadores — use quando
+// mudar o formato das linhas (coluna nova, hydrate diferente, etc.)
+const CACHE_VERSAO = 1;
+// de quanto em quanto tempo a tabela volta do zero mesmo estando tudo certo
+const CACHE_VALIDADE_MS = 12 * 60 * 60 * 1000;
+const TABELAS_SEM_CACHE = new Set(['pcr', 'clean_up', 'presenca_escritorio_folgas']);
+
+let cacheDbPromessa = null;
+function cacheAbrir() {
+  if (cacheDbPromessa) return cacheDbPromessa;
+  cacheDbPromessa = new Promise(resolve => {
+    try {
+      if (!window.indexedDB) return resolve(null);
+      const req = indexedDB.open(CACHE_DB_NOME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(CACHE_STORE)) db.createObjectStore(CACHE_STORE);
+      };
+      req.onsuccess = () => resolve(req.result);
+      // aba anônima, cota estourada, IndexedDB bloqueado: sem cache o sistema
+      // volta sozinho ao modo antigo, não é erro pro usuário
+      req.onerror = () => resolve(null);
+      req.onblocked = () => resolve(null);
+    } catch (e) { resolve(null); }
+  });
+  return cacheDbPromessa;
+}
+function cacheLer(tabela) {
+  return cacheAbrir().then(db => new Promise(resolve => {
+    if (!db) return resolve(null);
+    try {
+      const req = db.transaction(CACHE_STORE, 'readonly').objectStore(CACHE_STORE).get(tabela);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    } catch (e) { resolve(null); }
+  }));
+}
+function cacheGravar(tabela, registro) {
+  return cacheAbrir().then(db => new Promise(resolve => {
+    if (!db) return resolve(false);
+    try {
+      const tx = db.transaction(CACHE_STORE, 'readwrite');
+      tx.objectStore(CACHE_STORE).put(registro, tabela);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+      tx.onabort = () => resolve(false);
+    } catch (e) { resolve(false); }
+  }));
+}
+function cacheLimpar() {
+  return cacheAbrir().then(db => new Promise(resolve => {
+    if (!db) return resolve(false);
+    try {
+      const tx = db.transaction(CACHE_STORE, 'readwrite');
+      tx.objectStore(CACHE_STORE).clear();
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+    } catch (e) { resolve(false); }
+  }));
+}
+// A marca d'água é sempre um valor que VEIO DO SERVIDOR (o maior atualizado_em
+// recebido), nunca o relógio do navegador — computador com hora errada
+// desalinharia o delta pra sempre.
+function maiorMarca(linhas, anterior) {
+  let maior = anterior || null;
+  for (const r of linhas) {
+    const v = r && r.atualizado_em;
+    if (!v) continue;
+    if (!maior || Date.parse(v) > Date.parse(maior)) maior = v;
+  }
+  return maior;
+}
+async function contarLinhasNoBanco(tabela) {
+  try {
+    const { count, error } = await comLimite(() => supa.from(tabela).select('*', { count: 'exact', head: true }));
+    return (!error && typeof count === 'number') ? count : null;
+  } catch (e) { return null; }
+}
+// Só as linhas alteradas DEPOIS da marca. O ">" é estrito de propósito:
+// o Postgres carimba com now(), que é a hora da TRANSAÇÃO — um upsert de 500
+// linhas sai todo com o mesmo valor, e logo depois do PASSO-24 a tabela
+// inteira tem o mesmo carimbo. Com ">=", essas linhas voltariam todas a cada
+// entrada e o cache não economizaria nada (visto no teste).
+//
+// O preço do ">" é uma corrida rara: gravação que COMEÇOU antes da nossa
+// leitura mas só confirma depois pode ficar para trás. Quem segura isso são
+// as duas peneiras seguintes — a conferência de total pega qualquer linha
+// NOVA que tenha escapado, e a recarga completa a cada CACHE_VALIDADE_MS
+// limita no tempo uma alteração que tenha escapado.
+async function fetchLinhasAlteradas(tabela, marca) {
+  const pageSize = 1000;
+  let todas = [], de = 0;
+  while (true) {
+    const { data, error } = await comLimite(() => supa.from(tabela).select('*')
+      .gt('atualizado_em', marca)
+      .order('atualizado_em', { ascending: true })
+      .range(de, de + pageSize - 1));
+    if (error) throw error;
+    todas = todas.concat(data);
+    if (data.length < pageSize) break;
+    de += pageSize;
+  }
+  return todas;
+}
+async function recarregarTabelaInteira(tabela, onPagina) {
+  const rows = await fetchAllRows(tabela, onPagina);
+  await cacheGravar(tabela, { versao: CACHE_VERSAO, completoEm: Date.now(), marca: maiorMarca(rows, null), rows });
+  return rows;
+}
+// Ponto de entrada: devolve as linhas da tabela usando o cache quando dá.
+async function carregarTabela(tabela, conflict, onPagina) {
+  if (TABELAS_SEM_CACHE.has(tabela) || !supa) return await fetchAllRows(tabela, onPagina);
+  let guardado = null;
+  try { guardado = await cacheLer(tabela); } catch (e) { guardado = null; }
+  const serve = guardado && guardado.versao === CACHE_VERSAO && Array.isArray(guardado.rows)
+    && guardado.marca && (Date.now() - (guardado.completoEm || 0) < CACHE_VALIDADE_MS);
+  if (!serve) return await recarregarTabelaInteira(tabela, onPagina);
+
+  let alteradas;
+  try {
+    alteradas = await fetchLinhasAlteradas(tabela, guardado.marca);
+  } catch (e) {
+    // coluna atualizado_em ainda não existe (PASSO-24 não rodado) ou qualquer
+    // outro tropeço: cai no caminho antigo, que sempre funciona
+    return await recarregarTabelaInteira(tabela, onPagina);
+  }
+  const cols = conflict.split(',');
+  const chaveDe = r => cols.map(c => r[c]).join('|');
+  const porChave = new Map(guardado.rows.map(r => [chaveDe(r), r]));
+  alteradas.forEach(r => porChave.set(chaveDe(r), r));
+  const rows = [...porChave.values()];
+  // conferência de total: pega exclusão feita por fora do sistema
+  const totalBanco = await contarLinhasNoBanco(tabela);
+  if (totalBanco !== null && totalBanco !== rows.length) return await recarregarTabelaInteira(tabela, onPagina);
+  if (onPagina) onPagina(rows.length);
+  await cacheGravar(tabela, {
+    versao: CACHE_VERSAO,
+    completoEm: guardado.completoEm,   // a validade conta do último carregamento INTEIRO
+    marca: maiorMarca(alteradas, guardado.marca),
+    rows
+  });
+  return rows;
+}
+
 // Carrega tudo que já está salvo no Supabase pro estado local, na entrada do sistema.
 // onProgresso(tabelasProntas, totalTabelas, nomeDaUltima) alimenta a barra do splash.
 // Tabelas que o banco ainda não tem (o SQL de criação não foi rodado). Não é
@@ -2654,7 +2830,7 @@ async function loadAllFromSupabase(onProgresso) {
   let prontas = 0;
   await Promise.all(entradas.map(async ([jsName, cfg]) => {
     try {
-      const brutas = await fetchAllRows(cfg.table);
+      const brutas = await carregarTabela(cfg.table, cfg.conflict);
       let rows = cfg.hydrate ? brutas.map(cfg.hydrate) : brutas;
       if (cfg.dedupe) rows = cfg.dedupe(rows);
       DB[jsName] = rows;
@@ -3390,6 +3566,14 @@ atualizarCampoNome('li-user','li-campo-nome','li-nome');
 })();
 aplicarTema('dark');
 document.getElementById('btn-tema').addEventListener('click', alternarTema);
+// Descarta a cópia local e recarrega a página: o caminho normal de entrada já
+// busca tudo de novo. Recarregar a página (em vez de chamar o loader no meio
+// da sessão) evita tela montada com dado pela metade enquanto troca embaixo.
+document.getElementById('btn-recarregar-dados').addEventListener('click', async () => {
+  if (!confirm('Descartar a cópia guardada neste navegador e buscar tudo de novo do banco?')) return;
+  try { await cacheLimpar(); } catch (e) { /* sem cache já é o estado desejado */ }
+  location.reload();
+});
 document.getElementById('btn-trocar-usuario').addEventListener('click', abrirTrocaUsuario);
 document.getElementById('tr-cancelar').addEventListener('click', fecharTrocaUsuario);
 document.getElementById('tr-confirmar').addEventListener('click', confirmarTrocaUsuario);
