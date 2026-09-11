@@ -6663,7 +6663,7 @@ const DESCRICAO_ROTAS = {
   relatorios: 'Montagem de relatório em PDF escolhendo as seções.',
   import: 'Importação das planilhas e do CSV de atividades.',
   retornosgiga: 'Conferência da planilha de retornos enviada pela GIGA.',
-  chamadosgiga: 'Chamados abertos na GIGA que ainda não têm O.S. na Produção.',
+  chamadosgiga: 'Chamados abertos na GIGA que ainda não foram puxados pro campo (PCR).',
 };
 // Lê o MENU LATERAL pra descobrir ícone, nome e área de cada rota. Fazendo
 // assim, uma rota nova entra no Menu Inicial só de existir no menu — não tem
@@ -11200,9 +11200,13 @@ function montarPrazoAtivacaoDoDia(dia, cidades, incluirME) {
 }
 
 // ===================== CHAMADOS EM ABERTO (GIGA) =====================
-// Cruza os chamados abertos no sistema da GIGA (export_chamados.csv) contra
-// os contratos que já existem na Produção — quem não tem contrato lá ainda
-// não foi puxado pro campo. Achado/pedido do cliente em 11/09/2026.
+// Cruza os chamados abertos no sistema da GIGA (export_chamados.csv) contra o
+// PCR (CSV de atividades) — quem tem o contrato lá já foi puxado pro campo,
+// quem não tem ainda não foi (só está aberto/agendado do lado da GIGA). Não é
+// contra a Produção: aquela vem da planilha do Excel, importada de vez em
+// quando; o PCR é o retrato diário de quem já tem técnico/rota atribuído — é
+// o cruzamento certo pra "está em campo ou não" (corrigido em 11/09/2026,
+// pedido do cliente — a 1ª versão cruzava contra Produção, errado).
 function renderChamadosGiga() {
   document.getElementById('content').innerHTML = `
     <div class="toolbar">
@@ -11252,28 +11256,72 @@ function renderChamadosGiga() {
     // contrato como só-dígitos dos dois lados, pra não depender de máscara/
     // espaço em branco batendo igual nas duas fontes
     const soDigitos = v => String(v || '').replace(/\D/g, '');
-    const contratosEmCampo = new Set(DB.producao.map(p => soDigitos(p.contrato)).filter(Boolean));
+    // "Em campo" é o PCR, não a Produção: a Produção vem da planilha do Excel
+    // (importada de vez em quando), enquanto o PCR é o CSV de atividades que a
+    // própria operação importa todo dia — é o retrato de quem JÁ está com
+    // técnico/rota atribuído. O CSV da GIGA mistura os dois mundos (o que já
+    // está em campo E o que só está agendado pra outro dia); cruzar contra o
+    // PCR (um "PROCX" pelo contrato) é o que separa um do outro de verdade
+    // (pedido do cliente, 11/09/2026 — antes cruzava contra Produção, errado).
+    const porContratoPCR = new Map();
+    DB.pcr.forEach(r => {
+      const c = soDigitos(r.contrato);
+      if (!c) return;
+      if (!porContratoPCR.has(c)) porContratoPCR.set(c, []);
+      porContratoPCR.get(c).push(r);
+    });
+    // "Já foi dada improdutiva antes?" — mesmo jargão/regra já usada no mapa de
+    // remanejamento do Parcial do Dia: "improdutiva" aqui é só o status NÃO
+    // CONCLUÍDO do PCR (não entra cancelado/suspenso). Como o chamado da GIGA
+    // ainda nem tem O.S. no PCR, o cruzamento é pelo CONTRATO — histórico de
+    // QUALQUER tentativa anterior pra esse cliente, não só desta O.S.
+    const ehNaoConcluidaEspecifico = status => /nao conclu/.test(normalizeHeader(status));
+    // "Em campo" precisa de pelo menos uma linha no PCR que NÃO seja Não
+    // Concluído — uma tentativa improdutiva SOZINHA não conta como "em campo":
+    // o técnico já foi lá e não resolveu, o cliente continua sem atendimento
+    // até alguém ser redespachado. Sem essa distinção, todo contrato com
+    // histórico de improdutiva "sumia" da lista de sem-O.S. por já ter
+    // qualquer linha no PCR — achado testando com dado controlado, não na
+    // teoria (a coluna "já foi improdutiva" nunca teria o que mostrar).
+    const contratosEmCampo = new Set(
+      [...porContratoPCR.entries()]
+        .filter(([, linhas]) => linhas.some(r => !ehNaoConcluidaEspecifico(r.status)))
+        .map(([c]) => c)
+    );
     const semOS = abertos.filter(r => !contratosEmCampo.has(soDigitos(r.contrato)));
     const comOS = abertos.length - semOS.length;
+
+    const infoImprodutiva = contrato => {
+      const tentativas = (porContratoPCR.get(soDigitos(contrato)) || []).filter(r => ehNaoConcluidaEspecifico(r.status));
+      if (!tentativas.length) return null;
+      const maisRecente = [...tentativas].sort((a, b) => (b.data || '').localeCompare(a.data || ''))[0];
+      return { qtd: tentativas.length, motivo: (maisRecente.motivo || '').trim(), data: maisRecente.data };
+    };
 
     body.innerHTML = `
       <div class="cards-grid">
         ${metricCard('Chamados no export', DB.chamadosGiga.length)}
         ${metricCard('Em aberto na GIGA', abertos.length)}
         ${metricCard('Sem O.S. em campo', semOS.length, semOS.length > 0)}
-        ${metricCard('Já em campo', comOS)}
+        ${metricCard('Já em campo (PCR)', comOS)}
       </div>
       <div class="section-heading">Sem O.S. em campo — aberto na GIGA e ainda não puxado</div>
-      <p style="font-size:13px;color:var(--text-secondary);margin:0 0 10px">Cruza o CONTRATO de cada chamado aberto contra o contrato já lançado na Produção (${esc(String(DB.producao.length))} ordens carregadas). Não achou = ainda não foi puxado pro campo.</p>
-      ${!semOS.length ? '<div class="panel"><div class="empty">Nenhum chamado aberto ficou de fora — tudo que está aberto na GIGA já tem O.S. na Produção.</div></div>' : `
+      <p style="font-size:13px;color:var(--text-secondary);margin:0 0 10px">Cruza o CONTRATO de cada chamado aberto contra o contrato que já apareceu no PCR (${esc(String(DB.pcr.length))} linhas carregadas — o CSV de atividades diário). Não achou = ainda não foi puxado pro campo. "Já foi improdutiva" olha se ESSE contrato já teve alguma tentativa Não Concluída no PCR, mesmo em O.S. anterior.</p>
+      ${!semOS.length ? '<div class="panel"><div class="empty">Nenhum chamado aberto ficou de fora — tudo que está aberto na GIGA já apareceu no PCR.</div></div>' : `
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
-        <th>Abertura</th><th>Protocolo</th><th>Fila</th><th>Unidade</th><th>Contrato</th><th>Cliente</th><th>Bairro</th><th>Status</th>
+        <th>Abertura</th><th>Protocolo</th><th>Fila</th><th>Unidade</th><th>Contrato</th><th>Cliente</th><th>Bairro</th><th>Status</th><th>Já foi improdutiva?</th>
       </tr></thead><tbody>
-        ${[...semOS].sort((a,b) => (a.data_abertura||'').localeCompare(b.data_abertura||'')).map(r => `<tr>
+        ${[...semOS].sort((a,b) => (a.data_abertura||'').localeCompare(b.data_abertura||'')).map(r => {
+          const imp = infoImprodutiva(r.contrato);
+          return `<tr>
           <td>${formatDate(r.data_abertura)}</td><td class="cat-cell">${esc(r.protocolo)}</td><td>${esc(r.fila)}</td>
           <td>${esc(r.unidade)}</td><td>${esc(r.contrato)}</td><td>${esc(r.cliente)}</td><td>${esc(r.bairro)}</td>
           <td style="color:var(--warn-text);font-weight:600">${esc(ROTULO_STATUS_GIGA[r.status] || r.status)}</td>
-        </tr>`).join('')}
+          <td>${imp
+            ? `<span style="color:var(--danger);font-weight:700">Sim (${imp.qtd}×)</span>${imp.motivo ? `<br><span style="font-size:11px;color:var(--text-secondary)">${esc(imp.motivo)} — ${formatDate(imp.data)}</span>` : ''}`
+            : '<span style="color:var(--text-secondary)">Não</span>'}</td>
+        </tr>`;
+        }).join('')}
       </tbody></table></div>`}`;
   }
 }
