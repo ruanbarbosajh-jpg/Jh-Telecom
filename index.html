@@ -11292,8 +11292,13 @@ function renderChamadosGiga() {
     // inteiro; isso aqui é só hoje — sinaliza pra quem despacha "já tentamos
     // hoje e não resolveu, não manda de novo sem saber disso".
     const hoje = hojeISOLocal();
-    const visitadaHojeImprodutiva = contrato =>
-      (porContratoPCR.get(soDigitos(contrato)) || []).some(r => r.data === hoje && ehNaoConcluidaEspecifico(r.status));
+    const visitadaHojeImprodutiva = contrato => {
+      const tentativas = (porContratoPCR.get(soDigitos(contrato)) || [])
+        .filter(r => r.data === hoje && ehNaoConcluidaEspecifico(r.status));
+      if (!tentativas.length) return null;
+      const motivos = [...new Set(tentativas.map(r => (r.motivo || '').trim()).filter(Boolean))];
+      return { motivo: motivos.join('; ') };
+    };
 
     body.innerHTML = `
       <div class="cards-grid">
@@ -11301,7 +11306,7 @@ function renderChamadosGiga() {
         ${metricCard('Já em campo (PCR)', comOS)}
       </div>
       <div class="section-heading">Chamados em aberto na GIGA</div>
-      <p style="font-size:13px;color:var(--text-secondary);margin:0 0 10px">Cruza o CONTRATO de cada chamado aberto contra o PCR (${esc(String(DB.pcr.length))} linhas carregadas — o CSV de atividades diário). Status = EM CAMPO quando o contrato já tem alguma linha ativa (não Não Concluída) no PCR. "Já visitada hoje" = teve tentativa Não Concluída HOJE pra esse contrato.</p>
+      <p style="font-size:13px;color:var(--text-secondary);margin:0 0 10px">Cruza o CONTRATO de cada chamado aberto contra o PCR (${esc(String(DB.pcr.length))} linhas carregadas — o CSV de atividades diário). Status = EM CAMPO quando o contrato já tem alguma linha ativa (não Não Concluída) no PCR. "Já visitada hoje" = teve tentativa Não Concluída HOJE pra esse contrato (com o motivo, quando tem).</p>
       ${!abertos.length ? '<div class="panel"><div class="empty">Nenhum chamado em aberto no export importado.</div></div>' : `
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
         <th>Abertura</th><th>Protocolo</th><th>Fila</th><th>Unidade</th><th>Contrato</th><th>Cliente</th><th>Bairro</th><th>Status</th><th>Já visitada hoje?</th>
@@ -11313,7 +11318,9 @@ function renderChamadosGiga() {
           <td>${formatDate(r.data_abertura)}</td><td class="cat-cell">${esc(r.protocolo)}</td><td>${esc(r.fila)}</td>
           <td>${esc(r.unidade)}</td><td>${esc(r.contrato)}</td><td>${esc(r.cliente)}</td><td>${esc(r.bairro)}</td>
           <td style="color:${emCampo ? 'var(--success)' : 'var(--danger)'};font-weight:700">${emCampo ? 'EM CAMPO' : 'NÃO ESTÁ EM CAMPO'}</td>
-          <td>${visitadaHoje ? '<span style="color:var(--danger);font-weight:700">Sim</span>' : '<span style="color:var(--text-secondary)">Não</span>'}</td>
+          <td>${visitadaHoje
+            ? `<span style="color:var(--danger);font-weight:700">Sim</span>${visitadaHoje.motivo ? `<br><span style="font-size:11px;color:var(--text-secondary)">${esc(visitadaHoje.motivo)}</span>` : ''}`
+            : '<span style="color:var(--text-secondary)">Não</span>'}</td>
         </tr>`;
         }).join('')}
       </tbody></table></div>`}`;
