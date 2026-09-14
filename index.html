@@ -26,6 +26,11 @@
      canvas que recebeu uma imagem SVG com HTML embutido dentro, por segurança.
      html2canvas lê o DOM de verdade e redesenha, sem esse bloqueio. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<!-- PptxGenJS: gera o .pptx da "Reunião Técnica — Prazos e Retornos" direto no
+     navegador (pedido do cliente 14/09/2026: "quero o botão pra exportar em
+     PowerPoint"). Mesmo esquema das outras libs: CDN, sem build. Se a CDN
+     estiver fora do ar, só esse botão para de funcionar — a tela continua. -->
+<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
 <!-- Leaflet: mapa de verdade (com base cartográfica) no painel "Cidades e Bairros
      Atendidos" do Dashboard — pedido explícito do cliente ("quero um mapa, igual a
      imagem", vendo um bubble map). Sem isso só dava pra mostrar concentração por
@@ -2276,6 +2281,7 @@
       <a data-route="pcr"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M1.5 9.3h3.3l1.5-5 3 10 1.5-5h5.7"/></svg></i><span class="nav-txt">PCR</span></a>
       <a data-route="chamadosgiga"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2" y="3" width="14" height="12" rx="1.5"/><line x1="2" y1="6.6" x2="16" y2="6.6"/><line x1="5.5" y1="1.3" x2="5.5" y2="4.3"/><line x1="12.5" y1="1.3" x2="12.5" y2="4.3"/><line x1="9" y1="10" x2="9" y2="10.02"/><line x1="9" y1="8.6" x2="9" y2="9.3"/></svg></i><span class="nav-txt">Chamados em Aberto (GIGA)</span></a>
       <a data-route="ofensoresprazo"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="4" y1="1.8" x2="4" y2="16.2"/><path d="M4 2.8h10l-2.6 3.5L14 9.8H4"/></svg></i><span class="nav-txt">Ofensores de Prazo</span></a>
+      <a data-route="reuniaoprazos"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2.2" y="3" width="13.6" height="9.4" rx="1.3"/><line x1="6" y1="15" x2="12" y2="15"/><line x1="9" y1="12.4" x2="9" y2="15"/><path d="M5.6 9.6 8 7.2l2 2 2.6-3"/></svg></i><span class="nav-txt">Reunião Téc. — Prazos e Retornos</span></a>
       <a data-route="relatoriosdia"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M9 2.2v9"/><path d="M5.5 7.7 9 11.2l3.5-3.5"/><line x1="3" y1="15.2" x2="15" y2="15.2"/></svg></i><span class="nav-txt">Relatórios (Excel/Imagem)</span></a>
       <div class="sidebar-group">Frota</div>
       <a data-route="fleet"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.3" y="5.8" width="9" height="7.2" rx="1"/><path d="M10.3 8.6h3.4l2.4 2.6v1.8h-5.8Z"/><circle cx="4.8" cy="14.6" r="1.4"/><circle cx="13.2" cy="14.6" r="1.4"/></svg></i><span class="nav-txt">Frota</span></a>
@@ -6651,6 +6657,7 @@ const DESCRICAO_ROTAS = {
   parcialdia: 'Fechamento do dia: mão de obra, status das ordens e imagem do remanejamento.',
   pcr: 'Prazo em tempo real: o que está vencendo agora e quem está em rota.',
   ofensoresprazo: 'Quem mais estourou prazo no período, por técnico e por cidade.',
+  reuniaoprazos: 'Pauta pronta da reunião técnica: prazo e retornos em percentual, com exportação em PowerPoint.',
   relatoriosdia: 'Exportação dos relatórios do dia em Excel e em imagem.',
   fleet: 'Frota: vínculos, trocas, manutenções, multas e revisões.',
   toll: 'Passagens de pedágio por placa, condutor e data.',
@@ -6772,6 +6779,7 @@ const PAGES = {
   pcr: { title: 'PCR — Prazo Controle Real', render: renderPCR },
   chamadosgiga: { title: 'Chamados em Aberto (GIGA)', render: renderChamadosGiga },
   ofensoresprazo: { title: 'Ofensores de Prazo', render: renderOfensoresPrazo },
+  reuniaoprazos: { title: 'Reunião Técnica — Prazos e Retornos', render: renderReuniaoPrazos },
   relatoriosdia: { title: 'Relatórios — Excel e Imagem', render: renderRelatoriosDia },
   fleet: { title: 'Frota', render: renderFleet },
   toll: { title: 'Pedágio', render: renderToll },
@@ -8059,6 +8067,12 @@ function tabelaServicosGiga(periodosTexto) {
   });
   return { itens, totalQtd: itens.reduce((a, i) => a + i.qtd, 0), totalValor: itens.reduce((a, i) => a + i.valor, 0) };
 }
+// "Ofensor" de uma linha de retorno = quem executou o serviço ORIGINAL que
+// gerou o retorno. Quando a planilha não preenche a coluna OFENSOR daquela
+// linha, cai no próprio técnico da linha (mesma regra usada nos rankings).
+function ofensorDaLinha(p) {
+  return p.ofensor && p.ofensor !== '-' ? p.ofensor : (p.recurso || 'Não informado');
+}
 // Conta os retornos IFI/IRR baixados num período, por TÉCNICO OFENSOR — que é
 // quem fez o serviço anterior e, portanto, responde pelo retorno. Confirmado
 // contra a planilha RELATORIO: a contagem por ofensor bate técnico a técnico
@@ -9162,10 +9176,9 @@ function renderOfensor() {
   wireMultiCityField('ofensor-cidades');
   document.getElementById('f-apply').addEventListener('click', load);
   load();
-  // "ofensor" = quem executou o serviço original que gerou o retorno. Quando a
-  // planilha não preenche a coluna OFENSOR numa linha específica, usamos o
-  // próprio técnico da linha como equivalente (mesma regra usada no ranking).
-  function ofensorDe(p) { return p.ofensor && p.ofensor !== '-' ? p.ofensor : (p.recurso || 'Não informado'); }
+  // declaração de função (não `const`) porque load() roda ANTES desta linha —
+  // com const, cai na temporal dead zone e a tela quebra inteira
+  function ofensorDe(p) { return ofensorDaLinha(p); }
   function load() {
     const s = document.getElementById('f-start').value, e = document.getElementById('f-end').value;
     // só lista cidade que tem produção nesse período — evita a lista enorme
@@ -13495,6 +13508,775 @@ function renderOfensoresPrazo() {
         {header:'Técnico', get:r=>r.tecnico}, {header:'Ofensores Manhã', get:r=>r.manha},
         {header:'Ofensores Tarde', get:r=>r.tarde}, {header:'Total Atrasos', get:r=>r.total}
       ], { totalRow: ['TOTAL', totPeriodo.manha, totPeriodo.tarde, totPeriodo.total] }),
+    });
+  }
+}
+
+// ===================== REUNIÃO TÉCNICA — PRAZOS E RETORNOS =====================
+// Tela de resumo pra reunião técnica (pedido do cliente 14/09/2026: "quero em
+// PowerPoint ou no sistema numa aba 'Reunião Tec Prazos e Retornos' — avalie a
+// melhor opção"). Virou ABA, não PPT: o PowerPoint nasce velho no dia seguinte,
+// aqui a conta é refeita na hora com o dado carregado na sessão de quem abrir.
+// Pra levar material estático pra reunião, o painel de PDF no fim da tela e o
+// "🖼 Gerar imagem" de cada seção resolvem.
+//
+// Tudo vem em PERCENTUAL e em RANKING — pedido explícito: "não quero números,
+// quero a porcentagem", e ranking em vez de gráfico de barra.
+//
+// TRÊS fontes, com COBERTURAS diferentes. Cada bloco diz de onde veio, porque
+// misturar isso sem avisar seria mentir com número certo:
+//   DB.prazo     planilha mensal (BASE DE DADOS) — cobre o mês inteiro
+//   DB.pcr       CSV diário de atividades — SÓ os dias que foram importados,
+//                mas é a única fonte com hora real de início/limite/fim
+//   DB.producao  BASE PRODUÇÃO / REPAROS OK — retornos IFI/IRR, ofensor e dias
+//
+// Amostra mínima pra um técnico/cidade entrar em ranking de PERCENTUAL: sem
+// isso, quem tem 1 reparo no mês e perdeu aparece com "100% fora do prazo" em
+// primeiro lugar, na frente de quem perdeu 30 de 80 — o ranking viraria ruído.
+const REUNIAO_MIN_ORDENS = 5;
+// ---------- Exportação em PowerPoint (branco e azul) ----------
+// Paleta fixa em hex (não usa os tokens de tema do sistema de propósito): o
+// .pptx é um arquivo que vai ser aberto fora daqui, num projetor, e precisa ser
+// sempre claro — tema escuro projetado em sala de reunião não lê.
+const PPT_COR = {
+  azul: '1D4ED8', azulEscuro: '12275B', azulClaro: 'EAF1FE', zebra: 'F6F9FF',
+  branco: 'FFFFFF', texto: '13233D', muted: '64748B', linha: 'D6E0F0',
+  verde: '15803D', vermelho: 'C5221F',
+};
+function pptSlide(pptx, titulo, subtitulo) {
+  const s = pptx.addSlide();
+  s.background = { color: PPT_COR.branco };
+  s.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.72, fill: { color: PPT_COR.azul } });
+  s.addText(String(titulo), { x: 0.45, y: 0.06, w: 9.1, h: 0.6, fontSize: 22, bold: true, color: PPT_COR.branco, valign: 'middle', fontFace: 'Segoe UI' });
+  if (subtitulo) s.addText(String(subtitulo), { x: 0.45, y: 0.78, w: 9.1, h: 0.28, fontSize: 11, color: PPT_COR.muted, fontFace: 'Segoe UI' });
+  return s;
+}
+// Até 3 cartões grandes de número — é o que o cliente quer ver de longe
+function pptKpis(pptx, slide, itens, y = 1.2) {
+  const larg = 2.95, gap = 0.22;
+  itens.slice(0, 3).forEach((k, i) => {
+    const x = 0.45 + i * (larg + gap);
+    slide.addShape(pptx.ShapeType.roundRect, { x, y, w: larg, h: 1.55, fill: { color: PPT_COR.azulClaro }, line: { color: PPT_COR.linha, width: 1 }, rectRadius: 0.06 });
+    slide.addText(String(k.valor), { x, y: y + 0.16, w: larg, h: 0.66, fontSize: k.corpo || 30, bold: true, align: 'center', color: k.cor || PPT_COR.azul, fontFace: 'Segoe UI' });
+    slide.addText(String(k.rotulo), { x: x + 0.08, y: y + 0.84, w: larg - 0.16, h: 0.3, fontSize: 11, align: 'center', color: PPT_COR.texto, fontFace: 'Segoe UI' });
+    if (k.sub) slide.addText(String(k.sub), { x: x + 0.1, y: y + 1.14, w: larg - 0.2, h: 0.32, fontSize: 9, align: 'center', color: PPT_COR.muted, fontFace: 'Segoe UI' });
+  });
+}
+function pptTabela(pptx, slide, headers, linhas, opts = {}) {
+  if (!linhas.length) {
+    slide.addText('Sem dados no período/filtro selecionado.', { x: 0.45, y: opts.y || 1.3, w: 9.1, h: 0.4, fontSize: 12, color: PPT_COR.muted, fontFace: 'Segoe UI' });
+    return;
+  }
+  const cabecalho = headers.map(h => ({ text: String(h), options: { bold: true, color: PPT_COR.branco, fill: { color: PPT_COR.azul } } }));
+  const corpo = linhas.map((l, i) => l.map((c, ci) => ({
+    text: String(c === null || c === undefined ? '' : c),
+    options: { color: ci === 1 ? PPT_COR.azulEscuro : PPT_COR.texto, bold: ci === 1, fill: { color: i % 2 ? PPT_COR.zebra : PPT_COR.branco } },
+  })));
+  slide.addTable([cabecalho, ...corpo], {
+    x: 0.45, y: opts.y || 1.25, w: 9.1, colW: opts.colW,
+    fontSize: opts.fontSize || 12, fontFace: 'Segoe UI',
+    border: { type: 'solid', pt: 0.5, color: PPT_COR.linha },
+    valign: 'middle', rowH: opts.rowH || 0.3, autoPage: false,
+  });
+}
+function pptRodape(slide, texto) {
+  slide.addText(String(texto), { x: 0.45, y: 5.05, w: 9.1, h: 0.3, fontSize: 9, italic: true, color: PPT_COR.muted, fontFace: 'Segoe UI' });
+}
+// Monta o .pptx inteiro a partir do que a tela já calculou (`d`), pra não ter
+// duas contas diferentes pro mesmo número — o slide é um espelho da tela.
+function exportarPptReuniao(d) {
+  if (typeof PptxGenJS !== 'function') { toast('Biblioteca do PowerPoint não carregou (sem internet?).', 'aviso'); return; }
+  const pptx = new PptxGenJS();
+  pptx.layout = 'LAYOUT_16x9';
+  pptx.author = 'JH TELECOM · Nexus System';
+  pptx.title = 'Reunião Técnica — Prazos e Retornos';
+
+  // ---- capa ----
+  const capa = pptx.addSlide();
+  capa.background = { color: PPT_COR.branco };
+  capa.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 3.1, h: '100%', fill: { color: PPT_COR.azul } });
+  capa.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.14, h: '100%', fill: { color: PPT_COR.azulEscuro } });
+  capa.addText('JH TELECOM', { x: 0.45, y: 2.1, w: 2.4, h: 0.4, fontSize: 18, bold: true, color: PPT_COR.branco, fontFace: 'Segoe UI' });
+  capa.addText('LITORAL SUL', { x: 0.45, y: 2.5, w: 2.4, h: 0.3, fontSize: 11, color: PPT_COR.azulClaro, fontFace: 'Segoe UI' });
+  capa.addText('Reunião Técnica', { x: 3.6, y: 1.7, w: 6, h: 0.6, fontSize: 32, bold: true, color: PPT_COR.azulEscuro, fontFace: 'Segoe UI' });
+  capa.addText('Prazos e Retornos', { x: 3.6, y: 2.3, w: 6, h: 0.6, fontSize: 32, bold: true, color: PPT_COR.azul, fontFace: 'Segoe UI' });
+  capa.addShape(pptx.ShapeType.rect, { x: 3.62, y: 3.05, w: 1.6, h: 0.05, fill: { color: PPT_COR.azul } });
+  capa.addText(d.periodoTxt, { x: 3.6, y: 3.25, w: 6, h: 0.35, fontSize: 15, color: PPT_COR.texto, fontFace: 'Segoe UI' });
+  capa.addText(`Gerado em ${new Date().toLocaleString('pt-BR')}`, { x: 3.6, y: 3.65, w: 6, h: 0.3, fontSize: 10, color: PPT_COR.muted, fontFace: 'Segoe UI' });
+
+  // ---- 1. prazo do mês ----
+  const s1 = pptSlide(pptx, 'Prazo do mês', d.periodoTxt + ' · reparos concluídos · prazo de 24h');
+  pptKpis(pptx, s1, [
+    { valor: formatPct(d.pctNoPrazo, 1), rotulo: 'No prazo (até 24h)', sub: `${d.dentro24} ordem(ns)`, cor: d.pctNoPrazo >= PRAZO_META ? PPT_COR.verde : PPT_COR.vermelho },
+    { valor: formatPct(d.pctForaPrazo, 1), rotulo: 'Fora do prazo', sub: `${d.foraPrazo} ordem(ns)`, cor: PPT_COR.vermelho },
+    { valor: String(d.totalReparos), rotulo: 'Reparos no período', sub: `meta de prazo: ${formatPct(PRAZO_META, 0)}` },
+  ]);
+  pptRodape(s1, 'Fonte: planilha de prazo (BASE DE DADOS). Ordem sem faixa válida não entra na conta.');
+
+  // ---- 2. melhores técnicos ----
+  const s2 = pptSlide(pptx, 'Técnicos que mais entregam no prazo', `Top ${Math.min(8, d.melhores.length)} · mínimo de ${REUNIAO_MIN_ORDENS} reparos no período`);
+  pptTabela(pptx, s2, ['#', 'Técnico', '% no prazo', '% fora', 'Reparos'],
+    d.melhores.slice(0, 8).map((t, i) => [String(i + 1).padStart(2, '0'), t.nome, formatPct(t.pctD, 1), formatPct(t.pctF, 1), t.total]),
+    { colW: [0.6, 4.2, 1.6, 1.5, 1.2] });
+
+  // ---- 3. ofensores de prazo ----
+  const s3 = pptSlide(pptx, 'Ofensores de prazo', `Top ${Math.min(8, d.piores.length)} · mínimo de ${REUNIAO_MIN_ORDENS} reparos no período`);
+  pptTabela(pptx, s3, ['#', 'Técnico', '% fora do prazo', '% no prazo', 'Reparos'],
+    d.piores.slice(0, 8).map((t, i) => [String(i + 1).padStart(2, '0'), t.nome, formatPct(t.pctF, 1), formatPct(t.pctD, 1), t.total]),
+    { colW: [0.6, 4.2, 1.8, 1.4, 1.1] });
+
+  // ---- 4. cidades ----
+  const s4 = pptSlide(pptx, 'Cidades ofensoras', 'Percentual de reparo fora do prazo da própria cidade');
+  pptTabela(pptx, s4, ['#', 'Cidade', '% fora do prazo', '% no prazo', 'Reparos'],
+    d.cidades.slice(0, 8).map((c, i) => [String(i + 1).padStart(2, '0'), c.nome, formatPct(c.pctF, 1), formatPct(c.pctD, 1), c.total]),
+    { colW: [0.6, 4.2, 1.8, 1.4, 1.1] });
+
+  // ---- 5. período ofensor ----
+  const s5 = pptSlide(pptx, 'Período ofensor', 'Pela hora do TEMPO LIMITE da ordem');
+  pptKpis(pptx, s5, [
+    { valor: formatPct(d.pctManha, 1), rotulo: 'Perdas na manhã', sub: `${d.qtdManha} ordem(ns)`, cor: d.periodoPior === 'manha' ? PPT_COR.vermelho : PPT_COR.azul },
+    { valor: formatPct(d.pctTarde, 1), rotulo: 'Perdas na tarde', sub: `${d.qtdTarde} ordem(ns)`, cor: d.periodoPior === 'tarde' ? PPT_COR.vermelho : PPT_COR.azul },
+    { valor: d.rotuloPior, rotulo: 'Período que mais perde', corpo: 26, cor: PPT_COR.vermelho },
+  ]);
+  pptTabela(pptx, s5, ['#', 'Ofensor do período', '% das perdas', 'Ordens'],
+    d.rankPeriodo.slice(0, 5).map((o, i) => [String(i + 1).padStart(2, '0'), o.nome, formatPct(o.pct, 1), o.qtd]),
+    { y: 3.0, colW: [0.6, 5.0, 2.0, 1.5], rowH: 0.28 });
+
+  // ---- 6. motivos da baixa ----
+  const s6 = pptSlide(pptx, 'Motivos da baixa — reparos fora do prazo', 'Motivo vindo da Produção, pela mesma O.S.');
+  pptTabela(pptx, s6, ['#', 'Motivo da baixa', '% das perdas', 'Ordens'],
+    d.motivosFora.slice(0, 8).map((m, i) => [String(i + 1).padStart(2, '0'), m.nome, formatPct(m.pct, 1), m.total]),
+    { colW: [0.6, 5.3, 1.8, 1.4] });
+
+  // ---- 7. tempo em campo ----
+  if (d.temPcr) {
+    const s7 = pptSlide(pptx, 'Tempo em campo e prazo estourado', `Base: ${d.diasPcr} dia(s) de PCR importado(s) no período`);
+    pptKpis(pptx, s7, [
+      { valor: d.folgaAoIniciar, rotulo: 'Folga ao iniciar', sub: 'do início até o prazo vencer' },
+      { valor: d.duracaoAtendimento, rotulo: 'Tempo de atendimento', sub: 'do início até a baixa' },
+      { valor: d.pctJaEstourado === null ? '-' : formatPct(d.pctJaEstourado, 1), rotulo: 'Já chegou estourado', sub: `${d.jaEstouradoQtd} de ${d.baseEstourado} sem tentativa anterior`, cor: PPT_COR.vermelho },
+    ]);
+    pptRodape(s7, 'Só ordens de reparo fora do prazo com hora real de início e de baixa no PCR.');
+
+    // ---- 8. horário de início ----
+    const s8 = pptSlide(pptx, 'Horário de início do dia', 'Hora média do primeiro início de cada técnico');
+    s8.addText('Por cidade', { x: 0.45, y: 1.12, w: 4, h: 0.26, fontSize: 12, bold: true, color: PPT_COR.azulEscuro, fontFace: 'Segoe UI' });
+    pptTabela(pptx, s8, ['Cidade', 'Início médio', 'Dias medidos'],
+      d.cidadesInicio.slice(0, 5).map(c => [c.nome, c.hora, c.dias]), { y: 1.42, colW: [4.6, 2.4, 2.1], rowH: 0.28 });
+    s8.addText('Quem começa mais tarde', { x: 0.45, y: 3.25, w: 4, h: 0.26, fontSize: 12, bold: true, color: PPT_COR.azulEscuro, fontFace: 'Segoe UI' });
+    pptTabela(pptx, s8, ['Técnico', 'Início médio', 'Dias'],
+      d.tecnicosTarde.slice(0, 4).map(t => [t.nome, t.hora, t.dias]), { y: 3.55, colW: [4.6, 2.4, 2.1], rowH: 0.28 });
+  }
+
+  // ---- 9. retornos ----
+  const s9 = pptSlide(pptx, 'Retornos — quanto do serviço volta', 'IFI sobre ativações + M.E · IRR sobre reparos');
+  pptKpis(pptx, s9, [
+    { valor: formatPct(d.pctIrr, 2), rotulo: '% IRR — reparo que voltou', sub: `${d.qtdIrr} retorno(s) · meta ${formatPct(BONUS_IRR_MAX, 2)}`, cor: d.pctIrr > BONUS_IRR_MAX ? PPT_COR.vermelho : PPT_COR.verde },
+    { valor: formatPct(d.pctIfi, 2), rotulo: '% IFI — ativação/M.E que voltou', sub: `${d.qtdIfi} retorno(s) · meta ${formatPct(BONUS_IFI_MAX, 2)}`, cor: d.pctIfi > BONUS_IFI_MAX ? PPT_COR.vermelho : PPT_COR.verde },
+    { valor: d.mediaDias, rotulo: 'Tempo médio até voltar', sub: `IRR ${d.mediaDiasIrr} · IFI ${d.mediaDiasIfi}` },
+  ]);
+
+  // ---- 10. cidades de retorno ----
+  const s10 = pptSlide(pptx, 'Retornos — cidades ofensoras', 'Percentual de retorno sobre os serviços da cidade');
+  pptTabela(pptx, s10, ['#', 'Cidade', '% de retorno', '% IRR', '% IFI'],
+    d.cidadesRet.slice(0, 8).map((c, i) => [String(i + 1).padStart(2, '0'), c.nome, formatPct(c.pct, 2), formatPct(c.pctIrr, 2), formatPct(c.pctIfi, 2)]),
+    { colW: [0.6, 3.9, 1.7, 1.5, 1.4] });
+
+  // ---- 11. ofensores de retorno ----
+  const s11 = pptSlide(pptx, 'Retornos — principais ofensores', 'Quem fez o serviço que voltou');
+  pptTabela(pptx, s11, ['#', 'Ofensor', '% dos retornos', 'IRR', 'IFI'],
+    d.ofensoresRet.slice(0, 8).map((o, i) => [String(i + 1).padStart(2, '0'), o.nome, formatPct(o.pct, 1), o.irr, o.ifi]),
+    { colW: [0.6, 4.6, 1.8, 1.0, 1.1] });
+
+  // ---- 12. motivo da baixa dos retornos ----
+  const s12 = pptSlide(pptx, 'Motivo da baixa dos retornos', 'Como a visita de retorno foi encerrada');
+  pptTabela(pptx, s12, ['#', 'Motivo', '% dos retornos', 'IRR', 'IFI'],
+    d.motivosRet.slice(0, 8).map((m, i) => [String(i + 1).padStart(2, '0'), m.nome, formatPct(m.pct, 1), m.irr, m.ifi]),
+    { colW: [0.6, 4.9, 1.7, 0.9, 1.0] });
+
+  // ---- 13. IRR: motivo anterior x retorno ----
+  if (d.paresIrrTotal) {
+    const s13 = pptSlide(pptx, 'IRR — o problema voltou pelo mesmo motivo?', 'Motivo do serviço anterior × motivo do retorno');
+    pptKpis(pptx, s13, [
+      { valor: formatPct(d.pctMesmoMotivo, 1), rotulo: 'Voltou pelo MESMO motivo', sub: `${d.iguais} de ${d.paresIrrTotal} par(es)`, cor: PPT_COR.vermelho },
+      { valor: formatPct(100 - d.pctMesmoMotivo, 1), rotulo: 'Voltou por motivo diferente', cor: PPT_COR.azul },
+      { valor: String(d.paresIrrTotal), rotulo: 'Pares analisados', sub: d.irrSemPar ? `${d.irrSemPar} sem par encontrado` : 'todos casaram' },
+    ]);
+    pptTabela(pptx, s13, ['Serviço anterior ➜ retorno', '% dos pares', 'Pares'],
+      d.paresRank.slice(0, 5).map(p => [p.nome, formatPct(p.pct, 1), p.total]),
+      { y: 3.0, colW: [6.1, 1.6, 1.4], rowH: 0.28, fontSize: 11 });
+    pptRodape(s13, 'Par achado por contrato + data da ordem anterior (a planilha não traz a O.S. anterior) — correspondência aproximada.');
+  }
+
+  pptx.writeFile({ fileName: `reuniao-tecnica-prazos-retornos-${hojeISOLocal()}.pptx` })
+    .then(() => toast('PowerPoint gerado.', 'ok', 2500))
+    .catch(err => {
+      console.error('[ppt] falhou:', err);
+      toast('Não consegui gerar o PowerPoint — tente de novo.', 'aviso');
+    });
+}
+// Ranking com pílula de posição (mesmo visual do ranking de motivos da baixa em
+// Ofensores de Prazo). itens: [{ nome, valor, sub }] — `valor` e `sub` já vêm
+// formatados (podem conter HTML montado aqui dentro); `nome` vem de planilha,
+// então é escapado.
+function tabelaRankingReuniao(itens, opts = {}) {
+  if (!itens.length) return `<div class="empty">${esc(opts.vazio || 'Sem dados nesse filtro.')}</div>`;
+  const cor = opts.cor || 'warn';
+  const temSub = !!opts.rotuloSub;
+  return `<div class="table-wrap"><table class="data-table"><thead><tr>
+      <th>Posição</th><th>${esc(opts.rotuloNome || 'Nome')}</th><th>${esc(opts.rotuloValor || 'Valor')}</th>${temSub ? `<th>${esc(opts.rotuloSub)}</th>` : ''}
+    </tr></thead><tbody>
+      ${itens.map((it, i) => `<tr>
+        <td><span class="badge ${cor}">${String(i + 1).padStart(2, '0')}</span></td>
+        <td class="cat-cell">${esc(it.nome)}</td>
+        <td style="font-weight:700">${it.valor}</td>
+        ${temSub ? `<td style="font-size:12px;color:var(--text-secondary);white-space:normal">${it.sub === undefined ? '-' : it.sub}</td>` : ''}
+      </tr>`).join('')}
+    </tbody></table></div>`;
+}
+// 8.75 -> "08:45" (hora média de início do dia)
+function horaDeDecimal(dec) {
+  if (dec === null || dec === undefined || !isFinite(dec)) return '-';
+  let h = Math.floor(dec), m = Math.round((dec - h) * 60);
+  if (m === 60) { h++; m = 0; }
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+// 3.5 -> "3h30"; aceita negativo (técnico começou DEPOIS do prazo já vencido)
+function duracaoDeHoras(h) {
+  if (h === null || h === undefined || !isFinite(h)) return '-';
+  const neg = h < 0, abs = Math.abs(h);
+  let hh = Math.floor(abs), mm = Math.round((abs - hh) * 60);
+  if (mm === 60) { hh++; mm = 0; }
+  return `${neg ? '-' : ''}${hh}h${String(mm).padStart(2, '0')}`;
+}
+function renderReuniaoPrazos() {
+  const { start, end } = defaultMonthPeriod();
+  document.getElementById('content').innerHTML = `${periodToolbar(start, end, `
+    ${multiCityField('reu-cidades', 'Cidades', { preset: CIDADES_COBRADAS_PRAZO })}
+  `)}<div id="reu-body"></div>`;
+  wireMultiCityField('reu-cidades');
+  document.getElementById('f-apply').addEventListener('click', load);
+  load();
+  function load() {
+    const s = document.getElementById('f-start').value, e = document.getElementById('f-end').value;
+    refreshCityField('reu-cidades', DB.prazo.filter(p => inRange(p.data, s, e)), { label: 'Cidades', presetPadrao: CIDADES_COBRADAS_PRAZO });
+    const cidades = getSelectedCities('reu-cidades');
+    // DB.pcr é a única tabela cuja cidade NÃO passa por normalizeCidade (vem do
+    // CSV em maiúsculo mas COM acento) — comparar normalizado cobre as três
+    // bases sem depender de qual delas passou pela normalização.
+    const cidadesNorm = new Set(cidades.map(normalizeCidade));
+    const cidadeOk = c => cidadesNorm.has(normalizeCidade(c));
+    const body = document.getElementById('reu-body');
+    const periodoTxt = `${formatDate(s)} a ${formatDate(e)}`;
+
+    // ---------- BASE 1: PRAZO (DB.prazo — mesma regra de Ofensores de Prazo) ----------
+    const rowsPrazo = DB.prazo.filter(p => inRange(p.data, s, e) && isConcluido(p.status) && cidadeOk(p.cidade)
+      && ehPrazoDeReparo(p) && classifyBucket(p.status_prazo) !== 'outro');
+    const noPrazo = r => classifyBucket(r.status_prazo) === 'ate24';
+    const foraPrazo = rowsPrazo.filter(r => !noPrazo(r));
+    const dentro24 = rowsPrazo.filter(noPrazo);
+    const pctNoPrazo = rowsPrazo.length ? (dentro24.length / rowsPrazo.length) * 100 : 0;
+    const pctForaPrazo = rowsPrazo.length ? (foraPrazo.length / rowsPrazo.length) * 100 : 0;
+
+    if (!rowsPrazo.length && !DB.producao.length) {
+      body.innerHTML = '<div class="panel"><div class="empty">Sem dados de prazo nem de produção nesse período/cidades. Importe PRAZOS_ESCRITÓRIO.xlsx e a BASE PRODUÇÃO em "Importar Excel".</div></div>';
+      return;
+    }
+
+    // ---------- Técnicos: % que entrega e % que não entrega no prazo ----------
+    const porTecnico = {};
+    rowsPrazo.forEach(r => {
+      const t = r.recurso || 'Não informado';
+      if (!porTecnico[t]) porTecnico[t] = { nome: t, dentro: 0, fora: 0, total: 0 };
+      porTecnico[t].total++;
+      if (noPrazo(r)) porTecnico[t].dentro++; else porTecnico[t].fora++;
+    });
+    const tecComAmostra = Object.values(porTecnico).filter(t => t.total >= REUNIAO_MIN_ORDENS);
+    const pctD = t => (t.dentro / t.total) * 100, pctF = t => (t.fora / t.total) * 100;
+    const melhoresTec = [...tecComAmostra].sort((a, b) => pctD(b) - pctD(a) || b.total - a.total).slice(0, 10);
+    const pioresTec = [...tecComAmostra].sort((a, b) => pctF(b) - pctF(a) || b.total - a.total).slice(0, 10);
+    const itemTecEntrega = t => ({
+      nome: t.nome, valor: `<span style="color:var(--success)">${formatPct(pctD(t), 1)}</span>`,
+      sub: `Fora do prazo: ${formatPct(pctF(t), 1)} · ${t.total} reparo(s) no período`,
+    });
+    const itemTecOfensor = t => ({
+      nome: t.nome, valor: `<span style="color:var(--danger)">${formatPct(pctF(t), 1)}</span>`,
+      sub: `No prazo: ${formatPct(pctD(t), 1)} · ${t.total} reparo(s) no período`,
+    });
+
+    // ---------- Cidades ofensoras de prazo ----------
+    const porCidadePrazo = {};
+    rowsPrazo.forEach(r => {
+      const c = r.cidade || 'Não informado';
+      if (!porCidadePrazo[c]) porCidadePrazo[c] = { nome: c, dentro: 0, fora: 0, total: 0 };
+      porCidadePrazo[c].total++;
+      if (noPrazo(r)) porCidadePrazo[c].dentro++; else porCidadePrazo[c].fora++;
+    });
+    const cidadesRank = Object.values(porCidadePrazo).sort((a, b) => pctF(b) - pctF(a) || b.total - a.total);
+
+    // ---------- Período ofensor (manhã × tarde) ----------
+    const contaPeriodo = { manha: 0, tarde: 0, outro: 0 };
+    foraPrazo.forEach(r => { contaPeriodo[periodoDoPrazo(r)]++; });
+    const totalPeriodo = contaPeriodo.manha + contaPeriodo.tarde;
+    const periodoPior = contaPeriodo.manha >= contaPeriodo.tarde ? 'manha' : 'tarde';
+    const rotuloPeriodo = p => p === 'manha' ? 'Manhã' : 'Tarde';
+    const ofensoresDoPeriodo = {};
+    foraPrazo.filter(r => periodoDoPrazo(r) === periodoPior).forEach(r => {
+      const t = r.recurso || 'Não informado';
+      ofensoresDoPeriodo[t] = (ofensoresDoPeriodo[t] || 0) + 1;
+    });
+    const totalPior = contaPeriodo[periodoPior];
+    const rankPeriodo = Object.entries(ofensoresDoPeriodo)
+      .map(([nome, qtd]) => ({ nome, qtd }))
+      .sort((a, b) => b.qtd - a.qtd).slice(0, 10)
+      .map(o => ({
+        nome: o.nome,
+        valor: `<span style="color:var(--danger)">${formatPct(totalPior ? (o.qtd / totalPior) * 100 : 0, 1)}</span>`,
+        sub: `das perdas da ${rotuloPeriodo(periodoPior).toLowerCase()} · ${o.qtd} ordem(ns)`,
+      }));
+
+    // ---------- Motivos da baixa dos reparos fora do prazo ----------
+    const motivoForaMap = {};
+    foraPrazo.forEach(r => {
+      const m = motivoDoPrazo(r);
+      if (!motivoForaMap[m]) motivoForaMap[m] = { nome: m, total: 0, porTecnico: {} };
+      motivoForaMap[m].total++;
+      const t = r.recurso || 'Não informado';
+      motivoForaMap[m].porTecnico[t] = (motivoForaMap[m].porTecnico[t] || 0) + 1;
+    });
+    const motivosFora = Object.values(motivoForaMap).sort((a, b) => b.total - a.total);
+    const top3De = obj => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} (${v})`).join(', ');
+
+    // ---------- BASE 2: PCR (hora real de início/limite/fim) ----------
+    // Só os dias que foram importados pelo CSV diário caem aqui — por isso cada
+    // bloco abaixo mostra a cobertura em vez de fingir que é o mês inteiro.
+    const dt = v => (v === null || v === undefined || v === '') ? null : (v instanceof Date ? v : new Date(v));
+    const pcrTodos = DB.pcr.filter(r => inRange(r.data, s, e) && cidadeOk(r.cidade))
+      .map(r => ({ ...r, inicio: dt(r.inicio), limite: dt(r.limite), encerramento: dt(r.encerramento) }));
+    const diasPcr = new Set(pcrTodos.map(r => r.data)).size;
+    const pcrReparo = pcrTodos.filter(r => ehServicoReparo(r.tipo_atividade));
+    const avisoPcr = `Fonte: CSV diário do PCR — cobertura de <b>${diasPcr} dia(s)</b> importado(s) no período (${esc(periodoTxt)}). Dia não importado não entra na conta.`;
+
+    // tempo que o técnico ficou "iniciado" nas ordens que PERDERAM o prazo
+    const perdeuPrazoPcr = pcrReparo.filter(r => r.inicio && r.limite && r.encerramento && r.encerramento > r.limite);
+    const horas = (a, b) => (b - a) / 3600000;
+    const media = arr => arr.length ? arr.reduce((x, y) => x + y, 0) / arr.length : null;
+    const folgaAoIniciar = media(perdeuPrazoPcr.map(r => horas(r.inicio, r.limite)));
+    const duracaoAtendimento = media(perdeuPrazoPcr.map(r => horas(r.inicio, r.encerramento)));
+
+    // % dos reparos que já chegam com o prazo estourado (sem tentativa anterior)
+    // O.S. com UMA ocorrência só no período = ninguém tentou antes (não teve
+    // improdutiva) — dessas, quantas o técnico só começou DEPOIS do prazo já
+    // ter vencido? É a resposta pra "veio estourado ou foi o campo que atrasou".
+    const porOSpcr = {};
+    pcrReparo.forEach(r => { if (r.os) (porOSpcr[r.os] = porOSpcr[r.os] || []).push(r); });
+    const semTentativaAnterior = Object.values(porOSpcr).filter(l => l.length === 1).map(l => l[0]);
+    const semTentFora = semTentativaAnterior.filter(r => r.limite && r.encerramento && r.encerramento > r.limite);
+    const jaChegouEstourado = semTentFora.filter(r => r.inicio && r.inicio > r.limite);
+    const pctJaEstourado = semTentFora.length ? (jaChegouEstourado.length / semTentFora.length) * 100 : null;
+
+    // horário em que cada técnico COMEÇA o dia (menor início do dia dele)
+    const primeiroDoDia = {};
+    pcrTodos.forEach(r => {
+      if (!r.inicio || !r.recurso) return;
+      const k = `${r.recurso}|${r.data}`;
+      if (!primeiroDoDia[k] || r.inicio < primeiroDoDia[k].inicio) primeiroDoDia[k] = r;
+    });
+    const inicios = Object.values(primeiroDoDia).map(r => ({ ...r, hora: r.inicio.getHours() + r.inicio.getMinutes() / 60 }));
+    const acumula = (mapa, chave, hora) => {
+      if (!mapa[chave]) mapa[chave] = { nome: chave, soma: 0, dias: 0 };
+      mapa[chave].soma += hora; mapa[chave].dias++;
+    };
+    const inicioPorCidade = {}, inicioPorTecnico = {};
+    inicios.forEach(r => {
+      acumula(inicioPorCidade, r.cidade || 'Não informado', r.hora);
+      acumula(inicioPorTecnico, r.recurso, r.hora);
+    });
+    const mediaHora = o => o.soma / o.dias;
+    const cidadesInicio = Object.values(inicioPorCidade).sort((a, b) => mediaHora(b) - mediaHora(a));
+    const tecnicosTarde = Object.values(inicioPorTecnico).filter(t => t.dias >= 3)
+      .sort((a, b) => mediaHora(b) - mediaHora(a)).slice(0, 10);
+
+    // ---------- BASE 3: RETORNOS (DB.producao — IFI/IRR) ----------
+    const prodPeriodo = DB.producao.filter(p => inRange(p.data, s, e) && cidadeOk(p.cidade));
+    const retornos = prodPeriodo.filter(p => p.ifi_irr === 'IFI' || p.ifi_irr === 'IRR');
+    const basesGeral = basesIfiIrr(prodPeriodo);
+    const qtdIfi = retornos.filter(r => r.ifi_irr === 'IFI').length;
+    const qtdIrr = retornos.filter(r => r.ifi_irr === 'IRR').length;
+    const pctIfi = pctIndicador(qtdIfi, basesGeral.ativacoes);
+    const pctIrr = pctIndicador(qtdIrr, basesGeral.reparos);
+
+    // cidades ofensoras de retorno — % sobre a base de serviço DA CIDADE
+    const porCidadeRet = {};
+    prodPeriodo.forEach(p => {
+      const c = p.cidade || 'Não informado';
+      if (!porCidadeRet[c]) porCidadeRet[c] = { nome: c, ifi: 0, irr: 0, ativacoes: 0, reparos: 0 };
+      const o = porCidadeRet[c];
+      if (p.ifi_irr === 'IFI') o.ifi++; else if (p.ifi_irr === 'IRR') o.irr++;
+      if (isConcluido(p.status)) {
+        if (ehBaseDoIfi(p.tipo_atividade)) o.ativacoes++;
+        else if (ehServicoReparo(p.tipo_atividade)) o.reparos++;
+      }
+    });
+    const pctRetCidade = o => { const base = o.ativacoes + o.reparos; return base ? ((o.ifi + o.irr) / base) * 100 : 0; };
+    const cidadesRetRank = Object.values(porCidadeRet).filter(o => o.ifi + o.irr > 0)
+      .sort((a, b) => pctRetCidade(b) - pctRetCidade(a));
+
+    // técnico ofensor de cada cidade
+    const ofensorPorCidade = {};
+    retornos.forEach(r => {
+      const c = r.cidade || 'Não informado', o = ofensorDaLinha(r);
+      if (!ofensorPorCidade[c]) ofensorPorCidade[c] = {};
+      ofensorPorCidade[c][o] = (ofensorPorCidade[c][o] || 0) + 1;
+    });
+    const maioresPorCidade = Object.entries(ofensorPorCidade).map(([cidade, mapa]) => {
+      const lista = Object.entries(mapa).sort((a, b) => b[1] - a[1]);
+      const totalCidade = lista.reduce((a, [, v]) => a + v, 0);
+      return { cidade, ofensor: lista[0][0], qtd: lista[0][1], total: totalCidade, outros: lista.slice(1, 4) };
+    }).sort((a, b) => b.total - a.total);
+
+    // tempo médio até o serviço voltar (coluna DIAS da planilha de retornos)
+    const diasDe = arr => arr.map(r => Number(r.dias)).filter(n => isFinite(n) && n >= 0);
+    const mediaDiasIfi = media(diasDe(retornos.filter(r => r.ifi_irr === 'IFI')));
+    const mediaDiasIrr = media(diasDe(retornos.filter(r => r.ifi_irr === 'IRR')));
+    const mediaDiasGeral = media(diasDe(retornos));
+
+    // principais ofensores no geral (IFI + IRR)
+    const porOfensor = {};
+    retornos.forEach(r => {
+      const o = ofensorDaLinha(r);
+      if (!porOfensor[o]) porOfensor[o] = { nome: o, total: 0, ifi: 0, irr: 0 };
+      porOfensor[o].total++;
+      if (r.ifi_irr === 'IFI') porOfensor[o].ifi++; else porOfensor[o].irr++;
+    });
+    const ofensoresGeral = Object.values(porOfensor).sort((a, b) => b.total - a.total).slice(0, 10);
+
+    // motivo da baixa DO RETORNO (quem fechou a visita de retorno)
+    const motivoRetMap = {};
+    retornos.forEach(r => {
+      const m = (r.motivo || '').trim() || 'Não informado';
+      if (!motivoRetMap[m]) motivoRetMap[m] = { nome: m, total: 0, ifi: 0, irr: 0 };
+      motivoRetMap[m].total++;
+      if (r.ifi_irr === 'IFI') motivoRetMap[m].ifi++; else motivoRetMap[m].irr++;
+    });
+    const motivosRet = Object.values(motivoRetMap).sort((a, b) => b.total - a.total);
+
+    // IRR: motivo do serviço ANTERIOR × motivo do retorno
+    // Não existe coluna com a O.S. anterior — o que a planilha traz é a DATA da
+    // ordem anterior. O par é achado por CONTRATO + aquela data, então é
+    // correspondência APROXIMADA (a tela avisa e mostra quantos ficaram sem par).
+    const idxContratoData = new Map();
+    DB.producao.forEach(p => {
+      if (!p.contrato || !p.data) return;
+      const k = `${String(p.contrato).trim()}|${p.data}`;
+      if (!idxContratoData.has(k)) idxContratoData.set(k, []);
+      idxContratoData.get(k).push(p);
+    });
+    const paresIrr = []; let irrSemPar = 0;
+    retornos.filter(r => r.ifi_irr === 'IRR').forEach(r => {
+      const anterior = (idxContratoData.get(`${String(r.contrato || '').trim()}|${r.data_ordem_anterior || ''}`) || [])
+        .filter(p => p.os !== r.os)[0];
+      if (!anterior) { irrSemPar++; return; }
+      paresIrr.push({
+        antes: (anterior.motivo || '').trim() || 'Não informado',
+        depois: (r.motivo || '').trim() || 'Não informado',
+      });
+    });
+    const iguais = paresIrr.filter(p => normalizeHeader(p.antes) === normalizeHeader(p.depois)).length;
+    const pctMesmoMotivo = paresIrr.length ? (iguais / paresIrr.length) * 100 : null;
+    const parMap = {};
+    paresIrr.forEach(p => {
+      const k = `${p.antes} ➜ ${p.depois}`;
+      if (!parMap[k]) parMap[k] = { nome: k, total: 0, igual: normalizeHeader(p.antes) === normalizeHeader(p.depois) };
+      parMap[k].total++;
+    });
+    const paresRank = Object.values(parMap).sort((a, b) => b.total - a.total).slice(0, 15);
+
+    const nota = txt => `<p style="font-size:12px;color:var(--text-muted);margin:-4px 0 12px;line-height:1.5">${txt}</p>`;
+
+    body.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+        <span style="font-size:13px;color:var(--text-muted)">${esc(periodoTxt)} · ${cidades.length} cidade(s)</span>
+        <button class="btn" id="reu-ppt">📊 Exportar PowerPoint</button>
+      </div>
+
+      <div class="section-heading">1. Prazo do mês</div>
+      ${nota(`Reparos concluídos · prazo de 24h · meta ${formatPct(PRAZO_META, 0)}.`)}
+      <div class="cards-grid">
+        ${metricCard('Reparos no período', rowsPrazo.length.toLocaleString('pt-BR'))}
+        ${metricCard('% no prazo (até 24h)', formatPct(pctNoPrazo, 1), false, { positive: pctNoPrazo >= PRAZO_META, sub: `${dentro24.length.toLocaleString('pt-BR')} ordem(ns)` })}
+        ${metricCard('% fora do prazo', formatPct(pctForaPrazo, 1), true, { sub: `${foraPrazo.length.toLocaleString('pt-BR')} ordem(ns)` })}
+      </div>
+      <div class="panels-grid">
+        ${gaugePanel('% no prazo (meta ' + formatPct(PRAZO_META, 0) + ')', pctNoPrazo, PRAZO_META)}
+        <div class="panel"><h3>No prazo × Fora do prazo</h3><div id="reu-donut"></div></div>
+      </div>
+
+      <div class="section-heading">2. Técnicos — % de entrega no prazo</div>
+      ${nota(`Mínimo de ${REUNIAO_MIN_ORDENS} reparos no período pra entrar no ranking.`)}
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Melhores — maior % no prazo</h3>
+        ${tabelaRankingReuniao(melhoresTec.map(itemTecEntrega), { cor: 'ok', rotuloNome: 'Técnico', rotuloValor: '% no prazo', rotuloSub: 'Detalhe', vazio: `Nenhum técnico com ${REUNIAO_MIN_ORDENS}+ reparos nesse filtro.` })}
+      </div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Ofensores — maior % fora do prazo</h3>
+        ${tabelaRankingReuniao(pioresTec.map(itemTecOfensor), { cor: 'warn', rotuloNome: 'Técnico', rotuloValor: '% fora do prazo', rotuloSub: 'Detalhe', vazio: `Nenhum técnico com ${REUNIAO_MIN_ORDENS}+ reparos nesse filtro.` })}
+      </div>
+
+      <div class="section-heading">3. Cidades ofensoras — % do mês</div>
+      ${nota('Percentual da própria cidade, não do total da empresa.')}
+      <div class="panel" style="margin-bottom:1.5rem">
+        ${tabelaRankingReuniao(cidadesRank.map(c => ({
+          nome: c.nome,
+          valor: `<span style="color:${pctF(c) > (100 - PRAZO_META) ? 'var(--danger)' : 'var(--success)'}">${formatPct(pctF(c), 1)}</span>`,
+          sub: `No prazo: ${formatPct(pctD(c), 1)} · ${c.total} reparo(s) no período`,
+        })), { rotuloNome: 'Cidade', rotuloValor: '% fora do prazo', rotuloSub: 'Detalhe' })}
+      </div>
+
+      <div class="section-heading">4. Período ofensor — manhã × tarde</div>
+      ${nota('Período pela hora do TEMPO LIMITE (antes das 12h = manhã).')}
+      <div class="cards-grid">
+        ${metricCard('Perdas na manhã', totalPeriodo ? formatPct((contaPeriodo.manha / totalPeriodo) * 100, 1) : '-', periodoPior === 'manha', { sub: `${contaPeriodo.manha} ordem(ns)` })}
+        ${metricCard('Perdas na tarde', totalPeriodo ? formatPct((contaPeriodo.tarde / totalPeriodo) * 100, 1) : '-', periodoPior === 'tarde', { sub: `${contaPeriodo.tarde} ordem(ns)` })}
+        ${metricCard('Período que mais perde', totalPeriodo ? rotuloPeriodo(periodoPior) : '-', true, { big: true, sub: contaPeriodo.outro ? `${contaPeriodo.outro} sem TEMPO LIMITE preenchido` : '' })}
+      </div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Ofensores da ${esc(rotuloPeriodo(periodoPior).toLowerCase())}</h3>
+        ${tabelaRankingReuniao(rankPeriodo, { rotuloNome: 'Técnico', rotuloValor: '% das perdas do período', rotuloSub: 'Detalhe', vazio: 'Sem ordens fora do prazo com período identificado.' })}
+      </div>
+
+      <div class="section-heading">5. Motivos da baixa — reparos fora do prazo</div>
+      ${nota('Motivo puxado da Produção pela mesma O.S.')}
+      <div class="panel" style="margin-bottom:1.5rem">
+        ${tabelaRankingReuniao(motivosFora.map(m => ({
+          nome: m.nome,
+          valor: `${formatPct(foraPrazo.length ? (m.total / foraPrazo.length) * 100 : 0, 1)} <span style="font-weight:600;color:var(--text-muted)">(${m.total})</span>`,
+          sub: top3De(m.porTecnico),
+        })), { rotuloNome: 'Motivo da baixa', rotuloValor: '% das perdas', rotuloSub: 'Principais técnicos envolvidos (top 3)', vazio: 'Nenhum motivo encontrado — confira se a BASE PRODUÇÃO foi importada.' })}
+      </div>
+
+      <div class="section-heading">6. Tempo em campo nas ordens fora do prazo</div>
+      ${nota(avisoPcr)}
+      ${!perdeuPrazoPcr.length ? '<div class="panel"><div class="empty">Sem ordens de reparo com hora de início e de encerramento no PCR desse período. Importe o CSV diário na aba PCR.</div></div>' : `
+      <div class="cards-grid">
+        ${metricCard('Ordens analisadas', perdeuPrazoPcr.length.toLocaleString('pt-BR'), false, { sub: 'reparos fora do prazo com hora real' })}
+        ${metricCard('Folga ao iniciar', duracaoDeHoras(folgaAoIniciar), folgaAoIniciar !== null && folgaAoIniciar < 0, { sub: 'do início do técnico até o prazo vencer (negativo = começou depois de vencido)' })}
+        ${metricCard('Tempo de atendimento', duracaoDeHoras(duracaoAtendimento), false, { sub: 'do início até a baixa da ordem' })}
+      </div>`}
+
+      <div class="section-heading">7. Reparo que já chega com o prazo estourado</div>
+      ${nota(`Só O.S. sem improdutiva anterior que ficaram fora do prazo — dessas, quantas o técnico começou depois do prazo já vencido. ${avisoPcr}`)}
+      ${!semTentFora.length ? '<div class="panel"><div class="empty">Sem O.S. de reparo sem tentativa anterior fora do prazo no PCR desse período.</div></div>' : `
+      <div class="cards-grid">
+        ${metricCard('Já chegou estourado', formatPct(pctJaEstourado, 1), true, { big: true, sub: `${jaChegouEstourado.length} de ${semTentFora.length} ordem(ns)` })}
+        ${metricCard('Estourou em campo', formatPct(100 - pctJaEstourado, 1), false, { big: true, sub: 'técnico começou com prazo ainda válido' })}
+        ${metricCard('Base analisada', semTentFora.length.toLocaleString('pt-BR'), false, { sub: 'reparos sem tentativa anterior, fora do prazo' })}
+      </div>`}
+
+      <div class="section-heading">8. Horário de início do dia</div>
+      ${nota(`Hora média do primeiro início do dia de cada técnico. ${avisoPcr}`)}
+      ${!inicios.length ? '<div class="panel"><div class="empty">Sem hora de início registrada no PCR desse período.</div></div>' : `
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Por cidade — do mais tarde pro mais cedo</h3>
+        ${tabelaRankingReuniao(cidadesInicio.map(c => ({
+          nome: c.nome, valor: horaDeDecimal(mediaHora(c)), sub: `${c.dias} início(s) de dia medidos`,
+        })), { rotuloNome: 'Cidade', rotuloValor: 'Início médio', rotuloSub: 'Amostra' })}
+      </div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Técnicos que mais começam tarde</h3>
+        ${nota('Só técnicos com 3 ou mais dias medidos no período.')}
+        ${tabelaRankingReuniao(tecnicosTarde.map(t => ({
+          nome: t.nome, valor: horaDeDecimal(mediaHora(t)), sub: `${t.dias} dia(s) medidos`,
+        })), { rotuloNome: 'Técnico', rotuloValor: 'Início médio', rotuloSub: 'Amostra', vazio: 'Nenhum técnico com 3+ dias medidos nesse período.' })}
+      </div>`}
+
+      <div class="section-heading">9. Retornos — % de serviço que volta</div>
+      ${nota('IFI ÷ ativações + M.E · IRR ÷ reparos · retorno lançado no ofensor.')}
+      <div class="cards-grid">
+        ${metricCard('% IRR (reparo que voltou)', formatPct(pctIrr, 2), pctIrr > BONUS_IRR_MAX, { sub: `${qtdIrr} retorno(s) · base ${basesGeral.reparos} reparo(s) · meta ${formatPct(BONUS_IRR_MAX, 2)}` })}
+        ${metricCard('% IFI (ativação/M.E que voltou)', formatPct(pctIfi, 2), pctIfi > BONUS_IFI_MAX, { sub: `${qtdIfi} retorno(s) · base ${basesGeral.ativacoes} serviço(s) · meta ${formatPct(BONUS_IFI_MAX, 2)}` })}
+        ${metricCard('Tempo médio até voltar', mediaDiasGeral === null ? '-' : `${mediaDiasGeral.toFixed(1).replace('.', ',')} dias`, false, { sub: `IRR ${mediaDiasIrr === null ? '-' : mediaDiasIrr.toFixed(1).replace('.', ',') + 'd'} · IFI ${mediaDiasIfi === null ? '-' : mediaDiasIfi.toFixed(1).replace('.', ',') + 'd'}` })}
+      </div>
+      <div class="panels-grid">
+        ${gaugePanel('% IRR', pctIrr, BONUS_IRR_MAX, { lowerIsBetter: true, decimals: 2 })}
+        ${gaugePanel('% IFI', pctIfi, BONUS_IFI_MAX, { lowerIsBetter: true, decimals: 2 })}
+      </div>
+
+      <div class="section-heading">10. Retornos — cidades ofensoras</div>
+      ${nota('Percentual de retorno sobre os serviços da própria cidade.')}
+      <div class="panel" style="margin-bottom:1.5rem">
+        ${tabelaRankingReuniao(cidadesRetRank.map(c => ({
+          nome: c.nome,
+          valor: `<span style="color:var(--danger)">${formatPct(pctRetCidade(c), 2)}</span>`,
+          sub: `IRR ${formatPct(pctIndicador(c.irr, c.reparos), 2)} (${c.irr}) · IFI ${formatPct(pctIndicador(c.ifi, c.ativacoes), 2)} (${c.ifi})`,
+        })), { rotuloNome: 'Cidade', rotuloValor: '% de retorno', rotuloSub: 'Abertura IRR / IFI', vazio: 'Sem retornos no período/cidades.' })}
+      </div>
+
+      <div class="section-heading">11. Retornos — maior ofensor de cada cidade</div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        ${!maioresPorCidade.length ? '<div class="empty">Sem retornos no período/cidades.</div>' : `
+        <div class="table-wrap"><table class="data-table"><thead><tr>
+          <th>Cidade</th><th>Maior ofensor</th><th>% dos retornos da cidade</th><th>Outros ofensores (top 3)</th>
+        </tr></thead><tbody>
+          ${maioresPorCidade.map(c => `<tr>
+            <td class="cat-cell">${esc(c.cidade)}</td>
+            <td>${esc(c.ofensor)}</td>
+            <td style="font-weight:700">${formatPct((c.qtd / c.total) * 100, 1)} <span style="font-weight:600;color:var(--text-muted)">(${c.qtd} de ${c.total})</span></td>
+            <td style="white-space:normal;font-size:12px;color:var(--text-secondary)">${esc(c.outros.map(([n, v]) => `${n} (${v})`).join(', ')) || '-'}</td>
+          </tr>`).join('')}
+        </tbody></table></div>`}
+      </div>
+
+      <div class="section-heading">12. Retornos — principais ofensores no geral</div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        ${tabelaRankingReuniao(ofensoresGeral.map(o => ({
+          nome: o.nome,
+          valor: `${formatPct(retornos.length ? (o.total / retornos.length) * 100 : 0, 1)} <span style="font-weight:600;color:var(--text-muted)">(${o.total})</span>`,
+          sub: `IRR ${o.irr} · IFI ${o.ifi}`,
+        })), { rotuloNome: 'Ofensor', rotuloValor: '% dos retornos', rotuloSub: 'Abertura', vazio: 'Sem retornos no período/cidades.' })}
+      </div>
+
+      <div class="section-heading">13. Motivo da baixa dos retornos (IFI / IRR)</div>
+      ${nota('Motivo com que a visita de retorno foi encerrada.')}
+      <div class="panel" style="margin-bottom:1.5rem">
+        ${tabelaRankingReuniao(motivosRet.map(m => ({
+          nome: m.nome,
+          valor: `${formatPct(retornos.length ? (m.total / retornos.length) * 100 : 0, 1)} <span style="font-weight:600;color:var(--text-muted)">(${m.total})</span>`,
+          sub: `IRR ${m.irr} · IFI ${m.ifi}`,
+        })), { rotuloNome: 'Motivo da baixa do retorno', rotuloValor: '% dos retornos', rotuloSub: 'Abertura', vazio: 'Sem motivo preenchido nos retornos do período.' })}
+      </div>
+
+      <div class="section-heading">14. IRR — motivo do serviço anterior × motivo do retorno</div>
+      ${nota(`Par achado por contrato + data da ordem anterior (correspondência aproximada — a planilha não traz a O.S. anterior).${irrSemPar ? ` <b>${irrSemPar}</b> IRR sem par encontrado ficaram de fora.` : ''}`)}
+      ${!paresIrr.length ? '<div class="panel"><div class="empty">Não consegui casar nenhum retorno IRR com o serviço anterior nesse período.</div></div>' : `
+      <div class="cards-grid">
+        ${metricCard('Voltou pelo MESMO motivo', formatPct(pctMesmoMotivo, 1), true, { big: true, sub: `${iguais} de ${paresIrr.length} par(es) analisado(s)` })}
+        ${metricCard('Voltou por motivo diferente', formatPct(100 - pctMesmoMotivo, 1), false, { big: true, sub: 'serviço anterior fechou com outro motivo' })}
+        ${metricCard('Pares analisados', paresIrr.length.toLocaleString('pt-BR'), false, { sub: irrSemPar ? `${irrSemPar} sem par` : 'todos os IRR casaram' })}
+      </div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Combinações mais comuns</h3>
+        ${tabelaRankingReuniao(paresRank.map(p => ({
+          nome: p.nome,
+          valor: `${formatPct((p.total / paresIrr.length) * 100, 1)} <span style="font-weight:600;color:var(--text-muted)">(${p.total})</span>`,
+          sub: p.igual ? '<span style="color:var(--danger)">mesmo motivo — problema não resolvido</span>' : 'motivo diferente',
+        })), { rotuloNome: 'Motivo do serviço anterior ➜ motivo do retorno', rotuloValor: '% dos pares', rotuloSub: 'Leitura' })}
+      </div>`}
+
+      <div id="pdf-export-area"></div>
+    `;
+    donutChart('reu-donut', [
+      { label: 'No prazo (até 24h)', value: dentro24.length, color: '#22c55e' },
+      { label: 'Fora do prazo', value: foraPrazo.length, color: '#ef4444' },
+    ], { centroLabel: 'Reparos' });
+    ativarTogglesDeSecao(body);
+    ativarBotoesImagem(body);
+
+    // O .pptx recebe os números JÁ CALCULADOS aqui — nunca recalcula por conta
+    // própria, senão o slide e a tela poderiam divergir.
+    document.getElementById('reu-ppt').addEventListener('click', () => exportarPptReuniao({
+      periodoTxt,
+      totalReparos: rowsPrazo.length, dentro24: dentro24.length, foraPrazo: foraPrazo.length,
+      pctNoPrazo, pctForaPrazo,
+      melhores: melhoresTec.map(t => ({ nome: t.nome, pctD: pctD(t), pctF: pctF(t), total: t.total })),
+      piores: pioresTec.map(t => ({ nome: t.nome, pctD: pctD(t), pctF: pctF(t), total: t.total })),
+      cidades: cidadesRank.map(c => ({ nome: c.nome, pctD: pctD(c), pctF: pctF(c), total: c.total })),
+      qtdManha: contaPeriodo.manha, qtdTarde: contaPeriodo.tarde,
+      pctManha: totalPeriodo ? (contaPeriodo.manha / totalPeriodo) * 100 : 0,
+      pctTarde: totalPeriodo ? (contaPeriodo.tarde / totalPeriodo) * 100 : 0,
+      periodoPior, rotuloPior: totalPeriodo ? rotuloPeriodo(periodoPior) : '-',
+      rankPeriodo: Object.entries(ofensoresDoPeriodo).map(([nome, qtd]) => ({ nome, qtd, pct: totalPior ? (qtd / totalPior) * 100 : 0 }))
+        .sort((a, b) => b.qtd - a.qtd),
+      motivosFora: motivosFora.map(m => ({ nome: m.nome, total: m.total, pct: foraPrazo.length ? (m.total / foraPrazo.length) * 100 : 0 })),
+      temPcr: !!perdeuPrazoPcr.length || !!inicios.length,
+      diasPcr, folgaAoIniciar: duracaoDeHoras(folgaAoIniciar), duracaoAtendimento: duracaoDeHoras(duracaoAtendimento),
+      pctJaEstourado, jaEstouradoQtd: jaChegouEstourado.length, baseEstourado: semTentFora.length,
+      cidadesInicio: cidadesInicio.map(c => ({ nome: c.nome, hora: horaDeDecimal(mediaHora(c)), dias: c.dias })),
+      tecnicosTarde: tecnicosTarde.map(t => ({ nome: t.nome, hora: horaDeDecimal(mediaHora(t)), dias: t.dias })),
+      pctIrr, pctIfi, qtdIrr, qtdIfi,
+      mediaDias: mediaDiasGeral === null ? '-' : `${mediaDiasGeral.toFixed(1).replace('.', ',')} dias`,
+      mediaDiasIrr: mediaDiasIrr === null ? '-' : `${mediaDiasIrr.toFixed(1).replace('.', ',')}d`,
+      mediaDiasIfi: mediaDiasIfi === null ? '-' : `${mediaDiasIfi.toFixed(1).replace('.', ',')}d`,
+      cidadesRet: cidadesRetRank.map(c => ({ nome: c.nome, pct: pctRetCidade(c), pctIrr: pctIndicador(c.irr, c.reparos), pctIfi: pctIndicador(c.ifi, c.ativacoes) })),
+      ofensoresRet: ofensoresGeral.map(o => ({ nome: o.nome, pct: retornos.length ? (o.total / retornos.length) * 100 : 0, irr: o.irr, ifi: o.ifi })),
+      motivosRet: motivosRet.map(m => ({ nome: m.nome, pct: retornos.length ? (m.total / retornos.length) * 100 : 0, irr: m.irr, ifi: m.ifi })),
+      paresIrrTotal: paresIrr.length, iguais, irrSemPar, pctMesmoMotivo: pctMesmoMotivo || 0,
+      paresRank: paresRank.map(p => ({ nome: p.nome, total: p.total, pct: paresIrr.length ? (p.total / paresIrr.length) * 100 : 0 })),
+    }));
+
+    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
+      { id: 'prazo', label: '1. Prazo do mês — resumo' },
+      { id: 'tecnicos', label: '2. Técnicos — % no prazo e % fora' },
+      { id: 'cidades', label: '3. Cidades ofensoras de prazo' },
+      { id: 'periodo', label: '4. Período ofensor (manhã × tarde)' },
+      { id: 'motivos', label: '5. Motivos da baixa — fora do prazo' },
+      { id: 'campo', label: '6/7. Tempo em campo e prazo já estourado' },
+      { id: 'inicio', label: '8. Horário de início do dia' },
+      { id: 'retresumo', label: '9. Retornos — % de serviço que volta' },
+      { id: 'retcidade', label: '10. Retornos — cidades ofensoras' },
+      { id: 'retofensor', label: '11/12. Retornos — ofensores' },
+      { id: 'retmotivo', label: '13. Motivo da baixa dos retornos' },
+      { id: 'irrpar', label: '14. IRR — motivo anterior × retorno' },
+    ]);
+    wirePdfExportPanel('Reunião Técnica — Prazos e Retornos', {
+      prazo: () => secaoTabela(`Prazo do Mês — ${periodoTxt}`, [
+        { l: 'Reparos no período', v: rowsPrazo.length },
+        { l: '% no prazo (até 24h)', v: formatPct(pctNoPrazo, 1) },
+        { l: '% fora do prazo', v: formatPct(pctForaPrazo, 1) },
+        { l: 'Meta de prazo', v: formatPct(PRAZO_META, 0) },
+      ], [{ header: 'Indicador', get: r => r.l }, { header: 'Valor', get: r => r.v }]),
+      tecnicos: () => secaoTabela('Técnicos — % no Prazo', [...tecComAmostra].sort((a, b) => pctD(b) - pctD(a)), [
+        { header: 'Técnico', get: t => t.nome }, { header: '% no prazo', get: t => formatPct(pctD(t), 1) },
+        { header: '% fora do prazo', get: t => formatPct(pctF(t), 1) }, { header: 'Reparos', get: t => t.total },
+      ]),
+      cidades: () => secaoTabela('Cidades — % Fora do Prazo', cidadesRank, [
+        { header: 'Cidade', get: c => c.nome }, { header: '% fora do prazo', get: c => formatPct(pctF(c), 1) },
+        { header: '% no prazo', get: c => formatPct(pctD(c), 1) }, { header: 'Reparos', get: c => c.total },
+      ]),
+      periodo: () => secaoTabela(`Período Ofensor — ${rotuloPeriodo(periodoPior)}`, rankPeriodo.map((o, i) => ({ ...o, pos: i + 1 })), [
+        { header: '#', get: o => o.pos }, { header: 'Técnico', get: o => o.nome },
+        { header: '% das perdas do período', get: o => stripTags(o.valor) },
+      ]),
+      motivos: () => secaoTabela('Motivos da Baixa — Reparo Fora do Prazo', motivosFora, [
+        { header: 'Motivo', get: m => m.nome }, { header: 'Ordens', get: m => m.total },
+        { header: '% das perdas', get: m => formatPct(foraPrazo.length ? (m.total / foraPrazo.length) * 100 : 0, 1) },
+      ], { totalRow: ['TOTAL', foraPrazo.length, '100%'] }),
+      campo: () => secaoTabela('Tempo em Campo e Prazo Estourado', [
+        { l: 'Dias de PCR importados no período', v: diasPcr },
+        { l: 'Ordens fora do prazo analisadas', v: perdeuPrazoPcr.length },
+        { l: 'Folga média ao iniciar', v: duracaoDeHoras(folgaAoIniciar) },
+        { l: 'Tempo médio de atendimento', v: duracaoDeHoras(duracaoAtendimento) },
+        { l: '% que já chegou com prazo estourado', v: pctJaEstourado === null ? '-' : formatPct(pctJaEstourado, 1) },
+        { l: 'Base (reparos sem tentativa anterior, fora do prazo)', v: semTentFora.length },
+      ], [{ header: 'Indicador', get: r => r.l }, { header: 'Valor', get: r => r.v }]),
+      inicio: () => secaoTabela('Horário Médio de Início — por Cidade', cidadesInicio, [
+        { header: 'Cidade', get: c => c.nome }, { header: 'Início médio', get: c => horaDeDecimal(mediaHora(c)) },
+        { header: 'Amostra (dias)', get: c => c.dias },
+      ]),
+      retresumo: () => secaoTabela(`Retornos — ${periodoTxt}`, [
+        { l: '% IRR', v: formatPct(pctIrr, 2) }, { l: 'Qtd. IRR', v: qtdIrr },
+        { l: '% IFI', v: formatPct(pctIfi, 2) }, { l: 'Qtd. IFI', v: qtdIfi },
+        { l: 'Tempo médio até voltar (dias)', v: mediaDiasGeral === null ? '-' : mediaDiasGeral.toFixed(1).replace('.', ',') },
+      ], [{ header: 'Indicador', get: r => r.l }, { header: 'Valor', get: r => r.v }]),
+      retcidade: () => secaoTabela('Retornos — Cidades Ofensoras', cidadesRetRank, [
+        { header: 'Cidade', get: c => c.nome }, { header: '% de retorno', get: c => formatPct(pctRetCidade(c), 2) },
+        { header: '% IRR', get: c => formatPct(pctIndicador(c.irr, c.reparos), 2) },
+        { header: '% IFI', get: c => formatPct(pctIndicador(c.ifi, c.ativacoes), 2) },
+      ]),
+      retofensor: () => secaoTabela('Retornos — Principais Ofensores', ofensoresGeral, [
+        { header: 'Ofensor', get: o => o.nome },
+        { header: '% dos retornos', get: o => formatPct(retornos.length ? (o.total / retornos.length) * 100 : 0, 1) },
+        { header: 'IRR', get: o => o.irr }, { header: 'IFI', get: o => o.ifi },
+      ]),
+      retmotivo: () => secaoTabela('Motivo da Baixa dos Retornos', motivosRet, [
+        { header: 'Motivo', get: m => m.nome }, { header: 'Retornos', get: m => m.total },
+        { header: '% dos retornos', get: m => formatPct(retornos.length ? (m.total / retornos.length) * 100 : 0, 1) },
+      ]),
+      irrpar: () => secaoTabela('IRR — Motivo do Serviço Anterior × Motivo do Retorno', paresRank, [
+        { header: 'Combinação', get: p => p.nome }, { header: 'Pares', get: p => p.total },
+        { header: '% dos pares', get: p => formatPct(paresIrr.length ? (p.total / paresIrr.length) * 100 : 0, 1) },
+        { header: 'Mesmo motivo?', get: p => p.igual ? 'Sim' : 'Não' },
+      ]),
     });
   }
 }
