@@ -15448,6 +15448,13 @@ function renderFolhaPagamento(modo) {
   // exatamente a dúvida do cliente em 03/09/2026 (dois "MARCO AURÉLIO", um com
   // 258 ordens e outro com 232: eram dois fechamentos diferentes).
   const periodoPadraoFolha = periodosNomeados[0] || '';
+  // Filtros do bloco do Escritório (só no Relatório — pedido do cliente
+  // 14/09/2026: "colocar o do escritório também, com filtro de tempo e
+  // colaborador separado"). Separado dos filtros de Técnico/Período de cima
+  // de propósito: a Folha Escritório fecha por MÊS CALENDÁRIO, não pelo
+  // ciclo 21-a-20 da Folha Técnica — um seletor só pra ela evita misturar
+  // os dois calendários num único campo.
+  const periodosEsc = soRelatorio ? periodosFolhaEscritorio() : { lista: [], atual: '' };
   document.getElementById('content').innerHTML = `<div class="toolbar toolbar-fixa">
     <div class="field"><label>Técnico</label><input type="text" id="f-tech" placeholder="Nome" list="tech-list"></div>
     ${DB.folhaPagamento.length ? `<div class="field"><label>Período</label><select id="f-periodo">
@@ -15457,6 +15464,11 @@ function renderFolhaPagamento(modo) {
     </select></div>` : ''}
     <div class="field"><label>Retornos IFI/IRR — de</label><input type="date" id="fol-ret-de"></div>
     <div class="field"><label>até</label><input type="date" id="fol-ret-ate"></div>
+    ${soRelatorio ? `
+    <div class="field"><label>Colaborador (Escritório)</label><input type="text" id="f-esc-nome" placeholder="Nome"></div>
+    <div class="field"><label>Período (Escritório)</label><select id="f-esc-periodo">
+      ${periodosEsc.lista.map(p=>`<option value="${esc(p)}"${p === periodosEsc.atual ? ' selected' : ''}>${esc(p)}</option>`).join('')}
+    </select></div>` : ''}
     <button class="btn" id="f-apply">Filtrar</button>
     <button class="btn-secundario" id="fol-ret-reset" style="padding:8px 14px;align-self:flex-end">Usar os números da planilha</button>
   </div>
@@ -15634,6 +15646,58 @@ function renderFolhaPagamento(modo) {
     };
     const descList = Object.entries(descTotals).filter(([,v])=>v>0).map(([label,value])=>({label,value,display:formatCurrency(value)})).sort((a,b)=>b.value-a.value);
 
+    // ---- Bloco do ESCRITÓRIO (só no Relatório) — mesma ideia do bloco da
+    // equipe de campo acima, mas lendo linhasFolhaEscritorio (que é a MESMA
+    // função que a tela Folha — Escritório usa, então os números sempre
+    // batem entre as duas telas). Filtro de período e de colaborador são
+    // próprios (ver comentário no toolbar) — vazio = nada selecionado ainda.
+    let linhasEsc = [], escPeriodo = '';
+    if (soRelatorio) {
+      const escNomeEl = document.getElementById('f-esc-nome');
+      const escPeriodoEl = document.getElementById('f-esc-periodo');
+      escPeriodo = escPeriodoEl ? escPeriodoEl.value : '';
+      const escFiltroNome = escNomeEl ? escNomeEl.value.toLowerCase() : '';
+      linhasEsc = escPeriodo ? linhasFolhaEscritorio(escPeriodo) : [];
+      if (escFiltroNome) linhasEsc = linhasEsc.filter(l => l.pessoa.toLowerCase().includes(escFiltroNome));
+    }
+    const totalReceberEsc = linhasEsc.reduce((a,l)=>a+(Number(l.total_receber)||0),0);
+    const totalProventosEsc = linhasEsc.reduce((a,l)=>a+(Number(l.proventos)||0),0);
+    const totalDescontosEsc = linhasEsc.reduce((a,l)=>a+(Number(l.descontos)||0),0);
+    const rankingEsc = [...linhasEsc].sort((a,b)=>b.total_receber-a.total_receber);
+    const topGanhamEsc = rankingEsc.map(l=>({label:l.pessoa, value:l.total_receber, display:formatCurrency(l.total_receber), color:'#22c55e'}));
+    const bottomGanhamEsc = [...rankingEsc].sort((a,b)=>a.total_receber-b.total_receber).map(l=>({label:l.pessoa, value:l.total_receber, display:formatCurrency(l.total_receber), color:'#ef4444'}));
+    const descTotalsEsc = {};
+    FOLHA_ESC_DESCONTOS.forEach(c => { descTotalsEsc[c.rot] = linhasEsc.reduce((a,l)=>a+(Number(l[c.campo])||0),0); });
+    const descListEsc = Object.entries(descTotalsEsc).filter(([,v])=>v>0).map(([label,value])=>({label,value,display:formatCurrency(value)})).sort((a,b)=>b.value-a.value);
+    const colsEsc = [
+      ['Colaborador', l=>esc(l.pessoa)], ['Cargo', l=>esc(l.cargo||'-')],
+      ['Salário base', l=>formatCurrency(l.salario_base)], ['Dias trab.', l=>Number(l.dias_trab)||0],
+      ['Líquido', l=>formatCurrency(l.liquido)],
+      ['Proventos', l=>formatCurrency(l.proventos)], ['Descontos', l=>formatCurrency(l.descontos)],
+      ['A Receber', l=>formatCurrency(l.total_receber)],
+    ];
+    const blocoRelatorioEscritorio = !soRelatorio ? '' : `
+      <div class="section-heading">Financeiro do Escritório${escPeriodo ? `<span class="sec-nota">${esc(escPeriodo)}</span>` : ''}</div>
+      ${!escPeriodo ? '<div class="panel"><div class="empty">Escolha um período do Escritório no filtro do topo pra ver os números.</div></div>' : !linhasEsc.length ? '<div class="panel"><div class="empty">Nenhum colaborador do Escritório nesse filtro.</div></div>' : `
+      <div class="cards-grid">
+        ${metricCard('Colaboradores', linhasEsc.length)}
+        ${metricCard('Total de proventos', formatCurrency(totalProventosEsc))}
+        ${metricCard('Total de descontos', formatCurrency(totalDescontosEsc), totalDescontosEsc>0)}
+        ${metricCard('Total a receber (escritório)', formatCurrency(totalReceberEsc), false, {positive:true})}
+      </div>
+      <div class="panels-grid">
+        <div class="panel"><h3>Quem mais ganha (escritório)</h3><div id="c-esc-top"></div></div>
+        <div class="panel"><h3>Quem menos ganha (escritório)</h3><div id="c-esc-bottom"></div></div>
+      </div>
+      ${descListEsc.length ? `<div class="panel" style="margin-bottom:1.5rem"><h3>Descontos por tipo (escritório)</h3><div id="c-esc-desc"></div></div>` : ''}
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+        ${colsEsc.map(c=>`<th>${c[0]}</th>`).join('')}
+      </tr></thead><tbody>
+        ${linhasEsc.map(l=>`<tr>${colsEsc.map(c=>`<td${c[0]==='Colaborador'?' class="cat-cell"':''}>${c[1](l)}</td>`).join('')}</tr>`).join('')}
+        <tr class="total-row"><td class="cat-cell">TOTAL</td><td>-</td><td>-</td><td>-</td><td>-</td>
+          <td>${formatCurrency(totalProventosEsc)}</td><td>${formatCurrency(totalDescontosEsc)}</td><td>${formatCurrency(totalReceberEsc)}</td></tr>
+      </tbody></table></div>`}`;
+
     // O RELATÓRIO leva os cartões e os gráficos; a FOLHA leva a tabela e o
     // holerite. Pedido do cliente (03/09/2026): a folha ficou longa demais
     // pra quem só quer conferir e assinar linha por linha.
@@ -15658,7 +15722,7 @@ function renderFolhaPagamento(modo) {
       </div>
       <div class="panel" style="margin-bottom:1.5rem"><h3>Descontos por tipo (equipe)</h3><div id="c-desc"></div></div>`;
 
-    body.innerHTML = soRelatorio ? blocoRelatorio + '<div id="pdf-export-area"></div>' : `
+    body.innerHTML = soRelatorio ? blocoRelatorio + blocoRelatorioEscritorio + '<div id="pdf-export-area"></div>' : `
       <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">Folha de Pagamento completa
         <button type="button" class="btn-export-xls" id="folha-export-xls">⤓ Excel da folha</button>
         <button type="button" class="btn-export-img" id="folha-export-img">🖼 Imagem da folha</button>
@@ -15708,6 +15772,11 @@ function renderFolhaPagamento(modo) {
       barsChartTopN('c-top', topGanham, {defaultN:8});
       barsChartTopN('c-bottom', bottomGanham, {defaultN:8});
       barsChartTopN('c-desc', descList, {color:'#0ea5e9'});
+      if (linhasEsc.length) {
+        barsChartTopN('c-esc-top', topGanhamEsc, {defaultN:8});
+        barsChartTopN('c-esc-bottom', bottomGanhamEsc, {defaultN:8});
+        if (descListEsc.length) barsChartTopN('c-esc-desc', descListEsc, {color:'#0ea5e9'});
+      }
     }
 
     // ---- Holerite (extrato de serviços) ----
@@ -15943,7 +16012,8 @@ function renderFolhaPagamento(modo) {
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'resumo', label: 'Resumo financeiro e indicadores' },
       { id: 'descontos', label: 'Descontos por tipo' },
-      { id: 'completa', label: 'Folha de pagamento completa (todos os técnicos)' }
+      { id: 'completa', label: 'Folha de pagamento completa (todos os técnicos)' },
+      ...(soRelatorio && linhasEsc.length ? [{ id: 'escritorio', label: `Folha do Escritório (${escPeriodo})` }] : []),
     ]);
     wirePdfExportPanel('Folha de Pagamento', {
       resumo: () => secaoTabela('Resumo Financeiro e Indicadores', [
@@ -15957,6 +16027,11 @@ function renderFolhaPagamento(modo) {
         {header:'% IFI', get:r=>formatPct(pct(r.ifi_pct, r), 2)}, {header:'% IRR', get:r=>formatPct(pct(r.irr_pct, r), 2)},
         {header:'Total Descontos', get:r=>formatCurrency(r.total_descontos)}, {header:'Total a Receber', get:r=>formatCurrency(r.total_receber)}
       ], { totalRow: ['TOTAL', totalOrdens, '', '', '', formatCurrency(totalDescontos), formatCurrency(totalReceber)] }),
+      escritorio: () => secaoTabela('Folha do Escritório — ' + escPeriodo, linhasEsc, [
+        {header:'Colaborador', get:r=>r.pessoa}, {header:'Cargo', get:r=>r.cargo||'-'}, {header:'Dias trab.', get:r=>Number(r.dias_trab)||0},
+        {header:'Proventos', get:r=>formatCurrency(r.proventos)}, {header:'Descontos', get:r=>formatCurrency(r.descontos)},
+        {header:'A Receber', get:r=>formatCurrency(r.total_receber)}
+      ], { totalRow: ['TOTAL', '', '', formatCurrency(totalProventosEsc), formatCurrency(totalDescontosEsc), formatCurrency(totalReceberEsc)] }),
     });
   }
 }
