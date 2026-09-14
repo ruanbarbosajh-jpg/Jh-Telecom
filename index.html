@@ -13246,10 +13246,25 @@ function gerarImagemRankingPrazo(listDentro, listFora, inicio, fim) {
   document.body.appendChild(wrapper);
   capturarElementoComoImagem(wrapper, 'ranking-prazo-tecnico-' + hojeISOLocal(), () => wrapper.remove());
 }
+// Motivo real de uma linha de DB.prazo, puxado da Produção pela mesma O.S.
+// (ver comentário em renderOfensoresPrazo — a aba BASE DE DADOS não tem
+// coluna de motivo, só a BASE PRODUÇÃO tem).
+function motivoDoPrazo(r) {
+  const idxProd = r.os ? DB_INDEX.producao.get(r.os) : undefined;
+  const prod = idxProd !== undefined ? DB.producao[idxProd] : null;
+  return ((prod && prod.motivo) || '').trim() || 'Não informado';
+}
 function renderOfensoresPrazo() {
   const { start, end } = defaultMonthPeriod();
   document.getElementById('content').innerHTML = `${periodToolbar(start,end,`
     ${multiCityField('op-cidades', 'Cidades', {preset: CIDADES_COBRADAS_PRAZO})}
+    <div class="field"><label>Técnico</label><input type="text" id="f-tech" placeholder="Nome" list="tech-list"></div>
+    <div class="field"><label>Motivo da baixa</label><select id="op-motivo"><option value="">Todos</option></select></div>
+    <div class="field"><label>Período da perda de prazo</label><select id="op-periodo">
+      <option value="">Todos</option>
+      <option value="manha">Manhã</option>
+      <option value="tarde">Tarde</option>
+    </select></div>
   `)}<div id="op-body"></div>`;
   wireMultiCityField('op-cidades');
   document.getElementById('f-apply').addEventListener('click', load);
@@ -13258,11 +13273,25 @@ function renderOfensoresPrazo() {
     const s = document.getElementById('f-start').value, e = document.getElementById('f-end').value;
     refreshCityField('op-cidades', DB.prazo.filter(p => inRange(p.data,s,e)), { label: 'Cidades', presetPadrao: CIDADES_COBRADAS_PRAZO });
     const cidades = getSelectedCities('op-cidades');
+    const tech = document.getElementById('f-tech').value.toLowerCase();
+    const periodoFiltro = document.getElementById('op-periodo').value;
+    const motivoSel = document.getElementById('op-motivo');
+    const motivoFiltro = motivoSel.value;
     // MESMA regra da página de Prazo: linha sem faixa válida (célula em branco
     // ou #VALUE! na planilha) fica de fora. Antes ela entrava aqui como "fora do
     // prazo" e o técnico virava ofensor por causa de célula vazia — dando dois
     // números diferentes de fora do prazo nas duas telas.
-    const rows = DB.prazo.filter(p => inRange(p.data,s,e) && isConcluido(p.status) && cidades.includes(p.cidade) && ehPrazoDeReparo(p) && classifyBucket(p.status_prazo) !== 'outro');
+    const baseFiltro = p => inRange(p.data,s,e) && isConcluido(p.status) && cidades.includes(p.cidade) && ehPrazoDeReparo(p) && classifyBucket(p.status_prazo) !== 'outro'
+      && (!tech || (p.recurso||'').toLowerCase().includes(tech))
+      && (!periodoFiltro || periodoDoPrazo(p) === periodoFiltro);
+    // opções do filtro de motivo = universo ANTES de aplicar o próprio filtro de
+    // motivo (senão a lista sempre ficava presa na opção já escolhida) — mesma
+    // ideia do refreshCityField pras cidades.
+    const rowsSemMotivo = DB.prazo.filter(baseFiltro);
+    const motivosDisponiveis = [...new Set(rowsSemMotivo.map(motivoDoPrazo))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+    motivoSel.innerHTML = '<option value="">Todos</option>' + motivosDisponiveis.map(m=>`<option value="${esc(m)}"${m===motivoFiltro?' selected':''}>${esc(m)}</option>`).join('');
+    if (motivoFiltro && !motivosDisponiveis.includes(motivoFiltro)) motivoSel.value = '';
+    const rows = rowsSemMotivo.filter(p => !motivoSel.value || motivoDoPrazo(p) === motivoSel.value);
     const semFaixa = DB.prazo.filter(p => inRange(p.data,s,e) && isConcluido(p.status) && cidades.includes(p.cidade) && ehPrazoDeReparo(p) && classifyBucket(p.status_prazo) === 'outro').length;
     const body = document.getElementById('op-body');
     if (!rows.length) {
@@ -13311,9 +13340,7 @@ function renderOfensoresPrazo() {
     // teria).
     const motivoForaMap = {};
     foraPrazo.forEach(r => {
-      const idxProd = r.os ? DB_INDEX.producao.get(r.os) : undefined;
-      const prod = idxProd !== undefined ? DB.producao[idxProd] : null;
-      const m = ((prod && prod.motivo) || '').trim() || 'Não informado';
+      const m = motivoDoPrazo(r);
       if (!motivoForaMap[m]) motivoForaMap[m] = { motivo: m, total: 0, porTecnico: {} };
       motivoForaMap[m].total++;
       const t = r.recurso || 'Não informado';
