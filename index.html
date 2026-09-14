@@ -13613,50 +13613,61 @@ function exportarPptReuniao(d) {
   ]);
   pptRodape(s1, 'Fonte: planilha de prazo (BASE DE DADOS). Ordem sem faixa válida não entra na conta.');
 
-  // ---- 2. melhores técnicos ----
-  const s2 = pptSlide(pptx, 'Técnicos que mais entregam no prazo', `Top ${Math.min(8, d.melhores.length)} · mínimo de ${REUNIAO_MIN_ORDENS} reparos no período`);
-  pptTabela(pptx, s2, ['#', 'Técnico', '% no prazo', '% fora', 'Reparos'],
-    d.melhores.slice(0, 8).map((t, i) => [String(i + 1).padStart(2, '0'), t.nome, formatPct(t.pctD, 1), formatPct(t.pctF, 1), t.total]),
-    { colW: [0.6, 4.2, 1.6, 1.5, 1.2] });
+  // ---- 2. quem mais produz ----
+  const s2 = pptSlide(pptx, 'Quem mais produz — e o prazo deles', 'Ordenado pela produção do período');
+  pptTabela(pptx, s2, ['#', 'Técnico', '% no prazo', '% fora do prazo'],
+    d.melhores.slice(0, 8).map((t, i) => [String(i + 1).padStart(2, '0'), t.nome, formatPct(t.pctD, 1), formatPct(t.pctF, 1)]),
+    { colW: [0.6, 5.0, 1.8, 1.7] });
 
   // ---- 3. ofensores de prazo ----
-  const s3 = pptSlide(pptx, 'Ofensores de prazo', `Top ${Math.min(8, d.piores.length)} · mínimo de ${REUNIAO_MIN_ORDENS} reparos no período`);
-  pptTabela(pptx, s3, ['#', 'Técnico', '% fora do prazo', '% no prazo', 'Reparos'],
-    d.piores.slice(0, 8).map((t, i) => [String(i + 1).padStart(2, '0'), t.nome, formatPct(t.pctF, 1), formatPct(t.pctD, 1), t.total]),
-    { colW: [0.6, 4.2, 1.8, 1.4, 1.1] });
+  const s3 = pptSlide(pptx, 'Ofensores de prazo', `Mínimo de ${REUNIAO_MIN_ORDENS} reparos no período`);
+  pptTabela(pptx, s3, ['#', 'Técnico', '% fora do prazo', '% no prazo'],
+    d.piores.slice(0, 8).map((t, i) => [String(i + 1).padStart(2, '0'), t.nome, formatPct(t.pctF, 1), formatPct(t.pctD, 1)]),
+    { colW: [0.6, 5.0, 1.8, 1.7] });
 
   // ---- 4. cidades ----
   const s4 = pptSlide(pptx, 'Cidades ofensoras', 'Percentual de reparo fora do prazo da própria cidade');
-  pptTabela(pptx, s4, ['#', 'Cidade', '% fora do prazo', '% no prazo', 'Reparos'],
-    d.cidades.slice(0, 8).map((c, i) => [String(i + 1).padStart(2, '0'), c.nome, formatPct(c.pctF, 1), formatPct(c.pctD, 1), c.total]),
-    { colW: [0.6, 4.2, 1.8, 1.4, 1.1] });
+  pptTabela(pptx, s4, ['#', 'Cidade', '% fora do prazo', '% no prazo'],
+    d.cidades.slice(0, 8).map((c, i) => [String(i + 1).padStart(2, '0'), c.nome, formatPct(c.pctF, 1), formatPct(c.pctD, 1)]),
+    { colW: [0.6, 5.0, 1.8, 1.7] });
 
   // ---- 5. período ofensor ----
-  const s5 = pptSlide(pptx, 'Período ofensor', 'Pela hora do TEMPO LIMITE da ordem');
+  const s5 = pptSlide(pptx, 'Período ofensor de prazo', 'Período definido pela hora do TEMPO LIMITE da ordem');
   pptKpis(pptx, s5, [
-    { valor: formatPct(d.pctManha, 1), rotulo: 'Perdas na manhã', sub: `${d.qtdManha} ordem(ns)`, cor: d.periodoPior === 'manha' ? PPT_COR.vermelho : PPT_COR.azul },
-    { valor: formatPct(d.pctTarde, 1), rotulo: 'Perdas na tarde', sub: `${d.qtdTarde} ordem(ns)`, cor: d.periodoPior === 'tarde' ? PPT_COR.vermelho : PPT_COR.azul },
-    { valor: d.rotuloPior, rotulo: 'Período que mais perde', corpo: 26, cor: PPT_COR.vermelho },
+    { valor: formatPct(d.pctManha, 1), rotulo: 'Perdas de prazo na manhã', cor: d.periodoPior === 'manha' ? PPT_COR.vermelho : PPT_COR.azul },
+    { valor: formatPct(d.pctTarde, 1), rotulo: 'Perdas de prazo na tarde', cor: d.periodoPior === 'tarde' ? PPT_COR.vermelho : PPT_COR.azul },
+    { valor: d.rotuloPior, rotulo: 'Período que mais perde prazo', corpo: 26, cor: PPT_COR.vermelho },
   ]);
-  pptTabela(pptx, s5, ['#', 'Ofensor do período', '% das perdas', 'Ordens'],
-    d.rankPeriodo.slice(0, 5).map((o, i) => [String(i + 1).padStart(2, '0'), o.nome, formatPct(o.pct, 1), o.qtd]),
-    { y: 3.0, colW: [0.6, 5.0, 2.0, 1.5], rowH: 0.28 });
+  pptTabela(pptx, s5, ['#', 'Técnico ofensor do período', '% das perdas'],
+    d.rankPeriodo.slice(0, 5).map((o, i) => [String(i + 1).padStart(2, '0'), o.nome, formatPct(o.pct, 1)]),
+    { y: 3.0, colW: [0.6, 6.0, 2.5], rowH: 0.28 });
 
   // ---- 6. motivos da baixa ----
   const s6 = pptSlide(pptx, 'Motivos da baixa — reparos fora do prazo', 'Motivo vindo da Produção, pela mesma O.S.');
-  pptTabela(pptx, s6, ['#', 'Motivo da baixa', '% das perdas', 'Ordens'],
-    d.motivosFora.slice(0, 8).map((m, i) => [String(i + 1).padStart(2, '0'), m.nome, formatPct(m.pct, 1), m.total]),
-    { colW: [0.6, 5.3, 1.8, 1.4] });
+  pptTabela(pptx, s6, ['#', 'Motivo da baixa', '% das perdas'],
+    d.motivosFora.slice(0, 8).map((m, i) => [String(i + 1).padStart(2, '0'), m.nome, formatPct(m.pct, 1)]),
+    { colW: [0.6, 6.0, 2.5] });
 
   // ---- 7. tempo em campo ----
   if (d.temPcr) {
-    const s7 = pptSlide(pptx, 'Tempo em campo e prazo estourado', `Base: ${d.diasPcr} dia(s) de PCR importado(s) no período`);
+    const s7 = pptSlide(pptx, 'Tempo em campo nas ordens fora do prazo', 'Média das ordens com hora real de início e de baixa');
     pptKpis(pptx, s7, [
-      { valor: d.folgaAoIniciar, rotulo: 'Folga ao iniciar', sub: 'do início até o prazo vencer' },
+      { valor: d.folgaAoIniciar, rotulo: 'Folga ao iniciar a ordem', sub: 'negativo = começou com o prazo já vencido', cor: String(d.folgaAoIniciar).startsWith('-') ? PPT_COR.vermelho : PPT_COR.azul },
       { valor: d.duracaoAtendimento, rotulo: 'Tempo de atendimento', sub: 'do início até a baixa' },
-      { valor: d.pctJaEstourado === null ? '-' : formatPct(d.pctJaEstourado, 1), rotulo: 'Já chegou estourado', sub: `${d.jaEstouradoQtd} de ${d.baseEstourado} sem tentativa anterior`, cor: PPT_COR.vermelho },
+      { valor: String(d.diasPcr), rotulo: 'Dias de PCR na amostra' },
     ]);
-    pptRodape(s7, 'Só ordens de reparo fora do prazo com hora real de início e de baixa no PCR.');
+
+    // ---- 7b. prazo já vencido ao receber ----
+    if (d.temEstourado) {
+      const s7b = pptSlide(pptx, 'Reparo recebido com o prazo já vencido', 'Percentual sobre o total de reparos do período');
+      pptKpis(pptx, s7b, [
+        { valor: formatPct(d.pctEstouradoSobreTotal, 1), rotulo: 'Recebidos com prazo vencido', cor: PPT_COR.vermelho },
+        { valor: formatPct(d.pctVencidoEmCampo, 1), rotulo: 'Prazo vencido em campo', cor: PPT_COR.azul },
+      ]);
+      pptTabela(pptx, s7b, ['Cidade', 'Recebido com prazo vencido', 'Prazo vencido em campo'],
+        d.estouradoPorCidade.slice(0, 6).map(c => [c.nome, formatPct(c.pctRecebido, 1), formatPct(c.pctCampo, 1)]),
+        { y: 3.0, colW: [3.5, 3.0, 2.6], rowH: 0.28 });
+    }
 
     // ---- 8. horário de início ----
     const s8 = pptSlide(pptx, 'Horário de início do dia', 'Hora média do primeiro início de cada técnico');
@@ -13741,6 +13752,14 @@ function horaDeDecimal(dec) {
   if (m === 60) { h++; m = 0; }
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
+// Escala do medidor de IFI/IRR. O padrão do gaugePanel é meta×6 — numa meta de
+// 4,5% isso vira uma régua de 0 a 27%, e um indicador de 2,36% fica espremido
+// num cantinho, sem dar pra ler se está perto ou longe de estourar. Aqui a
+// régua é o dobro da meta (ou o próprio valor com folga, quando ele já
+// estourou), então a meta cai no meio do arco e a leitura fica óbvia.
+function escalaIndicador(valor, meta) {
+  return Math.max(meta * 2, (valor || 0) * 1.25);
+}
 // 3.5 -> "3h30"; aceita negativo (técnico começou DEPOIS do prazo já vencido)
 function duracaoDeHoras(h) {
   if (h === null || h === undefined || !isFinite(h)) return '-';
@@ -13793,15 +13812,18 @@ function renderReuniaoPrazos() {
     });
     const tecComAmostra = Object.values(porTecnico).filter(t => t.total >= REUNIAO_MIN_ORDENS);
     const pctD = t => (t.dentro / t.total) * 100, pctF = t => (t.fora / t.total) * 100;
-    const melhoresTec = [...tecComAmostra].sort((a, b) => pctD(b) - pctD(a) || b.total - a.total).slice(0, 10);
+    // "Melhores" NÃO é quem tem o maior percentual (pedido do cliente): é quem
+    // mais PRODUZ, com o percentual dele do lado. Assim o ranking não premia
+    // quem fez pouca ordem e acertou todas.
+    const maisProduzem = Object.values(porTecnico).sort((a, b) => b.total - a.total || pctD(b) - pctD(a)).slice(0, 10);
     const pioresTec = [...tecComAmostra].sort((a, b) => pctF(b) - pctF(a) || b.total - a.total).slice(0, 10);
-    const itemTecEntrega = t => ({
-      nome: t.nome, valor: `<span style="color:var(--success)">${formatPct(pctD(t), 1)}</span>`,
-      sub: `Fora do prazo: ${formatPct(pctF(t), 1)} · ${t.total} reparo(s) no período`,
+    const itemTecProducao = t => ({
+      nome: t.nome, valor: `<span style="color:${pctD(t) >= PRAZO_META ? 'var(--success)' : 'var(--danger)'}">${formatPct(pctD(t), 1)}</span>`,
+      sub: formatPct(pctF(t), 1),
     });
     const itemTecOfensor = t => ({
       nome: t.nome, valor: `<span style="color:var(--danger)">${formatPct(pctF(t), 1)}</span>`,
-      sub: `No prazo: ${formatPct(pctD(t), 1)} · ${t.total} reparo(s) no período`,
+      sub: formatPct(pctD(t), 1),
     });
 
     // ---------- Cidades ofensoras de prazo ----------
@@ -13832,7 +13854,6 @@ function renderReuniaoPrazos() {
       .map(o => ({
         nome: o.nome,
         valor: `<span style="color:var(--danger)">${formatPct(totalPior ? (o.qtd / totalPior) * 100 : 0, 1)}</span>`,
-        sub: `das perdas da ${rotuloPeriodo(periodoPior).toLowerCase()} · ${o.qtd} ordem(ns)`,
       }));
 
     // ---------- Motivos da baixa dos reparos fora do prazo ----------
@@ -13845,7 +13866,7 @@ function renderReuniaoPrazos() {
       motivoForaMap[m].porTecnico[t] = (motivoForaMap[m].porTecnico[t] || 0) + 1;
     });
     const motivosFora = Object.values(motivoForaMap).sort((a, b) => b.total - a.total);
-    const top3De = obj => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} (${v})`).join(', ');
+    const top3De = obj => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k).join(', ');
 
     // ---------- BASE 2: PCR (hora real de início/limite/fim) ----------
     // Só os dias que foram importados pelo CSV diário caem aqui — por isso cada
@@ -13855,7 +13876,6 @@ function renderReuniaoPrazos() {
       .map(r => ({ ...r, inicio: dt(r.inicio), limite: dt(r.limite), encerramento: dt(r.encerramento) }));
     const diasPcr = new Set(pcrTodos.map(r => r.data)).size;
     const pcrReparo = pcrTodos.filter(r => ehServicoReparo(r.tipo_atividade));
-    const avisoPcr = `Fonte: CSV diário do PCR — cobertura de <b>${diasPcr} dia(s)</b> importado(s) no período (${esc(periodoTxt)}). Dia não importado não entra na conta.`;
 
     // tempo que o técnico ficou "iniciado" nas ordens que PERDERAM o prazo
     const perdeuPrazoPcr = pcrReparo.filter(r => r.inicio && r.limite && r.encerramento && r.encerramento > r.limite);
@@ -13873,7 +13893,30 @@ function renderReuniaoPrazos() {
     const semTentativaAnterior = Object.values(porOSpcr).filter(l => l.length === 1).map(l => l[0]);
     const semTentFora = semTentativaAnterior.filter(r => r.limite && r.encerramento && r.encerramento > r.limite);
     const jaChegouEstourado = semTentFora.filter(r => r.inicio && r.inicio > r.limite);
-    const pctJaEstourado = semTentFora.length ? (jaChegouEstourado.length / semTentFora.length) * 100 : null;
+    // O percentual é sobre o TOTAL de reparos do período (pedido do cliente) e
+    // não sobre a base menor "sem tentativa anterior" — assim o número responde
+    // "de tudo que rodou, quanto já chegou perdido". Denominador vem do MESMO
+    // PCR do numerador: cruzar com a planilha mensal daria duas coberturas
+    // diferentes na mesma fração.
+    const totalReparosPcr = Object.keys(porOSpcr).length;
+    const vencidoEmCampoQtd = semTentFora.length - jaChegouEstourado.length;
+    const pctEstouradoSobreTotal = totalReparosPcr ? (jaChegouEstourado.length / totalReparosPcr) * 100 : 0;
+    const pctVencidoEmCampo = totalReparosPcr ? (vencidoEmCampoQtd / totalReparosPcr) * 100 : 0;
+    const estouradoCidadeMap = {};
+    pcrReparo.forEach(r => {
+      const c = r.cidade || 'Não informado';
+      if (!estouradoCidadeMap[c]) estouradoCidadeMap[c] = { nome: c, os: new Set(), recebido: 0, campo: 0 };
+      if (r.os) estouradoCidadeMap[c].os.add(r.os);
+    });
+    semTentFora.forEach(r => {
+      const o = estouradoCidadeMap[r.cidade || 'Não informado'];
+      if (!o) return;
+      if (r.inicio && r.inicio > r.limite) o.recebido++; else o.campo++;
+    });
+    const estouradoPorCidade = Object.values(estouradoCidadeMap)
+      .map(o => ({ nome: o.nome, pctRecebido: o.os.size ? (o.recebido / o.os.size) * 100 : 0, pctCampo: o.os.size ? (o.campo / o.os.size) * 100 : 0 }))
+      .filter(o => o.pctRecebido > 0 || o.pctCampo > 0)
+      .sort((a, b) => b.pctRecebido - a.pctRecebido);
 
     // horário em que cada técnico COMEÇA o dia (menor início do dia dele)
     const primeiroDoDia = {};
@@ -14003,24 +14046,22 @@ function renderReuniaoPrazos() {
       <div class="section-heading">1. Prazo do mês</div>
       ${nota(`Reparos concluídos · prazo de 24h · meta ${formatPct(PRAZO_META, 0)}.`)}
       <div class="cards-grid">
-        ${metricCard('Reparos no período', rowsPrazo.length.toLocaleString('pt-BR'))}
-        ${metricCard('% no prazo (até 24h)', formatPct(pctNoPrazo, 1), false, { positive: pctNoPrazo >= PRAZO_META, sub: `${dentro24.length.toLocaleString('pt-BR')} ordem(ns)` })}
-        ${metricCard('% fora do prazo', formatPct(pctForaPrazo, 1), true, { sub: `${foraPrazo.length.toLocaleString('pt-BR')} ordem(ns)` })}
-      </div>
-      <div class="panels-grid">
-        ${gaugePanel('% no prazo (meta ' + formatPct(PRAZO_META, 0) + ')', pctNoPrazo, PRAZO_META)}
-        <div class="panel"><h3>No prazo × Fora do prazo</h3><div id="reu-donut"></div></div>
+        ${metricCard('Reparos concluídos no período', rowsPrazo.length.toLocaleString('pt-BR'), false, { nivel: 'primario' })}
+        ${metricCard(`Entregues no prazo (até 24h) · meta ${formatPct(PRAZO_META, 0)}`, formatPct(pctNoPrazo, 1), false, { positive: pctNoPrazo >= PRAZO_META, big: true, nivel: 'heroi', sub: pctNoPrazo >= PRAZO_META ? 'dentro da meta' : `${formatPct(PRAZO_META - pctNoPrazo, 1)} abaixo da meta` })}
+        ${metricCard('Entregues fora do prazo', formatPct(pctForaPrazo, 1), true, { big: true, nivel: 'heroi' })}
       </div>
 
-      <div class="section-heading">2. Técnicos — % de entrega no prazo</div>
-      ${nota(`Mínimo de ${REUNIAO_MIN_ORDENS} reparos no período pra entrar no ranking.`)}
-      <div class="panel" style="margin-bottom:1.5rem">
-        <h3>Melhores — maior % no prazo</h3>
-        ${tabelaRankingReuniao(melhoresTec.map(itemTecEntrega), { cor: 'ok', rotuloNome: 'Técnico', rotuloValor: '% no prazo', rotuloSub: 'Detalhe', vazio: `Nenhum técnico com ${REUNIAO_MIN_ORDENS}+ reparos nesse filtro.` })}
-      </div>
-      <div class="panel" style="margin-bottom:1.5rem">
-        <h3>Ofensores — maior % fora do prazo</h3>
-        ${tabelaRankingReuniao(pioresTec.map(itemTecOfensor), { cor: 'warn', rotuloNome: 'Técnico', rotuloValor: '% fora do prazo', rotuloSub: 'Detalhe', vazio: `Nenhum técnico com ${REUNIAO_MIN_ORDENS}+ reparos nesse filtro.` })}
+      <div class="section-heading">2. Técnicos — produção e entrega no prazo</div>
+      ${nota(`Ofensores: mínimo de ${REUNIAO_MIN_ORDENS} reparos no período pra entrar no ranking.`)}
+      <div class="panels-grid">
+        <div class="panel">
+          <h3>Quem mais produz — e o prazo deles</h3>
+          ${tabelaRankingReuniao(maisProduzem.map(itemTecProducao), { cor: 'ok', rotuloNome: 'Técnico', rotuloValor: '% no prazo', rotuloSub: 'Fora do prazo', vazio: 'Sem reparos nesse filtro.' })}
+        </div>
+        <div class="panel">
+          <h3>Ofensores — maior % fora do prazo</h3>
+          ${tabelaRankingReuniao(pioresTec.map(itemTecOfensor), { cor: 'warn', rotuloNome: 'Técnico', rotuloValor: '% fora do prazo', rotuloSub: 'No prazo', vazio: `Nenhum técnico com ${REUNIAO_MIN_ORDENS}+ reparos nesse filtro.` })}
+        </div>
       </div>
 
       <div class="section-heading">3. Cidades ofensoras — % do mês</div>
@@ -14029,20 +14070,20 @@ function renderReuniaoPrazos() {
         ${tabelaRankingReuniao(cidadesRank.map(c => ({
           nome: c.nome,
           valor: `<span style="color:${pctF(c) > (100 - PRAZO_META) ? 'var(--danger)' : 'var(--success)'}">${formatPct(pctF(c), 1)}</span>`,
-          sub: `No prazo: ${formatPct(pctD(c), 1)} · ${c.total} reparo(s) no período`,
-        })), { rotuloNome: 'Cidade', rotuloValor: '% fora do prazo', rotuloSub: 'Detalhe' })}
+          sub: formatPct(pctD(c), 1),
+        })), { rotuloNome: 'Cidade', rotuloValor: '% fora do prazo', rotuloSub: '% no prazo' })}
       </div>
 
-      <div class="section-heading">4. Período ofensor — manhã × tarde</div>
-      ${nota('Período pela hora do TEMPO LIMITE (antes das 12h = manhã).')}
+      <div class="section-heading">4. Período ofensor de prazo</div>
+      ${nota('Período definido pela hora do TEMPO LIMITE da ordem — antes das 12h conta como manhã, a partir das 12h como tarde.')}
       <div class="cards-grid">
-        ${metricCard('Perdas na manhã', totalPeriodo ? formatPct((contaPeriodo.manha / totalPeriodo) * 100, 1) : '-', periodoPior === 'manha', { sub: `${contaPeriodo.manha} ordem(ns)` })}
-        ${metricCard('Perdas na tarde', totalPeriodo ? formatPct((contaPeriodo.tarde / totalPeriodo) * 100, 1) : '-', periodoPior === 'tarde', { sub: `${contaPeriodo.tarde} ordem(ns)` })}
-        ${metricCard('Período que mais perde', totalPeriodo ? rotuloPeriodo(periodoPior) : '-', true, { big: true, sub: contaPeriodo.outro ? `${contaPeriodo.outro} sem TEMPO LIMITE preenchido` : '' })}
+        ${metricCard('Perdas de prazo ocorridas na manhã', totalPeriodo ? formatPct((contaPeriodo.manha / totalPeriodo) * 100, 1) : '-', periodoPior === 'manha', { big: true })}
+        ${metricCard('Perdas de prazo ocorridas na tarde', totalPeriodo ? formatPct((contaPeriodo.tarde / totalPeriodo) * 100, 1) : '-', periodoPior === 'tarde', { big: true })}
+        ${metricCard('Período que mais perde prazo', totalPeriodo ? rotuloPeriodo(periodoPior) : '-', true, { big: true, nivel: 'heroi' })}
       </div>
       <div class="panel" style="margin-bottom:1.5rem">
-        <h3>Ofensores da ${esc(rotuloPeriodo(periodoPior).toLowerCase())}</h3>
-        ${tabelaRankingReuniao(rankPeriodo, { rotuloNome: 'Técnico', rotuloValor: '% das perdas do período', rotuloSub: 'Detalhe', vazio: 'Sem ordens fora do prazo com período identificado.' })}
+        <h3>Técnicos ofensores da ${esc(rotuloPeriodo(periodoPior).toLowerCase())}</h3>
+        ${tabelaRankingReuniao(rankPeriodo, { rotuloNome: 'Técnico', rotuloValor: '% das perdas do período', vazio: 'Sem ordens fora do prazo com período identificado.' })}
       </div>
 
       <div class="section-heading">5. Motivos da baixa — reparos fora do prazo</div>
@@ -14050,37 +14091,49 @@ function renderReuniaoPrazos() {
       <div class="panel" style="margin-bottom:1.5rem">
         ${tabelaRankingReuniao(motivosFora.map(m => ({
           nome: m.nome,
-          valor: `${formatPct(foraPrazo.length ? (m.total / foraPrazo.length) * 100 : 0, 1)} <span style="font-weight:600;color:var(--text-muted)">(${m.total})</span>`,
+          valor: formatPct(foraPrazo.length ? (m.total / foraPrazo.length) * 100 : 0, 1),
           sub: top3De(m.porTecnico),
         })), { rotuloNome: 'Motivo da baixa', rotuloValor: '% das perdas', rotuloSub: 'Principais técnicos envolvidos (top 3)', vazio: 'Nenhum motivo encontrado — confira se a BASE PRODUÇÃO foi importada.' })}
       </div>
 
       <div class="section-heading">6. Tempo em campo nas ordens fora do prazo</div>
-      ${nota(avisoPcr)}
+      ${nota('Média das ordens de reparo que perderam o prazo e têm hora real de início e de baixa.')}
       ${!perdeuPrazoPcr.length ? '<div class="panel"><div class="empty">Sem ordens de reparo com hora de início e de encerramento no PCR desse período. Importe o CSV diário na aba PCR.</div></div>' : `
       <div class="cards-grid">
-        ${metricCard('Ordens analisadas', perdeuPrazoPcr.length.toLocaleString('pt-BR'), false, { sub: 'reparos fora do prazo com hora real' })}
-        ${metricCard('Folga ao iniciar', duracaoDeHoras(folgaAoIniciar), folgaAoIniciar !== null && folgaAoIniciar < 0, { sub: 'do início do técnico até o prazo vencer (negativo = começou depois de vencido)' })}
-        ${metricCard('Tempo de atendimento', duracaoDeHoras(duracaoAtendimento), false, { sub: 'do início até a baixa da ordem' })}
+        ${metricCard('Folga ao iniciar a ordem', duracaoDeHoras(folgaAoIniciar), folgaAoIniciar !== null && folgaAoIniciar < 0, { big: true, nivel: 'heroi', sub: folgaAoIniciar !== null && folgaAoIniciar < 0 ? 'o técnico começou DEPOIS do prazo já ter vencido' : 'tempo que restava de prazo quando o técnico começou' })}
+        ${metricCard('Tempo de atendimento', duracaoDeHoras(duracaoAtendimento), false, { big: true, sub: 'do início do técnico até a baixa da ordem' })}
+        ${metricCard('Dias de PCR na amostra', String(diasPcr), false, { sub: 'dias com CSV diário importado no período' })}
       </div>`}
 
-      <div class="section-heading">7. Reparo que já chega com o prazo estourado</div>
-      ${nota(`Só O.S. sem improdutiva anterior que ficaram fora do prazo — dessas, quantas o técnico começou depois do prazo já vencido. ${avisoPcr}`)}
+      <div class="section-heading">7. Reparo recebido com o prazo já vencido</div>
+      ${nota('Ordem sem tentativa anterior em que o técnico só começou depois do prazo ter vencido — ou seja, chegou perdida no campo.')}
       ${!semTentFora.length ? '<div class="panel"><div class="empty">Sem O.S. de reparo sem tentativa anterior fora do prazo no PCR desse período.</div></div>' : `
       <div class="cards-grid">
-        ${metricCard('Já chegou estourado', formatPct(pctJaEstourado, 1), true, { big: true, sub: `${jaChegouEstourado.length} de ${semTentFora.length} ordem(ns)` })}
-        ${metricCard('Estourou em campo', formatPct(100 - pctJaEstourado, 1), false, { big: true, sub: 'técnico começou com prazo ainda válido' })}
-        ${metricCard('Base analisada', semTentFora.length.toLocaleString('pt-BR'), false, { sub: 'reparos sem tentativa anterior, fora do prazo' })}
+        ${metricCard('Recebidos com prazo vencido', formatPct(pctEstouradoSobreTotal, 1), true, { big: true, nivel: 'heroi', sub: 'do total de reparos do período' })}
+        ${metricCard('Prazo vencido em campo', formatPct(pctVencidoEmCampo, 1), false, { big: true, sub: 'técnico começou com prazo ainda válido' })}
+      </div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Por cidade</h3>
+        <div class="table-wrap"><table class="data-table"><thead><tr>
+          <th>Cidade</th><th style="width:36px"></th><th>Recebido com prazo vencido</th><th>Prazo vencido em campo</th>
+        </tr></thead><tbody>
+          ${estouradoPorCidade.map(c => `<tr>
+            <td class="cat-cell">${esc(c.nome)}</td>
+            <td style="color:var(--text-muted);text-align:center">➜</td>
+            <td style="font-weight:700;color:var(--danger)">${formatPct(c.pctRecebido, 1)}</td>
+            <td style="font-weight:700">${formatPct(c.pctCampo, 1)}</td>
+          </tr>`).join('') || '<tr><td colspan="4" class="empty">Sem dados por cidade.</td></tr>'}
+        </tbody></table></div>
       </div>`}
 
       <div class="section-heading">8. Horário de início do dia</div>
-      ${nota(`Hora média do primeiro início do dia de cada técnico. ${avisoPcr}`)}
+      ${nota('Hora média do primeiro início do dia de cada técnico.')}
       ${!inicios.length ? '<div class="panel"><div class="empty">Sem hora de início registrada no PCR desse período.</div></div>' : `
       <div class="panel" style="margin-bottom:1.5rem">
         <h3>Por cidade — do mais tarde pro mais cedo</h3>
         ${tabelaRankingReuniao(cidadesInicio.map(c => ({
-          nome: c.nome, valor: horaDeDecimal(mediaHora(c)), sub: `${c.dias} início(s) de dia medidos`,
-        })), { rotuloNome: 'Cidade', rotuloValor: 'Início médio', rotuloSub: 'Amostra' })}
+          nome: c.nome, valor: horaDeDecimal(mediaHora(c)),
+        })), { rotuloNome: 'Cidade', rotuloValor: 'Início médio' })}
       </div>
       <div class="panel" style="margin-bottom:1.5rem">
         <h3>Técnicos que mais começam tarde</h3>
@@ -14098,8 +14151,8 @@ function renderReuniaoPrazos() {
         ${metricCard('Tempo médio até voltar', mediaDiasGeral === null ? '-' : `${mediaDiasGeral.toFixed(1).replace('.', ',')} dias`, false, { sub: `IRR ${mediaDiasIrr === null ? '-' : mediaDiasIrr.toFixed(1).replace('.', ',') + 'd'} · IFI ${mediaDiasIfi === null ? '-' : mediaDiasIfi.toFixed(1).replace('.', ',') + 'd'}` })}
       </div>
       <div class="panels-grid">
-        ${gaugePanel('% IRR', pctIrr, BONUS_IRR_MAX, { lowerIsBetter: true, decimals: 2 })}
-        ${gaugePanel('% IFI', pctIfi, BONUS_IFI_MAX, { lowerIsBetter: true, decimals: 2 })}
+        ${gaugePanel('% IRR — reparo que voltou', pctIrr, BONUS_IRR_MAX, { lowerIsBetter: true, decimals: 2, max: escalaIndicador(pctIrr, BONUS_IRR_MAX) })}
+        ${gaugePanel('% IFI — ativação/M.E que voltou', pctIfi, BONUS_IFI_MAX, { lowerIsBetter: true, decimals: 2, max: escalaIndicador(pctIfi, BONUS_IFI_MAX) })}
       </div>
 
       <div class="section-heading">10. Retornos — cidades ofensoras</div>
@@ -14131,9 +14184,9 @@ function renderReuniaoPrazos() {
       <div class="panel" style="margin-bottom:1.5rem">
         ${tabelaRankingReuniao(ofensoresGeral.map(o => ({
           nome: o.nome,
-          valor: `${formatPct(retornos.length ? (o.total / retornos.length) * 100 : 0, 1)} <span style="font-weight:600;color:var(--text-muted)">(${o.total})</span>`,
-          sub: `IRR ${o.irr} · IFI ${o.ifi}`,
-        })), { rotuloNome: 'Ofensor', rotuloValor: '% dos retornos', rotuloSub: 'Abertura', vazio: 'Sem retornos no período/cidades.' })}
+          valor: `<span style="color:var(--danger)">${formatPct(retornos.length ? (o.total / retornos.length) * 100 : 0, 1)}</span>`,
+          sub: `${o.total} <span style="color:var(--text-muted)">(IRR ${o.irr} · IFI ${o.ifi})</span>`,
+        })), { rotuloNome: 'Ofensor', rotuloValor: '% dos retornos', rotuloSub: 'Total', vazio: 'Sem retornos no período/cidades.' })}
       </div>
 
       <div class="section-heading">13. Motivo da baixa dos retornos (IFI / IRR)</div>
@@ -14141,9 +14194,9 @@ function renderReuniaoPrazos() {
       <div class="panel" style="margin-bottom:1.5rem">
         ${tabelaRankingReuniao(motivosRet.map(m => ({
           nome: m.nome,
-          valor: `${formatPct(retornos.length ? (m.total / retornos.length) * 100 : 0, 1)} <span style="font-weight:600;color:var(--text-muted)">(${m.total})</span>`,
-          sub: `IRR ${m.irr} · IFI ${m.ifi}`,
-        })), { rotuloNome: 'Motivo da baixa do retorno', rotuloValor: '% dos retornos', rotuloSub: 'Abertura', vazio: 'Sem motivo preenchido nos retornos do período.' })}
+          valor: formatPct(retornos.length ? (m.total / retornos.length) * 100 : 0, 1),
+          sub: `${m.total} <span style="color:var(--text-muted)">(IRR ${m.irr} · IFI ${m.ifi})</span>`,
+        })), { rotuloNome: 'Motivo da baixa do retorno', rotuloValor: '% dos retornos', rotuloSub: 'Total', vazio: 'Sem motivo preenchido nos retornos do período.' })}
       </div>
 
       <div class="section-heading">14. IRR — motivo do serviço anterior × motivo do retorno</div>
@@ -14165,10 +14218,6 @@ function renderReuniaoPrazos() {
 
       <div id="pdf-export-area"></div>
     `;
-    donutChart('reu-donut', [
-      { label: 'No prazo (até 24h)', value: dentro24.length, color: '#22c55e' },
-      { label: 'Fora do prazo', value: foraPrazo.length, color: '#ef4444' },
-    ], { centroLabel: 'Reparos' });
     ativarTogglesDeSecao(body);
     ativarBotoesImagem(body);
 
@@ -14178,7 +14227,7 @@ function renderReuniaoPrazos() {
       periodoTxt,
       totalReparos: rowsPrazo.length, dentro24: dentro24.length, foraPrazo: foraPrazo.length,
       pctNoPrazo, pctForaPrazo,
-      melhores: melhoresTec.map(t => ({ nome: t.nome, pctD: pctD(t), pctF: pctF(t), total: t.total })),
+      melhores: maisProduzem.map(t => ({ nome: t.nome, pctD: pctD(t), pctF: pctF(t), total: t.total })),
       piores: pioresTec.map(t => ({ nome: t.nome, pctD: pctD(t), pctF: pctF(t), total: t.total })),
       cidades: cidadesRank.map(c => ({ nome: c.nome, pctD: pctD(c), pctF: pctF(c), total: c.total })),
       qtdManha: contaPeriodo.manha, qtdTarde: contaPeriodo.tarde,
@@ -14190,7 +14239,8 @@ function renderReuniaoPrazos() {
       motivosFora: motivosFora.map(m => ({ nome: m.nome, total: m.total, pct: foraPrazo.length ? (m.total / foraPrazo.length) * 100 : 0 })),
       temPcr: !!perdeuPrazoPcr.length || !!inicios.length,
       diasPcr, folgaAoIniciar: duracaoDeHoras(folgaAoIniciar), duracaoAtendimento: duracaoDeHoras(duracaoAtendimento),
-      pctJaEstourado, jaEstouradoQtd: jaChegouEstourado.length, baseEstourado: semTentFora.length,
+      pctEstouradoSobreTotal, pctVencidoEmCampo, temEstourado: !!semTentFora.length,
+      estouradoPorCidade,
       cidadesInicio: cidadesInicio.map(c => ({ nome: c.nome, hora: horaDeDecimal(mediaHora(c)), dias: c.dias })),
       tecnicosTarde: tecnicosTarde.map(t => ({ nome: t.nome, hora: horaDeDecimal(mediaHora(t)), dias: t.dias })),
       pctIrr, pctIfi, qtdIrr, qtdIfi,
@@ -14241,13 +14291,13 @@ function renderReuniaoPrazos() {
         { header: 'Motivo', get: m => m.nome }, { header: 'Ordens', get: m => m.total },
         { header: '% das perdas', get: m => formatPct(foraPrazo.length ? (m.total / foraPrazo.length) * 100 : 0, 1) },
       ], { totalRow: ['TOTAL', foraPrazo.length, '100%'] }),
-      campo: () => secaoTabela('Tempo em Campo e Prazo Estourado', [
+      campo: () => secaoTabela('Tempo em Campo e Prazo Vencido', [
         { l: 'Dias de PCR importados no período', v: diasPcr },
         { l: 'Ordens fora do prazo analisadas', v: perdeuPrazoPcr.length },
         { l: 'Folga média ao iniciar', v: duracaoDeHoras(folgaAoIniciar) },
         { l: 'Tempo médio de atendimento', v: duracaoDeHoras(duracaoAtendimento) },
-        { l: '% que já chegou com prazo estourado', v: pctJaEstourado === null ? '-' : formatPct(pctJaEstourado, 1) },
-        { l: 'Base (reparos sem tentativa anterior, fora do prazo)', v: semTentFora.length },
+        { l: '% recebido com prazo vencido (do total de reparos)', v: formatPct(pctEstouradoSobreTotal, 1) },
+        { l: '% com prazo vencido em campo (do total de reparos)', v: formatPct(pctVencidoEmCampo, 1) },
       ], [{ header: 'Indicador', get: r => r.l }, { header: 'Valor', get: r => r.v }]),
       inicio: () => secaoTabela('Horário Médio de Início — por Cidade', cidadesInicio, [
         { header: 'Cidade', get: c => c.nome }, { header: 'Início médio', get: c => horaDeDecimal(mediaHora(c)) },
