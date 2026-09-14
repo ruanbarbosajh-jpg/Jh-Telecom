@@ -10390,7 +10390,7 @@ function abrirPainelTecnico(tecnico, rows, retornos, dia) {
           ? `<b>${esc(r.ofensor) || '-'}</b> <span style="color:var(--success);font-size:11px">(é dele)</span>`
           : `${esc(r.ofensor) || '-'} <span style="color:var(--text-secondary);font-size:11px">(está com ${esc(tecnico)})</span>`}</td>
       <td>${esc(r.tipo_anterior) || '-'}</td><td>${formatDate(r.data_anterior)}</td><td>${esc(r.dias)}</td>
-      <td style="font-weight:700;color:${r.restam <= 3 ? 'var(--danger)' : r.restam <= 7 ? '#f59e0b' : 'var(--text-secondary)'}">${esc(r.restam)} dia(s)</td></tr>`;
+      <td style="font-weight:700;color:${r.restam === null || r.restam === undefined ? 'var(--text-muted)' : r.restam <= 3 ? 'var(--danger)' : r.restam <= 7 ? '#f59e0b' : 'var(--text-secondary)'}">${r.restam === null || r.restam === undefined ? '- (sem DIAS na planilha)' : esc(r.restam) + ' dia(s)'}</td></tr>`;
   const m = document.getElementById('modal-tecnico');
   m.querySelector('.mt-corpo').innerHTML = `
     <h3 style="margin:0 0 2px">${esc(tecnico)}</h3>
@@ -10781,7 +10781,11 @@ function renderPCR() {
       const atual = porOS.get(r.os);
       if (!atual || pesoStatus(r.status) > pesoStatus(atual.status)) porOS.set(r.os, r);
     });
-    const retornos = [...porOS.values()].sort((a,b) => a.restam - b.restam || String(a.os).localeCompare(String(b.os)));
+    // restam pode vir null (planilha oficial sem a coluna DIAS preenchida —
+    // achado em auditoria, 14/09/2026): null-3 vira 0 em JS, então a linha
+    // furava pro topo como se fosse a mais urgente. Manda pro fim da lista.
+    const restamOrdenavel = r => r.restam === null || r.restam === undefined ? Infinity : r.restam;
+    const retornos = [...porOS.values()].sort((a,b) => restamOrdenavel(a) - restamOrdenavel(b) || String(a.os).localeCompare(String(b.os)));
 
     // ---- Status detalhado ----
     const buckets = ['concluido','iniciado','em_rota','pendente','cancelado','nao_concluido'];
@@ -10903,7 +10907,7 @@ function renderPCR() {
           <td>${esc(r.cliente)||'-'}</td>
           <td class="cat-cell" style="${corTec}"${tituloTec}>${esc(r.ofensor)||'-'}</td><td>${esc(r.tipo_anterior)||'-'}</td><td>${esc(r.os_anterior)||'-'}</td>
           <td>${formatDate(r.data_anterior)}</td><td>${esc(r.dias)}</td>
-          <td style="font-weight:700;color:${r.restam<=3?'var(--danger)':r.restam<=7?'#f59e0b':'var(--text-secondary)'}">${esc(r.restam)} dia(s)</td></tr>`;
+          <td style="font-weight:700;color:${r.restam === null || r.restam === undefined ? 'var(--text-muted)' : r.restam<=3?'var(--danger)':r.restam<=7?'#f59e0b':'var(--text-secondary)'}">${r.restam === null || r.restam === undefined ? '- (sem DIAS na planilha)' : esc(r.restam) + ' dia(s)'}</td></tr>`;
         }).join('')}
       </tbody></table></div>`}
 
@@ -11082,7 +11086,7 @@ function renderPCR() {
         {header:'IFI/IRR',get:r=>r.ifi_irr},{header:'O.S',get:r=>r.os},{header:'Contrato',get:r=>r.contrato||'-'},
         {header:'Cidade',get:r=>r.cidade||'-'},{header:'Status',get:r=>r.status||'-'},
         {header:'Nome Cliente',get:r=>r.cliente||'-'},{header:'De quem é o retorno',get:r=>r.ofensor||'-'},{header:'Serviço anterior',get:r=>r.tipo_anterior||'-'},
-        {header:'Dias',get:r=>r.dias},{header:'Restam',get:r=>r.restam}
+        {header:'Dias',get:r=>r.dias ?? '-'},{header:'Restam',get:r=>r.restam ?? '-'}
       ]),
       det: () => secaoTabela('Prazos do Dia — Detalhado', prazoUnificado, [
         {header:'Falta',get:textoFalta},{header:'Cidade',get:r=>r.cidade||'-'},{header:'Técnico',get:r=>ehRecursoTecnico(r.recurso)?r.recurso:'-'},
@@ -11231,6 +11235,10 @@ function montarPrazoAtivacaoDoDia(dia, cidades, incluirME) {
 // o cruzamento certo pra "está em campo ou não" (corrigido em 11/09/2026,
 // pedido do cliente — a 1ª versão cruzava contra Produção, errado).
 function renderChamadosGiga() {
+  // Quantas linhas a TABELA desenha (mesmo remédio do Pedágio/Clean Up —
+  // ver CLAUDE.md §11.11: tabela de ordem-por-linha sem limite pode travar a
+  // aba com um export grande da GIGA, achado em auditoria 14/09/2026).
+  let limiteGiga = 100;
   document.getElementById('content').innerHTML = `
     <div class="toolbar">
       <div class="field"><label>Arquivo CSV de chamados (GIGA)</label><input type="file" id="giga-file" accept=".csv,text/csv"></div>
@@ -11335,11 +11343,19 @@ function renderChamadosGiga() {
       </div>
       <div class="section-heading">Chamados em aberto na GIGA</div>
       <p style="font-size:13px;color:var(--text-secondary);margin:0 0 10px">Cruza o CONTRATO de cada chamado aberto contra o PCR (${esc(String(DB.pcr.length))} linhas carregadas — o CSV de atividades diário). Status = EM CAMPO quando o contrato já tem alguma linha ativa (não Não Concluída) no PCR. "Já visitada hoje" = teve tentativa Não Concluída HOJE pra esse contrato (com o motivo, quando tem).</p>
-      ${!abertos.length ? '<div class="panel"><div class="empty">Nenhum chamado em aberto no export importado.</div></div>' : `
+      ${!abertos.length ? '<div class="panel"><div class="empty">Nenhum chamado em aberto no export importado.</div></div>' : (() => {
+        const ordenados = [...abertos].sort((a,b) => (a.data_abertura||'').localeCompare(b.data_abertura||''));
+        return `
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+        <span style="font-size:12px;color:var(--text-muted)">${ordenados.length} chamado(s) no filtro${ordenados.length > limiteGiga ? ` — mostrando os ${limiteGiga} mais antigos na tabela` : ''}</span>
+        <select class="topn-select" id="giga-limite">
+          ${[100, 300, 1000, 99999].map(n => `<option value="${n}"${limiteGiga === n ? ' selected' : ''}>${n >= 99999 ? 'Mostrar todos' : 'Mostrar ' + n}</option>`).join('')}
+        </select>
+      </div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
         <th>Abertura</th><th>Protocolo</th><th>Fila</th><th>Unidade</th><th>Contrato</th><th>Cliente</th><th>Bairro</th><th>Status</th><th>Já visitada hoje?</th>
       </tr></thead><tbody>
-        ${[...abertos].sort((a,b) => (a.data_abertura||'').localeCompare(b.data_abertura||'')).map(r => {
+        ${ordenados.slice(0, limiteGiga).map(r => {
           const emCampo = contratosEmCampo.has(soDigitos(r.contrato));
           const visitadaHoje = visitadaHojeImprodutiva(r.contrato);
           return `<tr>
@@ -11351,7 +11367,10 @@ function renderChamadosGiga() {
             : '<span style="color:var(--text-secondary)">Não</span>'}</td>
         </tr>`;
         }).join('')}
-      </tbody></table></div>`}`;
+      </tbody></table></div>`;
+      })()}`;
+    const selLimite = document.getElementById('giga-limite');
+    if (selLimite) selLimite.addEventListener('change', () => { limiteGiga = parseInt(selLimite.value, 10); load(); });
   }
 }
 
@@ -14551,11 +14570,26 @@ function despesaFolhaTecnicaDoPeriodo(inicioISO, fimISO) {
 // pré-marcado no seletor) e deixa a pessoa confirmar/ajustar quais entram —
 // pedido do cliente (14/09/2026: "coloque outro filtro para o escritorio",
 // em vez do sistema adivinhar a proporção de cada mês).
+// Gera o(s) rótulo(s) de mês calendário diretamente do intervalo (não filtra
+// a lista de periodosFolhaEscritorio(), que só tem mês atual+anterior+salvos)
+// — um ciclo ANTIGO do Financeiro cujos meses nunca foram abertos na tela
+// Folha Escritório antes não tinha como aparecer aqui, e a pessoa via o
+// seletor sem nenhuma opção pré-marcada pra ele (achado em auditoria,
+// 14/09/2026). linhasFolhaEscritorio() já sabe montar a folha de QUALQUER
+// mês a partir do quadro, mesmo um nunca salvo — só faltava conseguir
+// PEDIR esse mês aqui.
 function periodosFolhaEscritorioQueTocam(inicioISO, fimISO) {
-  return periodosFolhaEscritorio().lista.filter(rotulo => {
-    const { inicio, fim } = datasDoPeriodoFolha(rotulo);
-    return overlaps(inicio, fim, inicioISO, fimISO);
-  });
+  const out = [];
+  let d = new Date(inicioISO + 'T00:00:00');
+  d = new Date(d.getFullYear(), d.getMonth(), 1);
+  const fim = new Date(fimISO + 'T00:00:00');
+  while (d <= fim) {
+    const iniMes = new Date(d.getFullYear(), d.getMonth(), 1);
+    const fimMes = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    out.push(`${formatDate(isoLocalDe(iniMes))} a ${formatDate(isoLocalDe(fimMes))}`);
+    d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  }
+  return out;
 }
 function despesaFolhaEscritorioDosPeriodos(periodos) {
   return periodos.reduce((a, periodo) => a + linhasFolhaEscritorio(periodo).reduce((s, l) => s + (Number(l.total_receber) || 0), 0), 0);
@@ -14763,7 +14797,14 @@ function renderFinance() {
       <div class="fin-grade">${FIN_GRUPOS.map(grupoHtml).join('')}</div>
       ${podeEditarFinanceiro() ? `<div id="fin-folha-painel" class="panel" style="display:none;margin:0 0 1rem">
         <div class="toolbar" style="margin:0">
-          ${multiSelectField('fin-folha-esc-periodos', 'Período(s) do Escritório', periodosFolhaEscritorio().lista, { noun: 'período(s)', preset: periodosFolhaEscritorioQueTocam(p.start, p.end) })}
+          ${(() => {
+            const mesesDoCiclo = periodosFolhaEscritorioQueTocam(p.start, p.end);
+            // união com os meses já conhecidos (atual/anterior/salvos) — assim o
+            // seletor também deixa incluir um mês vizinho de propósito, não só os
+            // que o ciclo cruza
+            const opcoesEsc = [...new Set([...mesesDoCiclo, ...periodosFolhaEscritorio().lista])];
+            return multiSelectField('fin-folha-esc-periodos', 'Período(s) do Escritório', opcoesEsc, { noun: 'período(s)', preset: mesesDoCiclo });
+          })()}
           <button class="btn" id="fin-folha-aplicar">Aplicar</button>
           <button type="button" class="btn-secundario" id="fin-folha-cancelar">Cancelar</button>
         </div>
