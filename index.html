@@ -10722,14 +10722,42 @@ function renderPCR() {
     const pctF = l => l.total ? (l.ate24/l.total)*100 : 0;
 
     // ---- Retornos IFI/IRR (cruza com a base de produção) ----
-    // Retorno EM ABERTO: para cada ordem do dia, procura no histórico do MESMO
-    // CONTRATO o último atendimento concluído antes de hoje. Se voltou dentro
-    // da janela (IFI 15 dias / IRR 30 dias), é retorno e a "conta" é do técnico
-    // que fez o serviço anterior. Cruzando por contrato desse jeito, o cálculo
-    // reproduziu 103 das 104 marcações reais da planilha, com o mesmo ofensor
-    // e o mesmo número de dias.
+    // PRIORIDADE 1 — planilha oficial: quando a própria O.S de hoje já foi
+    // importada em REPAROS OK/BASE GERAL CONCLUÍDO (BASE_CONCLUIDOS-IRR-IFI.xlsx),
+    // essa planilha já traz OFENSOR, TIPO DE ORDEM, DIAS e a coluna IFI-IRR
+    // prontos — é a GIGA quem calcula esse retorno oficialmente, então usa
+    // esse valor direto em vez de recalcular por cima (pedido do cliente,
+    // 14/09/2026: "puxar o IFI e IRR da planilha de retornos nos REPAROS OK").
+    // Vale tanto pra quando ela diz IFI/IRR quanto pra quando diz DESC ou nada
+    // — se a O.S já passou pela planilha, a decisão É dela, não recalculamos
+    // por cima só porque bateria diferente aqui.
+    // PRIORIDADE 2 (fallback) — só entra quando a O.S de hoje AINDA não tem
+    // linha em REPAROS OK (o normal: essa planilha é importada bem depois do
+    // dia acontecer). Reproduz a MESMA regra localmente: procura no histórico
+    // do MESMO CONTRATO o último atendimento concluído antes de hoje; se
+    // voltou dentro da janela (IFI 15 dias / IRR 30 dias), é retorno e a
+    // "conta" é do técnico que fez o serviço anterior. Conferido em Python
+    // contra BASE_CONCLUIDOS-IRR-IFI.xlsx (14/09/2026): TIPO DE ORDEM,
+    // DATA ORDEM ANTERIOR/DIAS e a janela batem 100% com essa mesma regra —
+    // só a ORIGEM do dado mudava (aqui é recalculado, lá é oficial).
     const hist = historicoPorContrato();
     const retornosBrutos = rows.map(r => {
+      const idxOficial = r.os ? DB_INDEX.producao.get(r.os) : undefined;
+      const oficial = idxOficial !== undefined ? DB.producao[idxOficial] : null;
+      if (oficial) {
+        if (oficial.ifi_irr !== 'IFI' && oficial.ifi_irr !== 'IRR') return null;
+        const dias = oficial.dias !== null && oficial.dias !== undefined && oficial.dias !== '' && isFinite(Number(oficial.dias)) ? Number(oficial.dias) : null;
+        // O.S ANTERIOR não vem pronta na planilha (só a DATA) — acha no
+        // histórico do contrato a linha concluída bem naquela data, só pra
+        // completar a coluna "O.S anterior" da tela; não afeta a classificação.
+        const osAnterior = (hist[r.contrato] || []).find(p => p.data === oficial.data_ordem_anterior);
+        return { data:r.data, os:r.os, contrato:r.contrato, cidade:r.cidade, cliente:r.cliente,
+                 tipo:r.tipo_atividade, status:r.status, tecnico_atual:r.recurso,
+                 ofensor:oficial.ofensor || '', tipo_anterior:oficial.tipo_ordem || '',
+                 os_anterior:(osAnterior && osAnterior.os) || '', data_anterior:oficial.data_ordem_anterior || null, dias,
+                 restam: dias !== null ? (oficial.ifi_irr === 'IFI' ? JANELA_IFI : JANELA_IRR) - dias : null,
+                 ifi_irr:oficial.ifi_irr };
+      }
       if (!r.contrato) return null;
       const anteriores = (hist[r.contrato] || []).filter(p => p.data && p.data < r.data && p.os !== r.os);
       if (!anteriores.length) return null;
