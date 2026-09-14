@@ -8504,7 +8504,12 @@ function gerarPeriodoFolha(inicio, fim) {
 //   APTO = IFI ≤ 2,50% E IRR ≤ 4,50% E dias ≥ 26
 // Os retornos são atribuídos ao OFENSOR (contarRetornosPorOfensor), não a quem
 // executou a visita de retorno.
-function renderBonusAoVivo(inicio, fim, filtroTecnico) {
+// retornoInicio/retornoFim: período dos retornos IFI/IRR, quando diferente do
+// período da produção (campo "Retornos IFI/IRR — de/até" do Acompanhamento
+// Técnico, pedido do cliente 14/09/2026) — em branco, cai no mesmo
+// inicio/fim da produção, que é como a tela sempre funcionou.
+function renderBonusAoVivo(inicio, fim, filtroTecnico, retornoInicio, retornoFim) {
+  const retIni = retornoInicio || inicio, retFim = retornoFim || fim;
   const porTecnico = {};
   DB.producao.forEach(p => {
     if (!isConcluido(p.status) || !inRange(p.data, inicio, fim)) return;
@@ -8516,7 +8521,7 @@ function renderBonusAoVivo(inicio, fim, filtroTecnico) {
     if (ehBaseDoIfi(p.tipo_atividade)) o.ativacaoMe++;
     else if (ehServicoReparo(p.tipo_atividade)) o.reparos++;
   });
-  const retornos = contarRetornosPorOfensor(inicio, fim);
+  const retornos = contarRetornosPorOfensor(retIni, retFim);
   const achaRetorno = t => {
     const alvo = normalizeHeader(t);
     const par = Object.entries(retornos).find(([k]) => normalizeHeader(k) === alvo);
@@ -8569,7 +8574,10 @@ function renderBonusAoVivo(inicio, fim, filtroTecnico) {
         Mesmos critérios da folha: <b>IFI ≤ ${formatPct(BONUS_IFI_MAX, 2)}</b> ·
         <b>IRR ≤ ${formatPct(BONUS_IRR_MAX, 2)}</b> ·
         <b>mínimo de ${BONUS_DIAS_MIN} dias</b> com ordem baixada.
-        Calculado na hora, da produção de <b>${formatDate(inicio)}</b> a <b>${formatDate(fim)}</b> —
+        Calculado na hora, da produção de <b>${formatDate(inicio)}</b> a <b>${formatDate(fim)}</b>${
+          (retIni !== inicio || retFim !== fim)
+            ? ` — retornos IFI/IRR considerados só de <b>${formatDate(retIni)}</b> a <b>${formatDate(retFim)}</b>`
+            : ''} —
         atualiza a cada importação, sem esperar o fechamento do mês.
         Não segue os filtros de cidade e status da tela: mudar a base mudaria o percentual.
       </p>
@@ -8931,9 +8939,21 @@ function renderAcomTec() {
       <option value="naoconcluido">Não concluído</option>
       <option value="cancelado">Cancelado</option>
     </select></div>
-  `)}<div id="acom-body"></div>`;
+    <div class="field"><label>Retornos IFI/IRR (bônus) — de</label><input type="date" id="acom-ret-de"></div>
+    <div class="field"><label>até</label><input type="date" id="acom-ret-ate"></div>
+  `)}<button class="btn-secundario" id="acom-ret-reset" style="margin:0 0 14px">Retornos: usar o período de cima</button><div id="acom-body"></div>`;
   wireMultiCityField('acom-cidades');
   document.getElementById('f-apply').addEventListener('click', load);
+  // Pedido do cliente 14/09/2026: a Tabela de Bônus contava os retornos
+  // IFI/IRR sempre no MESMO período de cima (o da produção) — sem como
+  // isolar, por exemplo, só os retornos baixados entre dia 01 e 30 de um mês
+  // específico sem mudar o período da produção junto. Filtro separado, igual
+  // já existe na Folha (fol-ret-de/ate): em branco, cai no período de cima.
+  document.getElementById('acom-ret-reset').addEventListener('click', () => {
+    document.getElementById('acom-ret-de').value = '';
+    document.getElementById('acom-ret-ate').value = '';
+    load();
+  });
   load();
   function load() {
     const s = document.getElementById('f-start').value, e = document.getElementById('f-end').value;
@@ -8941,6 +8961,9 @@ function renderAcomTec() {
     const tech = document.getElementById('f-tech').value.toLowerCase();
     const cidades = getSelectedCities('acom-cidades');
     const statusFilter = document.getElementById('f-status').value;
+    // em branco = usa o mesmo De/Até de cima, igual sempre foi
+    const retDe = document.getElementById('acom-ret-de').value || s;
+    const retAte = document.getElementById('acom-ret-ate').value || e;
     const statusOk = st => statusFilter==='concluido' ? isConcluido(st) : statusFilter==='cancelado' ? /cancel/i.test(st) : statusFilter==='naoconcluido' ? (!isConcluido(st) && !/cancel/i.test(st)) : true;
     const rows = DB.producao.filter(p => inRange(p.data,s,e) && statusOk(p.status) && (!tech || (p.recurso||'').toLowerCase().includes(tech)) && cidades.includes(p.cidade));
     const body = document.getElementById('acom-body');
@@ -8990,7 +9013,7 @@ function renderAcomTec() {
         ${metricCard('🔧 Reparo Corretivo', reparo, false, {sub: total?((reparo/total)*100).toFixed(1)+'% do total':''})}
         ${metricCard('⇅ Upgrade/Downgrade', upgrade, false, {sub: total?((upgrade/total)*100).toFixed(1)+'% do total':''})}
       </div>
-      ${renderBonusAoVivo(s, e, tech)}
+      ${renderBonusAoVivo(s, e, tech, retDe, retAte)}
       <div class="panels-grid">
         <div class="panel" style="display:flex;flex-direction:column"><h3>Serviço por Técnico</h3><div id="c-tech" style="flex:1;display:flex;flex-direction:column"></div></div>
         <div class="panel"><h3>Total de Serviço por Cidade</h3><div id="c-city"></div></div>
