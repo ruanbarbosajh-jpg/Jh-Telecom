@@ -14532,6 +14532,34 @@ function valoresDoComparativoFin(rotulo) {
   FIN_CATEGORIAS.forEach(cat => { if (porNome[normalizeHeader(cat)]) out[cat] = porNome[normalizeHeader(cat)]; });
   return out;
 }
+// "Folha Técnica" pronta, pra pré-preencher a despesa sem digitar de novo o
+// que já está lançado na Folha de Pagamento (pedido do cliente, 14/09/2026:
+// "Total de Despesas" e "Lucro" nascendo R$0,00/100% de margem enquanto tem
+// folha real lançada não é coerente). O ciclo da Folha Técnica é o MESMO
+// 21-a-20 do Financeiro, então basta somar A RECEBER de quem tem período
+// dentro do intervalo — sem picker, sem ambiguidade.
+function despesaFolhaTecnicaDoPeriodo(inicioISO, fimISO) {
+  return (DB.folhaPagamento || []).reduce((a, r) => {
+    const { inicio, fim } = datasDoPeriodoFolha(r.periodo);
+    return overlaps(inicio, fim, inicioISO, fimISO) ? a + (Number(r.total_receber) || 0) : a;
+  }, 0);
+}
+// "Folha Escritório" fecha por MÊS CALENDÁRIO (ver periodosFolhaEscritorio),
+// não pelo ciclo 21-a-20 do Financeiro — os dois nunca se alinham exatos (um
+// ciclo típico cruza 2 meses). Por isso, ao contrário da Folha Técnica, NÃO
+// soma sozinho: lista os meses do Escritório que TOCAM o ciclo (pra vir
+// pré-marcado no seletor) e deixa a pessoa confirmar/ajustar quais entram —
+// pedido do cliente (14/09/2026: "coloque outro filtro para o escritorio",
+// em vez do sistema adivinhar a proporção de cada mês).
+function periodosFolhaEscritorioQueTocam(inicioISO, fimISO) {
+  return periodosFolhaEscritorio().lista.filter(rotulo => {
+    const { inicio, fim } = datasDoPeriodoFolha(rotulo);
+    return overlaps(inicio, fim, inicioISO, fimISO);
+  });
+}
+function despesaFolhaEscritorioDosPeriodos(periodos) {
+  return periodos.reduce((a, periodo) => a + linhasFolhaEscritorio(periodo).reduce((s, l) => s + (Number(l.total_receber) || 0), 0), 0);
+}
 // Categorias que a planilha de Comparação já tem pra esse período mas o
 // cadastro ainda está zerado — sinal de cadastro DIGITADO PELA METADE (ex.:
 // alguém lançou só "Conta de Água" e salvou, esquecendo o resto). Como
@@ -14615,7 +14643,6 @@ function renderFinance() {
     </select></div>
     <button class="btn" id="fin-carregar">Carregar período</button>
     ${podeEditarFinanceiro() ? '<button type="button" class="btn-secundario" id="fin-novo-periodo">+ Criar novo período</button>' : ''}
-    <button type="button" class="btn-secundario" id="fin-criar-fechamento">Criar Fechamento</button>
   </div>
   <div id="fin-novo-painel" class="panel" style="display:none;margin:0 0 1rem">
     <div class="toolbar" style="margin:0">
@@ -14626,14 +14653,6 @@ function renderFinance() {
     </div>
     <p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">O ciclo normal vai do dia 21 de um mês ao dia 20 do seguinte — as datas já vêm sugeridas assim, mas dá pra digitar qualquer intervalo.</p>
     <p id="fin-novo-msg" style="font-size:12px;color:var(--warn-text);margin:6px 0 0"></p>
-  </div>
-  <div id="fin-fech-painel" class="panel" style="display:none;margin:0 0 1rem">
-    <div class="toolbar" style="margin:0">
-      ${multiSelectField('fin-fech-periodos', 'Ciclos', lista.map(p => p.rotulo), { noun: 'ciclo(s)', allLabel: 'Todos os ciclos', preset: [atual] })}
-      <button class="btn" id="fin-fech-gerar">Gerar relatório (PDF)</button>
-      <button type="button" class="btn-secundario" id="fin-fech-cancelar">Cancelar</button>
-    </div>
-    <p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">Gera um PDF com a mesma tabela de Despesas/Receitas por categoria — TOTAL DESPESAS, RECEITA DAS ORDENS e LUCRO — dos ciclos escolhidos acima (um só, alguns ou todos).</p>
   </div>
   <p style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">
     Os valores ficam salvos por período no banco. Trocar de período aqui não altera
@@ -14668,28 +14687,6 @@ function renderFinance() {
       load();
     });
   }
-  // "Criar Fechamento": relatório em PDF da tabela de Despesas/Receitas por
-  // categoria (a mesma do "Resumo financeiro do ciclo" no Dashboard), pra 1
-  // ciclo, alguns ou todos — pedido do cliente 09/09/2026. Fica só aqui na
-  // tela Financeiro, não mexe em nada do Dashboard.
-  const painelFech = document.getElementById('fin-fech-painel');
-  document.getElementById('fin-criar-fechamento').addEventListener('click', () => {
-    painelFech.style.display = painelFech.style.display === 'none' ? '' : 'none';
-  });
-  document.getElementById('fin-fech-cancelar').addEventListener('click', () => { painelFech.style.display = 'none'; });
-  wireMultiSelectField('fin-fech-periodos', { noun: 'ciclo(s)', allLabel: 'Todos os ciclos' });
-  document.getElementById('fin-fech-gerar').addEventListener('click', () => {
-    const selecionados = getMultiSelectValues('fin-fech-periodos');
-    if (!selecionados.length) { toast('Escolha ao menos 1 ciclo.', 'aviso'); return; }
-    if (typeof window.jspdf === 'undefined') { toast('A biblioteca de PDF não carregou (sem internet?).', 'erro'); return; }
-    // cronológico (mais antigo primeiro), igual à tabela "Todos os ciclos" do
-    // Dashboard — mais fácil de ler num papel do que mais-novo-primeiro
-    const ordenados = [...selecionados].sort((a, b) =>
-      String(datasDoPeriodoFolha(a).fim || '').localeCompare(String(datasDoPeriodoFolha(b).fim || '')));
-    const pivotFech = pivotDoCadastroFin();
-    const escopo = ordenados.length === lista.length ? 'Todos os ciclos' : ordenados.length === 1 ? ordenados[0] : `${ordenados.length} ciclos`;
-    gerarPDFMultiSecoes('Fechamento — ' + escopo, [secaoFinanceiraComparativa('Despesas / Receitas por Categoria', ordenados, pivotFech)]);
-  });
   load();
 
   function load() {
@@ -14734,20 +14731,27 @@ function renderFinance() {
         // AUDITORIA 04/09/2026: sem cadastro, os campos abaixo nascem
         // zerados — "Total de Despesas R$ 0,00" e "Lucro" igual à receita
         // cheia, como se o ciclo não tivesse custo nenhum. Quando a planilha
-        // de Comparação já tem despesa pra esse período, avisa antes que a
-        // pessoa leia o R$ 0,00 como se fosse real.
+        // de Comparação OU a Folha (Técnica/Escritório) já têm despesa real
+        // pra esse período, avisa antes que a pessoa leia o R$ 0,00 como se
+        // fosse real (14/09/2026: passou a olhar a Folha também, não só o
+        // Excel — é comum ter folha lançada num ciclo sem Comparativo importado).
         const cmpAqui = DB.comparativoFinanceiro;
         const temNaPlanilha = cmpAqui && cmpAqui.totalDespesas && cmpAqui.totalDespesas[rotulo] !== undefined;
+        const folhaTecAqui = despesaFolhaTecnicaDoPeriodo(p.start, p.end);
+        const folhaEscAqui = despesaFolhaEscritorioDosPeriodos(periodosFolhaEscritorioQueTocam(p.start, p.end));
+        const temNaFolha = folhaTecAqui > 0 || folhaEscAqui > 0;
         if (!temCadastroFin(rotulo)) {
-          if (!temNaPlanilha) return '';
+          if (!temNaPlanilha && !temNaFolha) return '';
+          const fontes = [];
+          if (temNaFolha) fontes.push(`a Folha já tem <b>${formatCurrency(folhaTecAqui)}</b> de Folha Técnica e <b>${formatCurrency(folhaEscAqui)}</b> de Folha Escritório — clique em <b>"Usar da Folha de Pagamento"</b> abaixo`);
+          if (temNaPlanilha) fontes.push(`a planilha de Comparação tem <b>${formatCurrency(cmpAqui.totalDespesas[rotulo])}</b> de despesa — clique em <b>"Usar do Comparativo (Excel)"</b> abaixo`);
           return `<p style="font-size:12px;color:var(--warn-text);background:color-mix(in srgb, var(--warn-text) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn-text) 35%, transparent);border-radius:var(--r-sm);padding:10px 12px;margin:-6px 0 18px">
             Este período ainda não tem nada cadastrado aqui — os campos abaixo estão zerados, então "Total de Despesas" e "Lucro" não refletem o ciclo de verdade.
-            A planilha de Comparação já tem despesa de <b>${formatCurrency(cmpAqui.totalDespesas[rotulo])}</b> pra ${esc(rotulo)} (é o que aparece no Dashboard).
-            Clique em <b>"Usar do Comparativo (Excel)"</b> abaixo pra trazer esses valores pro cadastro.
+            Pra ${esc(rotulo)}, ${fontes.join('; ')} pra trazer esses valores pro cadastro.
           </p>`;
         }
         // Cadastro existe, mas cobre só ALGUMAS categorias — o resto conta como
-        // R$0,00 no Total de Despesas mesmo a planilha já tendo valor pra elas.
+        // R$0,00 no Total de Despesas mesmo a planilha/folha já tendo valor.
         const faltando = categoriasFaltantesFin(rotulo);
         if (!faltando.length) return '';
         return `<p style="font-size:12px;color:var(--warn-text);background:color-mix(in srgb, var(--warn-text) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn-text) 35%, transparent);border-radius:var(--r-sm);padding:10px 12px;margin:-6px 0 18px">
@@ -14757,8 +14761,20 @@ function renderFinance() {
         </p>`;
       })()}
       <div class="fin-grade">${FIN_GRUPOS.map(grupoHtml).join('')}</div>
-      ${podeEditarFinanceiro() ? `<div class="fin-salvar-barra">
+      ${podeEditarFinanceiro() ? `<div id="fin-folha-painel" class="panel" style="display:none;margin:0 0 1rem">
+        <div class="toolbar" style="margin:0">
+          ${multiSelectField('fin-folha-esc-periodos', 'Período(s) do Escritório', periodosFolhaEscritorio().lista, { noun: 'período(s)', preset: periodosFolhaEscritorioQueTocam(p.start, p.end) })}
+          <button class="btn" id="fin-folha-aplicar">Aplicar</button>
+          <button type="button" class="btn-secundario" id="fin-folha-cancelar">Cancelar</button>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">
+          Folha Técnica soma sozinha o Total a Receber da Folha de Pagamento deste ciclo (${esc(rotulo)}) — não precisa escolher nada pra ela, o ciclo já é o mesmo.
+          Folha Escritório fecha por MÊS CALENDÁRIO, não pelo ciclo 21-a-20 — escolha acima qual(is) mês(es) cobrem esse ciclo (já vêm marcados os que tocam ele).
+        </p>
+      </div>
+      <div class="fin-salvar-barra">
         <button class="btn" id="fin-salvar">Atualizar fechamento</button>
+        <button type="button" class="btn-secundario" id="fin-usar-folha">Usar da Folha de Pagamento</button>
         <button type="button" class="btn-secundario" id="fin-usar-comparativo">Usar do Comparativo (Excel)</button>
         <span id="fin-msg" style="font-size:13px;color:var(--text-muted)"></span>
       </div>` : ''}
@@ -14930,6 +14946,39 @@ function renderFinance() {
       };
       leitor.readAsArrayBuffer(arquivo);
     });
+
+    // "Usar da Folha de Pagamento": pré-preenche Folha Técnica (soma sozinha,
+    // mesmo ciclo) e Folha Escritório (soma os períodos escolhidos no
+    // seletor, já vindo marcado com os meses que tocam esse ciclo) — mesma
+    // mecânica do "Usar do Comparativo" logo abaixo: só preenche a tela, não
+    // grava sozinho. Pedido do cliente 14/09/2026.
+    const btnFolha = document.getElementById('fin-usar-folha');
+    const painelFolha = document.getElementById('fin-folha-painel');
+    if (btnFolha) {
+      btnFolha.addEventListener('click', () => {
+        painelFolha.style.display = painelFolha.style.display === 'none' ? '' : 'none';
+      });
+      document.getElementById('fin-folha-cancelar').addEventListener('click', () => { painelFolha.style.display = 'none'; });
+      wireMultiSelectField('fin-folha-esc-periodos', { noun: 'período(s)' });
+      document.getElementById('fin-folha-aplicar').addEventListener('click', () => {
+        const periodosEsc = getMultiSelectValues('fin-folha-esc-periodos');
+        const folhaTec = despesaFolhaTecnicaDoPeriodo(p.start, p.end);
+        const folhaEsc = despesaFolhaEscritorioDosPeriodos(periodosEsc);
+        const valoresNovos = { 'Folha Técnica': folhaTec, 'Folha Escritório': folhaEsc };
+        inputs().forEach(el => {
+          const v = valoresNovos[el.dataset.cat];
+          if (v === undefined) return;
+          const centavos = Math.round(v * 100);
+          el.dataset.centavos = centavos;
+          el.value = formatCurrency(centavos / 100);
+          el.classList.toggle('tem-valor', centavos > 0);
+        });
+        recalcular();
+        painelFolha.style.display = 'none';
+        const msg = document.getElementById('fin-msg');
+        msg.innerHTML = `<span style="color:var(--warn-text)">Preenchido com Folha Técnica (${esc(rotulo)}) e Folha Escritório (${periodosEsc.length ? periodosEsc.map(esc).join(', ') : 'nenhum período escolhido'}) — confira e clique em "Atualizar fechamento" pra gravar.</span>`;
+      });
+    }
 
     // "Usar do Comparativo": pré-preenche com o que já está na planilha de
     // comparação (COMPARATIVO.xlsx) pra esse período, sem gravar sozinho —
@@ -15145,33 +15194,6 @@ function tabelaFinanceiraComparativa(periodos, pivotDash, opts = {}) {
       }).join('')}${celTotal(pivotDash.lucro, totalLucro < 0 ? 'var(--tab-alerta)' : 'var(--tab-sucesso)')}</tr>
     </tbody>
   </table></div>`;
-}
-// Versão "linhas de dados" de tabelaFinanceiraComparativa, pra alimentar
-// secaoTabela/gerarPDFMultiSecoes (que esperam array simples, não HTML) — usada
-// pelo botão "Criar Fechamento" da tela Financeiro. Mesma fonte (pivotDash),
-// mesmas linhas (categorias + TOTAL DESPESAS/RECEITA DAS ORDENS/LUCRO); sem
-// seta de tendência (não faz sentido em papel) e sempre com a coluna Total.
-function secaoFinanceiraComparativa(titulo, periodos, pivotDash) {
-  const valDash = (obj, p) => (obj && obj[p]) || 0;
-  const somaTotal = obj => periodos.reduce((a, p) => a + valDash(obj, p), 0);
-  const categorias = pivotDash && pivotDash.porCategoria
-    ? Object.keys(pivotDash.porCategoria).filter(c => periodos.some(p => pivotDash.porCategoria[c][p])) : [];
-  const linhas = categorias.map(cat => {
-    const linha = { cat };
-    periodos.forEach(p => { linha[p] = valDash(pivotDash.porCategoria[cat], p); });
-    return linha;
-  });
-  const columns = [{ header: 'Despesas / Receitas', get: r => r.cat }]
-    .concat(periodos.map(p => ({ header: p, get: r => formatCurrency(r[p]), align: 'right' })))
-    .concat([{ header: 'Total', get: r => formatCurrency(periodos.reduce((a, p) => a + r[p], 0)), align: 'right' }]);
-  const linhaTotal = (rot, obj) => [rot, ...periodos.map(p => formatCurrency(valDash(obj, p))), formatCurrency(somaTotal(obj))];
-  return secaoTabela(titulo, linhas, columns, {
-    totalRows: [
-      linhaTotal('TOTAL DESPESAS', pivotDash.totalDespesas),
-      linhaTotal('RECEITA DAS ORDENS', pivotDash.receitaOrdens),
-      linhaTotal('LUCRO', pivotDash.lucro),
-    ],
-  });
 }
 function diffMoney(x,y,invert) {
   const d = y-x; const sign = d>=0?'+':''; const arrow = d>=0?'▲':'▼';
