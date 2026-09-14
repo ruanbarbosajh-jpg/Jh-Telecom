@@ -13181,6 +13181,61 @@ function renderPrazo() {
 }
 
 // ===================== OFENSORES DE PRAZO =====================
+// Imagem do ranking "Produção até 24h" / "Produção fora do prazo" por técnico
+// (pedido do cliente 14/09/2026: "gerar imagem" nesses dois gráficos, com um
+// visual de ranking — pílula de posição, técnico, OS (%) — em vez do gráfico
+// de barras da tela). Monta um card por HTML/CSS fora da tela (mesma técnica
+// de ativarBotoesImagem) e captura com html2canvas — muito mais simples que
+// desenhar pílula arredondada + ícone à mão num canvas.
+// item.display já vem pronto como "51 (91%)" (ver listDentro/listFora em
+// renderOfensoresPrazo); aqui só separa o número do percentual pra colorir
+// cada um com um peso diferente, igual ao print que o cliente mandou.
+function linhaRankingPrazoImg(item, i, cor) {
+  const num = String(i + 1).padStart(2, '0');
+  const m = String(item.display || '').match(/\(([^)]+)\)/);
+  const pct = m ? ` <span style="color:#93a0bd;font-weight:600;font-size:13px">(${esc(m[1])})</span>` : '';
+  return `<tr style="border-top:1px solid #1b2745">
+    <td style="padding:12px 4px 12px 0"><span style="display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:26px;border-radius:13px;background:${corComAlfa(cor,0.15)};color:${cor};font-weight:700;font-size:13px;padding:0 6px">${num}</span></td>
+    <td style="padding:12px 10px;color:#e8ecf7;font-size:14px;font-weight:600;white-space:nowrap">${esc(item.label)}</td>
+    <td style="padding:12px 0 12px 10px;text-align:right;color:#e8ecf7;font-size:15px;font-weight:700;white-space:nowrap">${item.value}${pct}</td>
+  </tr>`;
+}
+function cartaoRankingPrazoImg(titulo, lista, cor, rotuloTopN) {
+  const linhas = lista.map((it, i) => linhaRankingPrazoImg(it, i, cor)).join('');
+  return `<div style="flex:1;min-width:380px;background:#0d1524;border:1px solid #1b2745;border-radius:14px;padding:20px 22px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:10px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:36px;height:36px;border-radius:50%;background:${corComAlfa(cor,0.15)};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${cor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        </div>
+        <h3 style="margin:0;color:#e8ecf7;font-size:18px;font-weight:700;white-space:nowrap">${esc(titulo)}</h3>
+      </div>
+      <div style="background:#111a30;border:1px solid #1b2745;border-radius:14px;padding:6px 14px;color:#93a0bd;font-size:13px;font-weight:600;white-space:nowrap">${esc(rotuloTopN)}</div>
+    </div>
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr style="color:#93a0bd;font-size:12px;font-weight:700">
+        <td style="padding:0 4px 8px 0">Posição</td><td style="padding:0 10px 8px">Técnico</td><td style="padding:0 0 8px 10px;text-align:right">OS ( % )</td>
+      </tr></thead>
+      <tbody>${linhas || `<tr><td colspan="3" style="padding:14px 0;color:#93a0bd">Sem dados.</td></tr>`}</tbody>
+    </table>
+  </div>`;
+}
+function gerarImagemRankingPrazo(listDentro, listFora) {
+  const lerTopN = selId => {
+    const el = document.getElementById(selId);
+    return el && el.value ? el.value : '10';
+  };
+  const cortar = (lista, valor) => valor === 'Todos' ? lista : lista.slice(0, parseInt(valor, 10) || lista.length);
+  const rotulo = valor => valor === 'Todos' ? 'Mostrar todos ▾' : `Top ${valor} ▾`;
+  const valDentro = lerTopN('c-dentro-topn-sel'), valFora = lerTopN('c-fora-topn-sel');
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = 'position:fixed;top:0;left:-3000px;width:1040px;background:#060a13;padding:24px;display:flex;gap:24px;font-family:"Segoe UI",Arial,sans-serif;';
+  wrapper.innerHTML =
+    cartaoRankingPrazoImg('Produção até 24h (por técnico)', cortar(listDentro, valDentro), '#22c55e', rotulo(valDentro)) +
+    cartaoRankingPrazoImg('Produção fora do prazo (por técnico)', cortar(listFora, valFora), '#ef4444', rotulo(valFora));
+  document.body.appendChild(wrapper);
+  capturarElementoComoImagem(wrapper, 'ranking-prazo-tecnico-' + hojeISOLocal(), () => wrapper.remove());
+}
 function renderOfensoresPrazo() {
   const { start, end } = defaultMonthPeriod();
   document.getElementById('content').innerHTML = `${periodToolbar(start,end,`
@@ -13291,6 +13346,7 @@ function renderOfensoresPrazo() {
         <div class="panel"><h3>Produção até 24h (por técnico)</h3><div id="c-dentro"></div></div>
         <div class="panel"><h3>Produção fora do prazo (por técnico)</h3><div id="c-fora"></div></div>
       </div>
+      <div style="text-align:right;margin:-10px 0 14px"><button type="button" class="btn-export-img" id="op-tec-img">🖼 Gerar imagem</button></div>
       <div class="panels-grid">
         <div class="panel"><h3>Total fora do prazo por cidade</h3><div id="c-cidade"></div></div>
         <div class="panel"><h3>% Fora do prazo vs % até 24h</h3><div id="c-pct"></div></div>
@@ -13331,6 +13387,7 @@ function renderOfensoresPrazo() {
     barsChartTopN('c-fora', listFora, {color:'#ef4444', defaultN:10});
     barsChartTopN('c-cidade', listCityFora, {color:'#ef4444', defaultN:10});
     donutChart('c-pct', [{label:'Fora do prazo', value:foraPrazo.length, color:'#ef4444'}, {label:'Até 24h', value:dentro24.length, color:'#22c55e'}], { centroLabel: 'Ordens' });
+    document.getElementById('op-tec-img').addEventListener('click', () => gerarImagemRankingPrazo(listDentro, listFora));
     const periodoTecTopnSel = document.getElementById('periodo-tec-topn');
     if (periodoTecTopnSel) periodoTecTopnSel.addEventListener('change', () => {
       document.getElementById('periodo-tec-tbody').innerHTML = tecPeriodoRowsHtml(periodoTecTopnSel.value);
