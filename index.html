@@ -13220,7 +13220,7 @@ function cartaoRankingPrazoImg(titulo, lista, cor, rotuloTopN) {
     </table>
   </div>`;
 }
-function gerarImagemRankingPrazo(listDentro, listFora) {
+function gerarImagemRankingPrazo(listDentro, listFora, inicio, fim) {
   const lerTopN = selId => {
     const el = document.getElementById(selId);
     return el && el.value ? el.value : '10';
@@ -13229,10 +13229,20 @@ function gerarImagemRankingPrazo(listDentro, listFora) {
   const rotulo = valor => valor === 'Todos' ? 'Mostrar todos ▾' : `Top ${valor} ▾`;
   const valDentro = lerTopN('c-dentro-topn-sel'), valFora = lerTopN('c-fora-topn-sel');
   const wrapper = document.createElement('div');
-  wrapper.style.cssText = 'position:fixed;top:0;left:-3000px;width:1040px;background:#060a13;padding:24px;display:flex;gap:24px;font-family:"Segoe UI",Arial,sans-serif;';
-  wrapper.innerHTML =
-    cartaoRankingPrazoImg('Produção até 24h (por técnico)', cortar(listDentro, valDentro), '#22c55e', rotulo(valDentro)) +
-    cartaoRankingPrazoImg('Produção fora do prazo (por técnico)', cortar(listFora, valFora), '#ef4444', rotulo(valFora));
+  wrapper.style.cssText = 'position:fixed;top:0;left:-3000px;width:1040px;background:#060a13;padding:24px;font-family:"Segoe UI",Arial,sans-serif;';
+  // pedido do cliente 14/09/2026: mostrar na própria imagem qual período (De/Até
+  // do topo da tela) gerou aquele ranking — sem isso, quem recebe a imagem por
+  // fora do sistema não tem como saber a que dia/mês ela se refere.
+  const periodoTxt = inicio && fim ? `Período: ${formatDate(inicio)} a ${formatDate(fim)}` : '';
+  wrapper.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px;gap:12px">
+      <div style="color:#e8ecf7;font-size:19px;font-weight:700;white-space:nowrap">Ranking de Prazo por Técnico</div>
+      ${periodoTxt ? `<div style="color:#93a0bd;font-size:14px;font-weight:600;white-space:nowrap">${esc(periodoTxt)}</div>` : ''}
+    </div>
+    <div style="display:flex;gap:24px">
+      ${cartaoRankingPrazoImg('Produção até 24h (por técnico)', cortar(listDentro, valDentro), '#22c55e', rotulo(valDentro))}
+      ${cartaoRankingPrazoImg('Produção fora do prazo (por técnico)', cortar(listFora, valFora), '#ef4444', rotulo(valFora))}
+    </div>`;
   document.body.appendChild(wrapper);
   capturarElementoComoImagem(wrapper, 'ranking-prazo-tecnico-' + hojeISOLocal(), () => wrapper.remove());
 }
@@ -13387,7 +13397,7 @@ function renderOfensoresPrazo() {
     barsChartTopN('c-fora', listFora, {color:'#ef4444', defaultN:10});
     barsChartTopN('c-cidade', listCityFora, {color:'#ef4444', defaultN:10});
     donutChart('c-pct', [{label:'Fora do prazo', value:foraPrazo.length, color:'#ef4444'}, {label:'Até 24h', value:dentro24.length, color:'#22c55e'}], { centroLabel: 'Ordens' });
-    document.getElementById('op-tec-img').addEventListener('click', () => gerarImagemRankingPrazo(listDentro, listFora));
+    document.getElementById('op-tec-img').addEventListener('click', () => gerarImagemRankingPrazo(listDentro, listFora, s, e));
     const periodoTecTopnSel = document.getElementById('periodo-tec-topn');
     if (periodoTecTopnSel) periodoTecTopnSel.addEventListener('change', () => {
       document.getElementById('periodo-tec-tbody').innerHTML = tecPeriodoRowsHtml(periodoTecTopnSel.value);
