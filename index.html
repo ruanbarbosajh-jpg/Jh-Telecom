@@ -13300,20 +13300,26 @@ function renderOfensoresPrazo() {
     }).filter(i=>i.value>0).sort((a,b)=>b.value-a.value);
 
     // ---- Ranking de motivos da baixa — só dos reparos que perderam o prazo
-    // (pedido do cliente 14/09/2026). Mesma coluna "Motivo de Encerramento das
-    // Atividades" que a Produção usa (ver renderAcomTec), mas aqui em cima de
-    // foraPrazo — dá pra ver se o atraso concentra num motivo só (troca de ONU,
-    // drop, etc.) ou está espalhado.
+    // (pedido do cliente 14/09/2026). A aba "BASE DE DADOS" (que alimenta
+    // DB.prazo) NÃO tem coluna de motivo — só "BASE PRODUÇÃO" tem ("Motivo de
+    // Encerramento das Atividades", ver o mapeamento SHEET_DEFS.producao).
+    // Achado ao verificar por que só aparecia "Não informado": r.motivo em
+    // DB.prazo é sempre undefined, então TUDO caía no mesmo balde. A O.S é a
+    // mesma nas duas planilhas, então cruza por ela (mesmo padrão do
+    // "Retornos do Dia" da PCR, que também pega o dado oficial via
+    // DB_INDEX.producao.get(os) em vez de confiar só no que a própria tabela
+    // teria).
     const motivoForaMap = {};
     foraPrazo.forEach(r => {
-      const m = (r.motivo || '').trim() || 'Não informado';
+      const idxProd = r.os ? DB_INDEX.producao.get(r.os) : undefined;
+      const prod = idxProd !== undefined ? DB.producao[idxProd] : null;
+      const m = ((prod && prod.motivo) || '').trim() || 'Não informado';
       if (!motivoForaMap[m]) motivoForaMap[m] = { motivo: m, total: 0, porTecnico: {} };
       motivoForaMap[m].total++;
       const t = r.recurso || 'Não informado';
       motivoForaMap[m].porTecnico[t] = (motivoForaMap[m].porTecnico[t] || 0) + 1;
     });
     const motivosForaRank = Object.values(motivoForaMap).sort((a, b) => b.total - a.total);
-    const listMotivoFora = motivosForaRank.map(m => ({ label: m.motivo, value: m.total }));
     const topTecnicosMotivo = obj => Object.entries(obj).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([k,v])=>`${k} (${v})`).join(', ');
 
     // ---- Ofensores por período (manhã/tarde) ----
@@ -13374,24 +13380,23 @@ function renderOfensoresPrazo() {
         <div class="panel"><h3>Produção até 24h (por técnico)</h3><div id="c-dentro"></div></div>
         <div class="panel"><h3>Produção fora do prazo (por técnico)</h3><div id="c-fora"></div></div>
       </div>
+      ${ehAnalista() ? `
       <div class="panel" style="margin-bottom:1.5rem">
-        <h3>Principais Motivos da Baixa — Reparo Fora do Prazo <span style="font-weight:400;color:var(--text-muted);font-size:13px">(${foraPrazo.length} ordem(ns))</span></h3>
-        <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px">Só entram os reparos que perderam o prazo de 24h — mesma coluna "Motivo de Encerramento das Atividades" da Produção.</p>
-        ${!motivosForaRank.length ? '<div class="empty">Nenhum motivo preenchido nas ordens fora do prazo desse filtro.</div>' : `
-        <div id="c-motivo-fora" style="margin-bottom:14px"></div>
+        <h3>Principais Motivos da Baixa — Reparo Fora do Prazo <span style="font-weight:400;color:var(--text-muted);font-size:13px">(${foraPrazo.length} ordem(ns) · visível só pro Analista por enquanto)</span></h3>
+        <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px">Só entram os reparos que perderam o prazo de 24h — motivo puxado da Produção (Motivo de Encerramento das Atividades) pela mesma O.S.</p>
+        ${!motivosForaRank.length ? '<div class="empty">Nenhum motivo preenchido nas ordens fora do prazo desse filtro — confira se a Produção (BASE PRODUÇÃO/REPAROS OK) foi importada.</div>' : `
         <div class="table-wrap"><table class="data-table"><thead><tr>
-          <th>#</th><th>Motivo da Baixa</th><th>Ordens</th><th>% do total fora do prazo</th><th>Técnicos que mais bateram esse motivo (top 3)</th>
+          <th>Posição</th><th>Motivo da Baixa</th><th>Ordens (%)</th><th>Técnicos que mais bateram esse motivo (top 3)</th>
         </tr></thead><tbody>
           ${motivosForaRank.map((m,i)=>`<tr>
-            <td style="color:var(--text-muted)">${i+1}</td>
+            <td><span class="badge warn">${String(i+1).padStart(2,'0')}</span></td>
             <td class="cat-cell">${esc(m.motivo)}</td>
-            <td style="font-weight:700">${m.total}</td>
-            <td>${formatPct(((m.total/foraPrazo.length)*100), 1)}</td>
+            <td style="font-weight:700">${m.total} <span style="font-weight:600;color:var(--text-muted)">(${formatPct(((m.total/foraPrazo.length)*100), 1)})</span></td>
             <td style="white-space:normal;font-size:12px;color:var(--text-secondary)">${esc(topTecnicosMotivo(m.porTecnico))}</td>
           </tr>`).join('')}
-          <tr class="total-row"><td></td><td class="cat-cell" style="color:var(--accent)">TOTAL</td><td style="color:var(--accent)">${foraPrazo.length}</td><td style="color:var(--accent)">100%</td><td></td></tr>
+          <tr class="total-row"><td></td><td class="cat-cell" style="color:var(--accent)">TOTAL</td><td style="color:var(--accent)">${foraPrazo.length} (100%)</td><td></td></tr>
         </tbody></table></div>`}
-      </div>
+      </div>` : ''}
       <div class="panels-grid">
         <div class="panel"><h3>Total fora do prazo por cidade</h3><div id="c-cidade"></div></div>
         <div class="panel"><h3>% Fora do prazo vs % até 24h</h3><div id="c-pct"></div></div>
@@ -13431,7 +13436,6 @@ function renderOfensoresPrazo() {
     barsChartTopN('c-dentro', listDentro, {color:'#22c55e', defaultN:10});
     barsChartTopN('c-fora', listFora, {color:'#ef4444', defaultN:10});
     barsChartTopN('c-cidade', listCityFora, {color:'#ef4444', defaultN:10});
-    barsChartTopN('c-motivo-fora', listMotivoFora, {color:'#ef4444', defaultN:10});
     donutChart('c-pct', [{label:'Fora do prazo', value:foraPrazo.length, color:'#ef4444'}, {label:'Até 24h', value:dentro24.length, color:'#22c55e'}], { centroLabel: 'Ordens' });
     document.getElementById('op-tec-img').addEventListener('click', () => gerarImagemRankingPrazo(listDentro, listFora, s, e));
     const periodoTecTopnSel = document.getElementById('periodo-tec-topn');
@@ -13443,7 +13447,7 @@ function renderOfensoresPrazo() {
       { id: 'resumo', label: 'Resumo geral' },
       { id: 'fora', label: 'Ranking de técnicos fora do prazo' },
       { id: 'cidade', label: 'Ranking de cidades fora do prazo' },
-      { id: 'motivo', label: 'Principais motivos da baixa — reparo fora do prazo' },
+      ...(ehAnalista() ? [{ id: 'motivo', label: 'Principais motivos da baixa — reparo fora do prazo' }] : []),
       { id: 'periodo', label: 'Ofensores por período (manhã/tarde) — por cidade' },
       { id: 'periodotecnico', label: 'Ofensores por período (manhã/tarde) — por técnico' }
     ]);
