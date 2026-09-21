@@ -2322,7 +2322,6 @@
         <!-- Escape hatch do cache local: joga fora a cópia guardada no
              navegador e busca tudo de novo do Supabase. Serve pra "tá
              estranho, recarrega do zero" sem precisar de suporte. -->
-        <button class="icon-btn" id="btn-recarregar-dados" title="Descartar a cópia local e buscar tudo de novo do banco">↻ Atualizar dados</button>
         <button class="icon-btn" id="btn-tema" title="Alternar tema claro/escuro"><span id="btn-tema-icone">☀</span><span id="btn-tema-texto">Tema claro</span></button>
         <button class="icon-btn" id="btn-trocar-usuario" title="Entrar com outro perfil">⇄ Alterar usuário</button>
         <div class="topbar-user" id="user-name"></div>
@@ -3624,14 +3623,8 @@ atualizarCampoNome('li-user','li-campo-nome','li-nome');
 })();
 aplicarTema('dark');
 document.getElementById('btn-tema').addEventListener('click', alternarTema);
-// Descarta a cópia local e recarrega a página: o caminho normal de entrada já
-// busca tudo de novo. Recarregar a página (em vez de chamar o loader no meio
-// da sessão) evita tela montada com dado pela metade enquanto troca embaixo.
-document.getElementById('btn-recarregar-dados').addEventListener('click', async () => {
-  if (!confirm('Descartar a cópia guardada neste navegador e buscar tudo de novo do banco?')) return;
-  try { await cacheLimpar(); } catch (e) { /* sem cache já é o estado desejado */ }
-  location.reload();
-});
+// (O botão "↻ Atualizar dados" saiu em 21/09/2026: o sistema se atualiza sozinho,
+// ver conferirTabelasNoBanco. A cópia local ainda expira sozinha a cada 12h.)
 document.getElementById('btn-trocar-usuario').addEventListener('click', abrirTrocaUsuario);
 document.getElementById('tr-cancelar').addEventListener('click', fecharTrocaUsuario);
 document.getElementById('tr-confirmar').addEventListener('click', confirmarTrocaUsuario);
@@ -4479,9 +4472,24 @@ function formatDate(v) {
   if (!y || !m || !d) return v;
   return `${d}/${m}/${y}`;
 }
+// MEMOIZADA: \u00e9 chamada milh\u00f5es de vezes por tela (cada ordem da Produ\u00e7\u00e3o \u00d7 cada
+// t\u00e9cnico \u00d7 cada tipo) e faz normalize + 3 regex \u2014 na Folha isso sozinho levava
+// ~18 s com 41 mil ordens (medido em 21/09/2026). O conjunto de textos diferentes
+// \u00e9 pequeno (tipos, status, nomes), ent\u00e3o o cache acerta quase sempre.
+const _NORM_CACHE = new Map();
 function normalizeHeader(str) {
   if (str === null || str === undefined) return '';
-  return String(str).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[.\-_/():]/g, ' ').replace(/\s+/g, ' ').trim();
+  const chave = typeof str === 'string';
+  if (chave) {
+    const c = _NORM_CACHE.get(str);
+    if (c !== undefined) return c;
+  }
+  const r = String(str).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[.\-_/():]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (chave) {
+    if (_NORM_CACHE.size > 200000) _NORM_CACHE.clear(); // teto: texto livre (endere\u00e7o, nome) n\u00e3o pode encher a mem\u00f3ria
+    _NORM_CACHE.set(str, r);
+  }
+  return r;
 }
 function excelDateToISO(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -7592,7 +7600,14 @@ function renderDashboard() {
     const valorPagoGiga = sum('valor_pago_giga');       // o que a GIGA realmente paga no ciclo
     const despesas = sum('despesas');
     const lucro = sum('lucros');
-    const gasolina = soSintetico && unico ? (despesasEfetivasDoPeriodo(rotuloPeriodo).porCat['Combustível'] || 0) : sum('gasolina');
+    // Gasolina: o CARTÃO mostra o combustível TOTAL do ciclo (Financeiro/planilha:
+    // inclui coordenação, gerência, supervisão…) e a descrição diz quanto disso é
+    // dos técnicos (a soma do fechamento). Pedido do cliente 21/09/2026. Sem o
+    // total do Financeiro (ou com ele menor que o dos técnicos) vale o dos técnicos.
+    const gasolinaTecnicos = sum('gasolina');
+    const combustivelFin = unico ? (despesasEfetivasDoPeriodo(rotuloPeriodo).porCat['Combustível'] || 0) : 0;
+    const gasolina = Math.max(gasolinaTecnicos, combustivelFin);
+    const gasolinaOutros = gasolina - gasolinaTecnicos;
     const descIfi = sum('desc_ifi'), descIrr = sum('desc_irr');
     const qtdIfi = sum('qtd_ifi'), qtdIrr = sum('qtd_irr');
     const totalOrdens = sum('total_geral');
@@ -7953,7 +7968,8 @@ function renderDashboard() {
             <div class="op-bloco">
               <span class="rot">Gasolina</span>
               <span class="val">${formatCurrency(gasolina)}</span>
-              <span class="sub">média de <b>${formatCurrency(technicians ? gasolina / technicians : 0)}</b> por técnico</span>
+              <span class="sub"><b>${formatCurrency(gasolinaTecnicos)}</b> — dos técnicos, média de <b>${formatCurrency(technicians ? gasolinaTecnicos / technicians : 0)}</b> por técnico</span>
+              ${gasolinaOutros > 0.005 ? `<span class="sub"><b>${formatCurrency(gasolinaOutros)}</b> — coordenação, gerência e demais veículos</span>` : ''}
             </div>
             <div class="op-bloco">
               <span class="rot">Aluguel de carro</span>
@@ -10801,10 +10817,14 @@ async function pcrAtualizarDoBanco() {
 // minúsculas) e só relê a tabela quando diferem. A releitura usa carregarTabela,
 // que já é incremental (só as linhas alteradas) — não rebaixa a tabela inteira.
 // Exige a coluna atualizado_em (PASSO-24). Sem ela a consulta falha e a
-// conferência simplesmente não roda: nada quebra, só não se atualiza sozinho —
-// o botão "↻ Atualizar dados" continua valendo.
-const TABELAS_AO_VIVO = ['producao', 'fechamento'];
+// conferência simplesmente não roda: nada quebra, só não se atualiza sozinho
+// (a cópia local ainda expira a cada 12h e volta inteira do banco).
+// Todas as tabelas que entram no cache local (as outras — pcr, clean_up… — têm
+// conferência própria ou não mudam entre logins). Calculado na hora: a lista de
+// tabelas é declarada bem antes deste trecho.
+const tabelasAoVivo = () => Object.keys(SUPABASE_TABLES).filter(k => !TABELAS_SEM_CACHE.has(SUPABASE_TABLES[k].table));
 let AO_VIVO_CHECANDO = false;
+let AO_VIVO_ULTIMA = 0;   // quando foi a última conferência (não repete em menos de 1 min)
 async function assinaturaRemotaDaTabela(tabela) {
   const [cont, novo] = await Promise.all([
     supa.from(tabela).select('*', { count: 'exact', head: true }),
@@ -10824,7 +10844,7 @@ async function conferirProducaoNoBanco() {
   AO_VIVO_CHECANDO = true;
   const mudaram = [];
   try {
-    for (const jsName of TABELAS_AO_VIVO) {
+    for (const jsName of tabelasAoVivo()) {
       const cfg = SUPABASE_TABLES[jsName];
       let remota;
       try { remota = await assinaturaRemotaDaTabela(cfg.table); } catch (e) { remota = null; }
@@ -10848,30 +10868,35 @@ async function conferirProducaoNoBanco() {
   }
   return mudaram;
 }
-const ROTAS_AO_VIVO = new Set(['dashboard', 'finance']);
+// Só a tela de importação fica de fora: refazê-la no meio de um arquivo escolhido
+// jogaria o arquivo fora.
+const ROTAS_SEM_AO_VIVO = new Set(['import']);
 let AO_VIVO_TIMER = null;
-async function producaoConferirEAtualizarTela() {
+async function producaoConferirEAtualizarTela(forcar) {
   const rota = ROTA_ATUAL.nome;
-  if (!ROTAS_AO_VIVO.has(rota)) return;
+  if (!rota || ROTAS_SEM_AO_VIVO.has(rota) || document.visibilityState === 'hidden') return;
+  // navegar entre abas / voltar pra janela não pode disparar 30 consultas toda vez
+  if (!forcar && Date.now() - AO_VIVO_ULTIMA < 60000) return;
+  AO_VIVO_ULTIMA = Date.now();
   const mudaram = await conferirProducaoNoBanco();
   if (!mudaram.length || ROTA_ATUAL.nome !== rota) return;
   if (rota === 'finance') {
     // no Financeiro só refaz a receita: re-renderizar apagaria despesa digitada
     if (typeof FIN_ATUALIZAR_RECEITA === 'function') FIN_ATUALIZAR_RECEITA();
-    toast('Receita atualizada com a produção nova.', 'ok', 3000);
+    toast('Dados atualizados.', 'ok', 3000);
     return;
   }
   const ativo = document.activeElement;
   const digitando = ativo && /^(INPUT|SELECT|TEXTAREA)$/.test(ativo.tagName) && document.getElementById('content').contains(ativo);
-  if (digitando) { toast('Produção atualizada. Reabra o Dashboard pra ver os números novos.', 'ok', 5000); return; }
-  navigate(rota);
-  toast('Dashboard atualizado com a produção nova.', 'ok', 3000);
+  if (digitando) { toast('Há dados novos. Saia do campo e volte a esta tela pra ver.', 'ok', 5000); return; }
+  navigate(rota);   // os filtros voltam sozinhos (restaurarFiltros)
+  toast('Dados atualizados.', 'ok', 3000);
 }
 function agendarAtualizacaoAoVivo(route) {
   if (AO_VIVO_TIMER) { clearInterval(AO_VIVO_TIMER); AO_VIVO_TIMER = null; }
-  if (!ROTAS_AO_VIVO.has(route)) return;
+  if (ROTAS_SEM_AO_VIVO.has(route)) return;
   producaoConferirEAtualizarTela();
-  AO_VIVO_TIMER = setInterval(producaoConferirEAtualizarTela, 180000);
+  AO_VIVO_TIMER = setInterval(producaoConferirEAtualizarTela, 240000);
 }
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') producaoConferirEAtualizarTela();
