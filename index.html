@@ -5102,7 +5102,7 @@ function barsChart(elId, items, opts = {}) {
   const maiorValor = Math.max(...items.map(i => String(i.display !== undefined ? i.display : i.value).length));
   el.innerHTML = `<div class="bars-chart${opts.fill?' fill':''}">${items.map(i => `
     <div class="bar-row${opts.clicavel?' bar-row-clicavel':''}"${opts.clicavel?` data-label="${esc(i.label)}" title="Clique para ver o detalhe"`:''}>
-      <div class="bar-label"${i.labelColor?` style="color:${i.labelColor};font-weight:600"`:''}${opts.clicavel?'':` title="${i.label}"`}>${i.label}</div>
+      <div class="bar-label"${i.labelColor?` style="color:${i.labelColor};font-weight:600"`:''}${opts.clicavel?'':` title="${esc(i.label)}"`}>${esc(i.label)}</div>
       <div class="bar-track"><div class="bar-fill" style="--bar-final:${Math.max((i.value/max)*100,2)}%;background:${i.color||color}"></div></div>
       <div class="bar-value" style="min-width:${maiorValor}ch">${i.display !== undefined ? i.display : i.value}</div>
     </div>`).join('')}</div>`;
@@ -5163,7 +5163,7 @@ function donutChart(elId, items, opts = {}) {
     </div>
     <div class="donut-legend">${items.map((i,idx) => {
       const pct = ((i.value/total)*100);
-      return `<div class="legend-item"><span class="legend-dot" style="background:${i.color||corCategorica(idx)}"></span>${i.label}<b>${i.display !== undefined ? i.display : i.value}</b><span class="legend-pct">${formatPct(pct)}</span></div>`;
+      return `<div class="legend-item"><span class="legend-dot" style="background:${i.color||corCategorica(idx)}"></span>${esc(i.label)}<b>${i.display !== undefined ? i.display : i.value}</b><span class="legend-pct">${formatPct(pct)}</span></div>`;
     }).join('')}</div>
   </div>`;
 }
@@ -13974,7 +13974,15 @@ function renderReuniaoPrazos() {
   load();
   function load() {
     const s = document.getElementById('f-start').value, e = document.getElementById('f-end').value;
-    refreshCityField('reu-cidades', DB.prazo.filter(p => inRange(p.data, s, e)), { label: 'Cidades', presetPadrao: CIDADES_COBRADAS_PRAZO });
+    // As cidades saem das TRÊS bases da tela (prazo, PCR e produção). Só do
+    // prazo, quem tinha PCR/retornos mas ainda não tinha importado a planilha de
+    // prazo ficava com ZERO cidade marcada e a tela inteira vazia — achado
+    // testando com o CSV real de 21/09/2026.
+    refreshCityField('reu-cidades', [
+      ...DB.prazo.filter(p => inRange(p.data, s, e)),
+      ...DB.pcr.filter(p => inRange(p.data, s, e)),
+      ...DB.producao.filter(p => inRange(p.data, s, e)),
+    ], { label: 'Cidades', presetPadrao: CIDADES_COBRADAS_PRAZO });
     const cidades = getSelectedCities('reu-cidades');
     // DB.pcr é a única tabela cuja cidade NÃO passa por normalizeCidade (vem do
     // CSV em maiúsculo mas COM acento) — comparar normalizado cobre as três
@@ -13993,8 +14001,8 @@ function renderReuniaoPrazos() {
     const pctNoPrazo = rowsPrazo.length ? (dentro24.length / rowsPrazo.length) * 100 : 0;
     const pctForaPrazo = rowsPrazo.length ? (foraPrazo.length / rowsPrazo.length) * 100 : 0;
 
-    if (!rowsPrazo.length && !DB.producao.length) {
-      body.innerHTML = '<div class="panel"><div class="empty">Sem dados de prazo nem de produção nesse período/cidades. Importe PRAZOS_ESCRITÓRIO.xlsx e a BASE PRODUÇÃO em "Importar Excel".</div></div>';
+    if (!rowsPrazo.length && !DB.producao.length && !DB.pcr.length) {
+      body.innerHTML = '<div class="panel"><div class="empty">Sem dados de prazo, produção nem PCR nesse período/cidades. Importe PRAZOS_ESCRITÓRIO.xlsx, a BASE PRODUÇÃO e o CSV diário da PCR.</div></div>';
       return;
     }
 
@@ -14064,7 +14072,7 @@ function renderReuniaoPrazos() {
       motivoForaMap[m].porTecnico[t] = (motivoForaMap[m].porTecnico[t] || 0) + 1;
     });
     const motivosFora = Object.values(motivoForaMap).sort((a, b) => b.total - a.total);
-    const top3De = obj => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k).join(', ');
+    const top3De = obj => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => esc(k)).join(', ');
 
     // ---------- BASE 2: PCR (hora real de início/limite/fim) ----------
     // Só os dias que foram importados pelo CSV diário caem aqui — por isso cada
@@ -14091,7 +14099,10 @@ function renderReuniaoPrazos() {
     // "de tudo que rodou, quanto já chegou perdido". Denominador vem do MESMO
     // PCR do numerador: cruzar com a planilha mensal daria duas coberturas
     // diferentes na mesma fração.
-    const totalReparosPcr = Object.keys(porOSpcr).length;
+    // Só reparo CONCLUÍDO entra no denominador: cancelada e pendente não têm
+    // "recebeu vencido / venceu em campo" pra medir e só diluiriam o percentual
+    // (no CSV real de 18 e 21/09 são 381 das 385 linhas).
+    const totalReparosPcr = Object.values(porOSpcr).filter(l => l.some(r => isConcluido(r.status))).length;
     const vencidoEmCampoQtd = semTentFora.length - jaChegouEstourado.length;
     const pctEstouradoSobreTotal = totalReparosPcr ? (jaChegouEstourado.length / totalReparosPcr) * 100 : 0;
     const pctVencidoEmCampo = totalReparosPcr ? (vencidoEmCampoQtd / totalReparosPcr) * 100 : 0;
@@ -14113,8 +14124,16 @@ function renderReuniaoPrazos() {
 
     // horário em que cada técnico COMEÇA o dia (menor início do dia dele)
     const primeiroDoDia = {};
+    // SÓ conta ordem em que o técnico de fato COMEÇOU. Na ordem pendente o
+    // "Início" do CSV é a janela AGENDADA (08:00, 08:01...) e vem "00:00" quando
+    // não tem horário — conferido no CSV real de 18 e 21/09/2026: as 184
+    // pendentes têm Início preenchido, as 197 canceladas nenhum, e só as 4 "em
+    // rota" têm hora real. Sem este filtro a "hora média de início" virava a
+    // média do que foi AGENDADO (e os 00:00 puxavam pra baixo), não do que o
+    // técnico fez.
+    const comecouDeVerdade = st => ['em_rota', 'iniciado', 'concluido', 'nao_concluido'].includes(classifyStatusGranular(st));
     pcrTodos.forEach(r => {
-      if (!r.inicio || !r.recurso) return;
+      if (!r.inicio || !r.recurso || !comecouDeVerdade(r.status)) return;
       const k = `${r.recurso}|${r.data}`;
       if (!primeiroDoDia[k] || r.inicio < primeiroDoDia[k].inicio) primeiroDoDia[k] = r;
     });
