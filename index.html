@@ -16176,17 +16176,41 @@ function retornosDoPeriodoFin(inicioISO, fimISO) {
     const j = datasDoPeriodoFolha(l.periodo);
     return j.inicio && overlaps(j.inicio, j.fim, inicioISO, fimISO);
   });
-  const faixaDe = nome => { const l = folha.find(x => normalizeHeader(x.tecnico) === normalizeHeader(nome)); return { bonus: l ? l.bonus : '' }; };
-  const janela = { inicio: inicioISO, fim: fimISO };
-  let ifi = 0, irr = 0, qtdIfi = 0, qtdIrr = 0, semFaixa = 0;
-  Object.entries(conta).forEach(([nome, c]) => {
-    const linha = faixaDe(nome);
-    if (!folha.some(x => normalizeHeader(x.tecnico) === normalizeHeader(nome))) semFaixa++;
-    ifi += c.ifi * precoRetornoDoTecnico('ifi', linha, janela);
-    irr += c.irr * precoRetornoDoTecnico('irr', linha, janela);
-    qtdIfi += c.ifi; qtdIrr += c.irr;
+  // Dias trabalhados de cada técnico no ciclo (dias distintos com ordem concluída)
+  // — entra na regra do APTO pra quem ainda não tem linha na Folha do ciclo.
+  const dias = new Map();
+  DB.producao.forEach(p => {
+    if (!p.data || !isConcluido(p.status) || !inRange(p.data, inicioISO, fimISO) || !ehRecursoTecnico(p.recurso)) return;
+    const k = normalizeHeader(p.recurso);
+    if (!dias.has(k)) dias.set(k, new Set());
+    dias.get(k).add(p.data);
   });
-  return { ifi, irr, qtdIfi, qtdIrr, semFaixa };
+  const janela = { inicio: inicioISO, fim: fimISO };
+  const linhas = [];
+  Object.entries(conta).forEach(([nome, c]) => {
+    const linhaFolha = folha.find(x => normalizeHeader(x.tecnico) === normalizeHeader(nome));
+    let apto, origem;
+    if (linhaFolha && String(linhaFolha.bonus || '').trim()) {
+      apto = /apto/i.test(linhaFolha.bonus) && !/inapto/i.test(linhaFolha.bonus); origem = 'folha';
+    } else {
+      // sem linha na Folha desse ciclo (a Folha do ciclo ainda não foi gerada, ou o
+      // ofensor não aparece nela): aplica a MESMA regra que a Folha usa pra decidir
+      // o bônus — 26 dias, IFI ≤ 2,50% e IRR ≤ 4,50%. Antes caía sempre na faixa
+      // normal, e todo ofensor APTO era descontado a menos.
+      const base = baseDoTecnico(nome, inicioISO, fimISO);
+      const d = (dias.get(normalizeHeader(nome)) || new Set()).size;
+      const ifiP = base.ativacao ? (c.ifi / base.ativacao) * 100 : 0;
+      const irrP = base.reparos ? (c.irr / base.reparos) * 100 : 0;
+      apto = d >= BONUS_DIAS_MIN && ifiP <= BONUS_IFI_MAX && irrP <= BONUS_IRR_MAX; origem = 'regra';
+    }
+    const linha = { bonus: apto ? 'APTO' : 'INAPTO' };
+    const precoIfi = precoRetornoDoTecnico('ifi', linha, janela), precoIrr = precoRetornoDoTecnico('irr', linha, janela);
+    linhas.push({ nome, qtdIfi: c.ifi, qtdIrr: c.irr, apto, origem, precoIfi, precoIrr,
+                  valorIfi: c.ifi * precoIfi, valorIrr: c.irr * precoIrr });
+  });
+  linhas.sort((a, b) => (b.valorIfi + b.valorIrr) - (a.valorIfi + a.valorIrr));
+  const soma = k => linhas.reduce((a, l) => a + l[k], 0);
+  return { ifi: soma('valorIfi'), irr: soma('valorIrr'), qtdIfi: soma('qtdIfi'), qtdIrr: soma('qtdIrr'), linhas };
 }
 // Só as categorias que o sistema consegue calcular DESSE período; o resto fica
 // de fora (cai no cadastro/planilha).
@@ -16559,6 +16583,30 @@ function renderFinance() {
         ${ehAuto ? 'data-auto="1" title="Calculado pelo sistema — não é digitado"' : ''}
         style="width:140px;text-align:right"${podeEditarFinanceiro() && !ehAuto ? '' : ' readonly'}${podeEditarFinanceiro() ? '' : ' disabled'}>`;
     };
+    // Tabela de conferência do IFI/IRR: cada ofensor, quantos retornos, faixa e
+    // valor — pra dar pra auditar o total (pedido do cliente 21/09/2026).
+    const htmlDetalheRetornos = () => {
+      const r = auto.info.retornos;
+      if (!r) return '';
+      const moeda = v => formatCurrency(v);
+      return `<details class="panel" style="margin:0 0 1.5rem" open>
+        <summary style="cursor:pointer;font-weight:700">IFI e IRR do ciclo — ${r.qtdIfi + r.qtdIrr} retorno(s) por ofensor</summary>
+        <p style="font-size:12px;color:var(--text-muted);margin:8px 0 10px">
+          Cada retorno IFI/IRR baixado de ${formatDate(p.start)} a ${formatDate(p.end)} desconta o valor da ativação (IFI) ou do reparo (IRR)
+          <b>na faixa do ofensor</b>: APTO ${moeda(valoresVigentesEm(p.end).find(v => /ativa/.test(normalizeHeader(v.label))).d26)} / ${moeda(valoresVigentesEm(p.end).find(v => /reparo/.test(normalizeHeader(v.label))).d26)}, senão
+          ${moeda(valoresVigentesEm(p.end).find(v => /ativa/.test(normalizeHeader(v.label))).normal)} / ${moeda(valoresVigentesEm(p.end).find(v => /reparo/.test(normalizeHeader(v.label))).normal)}.
+          A faixa vem da Folha do ciclo; sem linha na Folha, vale a regra do bônus (26 dias, IFI ≤ 2,50%, IRR ≤ 4,50%).
+        </p>
+        <div class="table-wrap"><table class="data-table"><thead><tr>
+          <th>Ofensor</th><th>Faixa</th><th>Qtd. IFI</th><th>Valor IFI</th><th>Qtd. IRR</th><th>Valor IRR</th><th>Total</th>
+        </tr></thead><tbody>
+          ${r.linhas.map(l => `<tr><td class="cat-cell">${esc(l.nome)}</td>
+            <td><span class="badge ${l.apto ? 'ok' : 'neutral'}"${l.origem === 'regra' ? ' title="Sem linha na Folha — faixa pela regra do bônus"' : ''}>${l.apto ? 'APTO' : 'INAPTO'}${l.origem === 'regra' ? '*' : ''}</span></td>
+            <td>${l.qtdIfi}</td><td>${moeda(l.valorIfi)}</td><td>${l.qtdIrr}</td><td>${moeda(l.valorIrr)}</td><td><b>${moeda(l.valorIfi + l.valorIrr)}</b></td></tr>`).join('')}
+          <tr class="total-row"><td class="cat-cell">Total</td><td>—</td><td>${r.qtdIfi}</td><td>${moeda(r.ifi)}</td><td>${r.qtdIrr}</td><td>${moeda(r.irr)}</td><td>${moeda(r.ifi + r.irr)}</td></tr>
+        </tbody></table></div>
+      </details>`;
+    };
     // texto de como cada categoria automática foi calculada
     const notaAuto = cat => {
       if (auto.valores[cat] === undefined) return '';
@@ -16623,6 +16671,7 @@ function renderFinance() {
         </p>`;
       })()}
       <div class="fin-grade">${FIN_GRUPOS.map(grupoHtml).join('')}</div>
+      <div id="fin-ret-detalhe" style="margin-top:1rem">${htmlDetalheRetornos()}</div>
       ${podeEditarFinanceiro() ? `<div id="fin-folha-painel" class="panel" style="display:none;margin:0 0 1rem">
         <div class="toolbar" style="margin:0">
           ${(() => {
@@ -16729,6 +16778,8 @@ function renderFinance() {
         const nota = document.querySelector(`[data-nota-auto="${el.dataset.cat}"]`);
         if (nota) nota.innerHTML = notaAuto(el.dataset.cat);
       });
+      const detRet = document.getElementById('fin-ret-detalhe');
+      if (detRet) detRet.innerHTML = htmlDetalheRetornos();
       const det = document.getElementById('fin-receita-detalhe');
       if (det) det.innerHTML = htmlReceitaOrdens();
       recalcular();
