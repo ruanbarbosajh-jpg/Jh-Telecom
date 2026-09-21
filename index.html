@@ -65,6 +65,7 @@
     --danger-bg: rgba(239,68,68,0.15); --success-bg: rgba(34,197,94,0.15);
     --accent-bg: rgba(79,127,255,0.14);
     --warn-bg: #3a2a10; --warn-text: #f2c14e; --warn-borda: #6b551c;
+    --frota-laranja: #fb923c;     /* nome de técnico com carro da frota da JH */
     --nav-group: #7581a6;         /* era #5c6790 (3.35:1) — agora 4.8:1 */
     --total-bg: #0c1526;
     /* ---- TABELA (paleta passada pelo cliente em 04/09/2026) ----
@@ -128,6 +129,7 @@
     --danger: #c81e1e;            /* era #ef4444 (3.76:1) — agora 5.74:1 */
     --success-bg: #dcfce7; --danger-bg: #fee2e2; --accent-bg: #e0e9fd;
     --warn-bg: #fdf3d8; --warn-text: #8a6410; --warn-borda: #e3cd94;
+    --frota-laranja: #c2410c;     /* laranja de verdade (o --warn-text é marrom): 5.2:1 no branco */
     --nav-group: #6b7593;
     --track-bg: #e6ebf5;
     --row-hover: #e9edf7; --gauge-track: rgba(20,32,64,0.14); --gauge-meta: #0369a1; --nav-inactive: #5b6684; --nav-hover-bg: rgba(20,32,64,0.06);
@@ -7547,6 +7549,7 @@ function renderDashboard() {
       <div class="dash-resumo-fin${todos ? '' : ' centralizado'}">
         <div class="section-heading sem-toggle">Resumo financeiro do ciclo<span class="sec-nota">${unico ? 'só o ciclo selecionado' : todosOsCiclos ? 'todos os ciclos importados' : `${faixas.length} ciclos selecionados`}</span></div>
         ${tabelaFinanceiraComparativa(periodosParaResumo, pivotDash, { comSetas: false, comTotal: false })}
+        ${conferenciaFinanceiraHtml(periodosParaResumo)}
       </div>`;
 
     if (!fech.length) {
@@ -7755,7 +7758,7 @@ function renderDashboard() {
     // mostrar quando é 1 ciclo (o card some em "Todos os ciclos", que soma
     // vários períodos de uma vez).
     const cadFaltando = (cadTem && !todos) ? categoriasFaltantesFin(rotuloPeriodo) : [];
-    const cmpTem = !cadTem && !!(cmp && cmp.totalDespesas && cmp.totalDespesas[rotuloPeriodo] !== undefined);
+    const cmpTem = !cadTem && totalDespesasDaPlanilha(rotuloPeriodo) !== undefined;
     // AUDITORIA 04/09/2026: receita usa o fechamento (valorPagoGiga) sempre
     // que ESTE ciclo tem fechamento importado — a planilha de Comparação é
     // só uma foto de quando foi gerada e fica desatualizada se o Relatório
@@ -7799,16 +7802,17 @@ function renderDashboard() {
     const agregadoCiclos = unico ? null : faixas.map(resultadoDoCiclo).reduce(
       (a, r) => ({ receita: a.receita + r.receita, despesa: a.despesa + r.despesa, doFech: a.doFech + (r.origem === 'fechamento' ? 1 : 0) }),
       { receita: 0, despesa: 0, doFech: 0 });
+    const recUnico = unico ? receitaDoPeriodoComFonte(rotuloPeriodo, s, e) : null;
     const receitaFinal  = agregadoCiclos ? agregadoCiclos.receita
-      : (temValorPagoGiga ? valorPagoGiga : (cmpTemReceita ? cmp.receitaOrdens[rotuloPeriodo] : valorPagoGiga));
+      : (recUnico.fonte === 'nenhuma' ? valorPagoGiga : recUnico.valor);
     const despesaFinal  = agregadoCiclos ? agregadoCiclos.despesa
-      : (cadTem ? cadDespesa : (cmpTem ? cmp.totalDespesas[rotuloPeriodo]  : despesasTotal));
+      : (cadTem ? cadDespesa : (cmpTem ? totalDespesasDaPlanilha(rotuloPeriodo) : despesasTotal));
     const lucroFinal    = receitaFinal - despesaFinal;
     const fonteFin = agregadoCiclos
       ? `soma de ${faixas.length} ciclo(s), cada um pela mesma fonte do Resumo financeiro (cadastro do Financeiro → planilha de Comparação → fechamento${agregadoCiclos.doFech ? ` — ${agregadoCiclos.doFech} ciclo(s) só pelo fechamento` : ''})`
       : cadTem
-      ? 'cadastro do Financeiro' + (cmpTemReceita ? ' (despesa) e da planilha de Comparação (receita — sem valor pago GIGA no fechamento desse ciclo)' : '')
-      : (cmpTem ? 'despesa da planilha de Comparação' + (temValorPagoGiga ? ' (receita do fechamento por técnico)' : ' (sem valor pago GIGA no fechamento desse ciclo — receita também da planilha)') : 'fechamento por técnico');
+      ? 'cadastro do Financeiro (despesa) e ' + ROTULO_FONTE_RECEITA[recUnico.fonte] + ' (receita)'
+      : (cmpTem ? 'planilha de Comparação (despesa) e ' + ROTULO_FONTE_RECEITA[recUnico.fonte] + ' (receita)' : 'fechamento por técnico');
     const lucroTotal = lucroFinal;
 
     // ---- variação vs. ciclo ANTERIOR (só apresentação: usa os mesmos
@@ -8396,6 +8400,19 @@ function frotaDoTecnico(tecnico, inicio, fim) {
   if (!link) return '';
   return /jh/i.test(normalizeHeader(link.locadora)) ? 'JH' : 'PRÓPRIO';
 }
+// "Tem carro da frota da JH?" — só pra DESTACAR o nome nos rankings. Não é o
+// frotaDoTecnico: aquele devolve 'JH' só quando a coluna LOCADORA da planilha
+// diz "JH" (2 de 29 carros) e serve pra calcular o aluguel da folha. A planilha
+// FROTA LITORAL inteira é a frota da empresa (MOVIDA, LOCALIZA e JH), então
+// quem está nela tem carro da frota — o nome ficava azul pra todo mundo
+// (achado do cliente 21/09/2026). O fechamento do ciclo, quando existe, manda:
+// se ele diz PRÓPRIO, o carro é do técnico e não destaca.
+function temCarroDaFrotaJH(tecnico, inicio, fim) {
+  const f = (DB.fechamento || []).find(x => normalizeHeader(x.tecnico) === normalizeHeader(tecnico)
+    && overlaps(x.inicio, x.ate_o_dia, inicio, fim));
+  if (f && f.frota) return !/propri/i.test(normalizeHeader(f.frota));
+  return (DB.frotaLinks || []).some(x => normalizeHeader(x.motorista) === normalizeHeader(tecnico));
+}
 // Quanto CUSTA um retorno pro técnico. Regra confirmada pelo cliente em
 // 03/09/2026: o desconto acompanha a FAIXA do próprio técnico, a mesma do
 // valor da ordem — não é valor fixo.
@@ -8871,14 +8888,14 @@ function renderProduction() {
     // cidade tem carro da empresa?). PRÓPRIO fica sem destaque de propósito:
     // nesse caso o carro é do técnico, não da frota (ver o comentário do
     // ALUGUEL DE CARRO no Financeiro — são duas naturezas diferentes).
-    // A fonte é frotaDoTecnico: o fechamento do ciclo manda, o cadastro da
+    // A fonte é temCarroDaFrotaJH: o fechamento do ciclo manda, o cadastro da
     // Frota é o reserva. Calculado uma vez por load() e reaproveitado nas 4
     // listas (as de baixo são as mesmas, só reordenadas).
     const comFrotaJH = new Set();
     [...techList, ...deslocList].forEach(t => {
-      if (!comFrotaJH.has(t.label) && frotaDoTecnico(t.label, s, e) === 'JH') comFrotaJH.add(t.label);
+      if (!comFrotaJH.has(t.label) && temCarroDaFrotaJH(t.label, s, e)) comFrotaJH.add(t.label);
     });
-    const marcarFrota = lista => lista.map(t => comFrotaJH.has(t.label) ? { ...t, labelColor: 'var(--warn-text)' } : t);
+    const marcarFrota = lista => lista.map(t => comFrotaJH.has(t.label) ? { ...t, labelColor: 'var(--frota-laranja)' } : t);
 
     // Evolução no tempo: segue TODOS os filtros do topo. Data de ponta a ponta
     // (ver caixasDeTempo), e também técnico/cidade, porque as séries saem de
@@ -16093,18 +16110,25 @@ function ordensEValoresDoPeriodo(inicioISO, fimISO) {
     total: itens.reduce((a, i) => a + i.valor, 0),
   };
 }
+const ROTULO_FONTE_RECEITA = { planilha: 'planilha de Comparação', producao: 'ordens da Produção × valor GIGA', fechamento: 'fechamento por técnico', nenhuma: 'fechamento por técnico' };
 // Preenchido pela tela Financeiro a cada load(): refaz a receita no lugar.
 let FIN_ATUALIZAR_RECEITA = null;
 // Receita de um período COM a fonte que a originou — a regra de prioridade é UMA
 // só, usada por todo lugar que mostra "Receita das Ordens":
-//   1. fechamento (RELATORIO) com VALOR PAGO GIGA > 0 — o número oficial do ciclo;
-//   2. a planilha de Comparação (COMPARATIVO.xlsx) — o fechamento contábil que o
+//   1. a planilha de Comparação (COMPARATIVO.xlsx) — o fechamento contábil que o
 //      cliente já fechou pro período (não deve "andar" sozinho depois);
-//   3. as ORDENS da Produção × valor GIGA (ordensEValoresDoPeriodo) — é o que
+//   2. as ORDENS da Produção × valor GIGA (ordensEValoresDoPeriodo) — é o que
 //      preenche sozinho um ciclo novo, sem digitar nada (pedido do cliente
 //      21/09/2026: "criei o ciclo 21.08 a 20.09 só com as despesas; a receita
 //      quero que o sistema puxe as ordens e faça o cálculo");
+//   3. fechamento (RELATORIO) com VALOR PAGO GIGA > 0 — último recurso;
 //   4. zero, quando não há de onde tirar.
+// ORDEM TROCADA em 21/09/2026 (cliente mandou a foto da planilha e exigiu o
+// Dashboard igual a ela): o VALOR PAGO GIGA do RELATORIO NÃO é a "receita das
+// ordens" da planilha — em 21/06–20/07 ele dá 437.246,60 contra 428.535,31 da
+// planilha, e em 21/07–20/08, 511.055,40 contra 511.269,40. Ordens × preço GIGA
+// reproduz a planilha EXATAMENTE nos dois (e em 21/05–20/06), então o
+// fechamento deixou de ser a primeira fonte.
 // ACHADO 21/09/2026 (cliente: "lucro negativo no período 21.05 a 20.06"): o
 // RELATORIO_GERAL só tem os ciclos de 21/06 em diante, então pra 21/05–20/06
 // não existe fechamento e a receita saía R$ 0,00 — o lucro virava exatamente
@@ -16113,14 +16137,80 @@ let FIN_ATUALIZAR_RECEITA = null;
 // só no bloco "Resultado do Ciclo" do Dashboard; a tabela "Resumo financeiro"
 // (pivotDoCadastroFin) e a tela Financeiro chamavam receitaDoPeriodoFin direto.
 function receitaDoPeriodoComFonte(rotulo, inicioISO, fimISO) {
-  const doFechamento = receitaDoPeriodoFin(inicioISO, fimISO);
-  if (doFechamento > 0) return { valor: doFechamento, fonte: 'fechamento' };
   const cmp = DB.comparativoFinanceiro;
   const daPlanilha = cmp && cmp.receitaOrdens ? cmp.receitaOrdens[rotulo] : undefined;
   if (typeof daPlanilha === 'number' && daPlanilha > 0) return { valor: daPlanilha, fonte: 'planilha' };
   const ordens = ordensEValoresDoPeriodo(inicioISO, fimISO);
   if (ordens.qtd > 0) return { valor: ordens.total, fonte: 'producao' };
+  const doFechamento = receitaDoPeriodoFin(inicioISO, fimISO);
+  if (doFechamento > 0) return { valor: doFechamento, fonte: 'fechamento' };
   return { valor: 0, fonte: 'nenhuma' };
+}
+// Total de despesas de um período NA PLANILHA de Comparação. Ciclo em andamento
+// (foto de 21/09/2026: coluna 21/08–20/09 só com as despesas já conhecidas) vem
+// com a linha TOTAL DESPESAS em branco — sem isso o total virava undefined/NaN
+// no Dashboard e no resumo. Em branco = soma das categorias da própria coluna.
+function totalDespesasDaPlanilha(rotulo) {
+  const cmp = DB.comparativoFinanceiro;
+  if (!cmp || !cmp.periodos || !cmp.periodos.includes(rotulo)) return undefined;
+  const t = cmp.totalDespesas ? cmp.totalDespesas[rotulo] : undefined;
+  if (typeof t === 'number') return t;
+  const soma = FIN_CATEGORIAS.reduce((a, c) => a + (valoresDoComparativoFin(rotulo)[c] || 0), 0);
+  return soma > 0 ? soma : undefined;
+}
+// CONFERÊNCIA Financeiro (cadastro) × planilha de Comparação (pedido do cliente
+// 21/09/2026: "os dois devem estar corretos pro Dashboard ser atualizado"). O
+// Dashboard mostra o cadastro categoria a categoria e completa com a planilha,
+// então se as duas fontes discordam o número na tela é uma mistura. Aqui cada
+// ciclo diz se bate: despesa por categoria, total de despesas, e a receita da
+// planilha contra ordens × preço GIGA da Produção.
+function conferenciaFinanceira(rotulo) {
+  const cmp = DB.comparativoFinanceiro;
+  const temCmp = !!(cmp && cmp.periodos && cmp.periodos.includes(rotulo));
+  const temCad = temCadastroFin(rotulo);
+  const cad = despesasDoPeriodoFin(rotulo), doCmp = valoresDoComparativoFin(rotulo);
+  const conflitos = [];
+  if (temCad && temCmp) {
+    FIN_CATEGORIAS.forEach(cat => {
+      const a = cad[cat] || 0, b = doCmp[cat] || 0;
+      if (a > 0 && Math.abs(a - b) > 0.005) conflitos.push({ cat, cad: a, cmp: b });
+    });
+  }
+  const somaCmp = FIN_CATEGORIAS.reduce((a, c) => a + (doCmp[c] || 0), 0);
+  const totalCmpPlanilha = temCmp && cmp.totalDespesas ? cmp.totalDespesas[rotulo] : undefined; // só o que a planilha TRAZ (não o calculado)
+  // a planilha que traz TOTAL DESPESAS deve fechar com a soma das próprias categorias
+  const totalNaoFecha = typeof totalCmpPlanilha === 'number' && totalCmpPlanilha > 0 && Math.abs(totalCmpPlanilha - somaCmp) > 0.5;
+  let receita = null;
+  const { inicio, fim } = datasDoPeriodoFolha(rotulo);
+  const recPlanilha = temCmp && cmp.receitaOrdens ? cmp.receitaOrdens[rotulo] : undefined;
+  if (inicio && fim && typeof recPlanilha === 'number' && recPlanilha > 0) {
+    const ord = ordensEValoresDoPeriodo(inicio, fim);
+    if (ord.qtd > 0) receita = { planilha: recPlanilha, ordens: ord.total, dif: ord.total - recPlanilha };
+  }
+  const receitaDiverge = !!receita && Math.abs(receita.dif) > 0.5;
+  return { rotulo, temCmp, temCad, conflitos, totalCmpPlanilha, somaCmp, totalNaoFecha, receita, receitaDiverge,
+           ok: temCmp && !conflitos.length && !totalNaoFecha && !receitaDiverge };
+}
+function conferenciaFinanceiraHtml(periodos) {
+  const lista = periodos.map(conferenciaFinanceira);
+  const comPlanilha = lista.filter(c => c.temCmp);
+  if (!comPlanilha.length) {
+    return `<div class="panel" style="margin:12px 0 1.5rem"><div style="font-size:13px;color:var(--text-secondary)">Sem planilha de <b>Comparação</b> importada pra esses ciclos — não há com o que conferir o Financeiro.</div></div>`;
+  }
+  const ruins = comPlanilha.filter(c => !c.ok);
+  const linha = (c) => {
+    const itens = [];
+    c.conflitos.forEach(x => itens.push(`${esc(x.cat)}: Financeiro <b>${formatCurrency(x.cad)}</b> × Comparação <b>${formatCurrency(x.cmp)}</b>`));
+    if (c.totalNaoFecha) itens.push(`Total de despesas da planilha (<b>${formatCurrency(c.totalCmpPlanilha)}</b>) não fecha com a soma das categorias (<b>${formatCurrency(c.somaCmp)}</b>)`);
+    if (c.receitaDiverge) itens.push(`Receita: Comparação <b>${formatCurrency(c.receita.planilha)}</b> × ordens da Produção <b>${formatCurrency(c.receita.ordens)}</b> (${c.receita.dif > 0 ? '+' : '−'}${formatCurrency(Math.abs(c.receita.dif))})`);
+    return `<div style="margin:8px 0"><b>${esc(c.rotulo)}</b><ul style="margin:4px 0 0 18px;padding:0">${itens.map(t => `<li>${t}</li>`).join('')}</ul></div>`;
+  };
+  return ruins.length
+    ? `<div class="panel" style="margin:12px 0 1.5rem;border-color:var(--warn-borda);background:var(--warn-bg)">
+        <div style="font-size:13px;color:var(--warn-text)"><b>⚠ Financeiro × Comparação: ${ruins.length} de ${comPlanilha.length} ciclo(s) não batem.</b> O Dashboard mostra o cadastro do Financeiro e completa com a planilha; acerte o lado errado pra os dois ficarem iguais.</div>
+        <div style="font-size:12.5px;color:var(--text-primary)">${ruins.map(linha).join('')}</div>
+      </div>`
+    : `<div class="panel" style="margin:12px 0 1.5rem"><div style="font-size:13px;color:var(--success)"><b>✔ Financeiro e planilha de Comparação conferem</b> em ${comPlanilha.length} ciclo(s): despesa por categoria, total, e receita das ordens.</div></div>`;
 }
 // Despesas já cadastradas de um período: { 'Folha Técnica': 161824.27, ... }.
 // A busca é por nome NORMALIZADO porque dado antigo (vindo da planilha) grava
@@ -18475,7 +18565,7 @@ function pivotDoCadastroFin() {
       const v = planilha.porCategoria[cat][per];
       if (v !== undefined) põe(porCategoria, cat, per, v);
     });
-    totalDespesas[per] = planilha.totalDespesas[per];
+    totalDespesas[per] = totalDespesasDaPlanilha(per) || 0;
     // AUDITORIA 04/09/2026: a "RECEITA DAS ORDENS" que a planilha de
     // Comparação traz é uma FOTO de quando ela foi gerada — reimportar o
     // Relatório Geral depois (linha de técnico corrigida, adicionada etc.)
