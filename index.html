@@ -15,29 +15,36 @@
      em 10/09/2026 (pedido do cliente: Excel da Folha "colorido e já
      formatado") — mesma API (XLSX.utils.*, XLSX.writeFile), então toda
      exportação que já existia continua igual; só a Folha ganhou estilo novo. -->
-<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<!-- SEGURANÇA (auditoria 21/09/2026): todas as bibliotecas de CDN estão com VERSÃO FIXA e
+     hash SRI (integrity). Se a CDN um dia entregar arquivo diferente do que foi
+     conferido, o navegador se recusa a executar — não dá pra alguém injetar código no
+     sistema mexendo na biblioteca. O supabase-js estava em "@2" (flutuante: a versão
+     mudava sozinha); agora está fixo em 2.116.0. Pra atualizar uma lib: troque a
+     versão, recalcule o hash (openssl dgst -sha384 -binary arq | openssl base64 -A)
+     e teste o login + uma importação antes de publicar. -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js" integrity="sha384-OUW9euuUyxyHcAhTqbhI+Iyb8LMssXt/cpz0yXhs9UWG2/R/uaWdakx/4cfww7Vb" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.116.0/dist/umd/supabase.min.js" integrity="sha384-JBR+x8blGwjDRO63aHCGiZMD4VNiTR4ZUGA+N6ZKLf3zNt1fK8IBpcgPaMrxqWBp" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js" integrity="sha384-fCAW/rDWORTbQXSiB7mOg0QtQ5c+r0f544y6XoKjuVva0nMBlCpNUjiFeG5iMdS3" crossorigin="anonymous"></script>
 <!-- html2canvas: gera o PNG do cartão de Prazo (DIA/MÊS) igual está na tela
      de verdade — pedido do cliente ("imagem perfeita igual tá no sistema").
      A técnica sem lib (desenhar o card num SVG com foreignObject e rasterizar)
      esbarra em "tainted canvas" no Chrome — o navegador bloqueia exportar um
      canvas que recebeu uma imagem SVG com HTML embutido dentro, por segurança.
      html2canvas lê o DOM de verdade e redesenha, sem esse bloqueio. -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
 <!-- PptxGenJS: gera o .pptx da "Reunião Técnica — Prazos e Retornos" direto no
      navegador (pedido do cliente 14/09/2026: "quero o botão pra exportar em
      PowerPoint"). Mesmo esquema das outras libs: CDN, sem build. Se a CDN
      estiver fora do ar, só esse botão para de funcionar — a tela continua. -->
-<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js" integrity="sha384-Cck14aA9cifjYolcnjebXRfWGkz5ltHMBiG4px/j8GS+xQcb7OhNQWZYyWjQ+UwQ" crossorigin="anonymous"></script>
 <!-- Leaflet: mapa de verdade (com base cartográfica) no painel "Cidades e Bairros
      Atendidos" do Dashboard — pedido explícito do cliente ("quero um mapa, igual a
      imagem", vendo um bubble map). Sem isso só dava pra mostrar concentração por
      blocos (treemap), não sobre um mapa de verdade. Igual às outras libs do
      sistema: CDN direto, sem build/bundler. -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous"></script>
 <style>
   /* ============================================================
      DESIGN TOKENS
@@ -3726,6 +3733,21 @@ atualizarCampoNome('li-user','li-campo-nome','li-nome');
     setTimeout(() => { agendado = false; ativarFiltrosDeColuna(); ativarTogglesDeSecao(); wireGerarImagemCartaoPrazo(); }, 60);
   }).observe(alvo, { childList: true, subtree: true });
 })();
+// Erro que ninguém tratou: antes sumia em silêncio (a tela só "não fazia nada") e com
+// 8-9 pessoas usando não dá pra pedir print de console. Agora vai pro console e, pro
+// Analista, aparece um aviso curto (no máximo 3 por sessão, pra não virar enxurrada).
+let ERROS_AVISADOS = 0;
+function registrarErroGlobal(origem, e) {
+  const msg = String((e && (e.message || e)) || 'erro desconhecido').slice(0, 200);
+  console.error('[erro não tratado]', origem, e);
+  if (/ResizeObserver|Script error|Non-Error promise rejection/i.test(msg)) return; // ruído do navegador/extensões
+  if (ehAnalista() && ERROS_AVISADOS < 3) {
+    ERROS_AVISADOS++;
+    toast('Erro na tela: ' + msg + ' (detalhe no console — F12)', 'erro', 6000);
+  }
+}
+window.addEventListener('error', ev => registrarErroGlobal('error', ev.error || ev.message));
+window.addEventListener('unhandledrejection', ev => registrarErroGlobal('promessa', ev.reason));
 aplicarTema('dark');
 document.getElementById('btn-tema').addEventListener('click', alternarTema);
 // (O botão "↻ Atualizar dados" saiu em 21/09/2026: o sistema se atualiza sozinho,
@@ -7831,7 +7853,6 @@ function renderDashboard() {
     // então nunca aparece no fechamento. Informado pelo cliente (01/09/2026):
     // 27 alugados, 3 parados, 24 rodando com técnico.
     const CARROS_JH_ALUGADOS = 27;
-    const CARROS_JH_PARADOS = 3;
     const ehFrotaPropria = f => /propri/i.test(normalizeHeader(f.frota));
     const ehFrotaJH = f => f.frota && !ehFrotaPropria(f);
     const nFrotaPropria = fech.filter(ehFrotaPropria).length;
