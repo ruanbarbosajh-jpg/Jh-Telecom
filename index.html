@@ -870,25 +870,6 @@
   .sidebar-nav a:hover { background: var(--nav-hover-bg); color: #fff; }
   .sidebar-nav a.active { background: var(--accent-solid); color: #fff; }
   :root[data-theme="light"] .sidebar-nav a.active { box-shadow: 0 4px 14px rgba(79,127,255,.25); }
-  /* Atalho em destaque no topo do menu (Reunião Técnica). Contorno + texto
-     azul, NÃO preenchimento sólido: preenchido de azul ele fica idêntico ao
-     .active e a pessoa acha que a tela já está aberta (achado do cliente). O
-     preenchimento continua reservado pro estado ativo de verdade, logo abaixo.
-     O traço é box-shadow inset em vez de border pra não empurrar 2px de altura
-     e desalinhar esse item dos outros links do menu. */
-  .sidebar-nav a.nav-destaque {
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
-    color: var(--accent); font-weight: 600; margin-bottom: 8px;
-  }
-  .sidebar-nav a.nav-destaque i.nav-ic svg { stroke-width: 1.9; }
-  .sidebar-nav a.nav-destaque:hover {
-    background: color-mix(in srgb, var(--accent) 20%, transparent);
-    box-shadow: inset 0 0 0 1px var(--accent);
-    color: var(--accent);
-  }
-  /* aberta de verdade: aí sim preenche sólido, igual aos outros itens ativos */
-  .sidebar-nav a.nav-destaque.active { background: var(--accent-solid); color: #fff; box-shadow: none; }
   .sidebar-group { padding: 16px 12px 6px; font-size: var(--fs-xs); font-weight: 700; letter-spacing: .08em; color: var(--nav-group); text-transform: uppercase; }
   .logout-btn { margin: 1rem 1.25rem 0; padding: 9px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); border-radius: 8px; cursor: pointer; font-size: 13px; transition: background .15s ease, color .15s ease; }
   .logout-btn:hover { background: var(--nav-hover-bg); color: var(--text-primary); }
@@ -2286,7 +2267,7 @@
       <!-- Fica no TOPO e destacado de propósito (pedido do cliente): é a tela
            que abre a reunião técnica, então precisa ser a primeira coisa que a
            pessoa acha no menu. -->
-      <a data-route="reuniaoprazos" class="nav-destaque"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2.2" y="3" width="13.6" height="9.4" rx="1.3"/><line x1="6" y1="15" x2="12" y2="15"/><line x1="9" y1="12.4" x2="9" y2="15"/><path d="M5.6 9.6 8 7.2l2 2 2.6-3"/></svg></i><span class="nav-txt">Reunião Téc. — Prazos e Retornos</span></a>
+      <a data-route="reuniaoprazos"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2.2" y="3" width="13.6" height="9.4" rx="1.3"/><line x1="6" y1="15" x2="12" y2="15"/><line x1="9" y1="12.4" x2="9" y2="15"/><path d="M5.6 9.6 8 7.2l2 2 2.6-3"/></svg></i><span class="nav-txt">Reunião Téc. — Prazos e Retornos</span></a>
       <a data-route="dashboard"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.5" y="1.5" width="6.2" height="6.2" rx="1.2"/><rect x="10.3" y="1.5" width="6.2" height="6.2" rx="1.2"/><rect x="1.5" y="10.3" width="6.2" height="6.2" rx="1.2"/><rect x="10.3" y="10.3" width="6.2" height="6.2" rx="1.2"/></svg></i><span class="nav-txt">Dashboard</span></a>
       <a data-route="cleanup"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M9 1.8c-2.9 0-5.2 2.3-5.2 5.2 0 3.9 5.2 9.2 5.2 9.2s5.2-5.3 5.2-9.2c0-2.9-2.3-5.2-5.2-5.2Z"/><circle cx="9" cy="7" r="2"/></svg></i><span class="nav-txt">Clean Up</span></a>
       <a data-route="production"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2.5" y="8.5" width="3" height="7" rx="0.8"/><rect x="7.5" y="3.5" width="3" height="12" rx="0.8"/><rect x="12.5" y="10.5" width="3" height="5" rx="0.8"/></svg></i><span class="nav-txt">Produção</span></a>
@@ -3706,6 +3687,12 @@ function applySidebarPermissions() {
   // aparece quando existe autenticação de verdade pra barrar.
   const btnTrocar = document.getElementById('btn-trocar-usuario');
   if (btnTrocar) btnTrocar.style.display = USA_AUTH ? '' : 'none';
+  // Gestão só usa o tema claro (pedido do cliente 21/09/2026): força o claro e
+  // tira o botão. Roda a cada entrada/troca de perfil, então o botão volta
+  // sozinho quando outro perfil assume.
+  const btnTema = document.getElementById('btn-tema');
+  if (btnTema) btnTema.style.display = temaSoClaro(currentUser.role) ? 'none' : '';
+  if (temaSoClaro(currentUser.role)) aplicarTema('light');
 }
 // Splash "JH TELECOM — carregando 0 a 100%". Sobe sozinho até 90% (pra dar
 // sensação de progresso mesmo sem saber quanto falta) e a função devolvida
@@ -3749,7 +3736,9 @@ function aplicarTema(tema) {
   if (icone) icone.textContent = tema === 'light' ? '☾' : '☀';
   if (texto) texto.textContent = tema === 'light' ? 'Tema escuro' : 'Tema claro';
 }
+function temaSoClaro(perfil) { return perfil === 'gestao'; }
 function alternarTema() {
+  if (currentUser && temaSoClaro(currentUser.role)) return;
   const atual = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
   aplicarTema(atual === 'light' ? 'dark' : 'light');
 }
@@ -9308,28 +9297,6 @@ function renderAcomTec() {
 }
 
 // ===================== OFENSOR (IFI / IRR) =====================
-// Painel de diagnóstico: mostra o que realmente está gravado no campo IFI/IRR
-// de toda a base de produção importada — ajuda a achar se o problema é
-// coluna não reconhecida (tudo vazio) ou texto diferente do esperado
-// (ex.: "irr" minúsculo, "IRR " com espaço, ou outro valor qualquer).
-function diagnosticoIfiIrr() {
-  if (!ehAnalista()) return '';
-  const total = DB.producao.length;
-  if (!total) return `<div class="warning-box">Nenhuma linha de produção importada ainda (a tabela de produção está totalmente vazia).</div>`;
-  const contagem = {};
-  DB.producao.forEach(p => {
-    const v = (p.ifi_irr === null || p.ifi_irr === undefined || p.ifi_irr === '') ? '(vazio)' : p.ifi_irr;
-    contagem[v] = (contagem[v]||0) + 1;
-  });
-  const linhas = Object.entries(contagem).sort((a,b)=>b[1]-a[1]).slice(0,15);
-  return `<div class="warning-box">
-    <b>Diagnóstico:</b> ${total} linha(s) de produção importadas no total. Valores encontrados na coluna IFI/IRR:
-    <div class="table-wrap" style="margin-top:10px"><table class="data-table"><thead><tr><th>Valor encontrado</th><th>Quantidade</th></tr></thead><tbody>
-      ${linhas.map(([v,c])=>`<tr><td>${v}</td><td>${c}</td></tr>`).join('')}
-    </tbody></table></div>
-    <p style="margin:10px 0 0">Se aparecer só "(vazio)", a coluna não foi reconhecida na importação. Se aparecer algo diferente de exatamente "IFI" ou "IRR" (ex.: minúsculo, com espaço, ou outro texto), me manda esse valor que eu ajusto o sistema pra reconhecer.</p>
-  </div>`;
-}
 function renderOfensor() {
   const { start, end } = defaultPeriod();
   document.getElementById('content').innerHTML = `${periodToolbar(start,end,`
@@ -9353,7 +9320,7 @@ function renderOfensor() {
 
     const rows = DB.producao.filter(p => inRange(p.data,s,e) && p.ifi_irr && (p.ifi_irr==='IFI'||p.ifi_irr==='IRR') && matchFiltros(p));
     const body = document.getElementById('ofensor-body');
-    if (!rows.length) { body.innerHTML = '<div class="panel"><div class="empty">Sem retornos IFI/IRR no período/filtro. Importe REPAROS OK / BASE_REPARO_CONCLUIDO.</div></div>' + diagnosticoIfiIrr(); return; }
+    if (!rows.length) { body.innerHTML = '<div class="panel"><div class="empty">Sem retornos IFI/IRR no período/filtro. Importe REPAROS OK / BASE_REPARO_CONCLUIDO.</div></div>'; return; }
 
     // o denominador do % precisa respeitar os MESMOS filtros de cidade/ofensor
     // do numerador — senão o percentual de 1 técnico específico fica quase 0%
@@ -9436,7 +9403,7 @@ function renderTable() {
     const rows = DB.producao.filter(p => inRange(p.data,s,e) && p.ifi_irr && (p.ifi_irr==='IFI'||p.ifi_irr==='IRR')
       && cidades.includes(p.cidade) && (!ofensor || (p.ofensor||'').toLowerCase().includes(ofensor)));
     const body = document.getElementById('tbl-body');
-    if (!rows.length) { body.innerHTML = '<div class="panel"><div class="empty">Sem retornos no período.</div></div>' + diagnosticoIfiIrr(); return; }
+    if (!rows.length) { body.innerHTML = '<div class="panel"><div class="empty">Sem retornos no período.</div></div>'; return; }
     const qtdIfi = rows.filter(r=>r.ifi_irr==='IFI').length, qtdIrr = rows.filter(r=>r.ifi_irr==='IRR').length;
     const diasVals = rows.map(r=>parseFloat(r.dias)).filter(n=>!isNaN(n));
     const mediaDias = diasVals.length ? (diasVals.reduce((a,b)=>a+b,0)/diasVals.length) : 0;
@@ -10233,7 +10200,8 @@ function bucketColor(bucket, valor) {
   // Rota/Iniciado continuam neutros, não pediu cor pra esses dois.
   if (bucket === 'cancelado' || bucket === 'nao_concluido') return v > 0 ? 'color:var(--tab-alerta);font-weight:700' : '';
   if (bucket === 'pendente') return v > 0 ? 'color:#f59e0b;font-weight:700' : '';
-  if (bucket === 'concluido') return v > 0 ? 'color:var(--success);font-weight:700' : '';
+  // fundo em rgba (não color-mix): o html2canvas da "Gerar imagem" não lê color-mix
+  if (bucket === 'concluido') return v > 0 ? 'color:var(--success);font-weight:700;background:rgba(34,197,94,.16)' : '';
   return '';
 }
 // A aba "PRAZO REPARO DO DIA" tem sua própria coluna "DATA" (o dia do
@@ -12055,6 +12023,10 @@ function renderParcialDoDia() {
     <div id="pd-body"></div>`;
   wireMultiCityField('pd-cidades');
   document.getElementById('f-apply').addEventListener('click', load);
+  // Coluna "Cancelado" das tabelas de status nasce OCULTA (pedido do cliente
+  // 21/09/2026); o botão pequeno do título reexibe. Declarado ANTES do load()
+  // porque ele roda logo abaixo (let depois cairia na zona morta temporal).
+  let canceladosVisiveis = false;
   load();
   function load() {
     const data = document.getElementById('f-data').value;
@@ -12209,6 +12181,10 @@ function renderParcialDoDia() {
     // baixo sem motivo. "Não concluído", pendente etc continuam no denominador
     // (são ordens que ainda dependiam de execução).
     const efetividade = l => { const base = l.total - (l.cancelado || 0); return base > 0 ? (l.concluido / base) * 100 : 0; };
+    // Só a EXIBIÇÃO some com o cancelado; Total O.S e Efetividade seguem a mesma conta
+    const bucketsTabela = canceladosVisiveis ? buckets : buckets.filter(b => b !== 'cancelado');
+    const thStatus = b => `<th${b === 'concluido' ? ' style="color:var(--success)"' : ''}>${bucketLabel[b]}</th>`;
+    const btnCancelados = `<button type="button" class="btn-mini pd-toggle-cancelados">${canceladosVisiveis ? 'Ocultar cancelados' : 'Mostrar cancelados'}</button>`;
     const statusTable = tiposFixos.map(([label,re]) => {
       const linhas = rows.filter(r => re.test(normalizeHeader(r.tipo_atividade)));
       const linha = { label, total: linhas.length };
@@ -12358,42 +12334,42 @@ function renderParcialDoDia() {
           <td data-media-total>${moTotalDia()?(totais.total/moTotalDia()).toFixed(1):'-'}</td></tr>
       </tbody></table></div>
 
-      <div class="section-heading">Status Detalhado por Tipo de Serviço</div>
+      <div class="section-heading">Status Detalhado por Tipo de Serviço ${btnCancelados}</div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
-        <th>Serviços</th>${buckets.map(b=>`<th>${bucketLabel[b]}</th>`).join('')}<th>Total O.S</th><th>Efetividade</th>
+        <th>Serviços</th>${bucketsTabela.map(thStatus).join('')}<th>Total O.S</th><th>Efetividade</th>
       </tr></thead><tbody>
         ${statusTable.map(l=>{
           const efet = efetividade(l);
-          return `<tr><td class="cat-cell">${l.label}</td>${buckets.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="${l.total && efet < 70 ? 'color:var(--tab-alerta);' : ''}font-weight:700">${formatPct(efet, 0)}</td></tr>`;
+          return `<tr><td class="cat-cell">${l.label}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="${l.total && efet < 70 ? 'color:var(--tab-alerta);' : ''}font-weight:700">${formatPct(efet, 0)}</td></tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="font-weight:700">${formatPct(efetividade(totalStatus), 0)}</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="font-weight:700">${formatPct(efetividade(totalStatus), 0)}</td></tr>
       </tbody></table></div>
 
-      <div class="section-heading">Status Detalhado por Cidade</div>
+      <div class="section-heading">Status Detalhado por Cidade ${btnCancelados}</div>
       <div class="table-wrap"><table class="data-table"><thead><tr>
-        <th>Cidades</th>${buckets.map(b=>`<th>${bucketLabel[b]}</th>`).join('')}<th>Total O.S</th><th>Efetividade</th>
+        <th>Cidades</th>${bucketsTabela.map(thStatus).join('')}<th>Total O.S</th><th>Efetividade</th>
       </tr></thead><tbody>
         ${statusPorCidadeTable.map(l=>{
           const efet = efetividade(l);
-          return `<tr><td class="cat-cell">${l.label}</td>${buckets.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="${l.total && efet < 70 ? 'color:var(--tab-alerta);' : ''}font-weight:700">${formatPct(efet, 0)}</td></tr>`;
+          return `<tr><td class="cat-cell">${l.label}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="${l.total && efet < 70 ? 'color:var(--tab-alerta);' : ''}font-weight:700">${formatPct(efet, 0)}</td></tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="font-weight:700">${formatPct(efetividade(totalStatus), 0)}</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="font-weight:700">${formatPct(efetividade(totalStatus), 0)}</td></tr>
       </tbody></table></div>
 
-      <div class="section-heading">Status Detalhado por Técnico</div>
+      <div class="section-heading">Status Detalhado por Técnico ${btnCancelados}</div>
       <div class="toolbar" style="margin-bottom:12px">
         ${multiSelectField('pd-tec-tipo', 'Tipo de Serviço', nomesTiposTec, { noun: 'tipo(s)', allLabel: 'Todos os tipos', preset: tiposTecMarcados })}
         <button class="btn" id="pd-tec-tipo-aplicar">Aplicar</button>
         <button type="button" class="btn-export-img" id="pd-tec-img">🖼 Gerar imagem</button>
       </div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="tab-status-tecnico"><thead><tr>
-        <th>Técnico</th>${buckets.map(b=>`<th>${bucketLabel[b]}</th>`).join('')}<th>Total O.S</th><th>Efetividade</th>
+        <th>Técnico</th>${bucketsTabela.map(thStatus).join('')}<th>Total O.S</th><th>Efetividade</th>
       </tr></thead><tbody>
         ${statusPorTecnicoTable.map(l=>{
           const efet = efetividade(l);
-          return `<tr><td class="cat-cell">${esc(l.label)}</td>${buckets.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="${l.total && efet < 70 ? 'color:var(--tab-alerta);' : ''}font-weight:700">${formatPct(efet, 0)}</td></tr>`;
+          return `<tr><td class="cat-cell">${esc(l.label)}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="${l.total && efet < 70 ? 'color:var(--tab-alerta);' : ''}font-weight:700">${formatPct(efet, 0)}</td></tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${buckets.map(b=>`<td style="${bucketColor(b, totalStatusTecnico[b])}">${totalStatusTecnico[b]}</td>`).join('')}<td>${totalStatusTecnico.total}</td><td style="font-weight:700">${formatPct(efetividade(totalStatusTecnico), 0)}</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatusTecnico[b])}">${totalStatusTecnico[b]}</td>`).join('')}<td>${totalStatusTecnico.total}</td><td style="font-weight:700">${formatPct(efetividade(totalStatusTecnico), 0)}</td></tr>
       </tbody></table></div>
 
       ${!servicosDoDia.length ? '' : `
@@ -12550,6 +12526,10 @@ function renderParcialDoDia() {
     // ---- ocultar/reexibir cada tabela da página (mesmo padrão da PCR) ----
     ativarTogglesDeSecao(document.getElementById('pd-body'));
     ativarBotoesImagem(document.getElementById('pd-body'));
+    document.querySelectorAll('#pd-body .pd-toggle-cancelados').forEach(b => b.addEventListener('click', () => {
+      canceladosVisiveis = !canceladosVisiveis;
+      load();
+    }));
 
     // ---- Status Detalhado por Técnico: filtro de Tipo de Serviço (múltipla
     // escolha, mesmo componente do Clean Up/Financeiro) + imagem ----
@@ -12589,13 +12569,13 @@ function renderParcialDoDia() {
         {header:'M.O', get:r=>r.cidade==='TOTAL'?r.mo:moDoDia(r)}
       ]),
       status: () => secaoTabela('Status Detalhado por Tipo de Serviço', statusTable, [
-        {header:'Serviço', get:r=>r.label}, ...buckets.map(b=>({header:bucketLabel[b], get:r=>r[b]})), {header:'Total', get:r=>r.total}
+        {header:'Serviço', get:r=>r.label}, ...bucketsTabela.map(b=>({header:bucketLabel[b], get:r=>r[b]})), {header:'Total', get:r=>r.total}
       ]),
       statuscidade: () => secaoTabela('Status Detalhado por Cidade', statusPorCidadeTable, [
-        {header:'Cidade', get:r=>r.label}, ...buckets.map(b=>({header:bucketLabel[b], get:r=>r[b]})), {header:'Total', get:r=>r.total}
+        {header:'Cidade', get:r=>r.label}, ...bucketsTabela.map(b=>({header:bucketLabel[b], get:r=>r[b]})), {header:'Total', get:r=>r.total}
       ]),
       statustecnico: () => secaoTabela('Status Detalhado por Técnico', statusPorTecnicoTable, [
-        {header:'Técnico', get:r=>r.label}, ...buckets.map(b=>({header:bucketLabel[b], get:r=>r[b]})), {header:'Total', get:r=>r.total}
+        {header:'Técnico', get:r=>r.label}, ...bucketsTabela.map(b=>({header:bucketLabel[b], get:r=>r[b]})), {header:'Total', get:r=>r.total}
       ]),
       servicos: () => secaoTabela('Serviços do Dia', servicosDoDia, [
         {header:'O.S', get:r=>r.os}, {header:'Cliente', get:r=>r.cliente}, {header:'Contrato', get:r=>r.contrato},
