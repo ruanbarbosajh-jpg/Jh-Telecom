@@ -7706,7 +7706,10 @@ function renderDashboard() {
       const par = Object.entries(cmpCat).find(([k]) => normalizeHeader(k) === nome);
       return par ? par[1][rotuloCiclo] : undefined;
     };
-    const irrComparacao = valorDaComparacao('irr');
+    // IRR calculado pelo sistema (retornos do ciclo × preço da faixa) manda; sem
+    // cobertura de retornos no ciclo, cai na planilha de Comparação
+    const irrAuto = despesasAutomaticasDoPeriodo(rotuloCiclo).valores['IRR'];
+    const irrComparacao = irrAuto !== undefined ? irrAuto : valorDaComparacao('irr');
     const descontos = CAMPOS_DESCONTO
       .map(d => {
         const daFolha = somaNaFolha(d.c);
@@ -7751,7 +7754,7 @@ function renderDashboard() {
     // como reforço automático, não só como preenchimento manual sob pedido.
     const doCadastroFin = despesasDoPeriodoFin(rotuloPeriodo);
     const doComparativoFin = valoresDoComparativoFin(rotuloPeriodo);
-    const cadDespesa = cadTem ? FIN_CATEGORIAS.reduce((a, c) => a + (doCadastroFin[c] || doComparativoFin[c] || 0), 0) : 0;
+    const cadDespesa = cadTem ? totalDespesasEfetivo(rotuloPeriodo) : 0;
     // Categorias que vieram da planilha porque o cadastro estava vazio nelas
     // — antes era um AVISO de número errado; agora é só um informe de
     // proveniência, porque o valor já entra certo na conta. Só faz sentido
@@ -7806,7 +7809,7 @@ function renderDashboard() {
     const receitaFinal  = agregadoCiclos ? agregadoCiclos.receita
       : (recUnico.fonte === 'nenhuma' ? valorPagoGiga : recUnico.valor);
     const despesaFinal  = agregadoCiclos ? agregadoCiclos.despesa
-      : (cadTem ? cadDespesa : (cmpTem ? totalDespesasDaPlanilha(rotuloPeriodo) : despesasTotal));
+      : (cadTem ? cadDespesa : (cmpTem ? totalDespesasEfetivo(rotuloPeriodo) : despesasTotal));
     const lucroFinal    = receitaFinal - despesaFinal;
     const fonteFin = agregadoCiclos
       ? `soma de ${faixas.length} ciclo(s), cada um pela mesma fonte do Resumo financeiro (cadastro do Financeiro → planilha de Comparação → fechamento${agregadoCiclos.doFech ? ` — ${agregadoCiclos.doFech} ciclo(s) só pelo fechamento` : ''})`
@@ -16146,6 +16149,86 @@ function receitaDoPeriodoComFonte(rotulo, inicioISO, fimISO) {
   if (doFechamento > 0) return { valor: doFechamento, fonte: 'fechamento' };
   return { valor: 0, fonte: 'nenhuma' };
 }
+// ---- DESPESAS CALCULADAS PELO SISTEMA (pedido do cliente 21/09/2026: "imposto,
+// IFI, IRR, receita e despesas o sistema pode calcular automaticamente, são
+// dados que já estão no sistema — e IFI/IRR é por período, 21 a 20") ----
+// Imposto Nota = 19% da RECEITA DAS ORDENS. Conferido contra a planilha real
+// nos 5 ciclos (mar–ago/2026): 432.162,97 → 82.110,96; 542.560,97 → 103.086,58;
+// 474.623,30 → 90.178,43; 428.535,31 → 81.421,71; 511.269,40 → 97.141,19 —
+// todos exatos ao centavo.
+const ALIQUOTA_IMPOSTO_NOTA = 0.19;
+const FIN_CATEGORIAS_AUTO = ['Imposto Nota', 'IFI', 'IRR'];
+// IFI/IRR só dá pra calcular onde a Produção tem a classificação de retorno
+// (REPAROS OK / BASE_CONCLUIDOS): em ciclo mais antigo que essa base a conta
+// sairia R$ 0,00 e apagaria o valor real que está na planilha/cadastro.
+function temCoberturaRetornos(inicioISO, fimISO) {
+  return DB.producao.some(p => p.data && inRange(p.data, inicioISO, fimISO)
+    && ['IFI', 'IRR', 'DESC'].includes(String(p.ifi_irr || '').trim().toUpperCase()));
+}
+// Desconto de retorno do período: cada retorno IFI/IRR baixado entre inicio e
+// fim (contarRetornosPorOfensor — o ofensor responde, não quem fez o retorno)
+// vale o preço da ativação/reparo NA FAIXA do ofensor (APTO 53,00/42,00, senão
+// 48,50/38,50) — a mesma conta do desconto na Folha (aplicarDescontoRetorno).
+// A faixa vem da linha do ofensor na Folha desse ciclo; sem linha, faixa normal.
+function retornosDoPeriodoFin(inicioISO, fimISO) {
+  const conta = contarRetornosPorOfensor(inicioISO, fimISO);
+  const folha = (DB.folhaPagamento || []).filter(l => {
+    const j = datasDoPeriodoFolha(l.periodo);
+    return j.inicio && overlaps(j.inicio, j.fim, inicioISO, fimISO);
+  });
+  const faixaDe = nome => { const l = folha.find(x => normalizeHeader(x.tecnico) === normalizeHeader(nome)); return { bonus: l ? l.bonus : '' }; };
+  const janela = { inicio: inicioISO, fim: fimISO };
+  let ifi = 0, irr = 0, qtdIfi = 0, qtdIrr = 0, semFaixa = 0;
+  Object.entries(conta).forEach(([nome, c]) => {
+    const linha = faixaDe(nome);
+    if (!folha.some(x => normalizeHeader(x.tecnico) === normalizeHeader(nome))) semFaixa++;
+    ifi += c.ifi * precoRetornoDoTecnico('ifi', linha, janela);
+    irr += c.irr * precoRetornoDoTecnico('irr', linha, janela);
+    qtdIfi += c.ifi; qtdIrr += c.irr;
+  });
+  return { ifi, irr, qtdIfi, qtdIrr, semFaixa };
+}
+// Só as categorias que o sistema consegue calcular DESSE período; o resto fica
+// de fora (cai no cadastro/planilha).
+function despesasAutomaticasDoPeriodo(rotulo) {
+  const { inicio, fim } = datasDoPeriodoFolha(rotulo);
+  const valores = {}, info = {};
+  if (!inicio || !fim) return { valores, info };
+  const rec = receitaDoPeriodoComFonte(rotulo, inicio, fim);
+  if (rec.valor > 0) {
+    valores['Imposto Nota'] = Math.round(rec.valor * ALIQUOTA_IMPOSTO_NOTA * 100) / 100;
+    info.imposto = { receita: rec.valor, aliquota: ALIQUOTA_IMPOSTO_NOTA };
+  }
+  if (temCoberturaRetornos(inicio, fim)) {
+    const r = retornosDoPeriodoFin(inicio, fim);
+    valores['IFI'] = r.ifi; valores['IRR'] = r.irr;
+    info.retornos = r;
+  }
+  return { valores, info };
+}
+// Despesa por categoria já com o automático aplicado: calculado > cadastro >
+// planilha de Comparação.
+function despesasEfetivasDoPeriodo(rotulo) {
+  const manual = despesasDoPeriodoFin(rotulo), doCmp = valoresDoComparativoFin(rotulo);
+  const auto = despesasAutomaticasDoPeriodo(rotulo);
+  const porCat = {}; let total = 0;
+  FIN_CATEGORIAS.forEach(cat => {
+    const v = auto.valores[cat] !== undefined ? auto.valores[cat] : (manual[cat] || doCmp[cat] || 0);
+    porCat[cat] = v; total += v;
+  });
+  return { porCat, total, auto };
+}
+// Total de despesas do período pra Dashboard/Resumo: com cadastro, a soma das
+// categorias efetivas; só com a planilha, o TOTAL dela corrigido pela diferença
+// entre o calculado e o que a planilha tinha nas categorias automáticas (assim
+// linha da planilha que o sistema não conhece continua contando).
+function totalDespesasEfetivo(rotulo) {
+  if (temCadastroFin(rotulo)) return despesasEfetivasDoPeriodo(rotulo).total;
+  const t = totalDespesasDaPlanilha(rotulo);
+  if (t === undefined) return undefined;
+  const auto = despesasAutomaticasDoPeriodo(rotulo).valores, doCmp = valoresDoComparativoFin(rotulo);
+  return t + Object.keys(auto).reduce((a, c) => a + (auto[c] - (doCmp[c] || 0)), 0);
+}
 // Total de despesas de um período NA PLANILHA de Comparação. Ciclo em andamento
 // (foto de 21/09/2026: coluna 21/08–20/09 só com as despesas já conhecidas) vem
 // com a linha TOTAL DESPESAS em branco — sem isso o total virava undefined/NaN
@@ -16173,7 +16256,17 @@ function conferenciaFinanceira(rotulo) {
   if (temCad && temCmp) {
     FIN_CATEGORIAS.forEach(cat => {
       const a = cad[cat] || 0, b = doCmp[cat] || 0;
+      if (FIN_CATEGORIAS_AUTO.includes(cat)) return; // esses o sistema calcula (autoDifs abaixo)
       if (a > 0 && Math.abs(a - b) > 0.005) conflitos.push({ cat, cad: a, cmp: b });
+    });
+  }
+  // calculado pelo sistema × o que a planilha traz nessas linhas
+  const autoDifs = [];
+  if (temCmp) {
+    const auto = despesasAutomaticasDoPeriodo(rotulo).valores;
+    Object.keys(auto).forEach(cat => {
+      const b = doCmp[cat] || 0;
+      if (b > 0 && Math.abs(auto[cat] - b) > 0.5) autoDifs.push({ cat, sistema: auto[cat], cmp: b });
     });
   }
   const somaCmp = FIN_CATEGORIAS.reduce((a, c) => a + (doCmp[c] || 0), 0);
@@ -16188,8 +16281,8 @@ function conferenciaFinanceira(rotulo) {
     if (ord.qtd > 0) receita = { planilha: recPlanilha, ordens: ord.total, dif: ord.total - recPlanilha };
   }
   const receitaDiverge = !!receita && Math.abs(receita.dif) > 0.5;
-  return { rotulo, temCmp, temCad, conflitos, totalCmpPlanilha, somaCmp, totalNaoFecha, receita, receitaDiverge,
-           ok: temCmp && !conflitos.length && !totalNaoFecha && !receitaDiverge };
+  return { rotulo, temCmp, temCad, conflitos, autoDifs, totalCmpPlanilha, somaCmp, totalNaoFecha, receita, receitaDiverge,
+           ok: temCmp && !conflitos.length && !autoDifs.length && !totalNaoFecha && !receitaDiverge };
 }
 function conferenciaFinanceiraHtml(periodos) {
   const lista = periodos.map(conferenciaFinanceira);
@@ -16201,16 +16294,17 @@ function conferenciaFinanceiraHtml(periodos) {
   const linha = (c) => {
     const itens = [];
     c.conflitos.forEach(x => itens.push(`${esc(x.cat)}: Financeiro <b>${formatCurrency(x.cad)}</b> × Comparação <b>${formatCurrency(x.cmp)}</b>`));
+    c.autoDifs.forEach(x => itens.push(`${esc(x.cat)}: calculado pelo sistema <b>${formatCurrency(x.sistema)}</b> × Comparação <b>${formatCurrency(x.cmp)}</b> (o Dashboard usa o do sistema)`));
     if (c.totalNaoFecha) itens.push(`Total de despesas da planilha (<b>${formatCurrency(c.totalCmpPlanilha)}</b>) não fecha com a soma das categorias (<b>${formatCurrency(c.somaCmp)}</b>)`);
     if (c.receitaDiverge) itens.push(`Receita: Comparação <b>${formatCurrency(c.receita.planilha)}</b> × ordens da Produção <b>${formatCurrency(c.receita.ordens)}</b> (${c.receita.dif > 0 ? '+' : '−'}${formatCurrency(Math.abs(c.receita.dif))})`);
     return `<div style="margin:8px 0"><b>${esc(c.rotulo)}</b><ul style="margin:4px 0 0 18px;padding:0">${itens.map(t => `<li>${t}</li>`).join('')}</ul></div>`;
   };
   return ruins.length
     ? `<div class="panel" style="margin:12px 0 1.5rem;border-color:var(--warn-borda);background:var(--warn-bg)">
-        <div style="font-size:13px;color:var(--warn-text)"><b>⚠ Financeiro × Comparação: ${ruins.length} de ${comPlanilha.length} ciclo(s) não batem.</b> O Dashboard mostra o cadastro do Financeiro e completa com a planilha; acerte o lado errado pra os dois ficarem iguais.</div>
+        <div style="font-size:13px;color:var(--warn-text)"><b>⚠ Financeiro × Comparação: ${ruins.length} de ${comPlanilha.length} ciclo(s) não batem.</b> O Dashboard usa o cálculo do sistema (receita, imposto, IFI e IRR) e o cadastro do Financeiro, completando com a planilha; onde a planilha diverge, ela é que está desatualizada ou o cálculo precisa de conferência.</div>
         <div style="font-size:12.5px;color:var(--text-primary)">${ruins.map(linha).join('')}</div>
       </div>`
-    : `<div class="panel" style="margin:12px 0 1.5rem"><div style="font-size:13px;color:var(--success)"><b>✔ Financeiro e planilha de Comparação conferem</b> em ${comPlanilha.length} ciclo(s): despesa por categoria, total, e receita das ordens.</div></div>`;
+    : `<div class="panel" style="margin:12px 0 1.5rem"><div style="font-size:13px;color:var(--success)"><b>✔ Financeiro, cálculo do sistema e planilha de Comparação conferem</b> em ${comPlanilha.length} ciclo(s): despesa por categoria, imposto, IFI, IRR, total e receita das ordens.</div></div>`;
 }
 // Despesas já cadastradas de um período: { 'Folha Técnica': 161824.27, ... }.
 // A busca é por nome NORMALIZADO porque dado antigo (vindo da planilha) grava
@@ -16421,6 +16515,11 @@ function renderFinance() {
     const p = lista.find(x => x.rotulo === rotulo) || lista[0];
     if (!p) { document.getElementById('fin-body').innerHTML = '<div class="panel"><div class="empty">Nenhum período disponível — importe a produção primeiro.</div></div>'; return; }
     const valores = despesasDoPeriodoFin(rotulo);
+    // Imposto Nota, IFI e IRR o sistema calcula (ver despesasAutomaticasDoPeriodo):
+    // o campo mostra o valor calculado e não aceita digitação. `let` porque a
+    // conta se refaz quando entra produção nova (FIN_ATUALIZAR_RECEITA).
+    let auto = despesasAutomaticasDoPeriodo(rotulo);
+    Object.keys(auto.valores).forEach(cat => { valores[cat] = auto.valores[cat]; });
     // `let`: a receita se REFAZ sozinha quando entra produção nova (ver
     // atualizarReceitaNaTela) — sem re-renderizar a tela, que apagaria o que a
     // pessoa já digitou nos campos de despesa e ainda não salvou.
@@ -16454,9 +16553,19 @@ function renderFinance() {
     // que o navegador aceite. data-centavos é o número de verdade.
     const campo = cat => {
       const centavos = Math.round((valores[cat] || 0) * 100);
+      const ehAuto = auto.valores[cat] !== undefined;
       return `<input type="text" inputmode="decimal" class="folha-edit folha-edit-moeda fin-campo"
         data-cat="${esc(cat)}" data-centavos="${centavos}" value="${formatCurrency(centavos / 100)}"
-        style="width:140px;text-align:right"${podeEditarFinanceiro() ? '' : ' readonly disabled'}>`;
+        ${ehAuto ? 'data-auto="1" title="Calculado pelo sistema — não é digitado"' : ''}
+        style="width:140px;text-align:right"${podeEditarFinanceiro() && !ehAuto ? '' : ' readonly'}${podeEditarFinanceiro() ? '' : ' disabled'}>`;
+    };
+    // texto de como cada categoria automática foi calculada
+    const notaAuto = cat => {
+      if (auto.valores[cat] === undefined) return '';
+      let t = '';
+      if (cat === 'Imposto Nota') t = `${formatPct(ALIQUOTA_IMPOSTO_NOTA * 100, 0)} da receita das ordens`;
+      else if (auto.info.retornos) { const r = auto.info.retornos; t = `${cat === 'IFI' ? r.qtdIfi : r.qtdIrr} retorno(s) do ciclo × preço da faixa do ofensor`; }
+      return `<small class="fin-auto" style="color:var(--text-muted);font-weight:400"> · automático${t ? ' — ' + t : ''}</small>`;
     };
     // Grade em vez de 5 tabelas empilhadas de 2 colunas: eram 1.800px de
     // rolagem pra 17 campos, com a tabela ocupando a largura toda pra mostrar
@@ -16466,7 +16575,7 @@ function renderFinance() {
       <section class="fin-grupo">
         <header><h3>${esc(g.grupo)}</h3><span class="fin-subtotal" data-grupo="${esc(g.grupo)}"></span></header>
         ${g.itens.map(cat => `<label class="fin-linha">
-          <span>${esc(cat)}</span>${campo(cat)}</label>`).join('')}
+          <span>${esc(cat)}<span data-nota-auto="${esc(cat)}">${notaAuto(cat)}</span></span>${campo(cat)}</label>`).join('')}
       </section>`;
 
     document.getElementById('fin-body').innerHTML = `
@@ -16610,6 +16719,16 @@ function renderFinance() {
       recInfo = receitaDoPeriodoComFonte(rotulo, p.start, p.end);
       receita = recInfo.valor;
       card.textContent = formatCurrency(receita);
+      // o imposto (19% da receita) e o IFI/IRR também se refazem
+      auto = despesasAutomaticasDoPeriodo(rotulo);
+      inputs().filter(el => el.dataset.auto === '1').forEach(el => {
+        const v = auto.valores[el.dataset.cat];
+        if (v === undefined) return;
+        const centavos = Math.round(v * 100);
+        el.dataset.centavos = centavos; el.value = formatCurrency(centavos / 100);
+        const nota = document.querySelector(`[data-nota-auto="${el.dataset.cat}"]`);
+        if (nota) nota.innerHTML = notaAuto(el.dataset.cat);
+      });
       const det = document.getElementById('fin-receita-detalhe');
       if (det) det.innerHTML = htmlReceitaOrdens();
       recalcular();
@@ -16767,6 +16886,7 @@ function renderFinance() {
         return;
       }
       inputs().forEach(el => {
+        if (el.dataset.auto === '1') return; // Imposto/IFI/IRR o sistema calcula
         const v = doComparativo[el.dataset.cat];
         if (v === undefined) return;
         const centavos = Math.round(v * 100);
@@ -18565,7 +18685,14 @@ function pivotDoCadastroFin() {
       const v = planilha.porCategoria[cat][per];
       if (v !== undefined) põe(porCategoria, cat, per, v);
     });
-    totalDespesas[per] = totalDespesasDaPlanilha(per) || 0;
+    // Imposto/IFI/IRR: o sistema calcula (ver despesasAutomaticasDoPeriodo) e
+    // isso vale por cima do que a planilha traz nessas 3 linhas
+    const autoPer = despesasAutomaticasDoPeriodo(per).valores;
+    Object.keys(autoPer).forEach(cat => {
+      const chave = Object.keys(planilha.porCategoria).find(k => normalizeHeader(k) === normalizeHeader(cat)) || cat;
+      põe(porCategoria, chave, per, autoPer[cat]);
+    });
+    totalDespesas[per] = totalDespesasEfetivo(per) || 0;
     // AUDITORIA 04/09/2026: a "RECEITA DAS ORDENS" que a planilha de
     // Comparação traz é uma FOTO de quando ela foi gerada — reimportar o
     // Relatório Geral depois (linha de técnico corrigida, adicionada etc.)
@@ -18590,10 +18717,10 @@ function pivotDoCadastroFin() {
     // como reforço, em vez de contar R$ 0,00 (pedido do cliente 10/09/2026
     // — mesmo achado do "Resultado do Ciclo" no Dashboard: cadastro parcial
     // inflava o lucro silenciosamente. Ver comentário em renderDashboard).
-    const doCmp = planilha ? valoresDoComparativoFin(p.rotulo) : {};
+    const ef = despesasEfetivasDoPeriodo(p.rotulo);
     let soma = 0;
     FIN_CATEGORIAS.forEach(cat => {
-      const v = d[cat] || doCmp[cat] || 0;
+      const v = ef.porCat[cat] || 0;
       põe(porCategoria, cat, p.rotulo, v); soma += v;
     });
     const receita = receitaDoPeriodoComFonte(p.rotulo, p.start, p.end).valor;
