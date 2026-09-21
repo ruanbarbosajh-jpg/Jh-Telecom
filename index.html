@@ -2809,7 +2809,56 @@ async function recarregarTabelaInteira(tabela, onPagina) {
   return rows;
 }
 // Ponto de entrada: devolve as linhas da tabela usando o cache quando dá.
+// PCR — cache só da parte ANTIGA (dias fora da janela de PCR_JANELA_DIAS).
+// Motivo (21/09/2026, cliente vai liberar o sistema pra 8-9 pessoas que importam
+// o CSV o dia todo): a PCR inteira (~8,5 mil linhas, ~610 bytes cada ≈ 5 MB) era
+// baixada em TODO login e TODO F5 — 9 pessoas × alguns acessos por dia estouravam
+// os 5 GB/mês do plano gratuito sozinhos. Agora a janela recente (onde as
+// importações mexem) vem sempre do banco, e o resto vem do navegador, conferido
+// por contagem + carimbo mais novo (2 consultas minúsculas). Se não bate, baixa
+// a parte antiga de novo — nunca serve dado que o banco desmente.
+async function fetchPCRPaginado(filtrar, onPagina) {
+  const linhas = [];
+  for (let de = 0; ; de += 1000) {
+    const { data, error } = await comLimite(() => filtrar(supa.from('pcr').select('*')).order('chave', { ascending: true }).range(de, de + 999));
+    if (error) { supabaseStatus = { ok: false, mensagem: error.message }; throw error; }
+    if (onPagina) onPagina(data.length);
+    linhas.push(...data);
+    if (data.length < 1000) break;
+  }
+  return linhas;
+}
+async function carregarPCRComCache(onPagina) {
+  const corte = pcrCorteDaJanela();
+  let guardado = null;
+  try { guardado = await cacheLer('pcr'); } catch (e) { guardado = null; }
+  const valido = guardado && guardado.versao === CACHE_VERSAO && Array.isArray(guardado.rows)
+    && (Date.now() - (guardado.completoEm || 0) < CACHE_VALIDADE_MS);
+  const janela = await fetchPCRPaginado(q => q.gte('data', corte), onPagina);
+  let antigas = null;
+  if (valido) {
+    const doCache = guardado.rows.filter(r => r.data && r.data < corte);
+    try {
+      const [cont, novo] = await Promise.all([
+        comLimite(() => supa.from('pcr').select('*', { count: 'exact', head: true }).lt('data', corte)),
+        comLimite(() => supa.from('pcr').select('atualizado_em').lt('data', corte).order('atualizado_em', { ascending: false }).limit(1)),
+      ]);
+      if (!cont.error && !novo.error && typeof cont.count === 'number') {
+        const maisNovoBanco = novo.data && novo.data[0] ? Date.parse(novo.data[0].atualizado_em) || 0 : 0;
+        let maisNovoLocal = 0;
+        doCache.forEach(r => { const t = Date.parse(r.atualizado_em); if (t > maisNovoLocal) maisNovoLocal = t; });
+        if (cont.count === doCache.length && maisNovoBanco === maisNovoLocal) antigas = doCache;
+      }
+    } catch (e) { antigas = null; }
+  }
+  const reaproveitou = !!antigas;
+  if (!antigas) antigas = await fetchPCRPaginado(q => q.lt('data', corte), onPagina);
+  const todas = antigas.concat(janela);
+  await cacheGravar('pcr', { versao: CACHE_VERSAO, completoEm: reaproveitou ? guardado.completoEm : Date.now(), marca: null, rows: todas });
+  return todas;
+}
 async function carregarTabela(tabela, conflict, onPagina) {
+  if (tabela === 'pcr' && supa) return await carregarPCRComCache(onPagina);
   if (TABELAS_SEM_CACHE.has(tabela) || !supa) return await fetchAllRows(tabela, onPagina);
   let guardado = null;
   try { guardado = await cacheLer(tabela); } catch (e) { guardado = null; }
@@ -10659,12 +10708,31 @@ function importarCsvPCR(texto) {
   // e-mail da conta, e "importado por xxx@jhtelecom.com.br" não dizia nada
   // pra quem lê a tela (currentUser.nome já vem certo nos dois modos)
   const quem = currentUser ? (currentUser.nome || currentUser.login) : null;
+  // Linha que NÃO mudou desde a última importação mantém o carimbo antigo: os
+  // outros logins só baixam o que carimbo novo acusa (pcrAtualizarDoBanco). Antes
+  // TODA linha do arquivo levava o carimbo de agora, e cada importação fazia as
+  // outras 8 pessoas rebaixarem a janela inteira (~1 MB cada). A primeira linha
+  // de cada dia é sempre recarimbada: assim "última atualização deste dia" anda
+  // mesmo quando nada mudou.
+  const anteriores = new Map(DB.pcr.map(r => [r.chave, r]));
+  const tm = d => d ? +new Date(d) : 0;
+  const assinatura = r => [r.status, r.recurso, r.cidade, r.tipo_atividade, r.motivo, r.cliente, r.contrato, r.endereco,
+    r.periodo, r.periodo_sistema, r.horas_prazo, r.faixa, r.aging, tm(r.abertura), tm(r.limite), tm(r.encerramento), tm(r.inicio)].join('¦');
+  const diaJaMarcado = new Set();
   out.forEach(r => {
     const base = `${r.data}|${r.os || 'sem-os'}`;
     vistos[base] = (vistos[base] || 0) + 1;
     r.chave = `${base}|${vistos[base]}`;
-    r.atualizado_em = quando;
-    r.importado_por = quem;
+    const antes = anteriores.get(r.chave);
+    const primeiraDoDia = !diaJaMarcado.has(r.data);
+    diaJaMarcado.add(r.data);
+    if (antes && antes.atualizado_em && !primeiraDoDia && assinatura(antes) === assinatura(r)) {
+      r.atualizado_em = antes.atualizado_em;
+      r.importado_por = antes.importado_por;
+    } else {
+      r.atualizado_em = quando;
+      r.importado_por = quem;
+    }
   });
 
   // MESCLA com o que já estava carregado (do Supabase ou de outra importação)
@@ -10788,6 +10856,35 @@ async function pcrAtualizarDoBanco() {
     // uma importação começou aqui enquanto perguntávamos ao banco: o que veio
     // pode já estar velho em relação ao que a pessoa acabou de subir
     if (PCR_SINCRONIZANDO > 0) return { mudou: false };
+
+    // CAMINHO BARATO: o banco tem carimbo MAIS NOVO que o meu → baixa só as linhas
+    // carimbadas depois do meu (a importação recarimba só o que mudou). Só vale se
+    // depois de aplicar a assinatura BATER com a do banco; se não bater (linha
+    // removida por remanejamento, relógio de quem importou atrasado…) cai na janela
+    // inteira logo abaixo — o caminho seguro de sempre.
+    if (remoto.maisNovo > local.maisNovo && local.maisNovo > 0) {
+      try {
+        const marca = new Date(local.maisNovo).toISOString();
+        const alteradas = await fetchPCRPaginado(q => q.gt('atualizado_em', marca), null);
+        if (PCR_SINCRONIZANDO > 0) return { mudou: false };
+        const porChave = new Map(DB.pcr.map(r => [r.chave, r]));
+        alteradas.forEach(r => porChave.set(r.chave, hidratarLinhaPCR(r)));
+        const aposDelta = [...porChave.values()];
+        const conf = { qtd: 0, maisNovo: 0 };
+        aposDelta.forEach(r => {
+          if (!r.data || r.data < corte) return;
+          conf.qtd++;
+          const t = Date.parse(r.atualizado_em);
+          if (t > conf.maisNovo) conf.maisNovo = t;
+        });
+        if (conf.qtd === remoto.qtd && conf.maisNovo === remoto.maisNovo) {
+          DB.pcr = aposDelta;
+          DB_INDEX.pcr = new Map(DB.pcr.map((r, i) => [r.chave, i]));
+          const maisRecente = alteradas.reduce((a, r) => (Date.parse(r.atualizado_em) > Date.parse(a.atualizado_em || 0) ? r : a), {});
+          return { mudou: true, por: maisRecente.importado_por || '' };
+        }
+      } catch (e) { /* qualquer tropeço: janela inteira */ }
+    }
 
     const linhas = [];
     for (let de = 0; ; de += 1000) {
