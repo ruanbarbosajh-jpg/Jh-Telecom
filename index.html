@@ -3963,6 +3963,8 @@ document.getElementById('logout-btn').addEventListener('click', async () => {
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('li-password').value = '';
   currentUser = null;
+  // sem login o RLS devolve lista vazia — o timer do PCR não pode continuar
+  if (PCR_POLL_TIMER) { clearInterval(PCR_POLL_TIMER); PCR_POLL_TIMER = null; }
 });
 
 // Barra lateral: em telas largas o botão recolhe/reexibe (libera espaço para os
@@ -6896,6 +6898,7 @@ function navigate(route) {
   ativarFiltrosDeColuna();
   ativarTogglesDeSecao();
   wireGerarImagemCartaoPrazo();
+  agendarConferenciaPCR(route);
 }
 // ---------- Filtro por coluna estilo Excel, em TODAS as tabelas ----------
 // Cada cabeçalho ganha um funil. Clicando, abre a lista de valores únicos
@@ -10251,7 +10254,18 @@ function importarCsvPCR(texto) {
 // que não vieram no arquivo novo (ordem que sumiu do relatório do dia). O upsert
 // vem primeiro de propósito: se a rede cair no meio, o pior caso é sobrar linha
 // velha — nunca ficar sem dado nenhum.
+// Quantas gravações de PCR deste navegador ainda estão no ar. O verificador de
+// "outro login importou?" (pcrAtualizarDoBanco) NÃO pode rodar enquanto isso for
+// > 0: no meio do upsert o banco ainda está com o dado velho, e a comparação
+// leria "o banco é diferente do que eu tenho" e sobrescreveria a importação que
+// a própria pessoa acabou de fazer.
+let PCR_SINCRONIZANDO = 0;
 async function sincronizarPCR(linhas, dias) {
+  PCR_SINCRONIZANDO++;
+  try { return await sincronizarPCRInterno(linhas, dias); }
+  finally { PCR_SINCRONIZANDO--; }
+}
+async function sincronizarPCRInterno(linhas, dias) {
   if (!supa || !linhas.length) return { ok: true, skipped: !supa };
   const res = await syncBatchToSupabase('pcr', linhas);
   if (!res.ok) return res;
@@ -10285,6 +10299,120 @@ async function sincronizarPCR(linhas, dias) {
   return res;
 }
 
+// ---------- PCR: pegar o que OUTRO login importou, sem recarregar a página ----------
+// Pedido do cliente (16/09/2026): "pra Gestão quero que fique salvo os dados da
+// PCR quando algum outro login atualizar". O dado JÁ ficava salvo no Supabase —
+// o que faltava era o navegador de quem estava com o sistema aberto (a Gestão)
+// ficar sabendo: o PCR só era lido no login/F5 (é uma das tabelas fora do cache
+// incremental, ver TABELAS_SEM_CACHE), então a importação do Analista só
+// aparecia pros outros depois de sair e entrar de novo.
+//
+// COMO CONFERE SEM GASTAR EGRESS (a lição do §9 do CLAUDE.md: relido é o que
+// queima o plano, não o tamanho do banco): só pergunta ao banco duas coisas
+// minúsculas sobre os últimos PCR_JANELA_DIAS dias — quantas linhas existem e
+// qual o carimbo `atualizado_em` mais novo. Se bate com o que o navegador já
+// tem, acabou (poucas centenas de bytes). Só quando difere baixa a janela.
+//
+// Por que "DIFERE" e não "o do banco é mais novo": o carimbo vem do RELÓGIO de
+// quem importou. Se o computador do Analista estiver alguns minutos atrás do da
+// Gestão, a importação dele carimbaria MENOS que a última coisa que a Gestão
+// tem, e "mais novo" nunca dispararia. A contagem também entra na assinatura
+// pra pegar a O.S. que sumiu do dia (sincronizarPCR apaga as remanejadas).
+//
+// A janela é reescrita INTEIRA (não é merge): remover linha é justamente o que
+// um delta não enxerga. Dias mais antigos que a janela ficam como estão.
+const PCR_JANELA_DIAS = 7;
+let PCR_CHECANDO = false;
+function pcrCorteDaJanela() {
+  const d = new Date(); d.setDate(d.getDate() - PCR_JANELA_DIAS);
+  return isoLocalDe(d);
+}
+function pcrAssinaturaLocal(corte) {
+  let qtd = 0, maisNovo = 0;
+  DB.pcr.forEach(r => {
+    if (!r.data || r.data < corte) return;
+    qtd++;
+    const t = Date.parse(r.atualizado_em);
+    if (t > maisNovo) maisNovo = t;
+  });
+  return { qtd, maisNovo };
+}
+// Devolve { mudou, por } — `por` é quem fez a importação mais recente, pro aviso.
+async function pcrAtualizarDoBanco() {
+  if (!supa || !currentUser || PCR_CHECANDO || PCR_SINCRONIZANDO > 0) return { mudou: false };
+  PCR_CHECANDO = true;
+  try {
+    const corte = pcrCorteDaJanela();
+    const [cont, novo] = await Promise.all([
+      supa.from('pcr').select('*', { count: 'exact', head: true }).gte('data', corte),
+      supa.from('pcr').select('atualizado_em').gte('data', corte)
+        .order('atualizado_em', { ascending: false }).limit(1),
+    ]);
+    if (cont.error || novo.error || typeof cont.count !== 'number') return { mudou: false };
+    const remoto = { qtd: cont.count, maisNovo: novo.data && novo.data[0] ? Date.parse(novo.data[0].atualizado_em) || 0 : 0 };
+    const local = pcrAssinaturaLocal(corte);
+    if (remoto.qtd === local.qtd && remoto.maisNovo === local.maisNovo) return { mudou: false };
+    // Banco "vazio" enquanto o navegador tem dado NÃO é uma importação de
+    // outra pessoa: é sessão expirada. Com o RLS trancado (PASSO-2) quem perdeu
+    // o login recebe lista VAZIA, sem erro nenhum — e aceitar isso zeraria a
+    // janela inteira do PCR na tela de quem só ficou parado o dia todo.
+    if (remoto.qtd === 0 && local.qtd > 0) return { mudou: false };
+    // uma importação começou aqui enquanto perguntávamos ao banco: o que veio
+    // pode já estar velho em relação ao que a pessoa acabou de subir
+    if (PCR_SINCRONIZANDO > 0) return { mudou: false };
+
+    const linhas = [];
+    for (let de = 0; ; de += 1000) {
+      const { data, error } = await supa.from('pcr').select('*').gte('data', corte)
+        .order('chave', { ascending: true }).range(de, de + 999);
+      if (error || !data) return { mudou: false };   // dado parcial é pior que dado velho
+      linhas.push(...data);
+      if (data.length < 1000) break;
+    }
+    if (PCR_SINCRONIZANDO > 0) return { mudou: false };
+    DB.pcr = DB.pcr.filter(r => !r.data || r.data < corte).concat(linhas.map(hidratarLinhaPCR));
+    DB_INDEX.pcr = new Map(DB.pcr.map((r, i) => [r.chave, i]));
+    const maisRecente = linhas.reduce((a, r) => (Date.parse(r.atualizado_em) > Date.parse(a.atualizado_em || 0) ? r : a), {});
+    return { mudou: true, por: maisRecente.importado_por || '' };
+  } catch (e) {
+    return { mudou: false };   // rede caiu no meio: tenta de novo no próximo ciclo
+  } finally {
+    PCR_CHECANDO = false;
+  }
+}
+// Telas que leem DB.pcr — só nelas vale ficar conferindo.
+const ROTAS_COM_PCR = new Set(['pcr', 'parcialdia', 'chamadosgiga', 'reuniaoprazos']);
+let PCR_POLL_TIMER = null;
+// Chamada a cada navegação: religa (ou desliga) a conferência periódica conforme
+// a tela aberta. Sem o clearInterval aqui o timer se acumulava a cada troca de
+// aba — a mesma armadilha do PCR_LIVE_TIMER (CLAUDE.md §8, item 8).
+function agendarConferenciaPCR(route) {
+  if (PCR_POLL_TIMER) { clearInterval(PCR_POLL_TIMER); PCR_POLL_TIMER = null; }
+  if (!ROTAS_COM_PCR.has(route)) return;
+  pcrConferirEAtualizarTela();
+  PCR_POLL_TIMER = setInterval(pcrConferirEAtualizarTela, 90000);
+}
+// Voltar pra aba do navegador depois de um tempo parado é o momento em que mais
+// provavelmente alguém importou enquanto isso.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') pcrConferirEAtualizarTela();
+});
+async function pcrConferirEAtualizarTela() {
+  if (!ROTAS_COM_PCR.has(ROTA_ATUAL.nome)) return;
+  const r = await pcrAtualizarDoBanco();
+  if (!r.mudou) return;
+  // Se a pessoa está digitando (M.O do Parcial do Dia, filtro), refazer a tela
+  // apagaria o que ela ainda não salvou — nesse caso só avisa e deixa pra ela.
+  const ativo = document.activeElement;
+  const digitando = ativo && /^(INPUT|SELECT|TEXTAREA)$/.test(ativo.tagName) && document.getElementById('content').contains(ativo);
+  const quem = r.por ? ` por ${r.por}` : '';
+  if (digitando) {
+    toast(`PCR atualizada${quem}. Clique em Filtrar pra ver os dados novos.`, 'ok', 5000);
+    return;
+  }
+  toast(`PCR atualizada${quem}.`, 'ok', 3000);
+  navigate(ROTA_ATUAL.nome);
+}
 // ===================== CHAMADOS GIGA (export_chamados.csv) =====================
 // "11/09/2026" -> "2026-09-11". Devolve null pra "-" ou vazio (muita coluna
 // desse CSV vem sem data quando o chamado ainda não passou por aquela etapa).
@@ -10834,9 +10962,28 @@ function renderPCR() {
     // DATA ORDEM ANTERIOR/DIAS e a janela batem 100% com essa mesma regra —
     // só a ORIGEM do dado mudava (aqui é recalculado, lá é oficial).
     const hist = historicoPorContrato();
-    const retornosBrutos = rows.map(r => {
+    // "Retorno sempre vem como REPARO" (regra do cliente, 09/09/2026): a ordem
+    // de HOJE que pode ser retorno é só a de tipo Reparo. Antes a lista rodava
+    // sobre TODAS as ordens do dia, então uma Ativação ou M.Cômodo de um
+    // contrato que teve reparo há 10 dias aparecia como "IRR" — e o inverso
+    // também confundia a leitura de quem conferia contra a planilha.
+    const retornosBrutos = rowsReparo.map(r => {
       const idxOficial = r.os ? DB_INDEX.producao.get(r.os) : undefined;
-      const oficial = idxOficial !== undefined ? DB.producao[idxOficial] : null;
+      const oficialBruto = idxOficial !== undefined ? DB.producao[idxOficial] : null;
+      // A linha da Produção só é "a palavra da planilha oficial" se ela de fato
+      // passou por REPAROS OK: lá TODA linha tem a coluna IFI-IRR preenchida
+      // (IFI / IRR / DESC) OU o "TIPO DE ORDEM" preenchido ("-" quando não
+      // há serviço anterior). Conferido contra BASE_CONCLUIDOS-IRR-IFI.xlsx em
+      // 21/09/2026: 8.465 reparos, 0 divergências da regra abaixo — e as 7.515
+      // linhas sem marca têm todas tipo anterior "-" (= primeira visita).
+      // Uma linha que veio só da BASE PRODUÇÃO (sem essas colunas) NÃO é
+      // decisão oficial: tratá-la como "não é retorno" fazia o serviço SUMIR
+      // da lista (achado do cliente: "teve um dia que não apareceu um
+      // serviço"). Esse caso cai na regra local, que é a mesma.
+      const passouPelaPlanilhaOficial = !!oficialBruto && (
+        ['IFI', 'IRR', 'DESC'].includes(oficialBruto.ifi_irr) ||
+        (oficialBruto.tipo_ordem !== undefined && oficialBruto.tipo_ordem !== null && oficialBruto.tipo_ordem !== ''));
+      const oficial = passouPelaPlanilhaOficial ? oficialBruto : null;
       if (oficial) {
         if (oficial.ifi_irr !== 'IFI' && oficial.ifi_irr !== 'IRR') return null;
         const dias = oficial.dias !== null && oficial.dias !== undefined && oficial.dias !== '' && isFinite(Number(oficial.dias)) ? Number(oficial.dias) : null;
@@ -10871,14 +11018,33 @@ function renderPCR() {
     const pesoStatus = st => isConcluido(st) ? 3 : /nao conclu|não conclu/i.test(st) ? 2 : 1;
     const porOS = new Map();
     retornosBrutos.forEach(r => {
-      const atual = porOS.get(r.os);
-      if (!atual || pesoStatus(r.status) > pesoStatus(atual.status)) porOS.set(r.os, r);
+      // Sem número de O.S. (o CSV às vezes vem com a célula vazia) TODOS caíam
+      // na mesma chave "" e viravam UM retorno só — o resto sumia da lista.
+      // Mesma chave de fallback que a tabela do dia já usa (atualPorOS).
+      const chave = r.os || ('sem-os|' + (r.contrato || '') + '|' + (r.cliente || '') + '|' + (r.tecnico_atual || ''));
+      const atual = porOS.get(chave);
+      if (!atual || pesoStatus(r.status) > pesoStatus(atual.status)) porOS.set(chave, r);
     });
     // restam pode vir null (planilha oficial sem a coluna DIAS preenchida —
     // achado em auditoria, 14/09/2026): null-3 vira 0 em JS, então a linha
     // furava pro topo como se fosse a mais urgente. Manda pro fim da lista.
     const restamOrdenavel = r => r.restam === null || r.restam === undefined ? Infinity : r.restam;
     const retornos = [...porOS.values()].sort((a,b) => restamOrdenavel(a) - restamOrdenavel(b) || String(a.os).localeCompare(String(b.os)));
+
+    // Aviso de COBERTURA do histórico. Um retorno só é reconhecido se a Produção
+    // tem o serviço anterior: pra achar um IRR de até 30 dias, a Produção
+    // precisa começar pelo menos 30 dias antes do dia que está na tela. Sem
+    // esse aviso, "não apareceu um serviço" era indistinguível de "a Produção
+    // não tem o mês passado importado" — e a segunda causa não dá pra ver.
+    const primeiraDataProducao = DB.producao.reduce((m, p) => (p.data && (!m || p.data < m)) ? p.data : m, '');
+    const diaMaisAntigoNecessario = (() => { const d = new Date(dia + 'T00:00:00'); d.setDate(d.getDate() - JANELA_IRR); return isoLocalDe(d); })();
+    const avisoHistoricoRetorno = (!primeiraDataProducao || primeiraDataProducao > diaMaisAntigoNecessario)
+      ? `<p style="font-size:12px;color:var(--warn-text);background:color-mix(in srgb, var(--warn-text) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn-text) 35%, transparent);border-radius:var(--r-sm);padding:10px 12px;margin:-0.5rem 0 12px">
+          <b>Histórico incompleto:</b> ${primeiraDataProducao
+            ? `a Produção importada só começa em <b>${formatDate(primeiraDataProducao)}</b>, e pra reconhecer retorno de ${JANELA_IRR} dias em ${formatDate(dia)} ela precisa começar em ${formatDate(diaMaisAntigoNecessario)} ou antes.`
+            : 'não há Produção importada.'}
+          Retorno de serviço mais antigo que isso <b>não aparece</b> nesta lista — importe a BASE PRODUÇÃO / REPAROS OK.
+        </p>` : '';
 
     // ---- Status detalhado ----
     const buckets = ['concluido','iniciado','em_rota','pendente','cancelado','nao_concluido'];
@@ -10970,6 +11136,7 @@ function renderPCR() {
         <button type="button" class="btn-export-xls" id="ret-export">⤓ Excel</button>
         <button type="button" class="btn-export-img" id="ret-img">🖼 Gerar imagem</button>
       </div>
+      ${avisoHistoricoRetorno}
       ${!retornos.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhum cliente do dia voltou dentro da janela de garantia (IFI 15 dias / IRR 30 dias). Se estiver vazio sem motivo, importe a BASE PRODUÇÃO — é o histórico dela que diz quem atendeu antes.</div></div>' : `
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
         Ordem do dia cujo cliente já tinha sido atendido dentro da janela de garantia —
