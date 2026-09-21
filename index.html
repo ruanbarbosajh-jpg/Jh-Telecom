@@ -10263,6 +10263,275 @@ const fmtDT = d => d ? `${String(d.getDate()).padStart(2,'0')}/${String(d.getMon
 const fmtD  = d => d ? `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}` : '-';
 const fmtH  = d => d ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : '-';
 
+// ---- A EXECUTAR — por cidade e tipo de serviço ----
+// Mora na PARCIAL DO DIA (pedido do cliente, 21/09/2026); antes era da PCR.
+// Constantes e funções no nível do módulo pra a tela só chamar.
+function montarAExecutar(rows) {
+  // pendentes agrupadas por cidade > tipo de serviço
+  // (mesmo formato da dinâmica que o cliente usa: cidade em destaque, tipos
+  // embaixo, e só aparece tipo que tem ordem)
+  const nomeTipoPCR = t => {
+    const n = normalizeHeader(t);
+    if (/ativa/.test(n)) return 'Ativação';
+    if (/mudan.*comodo/.test(n)) return 'Mudança de Cômodo';
+    if (/mudan.*endereco/.test(n)) return 'Mudança de Endereço';
+    if (/reparo/.test(n)) return 'Reparo Corretivo';
+    if (/upgrade|downgrade/.test(n)) return 'Upgrade/Downgrade';
+    return (t || 'Não informado').trim();
+  };
+  // "A Executar" e "Total Geral" eram a MESMA coluna duas vezes — o grupo só
+  // contava pendente, então total geral não passava de repetir o que já
+  // estava em "A Executar". Agora entra também quem já foi CONCLUÍDO
+  // (mesma cidade/tipo), e Total = Concluído + A Executar, por construção.
+  // "A Executar" (08/09/2026, pedido do cliente) passou a somar pendente +
+  // em rota + iniciado — é a mesma regra do "Mão de Obra" da Parcial do Dia
+  // (ordem em aberto, ainda na mão do técnico, só que ele já pode ter
+  // começado ou estar a caminho). Antes só "pendente" contava, e uma ordem
+  // já iniciada/em rota sumia da conta até ser concluída. Cancelado e não
+  // concluído continuam de fora — não são nem entrega nem pendência.
+  const ehAExecutar = bucket => bucket === 'pendente' || bucket === 'em_rota' || bucket === 'iniciado';
+  // Os 5 tipos que nomeTipoPCR reconhece (pedido do cliente 09/09/2026:
+  // "quero que apareça os outros serviços também, mesmo que seja 0") —
+  // antes só entrava tipo que tivesse pelo menos 1 ordem naquela cidade, e
+  // cidade pequena (ex.: Bertioga, Cubatão) sumia com "Mudança de Cômodo"
+  // ou "Upgrade/Downgrade" da lista, como se o serviço não existisse ali.
+  // Fica de fora só o "Não informado"/nome cru (fallback de nomeTipoPCR
+  // pra tipo que não bate com nenhum dos 5) — esse continua entrando só
+  // quando tem ordem de verdade, senão toda cidade ganharia uma linha
+  // "Não informado 0" sem sentido nenhum.
+  const TIPOS_PCR_CONHECIDOS = ['Ativação', 'Mudança de Cômodo', 'Mudança de Endereço', 'Reparo Corretivo', 'Upgrade/Downgrade'];
+  const mapaExec = {};
+  rows.forEach(r => {
+    const bucket = classifyStatusGranular(r.status);
+    if (!ehAExecutar(bucket) && bucket !== 'concluido') return;
+    const c = r.cidade || 'Não informado', t = nomeTipoPCR(r.tipo_atividade);
+    if (!mapaExec[c]) mapaExec[c] = {};
+    if (!mapaExec[c][t]) mapaExec[c][t] = { concluido: 0, pendente: 0 };
+    mapaExec[c][t][ehAExecutar(bucket) ? 'pendente' : 'concluido']++;
+  });
+  const aExecutar = {
+    grupos: Object.keys(mapaExec).sort((a, b) => a.localeCompare(b, 'pt-BR')).map(c => {
+      TIPOS_PCR_CONHECIDOS.forEach(t => { if (!mapaExec[c][t]) mapaExec[c][t] = { concluido: 0, pendente: 0 }; });
+      const tipos = Object.entries(mapaExec[c]).sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'))
+        .map(([tipo, v]) => ({ tipo, concluido: v.concluido, pendente: v.pendente, total: v.concluido + v.pendente }));
+      return {
+        cidade: c,
+        concluido: tipos.reduce((a, t) => a + t.concluido, 0),
+        pendente: tipos.reduce((a, t) => a + t.pendente, 0),
+        total: tipos.reduce((a, t) => a + t.total, 0),
+        tipos,
+      };
+    }),
+  };
+  aExecutar.concluido = aExecutar.grupos.reduce((a, g) => a + g.concluido, 0);
+  aExecutar.pendente = aExecutar.grupos.reduce((a, g) => a + g.pendente, 0);
+  aExecutar.total = aExecutar.grupos.reduce((a, g) => a + g.total, 0);
+  return aExecutar;
+}
+function htmlAExecutar(aExecutar) {
+  return `
+      <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span>A Executar — por Cidade e Tipo de Serviço</span>
+        <button type="button" class="btn-export-img" id="exec-img">🖼 Gerar imagem</button>
+      </div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
+        Cidade e tipo de serviço, comparando o que já foi <b style="color:var(--success)">concluído</b> com o que
+        ainda está <b style="color:#f59e0b">a executar</b> (pendente, em rota ou iniciado) — <b>Total Geral = Concluído + A Executar</b>.
+        Cancelado e não concluído ficam fora dessa conta (não são nem entrega nem pendência).
+      </p>
+      ${!aExecutar.total ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma ordem concluída ou pendente nesse dia/filtro.</div></div>' : `
+      <div class="cards-grid" style="margin-bottom:1rem">
+        ${metricCard('Concluídas', aExecutar.concluido)}
+        ${metricCard('A Executar', aExecutar.pendente, aExecutar.pendente > 0)}
+        ${metricCard('Total Geral', aExecutar.total)}
+      </div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="tab-a-executar"><thead><tr>
+        <th>Tipo da O.S</th><th>Concluídos</th><th>A Executar</th><th>Total Geral</th>
+      </tr></thead><tbody>
+        ${aExecutar.grupos.map(g => `
+          <tr class="total-row"><td class="cat-cell">${esc(g.cidade)}</td><td style="color:var(--success);font-weight:700">${g.concluido}</td><td style="color:#f59e0b;font-weight:700">${g.pendente}</td><td style="font-weight:700">${g.total}</td></tr>
+          ${g.tipos.map(t => `<tr><td style="padding-left:26px;color:var(--text-primary);font-weight:600">${esc(t.tipo)}</td><td style="color:var(--success)">${t.concluido}</td><td style="color:#f59e0b">${t.pendente}</td><td>${t.total}</td></tr>`).join('')}
+        `).join('')}
+        <tr class="total-row"><td class="cat-cell">Total Geral</td><td style="color:var(--success);font-weight:700">${aExecutar.concluido}</td><td style="color:#f59e0b;font-weight:700">${aExecutar.pendente}</td><td style="font-weight:700">${aExecutar.total}</td></tr>
+      </tbody></table></div>`}`;
+}
+function ligarAExecutar(aExecutar, dia) {
+  const btnExecImg = document.getElementById('exec-img');
+  if (btnExecImg) btnExecImg.addEventListener('click', () => {
+    const linhasImg = [];
+    aExecutar.grupos.forEach(gr => {
+      linhasImg.push({ destaque: true, celulas: [gr.cidade, String(gr.concluido), String(gr.pendente), String(gr.total)] });
+      gr.tipos.forEach(t => linhasImg.push({ celulas: ['   ' + t.tipo, String(t.concluido), String(t.pendente), String(t.total)] }));
+    });
+    baixarTabelaComoImagem({
+      titulo: 'A EXECUTAR — JH TELECOM', subtitulo: formatDate(dia),
+      colunas: [{ titulo: 'TIPO DA O.S' }, { titulo: 'Concluídos' }, { titulo: 'A Executar' }, { titulo: 'Total Geral' }],
+      linhas: linhasImg,
+      total: { celulas: ['Total Geral', String(aExecutar.concluido), String(aExecutar.pendente), String(aExecutar.total)] },
+      nomeArquivo: 'a-executar-' + dia,
+    });
+    avisoBotao(btnExecImg, `🖼 ${aExecutar.total} O.S`, '🖼 Gerar imagem');
+  });
+}
+function pdfAExecutar(aExecutar) {
+  return secaoTabela('A Executar — por Cidade e Tipo de Serviço',
+    aExecutar.grupos.flatMap(g => [{ nome: g.cidade, concluido: g.concluido, pendente: g.pendente, total: g.total, grupo: true },
+      ...g.tipos.map(t => ({ nome: '   ' + t.tipo, concluido: t.concluido, pendente: t.pendente, total: t.total }))]),
+    [{header:'Tipo da O.S', get:r=>r.nome}, {header:'Concluídos', get:r=>r.concluido}, {header:'A Executar', get:r=>r.pendente}, {header:'Total Geral', get:r=>r.total}],
+    { totalRow:['Total Geral', aExecutar.concluido, aExecutar.pendente, aExecutar.total] });
+}
+// ---- MAPA — O.S do dia por bairro ----
+// Mora na PCR (pedido do cliente, 21/09/2026); antes era da Parcial do Dia.
+function prepararMapaOS(rows, data) {
+  // ---- Mapa: O.S do dia por bairro (concluído/em rota/iniciado/pendente) ----
+  // Pedido explícito: "concluídas, em rota e iniciado, cores diferentes" —
+  // cada status com a MESMA cor já usada no resto do sistema (COR_SITUACAO).
+  // Cancelado/não concluído ficam de fora (não pedido, e "onde a ordem está
+  // agora" não ajuda muito pra quem já foi encerrada sem sucesso).
+  // "Já visitada, dada improdutiva e voltou pro campo": no jargão da
+  // operação, "improdutiva" aqui é SÓ o status Não Concluído (pedido
+  // explícito do cliente pra não contar cancelado/suspenso — mais restrito
+  // que o ehStatusTerminal usado no resto do sistema). Pedido do cliente:
+  // olhar não só hoje, mas os ÚLTIMOS 32 DIAS de PCR importado — uma O.S.
+  // pode ter sido tentada e dado improdutiva há alguns dias e só hoje
+  // voltar pro campo como pendente/em rota, e isso também conta como
+  // revisita. Não inventa estado novo: só junta as linhas que o CSV de
+  // cada dia já trouxe.
+  const JANELA_REVISITA_DIAS = 32;
+  const pcrJanela = DB.pcr.filter(r => { const d = diasEntre(data, r.data); return d >= 0 && d <= JANELA_REVISITA_DIAS; });
+  // Pedido: "filtro pra Status (concluído, não concluído etc) e pra em
+  // rota, pendente etc, já visitadas" — o mapa passa a incluir TODOS os
+  // status granulares (antes só mostrava concluído/em rota/iniciado/
+  // pendente), com um filtro na tela pra ligar/desligar cada um.
+  const MAPA_BUCKETS = ['concluido', 'nao_concluido', 'cancelado', 'em_rota', 'iniciado', 'pendente'];
+  const ordensAbertas = rows.filter(r => MAPA_BUCKETS.includes(classifyStatusGranular(r.status)));
+  const porOSBruto = {};
+  pcrJanela.forEach(r => { if (r.os) (porOSBruto[r.os] = porOSBruto[r.os] || []).push(r); });
+  // motivo da PRIMEIRA tentativa improdutiva na janela (pedido: "quero o
+  // motivo da primeira improdutiva nos que estão em vermelho") — ordena as
+  // tentativas terminais por data+horário de Início (inicio é um Date de
+  // verdade — comparar por getTime(), não como texto, senão a ordem quebra
+  // entre dias diferentes) e pega a mais antiga; o motivo da tentativa
+  // atual (pendente/em rota de novo) normalmente vem vazio, então sem isso
+  // o popup da revisita não explicava o "porquê".
+  // "e somente não concluída": pedido explícito de restringir a SÓ esse
+  // status — ehStatusTerminal (usado no resto do sistema) também pega
+  // "cancelado" e "suspenso", que aqui NÃO contam como improdutiva.
+  const ehNaoConcluidaEspecifico = status => /nao conclu/.test(normalizeHeader(status));
+  // IMPORTANTE: agora que "Não Concluído" também é um dos status mostrados
+  // no mapa (pedido do filtro de Status), uma O.S. cujo estado ATUAL já é
+  // "Não Concluído" não pode contar como "revisita de si mesma" — só conta
+  // se existir uma tentativa "Não Concluído" DIFERENTE da linha que está
+  // sendo desenhada agora (comparação por referência do objeto: linhas de
+  // DB.pcr nunca são clonadas ao longo do pipeline, então "l !== r" identifica
+  // com segurança "é a mesma linha ou é uma tentativa anterior de verdade").
+  const ordensAbertasComBairro = ordensAbertas.map(r => {
+    const anteriores = (porOSBruto[r.os] || [])
+      .filter(l => l !== r && ehNaoConcluidaEspecifico(l.status))
+      .sort((a, b) => (a.data || '').localeCompare(b.data || '') || ((a.inicio ? a.inicio.getTime() : 0) - (b.inicio ? b.inicio.getTime() : 0)));
+    return {
+      ...r, bairro: extrairBairro(r.endereco) || 'Não informado', revisita: anteriores.length > 0,
+      motivoImprodutiva: anteriores.length ? (anteriores[0].motivo || '') : '',
+    };
+  });
+  const semEnderecoAbertos = ordensAbertas.filter(r => !r.endereco).length;
+  // Motivos de improdutiva que EXISTEM no dia (cliente ausente, problema de
+  // infra, etc.) — a lista sai dos próprios dados, não de uma tabela fixa:
+  // motivo novo no CSV aparece aqui sozinho. Vira filtro de marcar vários.
+  const MOTIVO_SEM = 'Sem motivo informado';
+  const contagemMotivos = {};
+  ordensAbertasComBairro.forEach(o => {
+    if (!o.revisita) return;
+    const m = (o.motivoImprodutiva || '').trim() || MOTIVO_SEM;
+    contagemMotivos[m] = (contagemMotivos[m] || 0) + 1;
+  });
+  const motivosImprodutiva = Object.entries(contagemMotivos)
+    .map(([motivo, qtd]) => ({ motivo, qtd }))
+    .sort((a, b) => b.qtd - a.qtd || a.motivo.localeCompare(b.motivo, 'pt-BR'));
+  return { ordensAbertas, ordensAbertasComBairro, semEnderecoAbertos, motivosImprodutiva, MAPA_BUCKETS, MOTIVO_SEM };
+}
+function htmlMapaOS(m) {
+  const { ordensAbertas, semEnderecoAbertos, ordensAbertasComBairro, motivosImprodutiva, MAPA_BUCKETS } = m;
+  return `
+      ${!ordensAbertas.length ? '' : `
+      <div class="section-heading">Mapa — O.S do Dia por Bairro <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(${ordensAbertas.length} O.S no dia)</span></div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
+        O bairro vem do texto do campo Endereço do CSV de atividades — mesma extração e mesma lista de coordenadas conhecidas do mapa do Dashboard.
+        ${semEnderecoAbertos ? `${semEnderecoAbertos} de ${ordensAbertas.length} O.S do dia não têm Endereço no CSV importado e entram em "Não informado".` : ''}
+      </p>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <div class="toolbar" style="margin-bottom:12px">
+          <div class="field"><label>Bairro</label><select id="pd-mapa-bairro"><option value="">Todos os bairros</option>
+            ${[...new Set(ordensAbertasComBairro.map(r=>r.bairro))].sort((a,b)=>a.localeCompare(b,'pt-BR')).map(b=>`<option value="${esc(b)}">${esc(b)}</option>`).join('')}
+          </select></div>
+        </div>
+        <div id="pd-mapa" class="mapa-cidades"></div>
+        <div class="mapa-legenda" id="pd-mapa-legenda">
+          ${MAPA_BUCKETS.map(b => `<label class="legend-item" style="cursor:pointer"><input type="checkbox" class="pd-mapa-status-check" value="${b}" checked style="margin-right:4px"><span class="legend-dot" style="background:${MAPA_CORES_STATUS[b]}"></span>${MAPA_STATUS_LABEL[b]}</label>`).join('')}
+          <label class="legend-item" style="cursor:pointer"><input type="checkbox" id="pd-mapa-revisita-check" checked style="margin-right:4px"><span class="legend-dot" style="background:${MAPA_COR_REVISITA}"></span>Já visitada, dada improdutiva — voltou pro campo <b style="color:${MAPA_COR_REVISITA}">(bairro fica vermelho)</b></label>
+        </div>
+        ${motivosImprodutiva.length ? `
+        <div class="mapa-filtro-motivos">
+          <div class="mapa-filtro-motivos-topo">
+            <b>Motivo da improdutiva</b>
+            <span>dá pra marcar mais de um — vale só para as ordens já visitadas</span>
+            <button type="button" class="btn-mini" id="pd-motivo-todos">Todos</button>
+            <button type="button" class="btn-mini" id="pd-motivo-nenhum">Nenhum</button>
+          </div>
+          <div class="mapa-filtro-motivos-lista">
+            ${motivosImprodutiva.map(m => `<label class="legend-item" style="cursor:pointer">
+              <input type="checkbox" class="pd-mapa-motivo-check" value="${esc(m.motivo)}" checked style="margin-right:4px">
+              ${esc(m.motivo)} <span class="mapa-motivo-qtd">${m.qtd}</span></label>`).join('')}
+          </div>
+        </div>` : ''}
+      </div>`}`;
+}
+function ligarMapaOS(m) {
+  const { ordensAbertasComBairro, MOTIVO_SEM } = m;
+  // ---- mapa de O.S em aberto: filtro de bairro local, sem recarregar a tela ----
+  const selBairroMapa = document.getElementById('pd-mapa-bairro');
+  if (selBairroMapa) {
+    const checksStatus = () => [...document.querySelectorAll('.pd-mapa-status-check')];
+    const checksMotivo = () => [...document.querySelectorAll('.pd-mapa-motivo-check')];
+    const checkRevisita = document.getElementById('pd-mapa-revisita-check');
+    const desenhaMapaAbertos = () => {
+      const bairro = selBairroMapa.value;
+      const statusLigados = new Set(checksStatus().filter(c => c.checked).map(c => c.value));
+      const revisitaLigada = checkRevisita ? checkRevisita.checked : true;
+      const motivosLigados = new Set(checksMotivo().filter(c => c.checked).map(c => c.value));
+      const temFiltroMotivo = checksMotivo().length > 0;
+      const filtradas = ordensAbertasComBairro.filter(o => {
+        if (bairro && o.bairro !== bairro) return false;
+        if (!statusLigados.has(classifyStatusGranular(o.status))) return false;
+        if (!o.revisita) return true;              // ordem normal não tem motivo
+        if (!revisitaLigada) return false;
+        // o filtro de motivo só vale pras JÁ VISITADAS: é delas que o motivo vem
+        if (!temFiltroMotivo) return true;
+        return motivosLigados.has((o.motivoImprodutiva || '').trim() || MOTIVO_SEM);
+      });
+      renderMapaOrdensAbertas('pd-mapa', filtradas);
+    };
+    selBairroMapa.addEventListener('change', desenhaMapaAbertos);
+    checksStatus().forEach(c => c.addEventListener('change', desenhaMapaAbertos));
+    checksMotivo().forEach(c => c.addEventListener('change', desenhaMapaAbertos));
+    if (checkRevisita) checkRevisita.addEventListener('change', desenhaMapaAbertos);
+    const marcarMotivos = valor => { checksMotivo().forEach(c => { c.checked = valor; }); desenhaMapaAbertos(); };
+    const btnTodos = document.getElementById('pd-motivo-todos');
+    const btnNenhum = document.getElementById('pd-motivo-nenhum');
+    if (btnTodos) btnTodos.addEventListener('click', () => marcarMotivos(true));
+    if (btnNenhum) btnNenhum.addEventListener('click', () => marcarMotivos(false));
+    desenhaMapaAbertos();
+  }
+}
+function pdfMapaOS(m) {
+  return secaoTabela('O.S do Dia por Bairro', m.ordensAbertasComBairro, [
+    {header:'O.S', get:r=>r.os}, {header:'Cliente', get:r=>r.cliente}, {header:'Técnico', get:r=>r.recurso},
+    {header:'Cidade', get:r=>r.cidade}, {header:'Bairro', get:r=>r.bairro}, {header:'Status', get:r=>r.status},
+    {header:'Já visitada (improdutiva)', get:r=>r.revisita?'Sim':'Não'},
+    {header:'Motivo da 1ª tentativa', get:r=>r.motivoImprodutiva || '-'}
+  ]);
+}
+
 function importarCsvPCR(texto) {
   const linhas = parseCSV(texto);
   if (linhas.length < 2) return { erro: 'CSV vazio ou sem linhas de dados.' };
@@ -11029,65 +11298,7 @@ function renderPCR() {
     // (eles continuam aparecendo nas tabelas de status logo abaixo).
     const rowsPendentes = rows.filter(r => /pendente/i.test(r.status || ''));
 
-    // ---- "A Executar": pendentes agrupadas por cidade > tipo de serviço ----
-    // (mesmo formato da dinâmica que o cliente usa: cidade em destaque, tipos
-    // embaixo, e só aparece tipo que tem ordem)
-    const nomeTipoPCR = t => {
-      const n = normalizeHeader(t);
-      if (/ativa/.test(n)) return 'Ativação';
-      if (/mudan.*comodo/.test(n)) return 'Mudança de Cômodo';
-      if (/mudan.*endereco/.test(n)) return 'Mudança de Endereço';
-      if (/reparo/.test(n)) return 'Reparo Corretivo';
-      if (/upgrade|downgrade/.test(n)) return 'Upgrade/Downgrade';
-      return (t || 'Não informado').trim();
-    };
-    // "A Executar" e "Total Geral" eram a MESMA coluna duas vezes — o grupo só
-    // contava pendente, então total geral não passava de repetir o que já
-    // estava em "A Executar". Agora entra também quem já foi CONCLUÍDO
-    // (mesma cidade/tipo), e Total = Concluído + A Executar, por construção.
-    // "A Executar" (08/09/2026, pedido do cliente) passou a somar pendente +
-    // em rota + iniciado — é a mesma regra do "Mão de Obra" da Parcial do Dia
-    // (ordem em aberto, ainda na mão do técnico, só que ele já pode ter
-    // começado ou estar a caminho). Antes só "pendente" contava, e uma ordem
-    // já iniciada/em rota sumia da conta até ser concluída. Cancelado e não
-    // concluído continuam de fora — não são nem entrega nem pendência.
-    const ehAExecutar = bucket => bucket === 'pendente' || bucket === 'em_rota' || bucket === 'iniciado';
-    // Os 5 tipos que nomeTipoPCR reconhece (pedido do cliente 09/09/2026:
-    // "quero que apareça os outros serviços também, mesmo que seja 0") —
-    // antes só entrava tipo que tivesse pelo menos 1 ordem naquela cidade, e
-    // cidade pequena (ex.: Bertioga, Cubatão) sumia com "Mudança de Cômodo"
-    // ou "Upgrade/Downgrade" da lista, como se o serviço não existisse ali.
-    // Fica de fora só o "Não informado"/nome cru (fallback de nomeTipoPCR
-    // pra tipo que não bate com nenhum dos 5) — esse continua entrando só
-    // quando tem ordem de verdade, senão toda cidade ganharia uma linha
-    // "Não informado 0" sem sentido nenhum.
-    const TIPOS_PCR_CONHECIDOS = ['Ativação', 'Mudança de Cômodo', 'Mudança de Endereço', 'Reparo Corretivo', 'Upgrade/Downgrade'];
-    const mapaExec = {};
-    rows.forEach(r => {
-      const bucket = classifyStatusGranular(r.status);
-      if (!ehAExecutar(bucket) && bucket !== 'concluido') return;
-      const c = r.cidade || 'Não informado', t = nomeTipoPCR(r.tipo_atividade);
-      if (!mapaExec[c]) mapaExec[c] = {};
-      if (!mapaExec[c][t]) mapaExec[c][t] = { concluido: 0, pendente: 0 };
-      mapaExec[c][t][ehAExecutar(bucket) ? 'pendente' : 'concluido']++;
-    });
-    const aExecutar = {
-      grupos: Object.keys(mapaExec).sort((a, b) => a.localeCompare(b, 'pt-BR')).map(c => {
-        TIPOS_PCR_CONHECIDOS.forEach(t => { if (!mapaExec[c][t]) mapaExec[c][t] = { concluido: 0, pendente: 0 }; });
-        const tipos = Object.entries(mapaExec[c]).sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'))
-          .map(([tipo, v]) => ({ tipo, concluido: v.concluido, pendente: v.pendente, total: v.concluido + v.pendente }));
-        return {
-          cidade: c,
-          concluido: tipos.reduce((a, t) => a + t.concluido, 0),
-          pendente: tipos.reduce((a, t) => a + t.pendente, 0),
-          total: tipos.reduce((a, t) => a + t.total, 0),
-          tipos,
-        };
-      }),
-    };
-    aExecutar.concluido = aExecutar.grupos.reduce((a, g) => a + g.concluido, 0);
-    aExecutar.pendente = aExecutar.grupos.reduce((a, g) => a + g.pendente, 0);
-    aExecutar.total = aExecutar.grupos.reduce((a, g) => a + g.total, 0);
+    const mapaOS = prepararMapaOS(rows, dia);
     const porCidade = {};
     rowsPendentes.forEach(r => {
       const c = r.cidade || 'Não informado';
@@ -11388,30 +11599,8 @@ function renderPCR() {
         ${prazoUnificado.map(linhaPrazoUnificado).join('')}
       </tbody></table></div>
 
-      <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <span>A Executar — por Cidade e Tipo de Serviço</span>
-        <button type="button" class="btn-export-img" id="exec-img">🖼 Gerar imagem</button>
-      </div>
-      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
-        Cidade e tipo de serviço, comparando o que já foi <b style="color:var(--success)">concluído</b> com o que
-        ainda está <b style="color:#f59e0b">a executar</b> (pendente, em rota ou iniciado) — <b>Total Geral = Concluído + A Executar</b>.
-        Cancelado e não concluído ficam fora dessa conta (não são nem entrega nem pendência).
-      </p>
-      ${!aExecutar.total ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma ordem concluída ou pendente nesse dia/filtro.</div></div>' : `
-      <div class="cards-grid" style="margin-bottom:1rem">
-        ${metricCard('Concluídas', aExecutar.concluido)}
-        ${metricCard('A Executar', aExecutar.pendente, aExecutar.pendente > 0)}
-        ${metricCard('Total Geral', aExecutar.total)}
-      </div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="tab-a-executar"><thead><tr>
-        <th>Tipo da O.S</th><th>Concluídos</th><th>A Executar</th><th>Total Geral</th>
-      </tr></thead><tbody>
-        ${aExecutar.grupos.map(g => `
-          <tr class="total-row"><td class="cat-cell">${esc(g.cidade)}</td><td style="color:var(--success);font-weight:700">${g.concluido}</td><td style="color:#f59e0b;font-weight:700">${g.pendente}</td><td style="font-weight:700">${g.total}</td></tr>
-          ${g.tipos.map(t => `<tr><td style="padding-left:26px;color:var(--text-primary);font-weight:600">${esc(t.tipo)}</td><td style="color:var(--success)">${t.concluido}</td><td style="color:#f59e0b">${t.pendente}</td><td>${t.total}</td></tr>`).join('')}
-        `).join('')}
-        <tr class="total-row"><td class="cat-cell">Total Geral</td><td style="color:var(--success);font-weight:700">${aExecutar.concluido}</td><td style="color:#f59e0b;font-weight:700">${aExecutar.pendente}</td><td style="font-weight:700">${aExecutar.total}</td></tr>
-      </tbody></table></div>`}
+
+      ${htmlMapaOS(mapaOS)}
 
       <div class="section-heading">Histórico de Importações do CSV</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
@@ -11460,22 +11649,7 @@ function renderPCR() {
       const r = exportarTabelaVisivel(tabRetornos(), 'retornos-ifi-irr-' + dia, ['Com quem está hoje', 'Nome Cliente', 'De quem é o retorno']);
       if (r) aviso(btnRetExp, `⤓ ${r.linhas} linha(s)`, '⤓ Excel');
     });
-    const btnExecImg = document.getElementById('exec-img');
-    if (btnExecImg) btnExecImg.addEventListener('click', () => {
-      const linhasImg = [];
-      aExecutar.grupos.forEach(gr => {
-        linhasImg.push({ destaque: true, celulas: [gr.cidade, String(gr.concluido), String(gr.pendente), String(gr.total)] });
-        gr.tipos.forEach(t => linhasImg.push({ celulas: ['   ' + t.tipo, String(t.concluido), String(t.pendente), String(t.total)] }));
-      });
-      baixarTabelaComoImagem({
-        titulo: 'A EXECUTAR — JH TELECOM', subtitulo: formatDate(dia),
-        colunas: [{ titulo: 'TIPO DA O.S' }, { titulo: 'Concluídos' }, { titulo: 'A Executar' }, { titulo: 'Total Geral' }],
-        linhas: linhasImg,
-        total: { celulas: ['Total Geral', String(aExecutar.concluido), String(aExecutar.pendente), String(aExecutar.total)] },
-        nomeArquivo: 'a-executar-' + dia,
-      });
-      aviso(btnExecImg, `🖼 ${aExecutar.total} O.S`, '🖼 Gerar imagem');
-    });
+    ligarMapaOS(mapaOS);
     const btnRetImg = document.getElementById('ret-img');
     if (btnRetImg) btnRetImg.addEventListener('click', () => {
       const r = exportarTabelaImagem(tabRetornos(), 'retornos-ifi-irr-' + dia, 'Retornos IFI/IRR — ' + formatDate(dia));
@@ -11524,14 +11698,10 @@ function renderPCR() {
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'ret', label: 'Retornos do dia (IFI/IRR)' },
       { id: 'det', label: 'Prazos do dia — detalhado' },
-      { id: 'exec', label: 'A executar — por cidade e tipo de serviço' }
+      ...(mapaOS.ordensAbertas.length ? [{ id: 'abertos', label: 'O.S do dia por bairro (mapa)' }] : [])
     ]);
     wirePdfExportPanel('PCR — ' + formatDate(dia), {
-      exec: () => secaoTabela('A Executar — por Cidade e Tipo de Serviço',
-        aExecutar.grupos.flatMap(g => [{ nome: g.cidade, concluido: g.concluido, pendente: g.pendente, total: g.total, grupo: true },
-          ...g.tipos.map(t => ({ nome: '   ' + t.tipo, concluido: t.concluido, pendente: t.pendente, total: t.total }))]),
-        [{header:'Tipo da O.S', get:r=>r.nome}, {header:'Concluídos', get:r=>r.concluido}, {header:'A Executar', get:r=>r.pendente}, {header:'Total Geral', get:r=>r.total}],
-        { totalRow:['Total Geral', aExecutar.concluido, aExecutar.pendente, aExecutar.total] }),
+      abertos: () => pdfMapaOS(mapaOS),
       ret: () => secaoTabela('Retornos do Dia (IFI / IRR)', retornos, [
         {header:'IFI/IRR',get:r=>r.ifi_irr},{header:'O.S',get:r=>r.os},{header:'Contrato',get:r=>r.contrato||'-'},
         {header:'Cidade',get:r=>r.cidade||'-'},{header:'Status',get:r=>r.status||'-'},
@@ -11786,13 +11956,115 @@ function renderChamadosGiga() {
       return { motivo: motivos.join('; ') };
     };
 
+    // ---- RETORNO (IFI/IRR) e PRAZO de cada chamado (pedido do cliente 21/09/2026) ----
+    // O CSV da GIGA só traz a DATA da abertura (sem hora) e não traz O.S.; então
+    // os dois cálculos saem cruzando o CONTRATO com o que o sistema já sabe.
+    const classeServico = t => {
+      const n = normalizeHeader(t);
+      if (/ativa/.test(n)) return 'ativacao';
+      if (/mudan.*endereco/.test(n)) return 'me';
+      if (/mudan.*comodo/.test(n)) return 'mc';
+      if (/reparo/.test(n)) return 'reparo';
+      if (/upgrade|downgrade/.test(n)) return 'up';
+      return '';
+    };
+    // Histórico de serviços CONCLUÍDOS por contrato: Produção (planilha, pode
+    // estar atrasada) + PCR (CSV diário, só os dias importados). Juntar os dois
+    // cobre o buraco de cada um — a Produção do cliente termina dias antes do PCR.
+    const historico = new Map();
+    const guardaHistorico = p => {
+      if (!p.contrato || !p.data || !isConcluido(p.status)) return;
+      const c = soDigitos(p.contrato);
+      if (!historico.has(c)) historico.set(c, []);
+      historico.get(c).push({ data: p.data, tipo: p.tipo_atividade, tecnico: p.recurso });
+    };
+    DB.producao.forEach(guardaHistorico);
+    DB.pcr.forEach(guardaHistorico);
+    // Retorno é SEMPRE Reparo (regra do cliente): só olha chamado da fila REPARO.
+    // A régua é a mesma do resto do sistema (classificaRetorno: Reparo anterior
+    // 30 dias = IRR, Ativação/M.Endereço anterior 15 dias = IFI). Como o chamado
+    // ainda está aberto, os dias contam até HOJE — é quando ele seria atendido —
+    // e "restam" diz quantos dias faltam pra virar DESC.
+    const retornoDoChamado = r => {
+      if (classeServico(r.fila) !== 'reparo') return null;
+      const lista = historico.get(soDigitos(r.contrato));
+      if (!lista) return null;
+      const ref = r.data_abertura || hoje;
+      const ant = lista.filter(x => x.data < ref).sort((a, b) => a.data.localeCompare(b.data)).pop();
+      if (!ant) return null;
+      const dias = diasEntre(hoje, ant.data);
+      const marca = classificaRetorno(ant.tipo, dias);
+      if (marca !== 'IFI' && marca !== 'IRR') return null;
+      return { marca, dias, restam: (marca === 'IFI' ? JANELA_IFI : JANELA_IRR) - dias, data: ant.data, tipo: ant.tipo, tecnico: ant.tecnico };
+    };
+    // Prazo: reparo 24h, ativação e mudança de endereço 36h (mudança de cômodo
+    // e upgrade não têm prazo). EXATO quando o contrato já está no PCR com uma
+    // ordem do mesmo tipo aberta na mesma data — o PCR tem hora e o limite
+    // pronto. Sem isso é ESTIMADO: sem a hora da abertura o limite cai numa
+    // janela de 24h (abertura à 00:00 + prazo até 23:59 + prazo).
+    const agora = Date.now();
+    const prazoDoChamado = r => {
+      const cl = classeServico(r.fila);
+      const horas = cl === 'reparo' ? 24 : (cl === 'ativacao' || cl === 'me') ? PRAZO_ATIVACAO_HORAS : null;
+      if (!horas || !r.data_abertura) return null;
+      const doPCR = (porContratoPCR.get(soDigitos(r.contrato)) || [])
+        .filter(l => l.abertura && l.limite && isoLocalDe(l.abertura) === r.data_abertura && classeServico(l.tipo_atividade) === cl)
+        .sort((a, b) => String(b.data).localeCompare(String(a.data)))[0];
+      if (doPCR) return { exato: true, limite: doPCR.limite.getTime(), concluida: isConcluido(doPCR.status) };
+      const [a, m, d] = r.data_abertura.split('-').map(Number);
+      const ini = new Date(a, m - 1, d).getTime();
+      return { exato: false, cedo: ini + horas * 36e5, tarde: ini + (horas + 24) * 36e5 };
+    };
+    // situação: 'vencido' | 'risco' | 'ok' | 'concluida' (o que a tela e os cards usam)
+    const situacaoPrazo = p => {
+      if (!p) return null;
+      if (p.exato) return p.concluida ? 'concluida' : (p.limite < agora ? 'vencido' : 'ok');
+      return agora > p.tarde ? 'vencido' : agora >= p.cedo ? 'risco' : 'ok';
+    };
+    const duracao = ms => {
+      const hh = ms / 36e5;
+      if (hh < 1) return Math.max(1, Math.round(hh * 60)) + 'min';
+      if (hh < 48) return Math.floor(hh) + 'h';
+      return Math.floor(hh / 24) + 'd';
+    };
+    const infoChamado = new Map(abertos.map(r => { const p = prazoDoChamado(r); return [r, { ret: retornoDoChamado(r), prazo: p, sit: situacaoPrazo(p) }]; }));
+    const qtdRetornos = abertos.filter(r => infoChamado.get(r).ret).length;
+    const qtdVencidos = abertos.filter(r => infoChamado.get(r).sit === 'vencido').length;
+    const qtdRisco = abertos.filter(r => infoChamado.get(r).sit === 'risco').length;
+    const celulaRetorno = r => {
+      if (classeServico(r.fila) !== 'reparo') return '<span style="color:var(--text-muted)">—</span>';
+      const x = infoChamado.get(r).ret;
+      if (!x) return '<span style="color:var(--text-secondary)">Não</span>';
+      return `<span class="badge warn">${x.marca}</span><br><span style="font-size:11px;color:var(--text-secondary)">${esc(x.tipo || '')} em ${formatDate(x.data)} (${x.dias}d) · ${x.restam}d restantes${x.tecnico && ehRecursoTecnico(x.tecnico) ? '<br>ofensor: ' + esc(x.tecnico) : ''}</span>`;
+    };
+    const celulaPrazo = r => {
+      const { prazo: p, sit } = infoChamado.get(r);
+      if (!p) return '<span style="color:var(--text-muted)">—</span>';
+      const peq = t => `<br><span style="font-size:11px;color:var(--text-secondary)">${t}</span>`;
+      if (sit === 'concluida') return '<span style="color:var(--text-secondary)">Concluída no PCR</span>';
+      if (p.exato) {
+        const cor = sit === 'vencido' ? 'var(--danger)' : (p.limite - agora) < 4 * 36e5 ? '#f59e0b' : 'var(--success)';
+        return sit === 'vencido'
+          ? `<span style="color:${cor};font-weight:700">Vencido</span>${peq('há ' + duracao(agora - p.limite) + ' · limite ' + fmtDT(new Date(p.limite)))}`
+          : `<span style="color:${cor};font-weight:700">No prazo</span>${peq('vence em ' + duracao(p.limite - agora) + ' · ' + fmtDT(new Date(p.limite)))}`;
+      }
+      if (sit === 'vencido') return `<span style="color:var(--danger);font-weight:700">Vencido</span>${peq('há mais de ' + duracao(agora - p.tarde) + ' (estimado)')}`;
+      if (sit === 'risco') return `<span style="color:#f59e0b;font-weight:700">Pode ter vencido</span>${peq('abertura sem horário (estimado)')}`;
+      return `<span style="color:var(--success);font-weight:700">No prazo</span>${peq('estimado, sem horário da abertura')}`;
+    };
+
     body.innerHTML = `
       <div class="cards-grid">
         ${metricCard('Sem O.S. em campo', semOS.length, semOS.length > 0)}
         ${metricCard('Já em campo (PCR)', comOS)}
+        ${metricCard('Possíveis retornos (IFI/IRR)', qtdRetornos, qtdRetornos > 0)}
+        ${metricCard('Prazo vencido', qtdVencidos, qtdVencidos > 0)}
+        ${metricCard('Prazo em risco', qtdRisco, qtdRisco > 0)}
       </div>
       <div class="section-heading">Chamados em aberto na GIGA</div>
-      <p style="font-size:13px;color:var(--text-secondary);margin:0 0 10px">Cruza o CONTRATO de cada chamado aberto contra o PCR (${esc(String(DB.pcr.length))} linhas carregadas — o CSV de atividades diário). Status = EM CAMPO quando o contrato já tem alguma linha ativa (não Não Concluída) no PCR. "Já visitada hoje" = teve tentativa Não Concluída HOJE pra esse contrato (com o motivo, quando tem).</p>
+      <p style="font-size:13px;color:var(--text-secondary);margin:0 0 10px">Cruza o CONTRATO de cada chamado aberto contra o PCR (${esc(String(DB.pcr.length))} linhas carregadas — o CSV de atividades diário). Status = EM CAMPO quando o contrato já tem alguma linha ativa (não Não Concluída) no PCR. "Já visitada hoje" = teve tentativa Não Concluída HOJE pra esse contrato (com o motivo, quando tem).
+        <b>Retorno</b> = reparo de um contrato que já teve serviço concluído dentro da janela (IRR: reparo anterior em até ${JANELA_IRR} dias; IFI: ativação ou mudança de endereço anterior em até ${JANELA_IFI} dias), pelo histórico da Produção + PCR — pode faltar retorno se o serviço anterior é mais antigo que a Produção importada.
+        <b>Prazo</b> = reparo 24h, ativação e mudança de endereço ${PRAZO_ATIVACAO_HORAS}h. É exato quando o contrato já tem a ordem no PCR; sem isso é estimado, porque a GIGA manda só a data da abertura, sem hora.</p>
       ${!abertos.length ? '<div class="panel"><div class="empty">Nenhum chamado em aberto no export importado.</div></div>' : (() => {
         const ordenados = [...abertos].sort((a,b) => (a.data_abertura||'').localeCompare(b.data_abertura||''));
         return `
@@ -11803,18 +12075,19 @@ function renderChamadosGiga() {
         </select>
       </div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
-        <th>Abertura</th><th>Protocolo</th><th>Fila</th><th>Unidade</th><th>Contrato</th><th>Cliente</th><th>Bairro</th><th>Status</th><th>Já visitada hoje?</th>
+        <th>Abertura</th><th>Fila</th><th>Unidade</th><th>Contrato</th><th>Cliente</th><th>Bairro</th><th>Status</th><th>Já visitada hoje?</th><th>Retorno</th><th>Prazo</th>
       </tr></thead><tbody>
         ${ordenados.slice(0, limiteGiga).map(r => {
           const emCampo = contratosEmCampo.has(soDigitos(r.contrato));
           const visitadaHoje = visitadaHojeImprodutiva(r.contrato);
           return `<tr>
-          <td>${formatDate(r.data_abertura)}</td><td class="cat-cell">${esc(r.protocolo)}</td><td>${esc(r.fila)}</td>
+          <td>${formatDate(r.data_abertura)}</td><td>${esc(r.fila)}</td>
           <td>${esc(r.unidade)}</td><td>${esc(r.contrato)}</td><td>${esc(r.cliente)}</td><td>${esc(r.bairro)}</td>
           <td style="color:${emCampo ? 'var(--success)' : 'var(--danger)'};font-weight:700">${emCampo ? 'EM CAMPO' : 'NÃO ESTÁ EM CAMPO'}</td>
           <td>${visitadaHoje
             ? `<span style="color:var(--danger);font-weight:700">Sim</span>${visitadaHoje.motivo ? `<br><span style="font-size:11px;color:var(--text-secondary)">${esc(visitadaHoje.motivo)}</span>` : ''}`
             : '<span style="color:var(--text-secondary)">Não</span>'}</td>
+          <td>${celulaRetorno(r)}</td><td>${celulaPrazo(r)}</td>
         </tr>`;
         }).join('')}
       </tbody></table></div>`;
@@ -12242,74 +12515,10 @@ function renderParcialDoDia() {
     // Status do "Serviços do Dia" com uma cor por situação (pedido explícito):
     // em rota = amarelo, pendente = laranja — diferente do statusBadge() padrão
     // (só 2 cores, ok/warn), usado nas outras tabelas do sistema.
+    const aExecutar = montarAExecutar(rows);
     const CLASSE_BADGE_SERVICO = { concluido:'ok', cancelado:'warn', nao_concluido:'warn', em_rota:'amber', pendente:'laranja', iniciado:'azul' };
     const badgeServicoDia = status => `<span class="badge ${CLASSE_BADGE_SERVICO[classifyStatusGranular(status)] || 'neutral'}">${esc(status) || '-'}</span>`;
 
-    // ---- Mapa: O.S do dia por bairro (concluído/em rota/iniciado/pendente) ----
-    // Pedido explícito: "concluídas, em rota e iniciado, cores diferentes" —
-    // cada status com a MESMA cor já usada no resto do sistema (COR_SITUACAO).
-    // Cancelado/não concluído ficam de fora (não pedido, e "onde a ordem está
-    // agora" não ajuda muito pra quem já foi encerrada sem sucesso).
-    // "Já visitada, dada improdutiva e voltou pro campo": no jargão da
-    // operação, "improdutiva" aqui é SÓ o status Não Concluído (pedido
-    // explícito do cliente pra não contar cancelado/suspenso — mais restrito
-    // que o ehStatusTerminal usado no resto do sistema). Pedido do cliente:
-    // olhar não só hoje, mas os ÚLTIMOS 32 DIAS de PCR importado — uma O.S.
-    // pode ter sido tentada e dado improdutiva há alguns dias e só hoje
-    // voltar pro campo como pendente/em rota, e isso também conta como
-    // revisita. Não inventa estado novo: só junta as linhas que o CSV de
-    // cada dia já trouxe.
-    const JANELA_REVISITA_DIAS = 32;
-    const pcrJanela = DB.pcr.filter(r => { const d = diasEntre(data, r.data); return d >= 0 && d <= JANELA_REVISITA_DIAS; });
-    // Pedido: "filtro pra Status (concluído, não concluído etc) e pra em
-    // rota, pendente etc, já visitadas" — o mapa passa a incluir TODOS os
-    // status granulares (antes só mostrava concluído/em rota/iniciado/
-    // pendente), com um filtro na tela pra ligar/desligar cada um.
-    const MAPA_BUCKETS = ['concluido', 'nao_concluido', 'cancelado', 'em_rota', 'iniciado', 'pendente'];
-    const ordensAbertas = servicosDoDia.filter(r => MAPA_BUCKETS.includes(classifyStatusGranular(r.status)));
-    const porOSBruto = {};
-    pcrJanela.forEach(r => { if (r.os) (porOSBruto[r.os] = porOSBruto[r.os] || []).push(r); });
-    // motivo da PRIMEIRA tentativa improdutiva na janela (pedido: "quero o
-    // motivo da primeira improdutiva nos que estão em vermelho") — ordena as
-    // tentativas terminais por data+horário de Início (inicio é um Date de
-    // verdade — comparar por getTime(), não como texto, senão a ordem quebra
-    // entre dias diferentes) e pega a mais antiga; o motivo da tentativa
-    // atual (pendente/em rota de novo) normalmente vem vazio, então sem isso
-    // o popup da revisita não explicava o "porquê".
-    // "e somente não concluída": pedido explícito de restringir a SÓ esse
-    // status — ehStatusTerminal (usado no resto do sistema) também pega
-    // "cancelado" e "suspenso", que aqui NÃO contam como improdutiva.
-    const ehNaoConcluidaEspecifico = status => /nao conclu/.test(normalizeHeader(status));
-    // IMPORTANTE: agora que "Não Concluído" também é um dos status mostrados
-    // no mapa (pedido do filtro de Status), uma O.S. cujo estado ATUAL já é
-    // "Não Concluído" não pode contar como "revisita de si mesma" — só conta
-    // se existir uma tentativa "Não Concluído" DIFERENTE da linha que está
-    // sendo desenhada agora (comparação por referência do objeto: linhas de
-    // DB.pcr nunca são clonadas ao longo do pipeline, então "l !== r" identifica
-    // com segurança "é a mesma linha ou é uma tentativa anterior de verdade").
-    const ordensAbertasComBairro = ordensAbertas.map(r => {
-      const anteriores = (porOSBruto[r.os] || [])
-        .filter(l => l !== r && ehNaoConcluidaEspecifico(l.status))
-        .sort((a, b) => (a.data || '').localeCompare(b.data || '') || ((a.inicio ? a.inicio.getTime() : 0) - (b.inicio ? b.inicio.getTime() : 0)));
-      return {
-        ...r, bairro: extrairBairro(r.endereco) || 'Não informado', revisita: anteriores.length > 0,
-        motivoImprodutiva: anteriores.length ? (anteriores[0].motivo || '') : '',
-      };
-    });
-    const semEnderecoAbertos = ordensAbertas.filter(r => !r.endereco).length;
-    // Motivos de improdutiva que EXISTEM no dia (cliente ausente, problema de
-    // infra, etc.) — a lista sai dos próprios dados, não de uma tabela fixa:
-    // motivo novo no CSV aparece aqui sozinho. Vira filtro de marcar vários.
-    const MOTIVO_SEM = 'Sem motivo informado';
-    const contagemMotivos = {};
-    ordensAbertasComBairro.forEach(o => {
-      if (!o.revisita) return;
-      const m = (o.motivoImprodutiva || '').trim() || MOTIVO_SEM;
-      contagemMotivos[m] = (contagemMotivos[m] || 0) + 1;
-    });
-    const motivosImprodutiva = Object.entries(contagemMotivos)
-      .map(([motivo, qtd]) => ({ motivo, qtd }))
-      .sort((a, b) => b.qtd - a.qtd || a.motivo.localeCompare(b.motivo, 'pt-BR'));
 
     body.innerHTML = `
       <div class="cards-grid">
@@ -12380,38 +12589,8 @@ function renderParcialDoDia() {
         ${servicosDoDia.map(r=>`<tr><td>${esc(r.os)||'-'}</td><td>${esc(r.cliente)||'-'}</td><td>${esc(r.contrato)||'-'}</td><td class="cat-cell">${esc(r.recurso)||'-'}</td><td>${esc(r.cidade)||'-'}</td><td>${esc(r.tipo_atividade)||'-'}</td><td>${badgeServicoDia(r.status)}</td><td>${esc(r.motivo)||'-'}</td><td>${fmtDT(r.abertura)}</td><td>${fmtDT(r.limite)}</td></tr>`).join('')}
       </tbody></table></div>`}
 
-      ${!ordensAbertas.length ? '' : `
-      <div class="section-heading">Mapa — O.S do Dia por Bairro <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(${ordensAbertas.length} O.S no dia)</span></div>
-      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
-        O bairro vem do texto do campo Endereço do CSV de atividades — mesma extração e mesma lista de coordenadas conhecidas do mapa do Dashboard.
-        ${semEnderecoAbertos ? `${semEnderecoAbertos} de ${ordensAbertas.length} O.S do dia não têm Endereço no CSV importado e entram em "Não informado".` : ''}
-      </p>
-      <div class="panel" style="margin-bottom:1.5rem">
-        <div class="toolbar" style="margin-bottom:12px">
-          <div class="field"><label>Bairro</label><select id="pd-mapa-bairro"><option value="">Todos os bairros</option>
-            ${[...new Set(ordensAbertasComBairro.map(r=>r.bairro))].sort((a,b)=>a.localeCompare(b,'pt-BR')).map(b=>`<option value="${esc(b)}">${esc(b)}</option>`).join('')}
-          </select></div>
-        </div>
-        <div id="pd-mapa" class="mapa-cidades"></div>
-        <div class="mapa-legenda" id="pd-mapa-legenda">
-          ${MAPA_BUCKETS.map(b => `<label class="legend-item" style="cursor:pointer"><input type="checkbox" class="pd-mapa-status-check" value="${b}" checked style="margin-right:4px"><span class="legend-dot" style="background:${MAPA_CORES_STATUS[b]}"></span>${MAPA_STATUS_LABEL[b]}</label>`).join('')}
-          <label class="legend-item" style="cursor:pointer"><input type="checkbox" id="pd-mapa-revisita-check" checked style="margin-right:4px"><span class="legend-dot" style="background:${MAPA_COR_REVISITA}"></span>Já visitada, dada improdutiva — voltou pro campo <b style="color:${MAPA_COR_REVISITA}">(bairro fica vermelho)</b></label>
-        </div>
-        ${motivosImprodutiva.length ? `
-        <div class="mapa-filtro-motivos">
-          <div class="mapa-filtro-motivos-topo">
-            <b>Motivo da improdutiva</b>
-            <span>dá pra marcar mais de um — vale só para as ordens já visitadas</span>
-            <button type="button" class="btn-mini" id="pd-motivo-todos">Todos</button>
-            <button type="button" class="btn-mini" id="pd-motivo-nenhum">Nenhum</button>
-          </div>
-          <div class="mapa-filtro-motivos-lista">
-            ${motivosImprodutiva.map(m => `<label class="legend-item" style="cursor:pointer">
-              <input type="checkbox" class="pd-mapa-motivo-check" value="${esc(m.motivo)}" checked style="margin-right:4px">
-              ${esc(m.motivo)} <span class="mapa-motivo-qtd">${m.qtd}</span></label>`).join('')}
-          </div>
-        </div>` : ''}
-      </div>`}
+
+      ${htmlAExecutar(aExecutar)}
 
       <div class="section-heading">Gerar imagem (PNG) — Remanejamento por tipo de serviço</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
@@ -12488,40 +12667,8 @@ function renderParcialDoDia() {
       inp.addEventListener('input', recalc);
     });
 
-    // ---- mapa de O.S em aberto: filtro de bairro local, sem recarregar a tela ----
-    const selBairroMapa = document.getElementById('pd-mapa-bairro');
-    if (selBairroMapa) {
-      const checksStatus = () => [...document.querySelectorAll('.pd-mapa-status-check')];
-      const checksMotivo = () => [...document.querySelectorAll('.pd-mapa-motivo-check')];
-      const checkRevisita = document.getElementById('pd-mapa-revisita-check');
-      const desenhaMapaAbertos = () => {
-        const bairro = selBairroMapa.value;
-        const statusLigados = new Set(checksStatus().filter(c => c.checked).map(c => c.value));
-        const revisitaLigada = checkRevisita ? checkRevisita.checked : true;
-        const motivosLigados = new Set(checksMotivo().filter(c => c.checked).map(c => c.value));
-        const temFiltroMotivo = checksMotivo().length > 0;
-        const filtradas = ordensAbertasComBairro.filter(o => {
-          if (bairro && o.bairro !== bairro) return false;
-          if (!statusLigados.has(classifyStatusGranular(o.status))) return false;
-          if (!o.revisita) return true;              // ordem normal não tem motivo
-          if (!revisitaLigada) return false;
-          // o filtro de motivo só vale pras JÁ VISITADAS: é delas que o motivo vem
-          if (!temFiltroMotivo) return true;
-          return motivosLigados.has((o.motivoImprodutiva || '').trim() || MOTIVO_SEM);
-        });
-        renderMapaOrdensAbertas('pd-mapa', filtradas);
-      };
-      selBairroMapa.addEventListener('change', desenhaMapaAbertos);
-      checksStatus().forEach(c => c.addEventListener('change', desenhaMapaAbertos));
-      checksMotivo().forEach(c => c.addEventListener('change', desenhaMapaAbertos));
-      if (checkRevisita) checkRevisita.addEventListener('change', desenhaMapaAbertos);
-      const marcarMotivos = valor => { checksMotivo().forEach(c => { c.checked = valor; }); desenhaMapaAbertos(); };
-      const btnTodos = document.getElementById('pd-motivo-todos');
-      const btnNenhum = document.getElementById('pd-motivo-nenhum');
-      if (btnTodos) btnTodos.addEventListener('click', () => marcarMotivos(true));
-      if (btnNenhum) btnNenhum.addEventListener('click', () => marcarMotivos(false));
-      desenhaMapaAbertos();
-    }
+
+    ligarAExecutar(aExecutar, data);
 
     // ---- ocultar/reexibir cada tabela da página (mesmo padrão da PCR) ----
     ativarTogglesDeSecao(document.getElementById('pd-body'));
@@ -12555,7 +12702,7 @@ function renderParcialDoDia() {
       { id: 'statuscidade', label: 'Status detalhado por cidade' },
       { id: 'statustecnico', label: 'Status detalhado por técnico' },
       ...(servicosDoDia.length ? [{ id: 'servicos', label: 'Serviços do dia (linha a linha)' }] : []),
-      ...(ordensAbertas.length ? [{ id: 'abertos', label: 'O.S do dia por bairro (mapa)' }] : [])
+      ...(aExecutar.total ? [{ id: 'exec', label: 'A executar — por cidade e tipo de serviço' }] : [])
     ]);
     wirePdfExportPanel('Parcial do Dia — ' + formatDate(data), {
       maodeobra: () => secaoTabela('Mão de Obra e Produção do Dia (pendentes)', [...cidadesList, {cidade:'TOTAL', ...totais}], [
@@ -12577,16 +12724,11 @@ function renderParcialDoDia() {
       statustecnico: () => secaoTabela('Status Detalhado por Técnico', statusPorTecnicoTable, [
         {header:'Técnico', get:r=>r.label}, ...bucketsTabela.map(b=>({header:bucketLabel[b], get:r=>r[b]})), {header:'Total', get:r=>r.total}
       ]),
+      exec: () => pdfAExecutar(aExecutar),
       servicos: () => secaoTabela('Serviços do Dia', servicosDoDia, [
         {header:'O.S', get:r=>r.os}, {header:'Cliente', get:r=>r.cliente}, {header:'Contrato', get:r=>r.contrato},
         {header:'Técnico', get:r=>r.recurso}, {header:'Cidade', get:r=>r.cidade}, {header:'Tipo de Serviço', get:r=>r.tipo_atividade},
         {header:'Status', get:r=>r.status}, {header:'Motivo', get:r=>r.motivo}, {header:'Abertura', get:r=>fmtDT(r.abertura)}, {header:'Limite', get:r=>fmtDT(r.limite)}
-      ]),
-      abertos: () => secaoTabela('O.S do Dia por Bairro', ordensAbertasComBairro, [
-        {header:'O.S', get:r=>r.os}, {header:'Cliente', get:r=>r.cliente}, {header:'Técnico', get:r=>r.recurso},
-        {header:'Cidade', get:r=>r.cidade}, {header:'Bairro', get:r=>r.bairro}, {header:'Status', get:r=>r.status},
-        {header:'Já visitada (improdutiva)', get:r=>r.revisita?'Sim':'Não'},
-        {header:'Motivo da 1ª tentativa', get:r=>r.motivoImprodutiva || '-'}
       ]),
     });
   }
