@@ -4253,55 +4253,6 @@ function painelValorGiga(itensGiga, opts = {}) {
   </div>`;
 }
 
-// ===================== RELATÓRIO RÁPIDO EM PDF =====================
-// Gera um PDF simples com tabela + barra proporcional — mesmo layout usado
-// no relatório de exemplo. items: [{label, qtd, valor?}], valor é opcional
-// (se não vier, a coluna de valor some da tabela e das barras).
-function gerarRelatorioPDF(opts) {
-  const { titulo, subtitulo, items, totalLabel = 'Total Geral' } = opts;
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  const temValor = items.some(i => i.valor !== undefined);
-  const totalQtd = items.reduce((a,i)=>a+i.qtd, 0);
-  const totalValor = items.reduce((a,i)=>a+(i.valor||0), 0);
-
-  const head = temValor ? [['Item', 'Contagem', 'Valor']] : [['Item', 'Contagem']];
-  const body = items.map(i => temValor ? [i.label, i.qtd.toLocaleString('pt-BR'), formatCurrency(i.valor)] : [i.label, i.qtd.toLocaleString('pt-BR')]);
-  const foot = temValor ? [[totalLabel, totalQtd.toLocaleString('pt-BR'), formatCurrency(totalValor)]] : [[totalLabel, totalQtd.toLocaleString('pt-BR')]];
-
-  const ctx = {
-    titulo, subtitulo, geradoEm: new Date().toLocaleString('pt-BR'),
-    secaoNome: 'Resumo por item', heroNum: totalQtd.toLocaleString('pt-BR'),
-    heroLabel: temValor ? `em ${formatCurrency(totalValor)}` : 'no total',
-  };
-  pdfDesenhaTopo(doc, ctx);
-  let y = pdfCartoesKpi(doc, items.slice(0, 4).map((i, idx) => ({
-    valor: i.qtd.toLocaleString('pt-BR'), rotulo: i.label, destaque: idx === 0,
-  })), PDF_TOPO_ALTURA - 6);
-
-  const estilo = pdfEstiloTabela(temValor ? { 1: {halign:'right'}, 2: {halign:'right'} } : { 1: {halign:'right'} }, head[0]);
-  doc.autoTable({
-    startY: y, head: [head[0].map(h => h.toUpperCase())], body, foot,
-    ...estilo,
-    // essa tabela é curta (poucos tipos de serviço), então cabe corpo maior
-    styles: { ...estilo.styles, fontSize: 9, cellPadding: 6 },
-    headStyles: { ...estilo.headStyles, fontSize: 8 },
-    footStyles: { ...estilo.footStyles, fontSize: 8.5 },
-    didDrawPage: (d) => { if (d.pageNumber > 1) pdfDesenhaTopo(doc, { ...ctx, secaoNome: ctx.secaoNome + ' — Continuação' }); },
-  });
-
-  drawBarChartPDF(doc, {
-    items: items.map(i => ({
-      label: i.label, value: i.qtd,
-      display: temValor ? `${i.qtd.toLocaleString('pt-BR')}  (${formatCurrency(i.valor)})` : i.qtd.toLocaleString('pt-BR'),
-    })),
-    cor: '#1769e0', maxItems: items.length,
-  }, doc.lastAutoTable.finalY + 34);
-
-  pdfNumerarPaginas(doc);
-  doc.save(opts.arquivo || 'relatorio.pdf');
-}
-
 // ===================== EXPORTAR PDF (por seção, combinável) =====================
 // Cada página define quais "seções" pode exportar (tabelas já calculadas na
 // tela). O usuário marca quais quer incluir e o sistema junta tudo num único
@@ -4335,94 +4286,214 @@ function hexToRgb(hex) {
   return m ? [parseInt(m[1],16), parseInt(m[2],16), parseInt(m[3],16)] : [79,127,255];
 }
 
-// ---------- Identidade visual dos PDFs ----------
-// Paleta e layout do modelo aprovado pelo cliente (relatório em paisagem, com
-// faixa de marca, bloco de destaque e cartões de indicador no topo).
-const PDF_CORES = {
-  navy: [16, 42, 67],       // faixa do topo e cabeçalho de tabela
-  texto: [36, 59, 83],      // texto principal
-  muted: [98, 125, 152],    // texto secundário
-  accent: [23, 105, 224],   // azul de destaque
-  accentClaro: [217, 231, 245],
-  zebra: [244, 247, 251],
-  linha: [214, 222, 236],
-  trilho: [232, 236, 244],
-  okBg: [231, 246, 236], okTexto: [31, 122, 69],
-  ruimBg: [253, 236, 236], ruimTexto: [180, 35, 24],
+// ============================================================================
+// PDF — MÓDULO ÚNICO (identidade visual, cabeçalho, rodapé, KPIs, tabelas, gráfico)
+// ============================================================================
+// TODO relatório do sistema sai daqui: as telas só montam as SEÇÕES (secaoTabela /
+// secaoGrafico) e chamam gerarPDFMultiSecoes. Mudar cor, margem, fonte, cabeçalho
+// ou rodapé de TODOS os PDFs = mexer só em PDF_TEMA e nas funções pdf* abaixo.
+// Os dados nunca são alterados: o texto de cada célula chega pronto da tela e só
+// passa por pdfTexto(), que troca símbolos que a fonte padrão do PDF não desenha
+// (≤ ≥ → ▲ ▼ ✓…) por equivalentes em texto — sem isso viravam letras quebradas.
+const PDF_TEMA = {
+  cor: {
+    navy: [16, 42, 67], texto: [30, 41, 59], muted: [100, 116, 139],
+    accent: [23, 105, 224], accentClaro: [226, 236, 250],
+    zebra: [246, 248, 252], linha: [219, 226, 237], trilho: [232, 236, 244], branco: [255, 255, 255],
+    okBg: [231, 246, 236], okTexto: [31, 122, 69], ruimBg: [253, 236, 236], ruimTexto: [180, 35, 24],
+  },
+  marca: 'JH TELECOM', sub: 'OMEGA SYSTEM',
+  margem: 40,          // lados (pt)
+  faixaCapa: 44,       // faixa de marca da 1ª página
+  faixaPagina: 30,     // faixa de marca das páginas seguintes
+  inicioCapa: 142,     // onde o conteúdo começa na 1ª página (depois do bloco de título)
+  inicioPagina: 54,    // onde o conteúdo começa nas páginas seguintes
+  baseConteudo: 46,    // reserva no pé da página (rodapé)
+  fonte: 'helvetica',
+  tamanhos: [8.5, 8, 7.5, 7, 6.5, 6],   // tentados nessa ordem até a tabela caber
 };
-const PDF_MARGEM = 40;
-const PDF_TOPO_ALTURA = 158;   // onde a tabela pode começar nas páginas seguintes
+const PDF_CORES = PDF_TEMA.cor;       // atalhos usados por código legado
+const PDF_MARGEM = PDF_TEMA.margem;
 
-// Tabela com muitas colunas fica espremida em retrato — o modelo do cliente é
-// em paisagem, e é isso que deixa o Detalhamento dos Serviços legível.
-function pdfOrientacao(secoes) {
-  const maxCols = Math.max(0, ...secoes.map(s => (s.headers || []).length));
-  return maxCols >= 6 ? 'landscape' : 'portrait';
+const PDF_TROCAS = { '≤': '<=', '≥': '>=', '→': '->', '←': '<-', '▲': '+', '▼': '-', '✓': 'OK', '✔': 'OK', '⚠': '!', '●': '•', '↑': '+', '↓': '-' };
+function pdfTexto(v) {
+  let t = String(v == null ? '' : v).replace(/[≤≥→←▲▼✓✔⚠●↑↓]/g, ch => PDF_TROCAS[ch]);
+  // o que sobrar fora do alfabeto que a fonte padrão sabe desenhar é descartado
+  return t.replace(/[^\u0000-\u00ff\u2013\u2014\u2018\u2019\u201c\u201d\u2022\u2026\u20ac]/g, '').replace(/\s+\n/g, '\n');
 }
-// Bloco do topo repetido em TODAS as páginas: faixa de marca + paginação,
-// título do relatório, nome da seção, número de destaque e "gerado em".
-function pdfDesenhaTopo(doc, ctx) {
-  const W = doc.internal.pageSize.getWidth();
-  doc.setFillColor(...PDF_CORES.navy);
-  doc.rect(0, 0, W, 51, 'F');
-  doc.setFont(undefined, 'bold'); doc.setFontSize(10.5); doc.setTextColor(255, 255, 255);
-  doc.text('JH TELECOM', PDF_MARGEM, 30);
-  doc.setFont(undefined, 'normal'); doc.setFontSize(8.5); doc.setTextColor(...PDF_CORES.accentClaro);
-  doc.text('· OMEGA SYSTEM', PDF_MARGEM + 72, 30);
-  doc.setFontSize(8.5); doc.setTextColor(...PDF_CORES.accentClaro);
-  if (ctx.paginaTexto) doc.text(ctx.paginaTexto, W - PDF_MARGEM, 30, { align: 'right' });
-
-  doc.setFont(undefined, 'bold'); doc.setFontSize(19); doc.setTextColor(...PDF_CORES.navy);
-  doc.text(String(ctx.titulo || '').toUpperCase(), PDF_MARGEM, 82);
-  if (ctx.subtitulo) {
-    doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_CORES.muted);
-    doc.text(ctx.subtitulo, PDF_MARGEM, 98);
+function pdfPeriodoDaTela() {
+  const v = id => { const e = document.getElementById(id); return e ? String(e.value || '') : ''; };
+  const iso = s => /^\d{4}-\d{2}-\d{2}$/.test(s);
+  if (iso(v('f-start')) && iso(v('f-end'))) return `${formatDate(v('f-start'))} a ${formatDate(v('f-end'))}`;
+  const dia = [v('f-data'), v('pcr-dia'), v('pa-dia')].find(iso);
+  if (dia) return formatDate(dia);
+  if (v('fin-periodo')) return v('fin-periodo');
+  const painel = document.getElementById('dash-ciclos-panel');
+  if (painel) {
+    const todos = [...painel.querySelectorAll('input[type=checkbox]')];
+    const marcados = todos.filter(c => c.checked).map(c => c.value);
+    if (marcados.length && marcados.length === todos.length) return 'Todos os ciclos';
+    if (marcados.length) return marcados.join(' · ');
   }
-  // nome da seção + número de destaque ("65 DE 3.922 ORDENS")
-  doc.setFont(undefined, 'bold'); doc.setFontSize(10.5); doc.setTextColor(...PDF_CORES.texto);
-  doc.text(ctx.secaoNome || '', PDF_MARGEM, 122);
-  if (ctx.heroNum) {
-    doc.setFont(undefined, 'bold'); doc.setFontSize(19); doc.setTextColor(...PDF_CORES.accent);
-    doc.text(String(ctx.heroNum), PDF_MARGEM, 146);
-    if (ctx.heroLabel) {
-      const larg = doc.getTextWidth(String(ctx.heroNum));
-      doc.setFont(undefined, 'bold'); doc.setFontSize(7.2); doc.setTextColor(...PDF_CORES.muted);
-      doc.text(String(ctx.heroLabel).toUpperCase(), PDF_MARGEM + larg + 10, 146);
+  return '';
+}
+// ---------- contexto do documento ----------
+function pdfCriar(titulo, opts = {}, orientacao = 'portrait') {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: orientacao });
+  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+  const agora = new Date();
+  const periodo = opts.periodo !== undefined ? opts.periodo : pdfPeriodoDaTela();
+  const ctx = {
+    doc, W, H, titulo: pdfTexto(titulo), subtitulo: pdfTexto(opts.subtitulo || ''),
+    periodo: pdfTexto(periodo),
+    geradoEm: agora.toLocaleDateString('pt-BR') + ' às ' + agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    usuario: pdfTexto(currentUser ? (currentUser.nome || currentUser.login || '') : ''),
+    y: PDF_TEMA.inicioCapa,
+  };
+  pdfCabecalhoPagina(ctx, true);
+  return ctx;
+}
+// Faixa de marca + (na 1ª página) bloco de título. Desenhado depois do conteúdo da
+// página pelo autoTable (didDrawPage), por isso só ocupa área que ficou reservada.
+function pdfCabecalhoPagina(ctx, capa) {
+  const { doc, W } = ctx, C = PDF_CORES, M = PDF_MARGEM;
+  const faixa = capa ? PDF_TEMA.faixaCapa : PDF_TEMA.faixaPagina;
+  doc.setFillColor(...C.navy); doc.rect(0, 0, W, faixa, 'F');
+  doc.setFillColor(...C.accent); doc.rect(0, faixa, W, 2, 'F');
+  doc.setFont(PDF_TEMA.fonte, 'bold'); doc.setFontSize(capa ? 11.5 : 9.5); doc.setTextColor(255, 255, 255);
+  doc.text(PDF_TEMA.marca, M, faixa / 2 + 3.5);
+  const wMarca = doc.getTextWidth(PDF_TEMA.marca);
+  doc.setFont(PDF_TEMA.fonte, 'normal'); doc.setFontSize(capa ? 8.5 : 7.5); doc.setTextColor(...C.accentClaro);
+  doc.text(PDF_TEMA.sub, M + wMarca + 8, faixa / 2 + 3.5);
+  if (!capa) {
+    doc.setFont(PDF_TEMA.fonte, 'normal'); doc.setFontSize(8);
+    // título corrido no topo das páginas seguintes: se não couber, termina em reticências
+    const limite = W * 0.5;
+    let t = String(ctx.titulo);
+    if (doc.getTextWidth(t) > limite) {
+      while (t.length > 4 && doc.getTextWidth(t + '…') > limite) t = t.slice(0, -1);
+      t = t.trim() + '…';
     }
+    doc.text(t, W - M, faixa / 2 + 3, { align: 'right' });
+    return;
   }
-  doc.setFont(undefined, 'bold'); doc.setFontSize(7.2); doc.setTextColor(...PDF_CORES.muted);
-  doc.text('GERADO EM', W - PDF_MARGEM, 130, { align: 'right' });
-  doc.setFont(undefined, 'normal'); doc.setFontSize(8.5); doc.setTextColor(...PDF_CORES.texto);
-  doc.text(ctx.geradoEm || '', W - PDF_MARGEM, 144, { align: 'right' });
-}
-// Cartões de indicador (até 4 por linha), como no modelo. Devolve o novo Y.
-function pdfCartoesKpi(doc, kpis, y) {
-  if (!kpis || !kpis.length) return y;
-  const W = doc.internal.pageSize.getWidth();
-  const larguraTotal = W - PDF_MARGEM * 2, gap = 10;
-  const cols = Math.min(4, kpis.length);
-  const larg = (larguraTotal - gap * (cols - 1)) / cols;
-  kpis.slice(0, 4).forEach((k, i) => {
-    const x = PDF_MARGEM + i * (larg + gap);
-    doc.setFillColor(...(k.destaque ? PDF_CORES.accentClaro : PDF_CORES.zebra));
-    doc.rect(x, y, larg, 38, 'F');
-    doc.setFillColor(...PDF_CORES.accent);
-    doc.rect(x, y, 2.5, 38, 'F');
-    doc.setFont(undefined, 'bold'); doc.setFontSize(14); doc.setTextColor(...PDF_CORES.navy);
-    doc.text(String(k.valor), x + 12, y + 21);
-    doc.setFont(undefined, 'bold'); doc.setFontSize(6.8); doc.setTextColor(...PDF_CORES.muted);
-    doc.text(String(k.rotulo).toUpperCase().slice(0, 32), x + 12, y + 32);
+  doc.setFont(PDF_TEMA.fonte, 'normal'); doc.setFontSize(8.5); doc.setTextColor(...C.accentClaro);
+  doc.text('Relatório gerencial', W - M, faixa / 2 + 3, { align: 'right' });
+  // título do relatório
+  // título comprido nunca é cortado: reduz a fonte até caber em 2 linhas e, no limite, deixa quebrar
+  doc.setFont(PDF_TEMA.fonte, 'bold'); doc.setTextColor(...C.navy);
+  let fsTitulo = 22, linhasTitulo;
+  for (; ; fsTitulo -= 2) {
+    doc.setFontSize(fsTitulo);
+    linhasTitulo = doc.splitTextToSize(ctx.titulo, W - M * 2 - 150);
+    if (linhasTitulo.length <= 2 || fsTitulo <= 14) break;
+  }
+  const passoTitulo = fsTitulo * 1.1;
+  doc.text(linhasTitulo, M, 82);
+  const yApos = 82 + (linhasTitulo.length - 1) * passoTitulo;
+  // período / filtros
+  let yLinha = yApos + 20;
+  const partes = [];
+  if (ctx.periodo && !ctx.titulo.includes(ctx.periodo)) partes.push(['Período', ctx.periodo]);
+  if (ctx.subtitulo) partes.push([partes.length ? 'Filtros' : 'Detalhe', ctx.subtitulo]);
+  partes.forEach(([rot, val]) => {
+    doc.setFont(PDF_TEMA.fonte, 'bold'); doc.setFontSize(9); doc.setTextColor(...C.muted);
+    doc.text(rot + ':', M, yLinha);
+    const wRot = doc.getTextWidth(rot + ': ');
+    doc.setFont(PDF_TEMA.fonte, 'normal'); doc.setTextColor(...C.texto);
+    const linhasVal = doc.splitTextToSize(val, W - M * 2 - wRot - 150);
+    doc.text(linhasVal, M + wRot, yLinha, { lineHeightFactor: 1.25 });
+    yLinha += 14 + (linhasVal.length - 1) * 11.5;
   });
-  return y + 38 + 14;
+  // geração (canto direito)
+  doc.setFont(PDF_TEMA.fonte, 'bold'); doc.setFontSize(7); doc.setTextColor(...C.muted);
+  doc.text('GERADO EM', W - M, 74, { align: 'right' });
+  doc.setFont(PDF_TEMA.fonte, 'normal'); doc.setFontSize(9); doc.setTextColor(...C.texto);
+  doc.text(ctx.geradoEm, W - M, 87, { align: 'right' });
+  if (ctx.usuario) { doc.setFontSize(8); doc.setTextColor(...C.muted); doc.text('por ' + ctx.usuario, W - M, 99, { align: 'right' }); }
+  // filete de separação
+  const yFio = Math.max(yLinha, 118) + 4;
+  doc.setDrawColor(...C.linha); doc.setLineWidth(0.6); doc.line(M, yFio, W - M, yFio);
+  doc.setDrawColor(...C.accent); doc.setLineWidth(2); doc.line(M, yFio, M + 46, yFio);
+  ctx.y = yFio + 20;
+  ctx.inicioCapaReal = ctx.y;
 }
-// Indicadores automáticos de uma seção: total de linhas + os valores mais
-// frequentes das colunas categóricas (Status, Motivo...). É o que o modelo do
-// cliente mostra no topo, sem precisar configurar seção por seção.
+function pdfNovaPagina(ctx) {
+  ctx.doc.addPage();
+  pdfCabecalhoPagina(ctx, false);
+  ctx.y = PDF_TEMA.inicioPagina;
+}
+function pdfGarantirEspaco(ctx, altura) {
+  if (ctx.y + altura > ctx.H - PDF_TEMA.baseConteudo) pdfNovaPagina(ctx);
+}
+// Rodapé em todas as páginas: marca + relatório à esquerda, "Página X de Y" à direita.
+function pdfRodapes(ctx) {
+  const { doc, W, H } = ctx, C = PDF_CORES, M = PDF_MARGEM;
+  const total = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= total; p++) {
+    doc.setPage(p);
+    doc.setDrawColor(...C.linha); doc.setLineWidth(0.5); doc.line(M, H - 32, W - M, H - 32);
+    doc.setFont(PDF_TEMA.fonte, 'normal'); doc.setFontSize(7.5); doc.setTextColor(...C.muted);
+    const esq = `${PDF_TEMA.marca} · ${PDF_TEMA.sub}   |   ${ctx.titulo}`;
+    doc.text(pdfCabeEmUmaLinha(doc, esq, W - M * 2 - 90), M, H - 20);
+    doc.text(`Página ${p} de ${total}`, W - M, H - 20, { align: 'right' });
+  }
+}
+// Texto de uma linha só (rodapé, rótulos): se passar da largura termina em reticências
+// em vez de vazar da margem. Usa a fonte/tamanho já ativos no doc.
+function pdfCabeEmUmaLinha(doc, texto, largura) {
+  let t = String(texto);
+  if (doc.getTextWidth(t) <= largura) return t;
+  while (t.length > 4 && doc.getTextWidth(t + '…') > largura) t = t.slice(0, -1);
+  return t.trim() + '…';
+}
+// ---------- blocos ----------
+function pdfTituloSecao(ctx, nome, contagem) {
+  const { doc, W } = ctx, C = PDF_CORES, M = PDF_MARGEM;
+  doc.setFont(PDF_TEMA.fonte, 'bold'); doc.setFontSize(12.5); doc.setTextColor(...C.navy);
+  const reserva = contagem ? 130 : 0;
+  // título de seção comprido quebra em mais de uma linha (nunca é cortado)
+  const linhasNome = doc.splitTextToSize(pdfTexto(nome), W - M * 2 - reserva);
+  const extra = (linhasNome.length - 1) * 15;
+  doc.text(linhasNome, M, ctx.y + 10);
+  ctx.y += extra;
+  if (contagem) {
+    doc.setFont(PDF_TEMA.fonte, 'normal'); doc.setFontSize(8.5); doc.setTextColor(...C.muted);
+    doc.text(pdfTexto(contagem), W - M, ctx.y + 10, { align: 'right' });
+  }
+  doc.setDrawColor(...C.linha); doc.setLineWidth(0.6); doc.line(M, ctx.y + 17, W - M, ctx.y + 17);
+  doc.setDrawColor(...C.accent); doc.setLineWidth(1.6); doc.line(M, ctx.y + 17, M + 34, ctx.y + 17);
+  ctx.y += 30;
+}
+function pdfKpis(ctx, kpis) {
+  if (!kpis || !kpis.length) return;
+  const { doc, W } = ctx, C = PDF_CORES, M = PDF_MARGEM;
+  const total = W - M * 2, gap = 10, cols = Math.min(4, kpis.length);
+  const larg = (total - gap * (cols - 1)) / cols, alt = 44;
+  kpis.slice(0, 4).forEach((k, i) => {
+    const x = M + i * (larg + gap);
+    doc.setFillColor(...(k.destaque ? C.accentClaro : C.zebra)); doc.setDrawColor(...C.linha); doc.setLineWidth(0.5);
+    doc.roundedRect(x, ctx.y, larg, alt, 3, 3, 'FD');
+    doc.setFillColor(...C.accent); doc.rect(x, ctx.y + 4, 2.6, alt - 8, 'F');
+    doc.setFont(PDF_TEMA.fonte, 'bold'); doc.setFontSize(15); doc.setTextColor(...C.navy);
+    doc.text(pdfTexto(k.valor), x + 14, ctx.y + 22);
+    doc.setFont(PDF_TEMA.fonte, 'bold'); doc.setFontSize(6.8); doc.setTextColor(...C.muted);
+    doc.text(pdfCabeEmUmaLinha(doc, pdfTexto(k.rotulo).toUpperCase(), larg - 22), x + 14, ctx.y + 35);
+  });
+  ctx.y += alt + 16;
+}
+// Indicadores automáticos de uma seção: total de linhas + os valores mais frequentes
+// das colunas categóricas (Status, Motivo...).
+// Cartões de destaque no topo da seção: só saem quando dizem algo que a tabela não diz de
+// cara — o total de registros + a contagem por status/motivo/tipo quando há valores que
+// REPETEM. Uma coluna "Tipo" onde cada linha é diferente, ou uma tabela de 3 linhas, não
+// ganha cartão (viraria "3 registros" repetindo o contador do título). A seção pode impor
+// os seus próprios cartões em `sec.kpis` ([{ valor, rotulo }]).
 function pdfKpisDaSecao(sec) {
+  if (Array.isArray(sec.kpis)) return sec.kpis;
   const kpis = [{ valor: (sec.rows || []).length.toLocaleString('pt-BR'), rotulo: 'Registros', destaque: true }];
   const headers = sec.headers || [];
-  // só colunas categóricas viram indicador — Status e Motivo primeiro, que é o
-  // que interessa num relatório operacional
   const candidatas = headers.map((h, i) => ({ i, h: normalizeHeader(h) }))
     .filter(c => /status|motivo|tipo|situacao/.test(c.h))
     .sort((a, b) => (/status|motivo/.test(b.h) ? 1 : 0) - (/status|motivo/.test(a.h) ? 1 : 0));
@@ -4431,91 +4502,247 @@ function pdfKpisDaSecao(sec) {
     const cont = {};
     (sec.rows || []).forEach(r => { const v = String(r[col.i] == null ? '' : r[col.i]).trim(); if (v && v !== '-') cont[v] = (cont[v] || 0) + 1; });
     const top = Object.entries(cont).sort((a, b) => b[1] - a[1]);
-    // coluna com valores demais (ex.: nome de cliente) não vira indicador
-    if (!top.length || top.length > 12) continue;
+    if (!top.length || top.length > 12 || top[0][1] < 2) continue;
     for (const [rotulo, valor] of top) {
       if (kpis.length >= 4) break;
       kpis.push({ valor: valor.toLocaleString('pt-BR'), rotulo });
     }
   }
-  return kpis;
+  return kpis.length > 1 ? kpis : [];
 }
-// "Página X de Y" no canto direito da faixa do topo. Só dá pra escrever depois
-// que o documento inteiro existe (antes disso não se sabe o total), então é uma
-// passada final por cima da faixa que já foi desenhada.
-function pdfNumerarPaginas(doc) {
-  const W = doc.internal.pageSize.getWidth();
-  const total = doc.internal.getNumberOfPages();
-  for (let p = 1; p <= total; p++) {
-    doc.setPage(p);
-    doc.setFont(undefined, 'normal'); doc.setFontSize(8.5); doc.setTextColor(...PDF_CORES.accentClaro);
-    doc.text(`Página ${p} de ${total}`, W - PDF_MARGEM, 30, { align: 'right' });
-  }
-}
-// Estilo da tabela + pílula colorida na coluna de status (verde pra concluído,
-// vermelho pra cancelado/não concluído), como no modelo.
-function pdfEstiloTabela(colStyles, headers) {
-  const idxStatus = (headers || []).findIndex(h => /status/.test(normalizeHeader(h)));
-  return {
-    theme: 'grid',
-    headStyles: { fillColor: PDF_CORES.navy, textColor: 255, fontStyle: 'bold', fontSize: 7, halign: 'center', cellPadding: 6, lineWidth: 0 },
-    footStyles: { fillColor: PDF_CORES.accentClaro, textColor: PDF_CORES.navy, fontStyle: 'bold', fontSize: 7.2, lineWidth: 0.4, lineColor: PDF_CORES.linha },
-    alternateRowStyles: { fillColor: PDF_CORES.zebra },
-    styles: { fontSize: 7.1, cellPadding: 5, valign: 'middle', overflow: 'linebreak',
-              textColor: PDF_CORES.texto, lineColor: PDF_CORES.linha, lineWidth: 0.3 },
-    columnStyles: colStyles || {},
-    margin: { left: PDF_MARGEM, right: PDF_MARGEM, top: PDF_TOPO_ALTURA, bottom: 46 },
-    didParseCell: (data) => {
-      if (data.section !== 'body' || idxStatus === -1 || data.column.index !== idxStatus) return;
-      const t = normalizeHeader((data.cell.text || []).join(' '));
-      if (!t) return;
-      const bom = t.includes('conclu') && !t.includes('nao');
-      const ruim = t.includes('cancel') || t.includes('nao conclu');
-      if (!bom && !ruim) return;
-      data.cell.styles.fillColor = bom ? PDF_CORES.okBg : PDF_CORES.ruimBg;
-      data.cell.styles.textColor = bom ? PDF_CORES.okTexto : PDF_CORES.ruimTexto;
-      data.cell.styles.fontStyle = 'bold';
-      data.cell.styles.halign = 'center';
-    },
-  };
-}
-// Desenha um gráfico de barras horizontais nativo no PDF (retângulos + texto,
-// sem lib de gráfico — mesma filosofia do resto do sistema). Devolve o novo Y.
-function drawBarChartPDF(doc, sec, y) {
-  const items = (sec.items || []).slice(0, sec.maxItems || 15);
-  if (!items.length) {
-    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_CORES.muted);
-    doc.text('Sem dados para este gráfico.', PDF_MARGEM, y);
-    return y + 20;
-  }
-  const alturaPagina = doc.internal.pageSize.getHeight();
-  const barHeight = 12, gap = 8, labelWidth = 150;
-  const startX = PDF_MARGEM + labelWidth + 8;
-  // reserva à direita medida com a fonte de verdade (getTextWidth) em vez de
-  // estimada por nº de caracteres — com valor em moeda ("2.520  (R$ 269.640,00)")
-  // a reserva fixa deixava o rótulo passar da margem
-  doc.setFontSize(8); doc.setFont(undefined, 'bold');
-  const larguraRotulo = Math.max(...items.map(i => doc.getTextWidth(String(i.display !== undefined ? i.display : i.value))));
-  const reservaDireita = Math.min(190, Math.max(46, larguraRotulo + 12));
-  const chartWidth = doc.internal.pageSize.getWidth() - startX - PDF_MARGEM - reservaDireita;
-  const maxValue = Math.max(...items.map(i => Math.abs(i.value) || 0), 1);
-  let linhaY = y;
-  items.forEach(it => {
-    if (linhaY > alturaPagina - 70) { doc.addPage(); linhaY = 56; }
-    doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_CORES.texto);
-    doc.text(String(it.label == null ? '-' : it.label).slice(0, 34), PDF_MARGEM, linhaY + barHeight - 3, { maxWidth: labelWidth });
-    // trilho de fundo: dá a noção de "quanto falta pro maior", igual na tela
-    doc.setFillColor(...PDF_CORES.trilho);
-    doc.rect(startX, linhaY, chartWidth, barHeight, 'F');
-    const w = Math.max((Math.abs(it.value || 0) / maxValue) * chartWidth, 2);
-    doc.setFillColor(...hexToRgb(it.color || sec.cor));
-    doc.rect(startX, linhaY, w, barHeight, 'F');
-    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_CORES.texto);
-    doc.text(String(it.display !== undefined ? it.display : it.value), startX + chartWidth + 6, linhaY + barHeight - 3);
-    linhaY += barHeight + gap;
+// ---------- tabela ----------
+const PDF_RE_NUM = /^[-−+]?\s*(R\$\s*)?-?\d[\d.\s]*(,\d+)?\s*(%|p\.p\.|h|min|d)?$/i;
+const PDF_RE_DATA = /^\d{1,2}\/\d{1,2}(\/\d{2,4})?(\s+\d{1,2}:\d{2})?$|^\d{1,2}:\d{2}(:\d{2})?$/;
+function pdfTipoColuna(valores) {
+  let n = 0, num = 0, data = 0, ids = 0;
+  valores.forEach(v => {
+    const t = String(v).trim();
+    if (!t || t === '-' || t === '—') return;
+    n++;
+    if (/^\d{6,}$/.test(t)) ids++;
+    else if (PDF_RE_NUM.test(t) || /^-?R\$/.test(t)) num++;
+    else if (PDF_RE_DATA.test(t)) data++;
   });
-  return linhaY + 12;
+  if (!n) return 'texto';
+  if (ids / n >= 0.8) return 'id';
+  if ((num + ids) / n >= 0.8) return 'num';
+  if (data / n >= 0.8) return 'data';
+  return 'texto';
 }
+// Largura de cada coluna. Número/data/código nunca quebra o valor (largura do maior
+// valor; o título pode quebrar em 2 linhas se precisar). Coluna de TEXTO fica com a
+// largura que o conteúdo pede; quando a tabela não cabe, só as colunas mais LARGAS
+// (endereço, observação, nome longo) são encolhidas — as curtas (cidade, status)
+// nunca. Se ainda assim não couber, reduz a fonte; no último recurso comprime tudo
+// proporcionalmente e deixa o texto quebrar linha.
+function pdfLarguras(doc, headers, rows, foot, tipos, disponivel) {
+  const pad = 10;
+  const amostra = rows.length > 400 ? [...rows].sort((a, b) => b.join('').length - a.join('').length).slice(0, 300).concat(rows.slice(0, 100)) : rows;
+  const todas = amostra.concat(foot);
+  const tamanhos = PDF_TEMA.tamanhos;
+  for (let t = 0; t < tamanhos.length; t++) {
+    const fs = tamanhos[t], ultimo = t === tamanhos.length - 1;
+    doc.setFontSize(fs);
+    const pref = [], min = [];
+    headers.forEach((h, i) => {
+      const H = String(h).toUpperCase();
+      doc.setFont(PDF_TEMA.fonte, 'bold');
+      const hInteiro = doc.getTextWidth(H);
+      const hPalavra = Math.max(...H.split(/\s+/).map(w => doc.getTextWidth(w)), 0);
+      // a coluna Status sai em negrito (pílula colorida): medir em negrito, senão "Não Concluído" quebra
+      doc.setFont(PDF_TEMA.fonte, /status/.test(normalizeHeader(h)) ? 'bold' : 'normal');
+      let maxC = 0, maxPalavra = 0;
+      todas.forEach(r => {
+        const txt = String(r[i] == null ? '' : r[i]);
+        maxC = Math.max(maxC, doc.getTextWidth(txt));
+        if (tipos[i] === 'texto') txt.split(/\s+/).forEach(w => { if (w.length > 3) maxPalavra = Math.max(maxPalavra, doc.getTextWidth(w)); });
+      });
+      if (tipos[i] === 'texto') {
+        pref.push(Math.max(maxC, hInteiro) + pad);
+        min.push(Math.max(hPalavra, Math.min(maxPalavra, 110), 26) + pad);
+      } else {
+        pref.push(Math.max(maxC, hInteiro) + pad);
+        min.push(Math.max(maxC, hPalavra) + pad);
+      }
+    });
+    const somaMin = min.reduce((a, b) => a + b, 0), somaPref = pref.reduce((a, b) => a + b, 0);
+    if (somaMin > disponivel * 1.001 && !ultimo) continue;      // tenta uma fonte menor
+    let larg;
+    if (somaMin > disponivel) {
+      larg = min.map(m => m * disponivel / somaMin);
+    } else if (somaPref <= disponivel) {
+      // sobra espaço: a tabela ocupa o que precisa (mínimo 60% da página), o extra vai pras colunas de texto
+      const alvo = Math.min(disponivel, Math.max(somaPref * 1.25, disponivel * 0.6));
+      const extra = alvo - somaPref;
+      const pesoTexto = pref.reduce((a, p, i) => a + (tipos[i] === 'texto' ? p : 0), 0);
+      larg = pref.map((p, i) => p + (pesoTexto ? (tipos[i] === 'texto' ? extra * p / pesoTexto : 0) : extra / pref.length));
+    } else {
+      // 1º as colunas de número/data perdem a folga do TÍTULO (que passa a quebrar em 2 linhas);
+      // 2º, se ainda faltar, só as colunas de texto mais LARGAS encolhem (teto C tal que
+      // soma(max(min, min(pref, C))) = disponivel) — nome curto, cidade e status ficam intactos.
+      larg = pref.slice();
+      let falta = somaPref - disponivel;
+      const folgaNum = pref.map((p, i) => (tipos[i] === 'texto' ? 0 : p - min[i]));
+      const somaFolga = folgaNum.reduce((a, b) => a + b, 0);
+      if (somaFolga > 0) {
+        const k = Math.min(1, falta / somaFolga);
+        larg = larg.map((w, i) => w - folgaNum[i] * k);
+        falta -= somaFolga * k;
+      }
+      if (falta > 0.5) {
+        const soma = C => larg.reduce((a, p, i) => a + Math.max(min[i], Math.min(p, C)), 0);
+        let lo = 0, hi = Math.max(...larg);
+        for (let k = 0; k < 40; k++) { const mid = (lo + hi) / 2; if (soma(mid) > disponivel) hi = mid; else lo = mid; }
+        larg = larg.map((p, i) => Math.max(min[i], Math.min(p, lo)));
+      }
+    }
+    return { larguras: larg, fs };
+  }
+}
+function pdfSecaoNaoVazia(sec) { return (sec.rows && sec.rows.length) || (sec.totalRows && sec.totalRows.length); }
+function pdfTabela(ctx, sec) {
+  const { doc, W } = ctx, C = PDF_CORES, M = PDF_MARGEM;
+  const headers = (sec.headers || []).map(pdfTexto);
+  const rows = (sec.rows || []).map(r => r.map(pdfTexto));
+  const foot = (sec.totalRows || []).map(r => r.map(pdfTexto));
+  const tipos = headers.map((h, i) => pdfTipoColuna(rows.map(r => r[i])));
+  // alinhamento: o que a seção pediu de forma explícita manda; senão, pelo conteúdo
+  const align = headers.map((h, i) => (sec.align && sec.align[i]) || ({ num: 'right', data: 'center', id: 'center', texto: 'left' })[tipos[i]]);
+  const { larguras, fs } = pdfLarguras(doc, headers, rows, foot, tipos, W - M * 2);
+  const columnStyles = {};
+  larguras.forEach((w, i) => { columnStyles[i] = { cellWidth: w, halign: align[i] }; });
+  const idxStatus = headers.findIndex(h => /status/.test(normalizeHeader(h)));
+  const paginaInicial = doc.internal.getCurrentPageInfo().pageNumber;
+  doc.autoTable({
+    startY: ctx.y,
+    head: [headers.map(h => h.toUpperCase())], body: rows, foot: foot.length ? foot : undefined,
+    theme: 'grid', showHead: 'everyPage', showFoot: 'lastPage', rowPageBreak: 'avoid', pageBreak: 'auto',
+    tableWidth: larguras.reduce((a, b) => a + b, 0),
+    margin: { left: M, right: M, top: PDF_TEMA.inicioPagina, bottom: PDF_TEMA.baseConteudo },
+    styles: { font: PDF_TEMA.fonte, fontSize: fs, cellPadding: { top: 4.4, bottom: 4.4, left: 5, right: 5 }, valign: 'middle',
+              overflow: 'linebreak', textColor: C.texto, lineColor: C.linha, lineWidth: 0.25 },
+    headStyles: { fillColor: C.navy, textColor: 255, fontStyle: 'bold', fontSize: Math.max(6, fs - 0.6), lineWidth: 0, valign: 'middle' },
+    footStyles: { fillColor: C.accentClaro, textColor: C.navy, fontStyle: 'bold', lineColor: C.linha, lineWidth: 0.25 },
+    alternateRowStyles: { fillColor: C.zebra },
+    columnStyles,
+    didParseCell: (d) => {
+      if (d.section === 'head' || d.section === 'foot') { d.cell.styles.halign = align[d.column.index]; return; }
+      const primeira = String((d.row.raw && d.row.raw[0]) || '').trim();
+      if (/^total(\s+(geral|dos descontos|do dia|do ciclo))?$/i.test(primeira)) {       // linha de total que vem dentro do corpo da tabela
+        d.cell.styles.fontStyle = 'bold'; d.cell.styles.fillColor = C.accentClaro; d.cell.styles.textColor = C.navy;
+      }
+      if (idxStatus !== -1 && d.column.index === idxStatus) {
+        const t = normalizeHeader((d.cell.text || []).join(' '));
+        const bom = t.includes('conclu') && !t.includes('nao'), ruim = t.includes('cancel') || t.includes('nao conclu');
+        if (bom || ruim) {
+          d.cell.styles.fillColor = bom ? C.okBg : C.ruimBg; d.cell.styles.textColor = bom ? C.okTexto : C.ruimTexto;
+          d.cell.styles.fontStyle = 'bold'; d.cell.styles.halign = 'center';
+        }
+      }
+    },
+    // páginas seguintes da MESMA tabela: faixa de marca compacta (o autoTable já repete o cabeçalho da tabela)
+    didDrawPage: (d) => { if (d.pageNumber !== paginaInicial) pdfCabecalhoPagina(ctx, false); },
+  });
+  ctx.y = doc.lastAutoTable.finalY + 24;
+}
+// ---------- gráfico de barras ----------
+function pdfGrafico(ctx, sec) {
+  const { doc, W } = ctx, C = PDF_CORES, M = PDF_MARGEM;
+  const items = (sec.items || []).slice(0, sec.maxItems || 15);
+  if (!items.length) { pdfMensagem(ctx, 'Sem dados para este gráfico.'); return; }
+  const labelW = Math.min(210, (W - M * 2) * 0.36);
+  doc.setFont(PDF_TEMA.fonte, 'normal'); doc.setFontSize(8);
+  const alturaBase = 22;
+  doc.setFont(PDF_TEMA.fonte, 'bold'); doc.setFontSize(8);
+  const larguraValor = Math.min(190, Math.max(46, Math.max(...items.map(i => doc.getTextWidth(pdfTexto(i.display !== undefined ? i.display : i.value)))) + 12));
+  const x0 = M + labelW + 8, larguraBarra = W - x0 - M - larguraValor;
+  const maxValue = Math.max(...items.map(i => Math.abs(i.value) || 0), 1);
+  items.forEach(it => {
+    doc.setFont(PDF_TEMA.fonte, 'normal'); doc.setFontSize(8);
+    const linhasRotulo = doc.splitTextToSize(pdfTexto(it.label == null ? '-' : it.label), labelW).slice(0, 4);
+    const alturaLinha = Math.max(alturaBase, linhasRotulo.length * 10 + 12);
+    pdfGarantirEspaco(ctx, alturaLinha);
+    doc.setTextColor(...C.texto);
+    doc.text(linhasRotulo, M, ctx.y + (alturaLinha - linhasRotulo.length * 10) / 2 + 8);
+    const yBarra = ctx.y + (alturaLinha - 11) / 2 - 1;
+    doc.setFillColor(...C.trilho); doc.roundedRect(x0, yBarra, larguraBarra, 11, 2, 2, 'F');
+    doc.setFillColor(...hexToRgb(it.color || sec.cor));
+    doc.roundedRect(x0, yBarra, Math.max((Math.abs(it.value || 0) / maxValue) * larguraBarra, 3), 11, 2, 2, 'F');
+    doc.setFont(PDF_TEMA.fonte, 'bold'); doc.setTextColor(...C.texto);
+    doc.text(pdfTexto(it.display !== undefined ? it.display : it.value), x0 + larguraBarra + 8, yBarra + 9);
+    ctx.y += alturaLinha;
+  });
+  ctx.y += 12;
+}
+function pdfMensagem(ctx, texto) {
+  const { doc } = ctx;
+  doc.setFont(PDF_TEMA.fonte, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_CORES.muted);
+  doc.text(texto, PDF_MARGEM, ctx.y + 8);
+  ctx.y += 28;
+}
+// ---------- seção completa: título + indicadores + conteúdo (sem título "órfão") ----------
+function pdfSecao(ctx, sec) {
+  const m = /\((\d[\d.]*)\s+de\s+([\d.]+)\s*([^)]*)\)/i.exec(sec.titulo || '');
+  const nome = String(sec.titulo || '').replace(/\s*\([^)]*\)\s*$/, '');
+  const grafico = sec.tipo === 'bars';
+  const kpis = grafico || !pdfSecaoNaoVazia(sec) ? [] : pdfKpisDaSecao(sec);
+  const nRegistros = grafico ? (sec.items || []).length : (sec.rows || []).length;
+  const contagem = m ? `${m[1]} de ${m[2]} ${m[3] || 'registros'}`.trim() : `${nRegistros.toLocaleString('pt-BR')} ${nRegistros === 1 ? 'registro' : 'registros'}`;
+  // título + indicadores + cabeçalho da tabela + 2 linhas precisam caber juntos
+  pdfGarantirEspaco(ctx, 30 + (kpis.length ? 60 : 0) + 66);
+  pdfTituloSecao(ctx, nome, contagem);
+  if (grafico) { pdfGrafico(ctx, sec); return; }
+  pdfKpis(ctx, kpis);
+  if (!pdfSecaoNaoVazia(sec)) { pdfMensagem(ctx, 'Sem registros para os filtros selecionados.'); return; }
+  pdfTabela(ctx, sec);
+}
+// Retrato quando cabe; paisagem quando alguma tabela não cabe legível em retrato.
+function pdfOrientacao(secoes) {
+  const { jsPDF } = window.jspdf;
+  const teste = new jsPDF({ unit: 'pt', format: 'a4' });
+  const disp = teste.internal.pageSize.getWidth() - PDF_MARGEM * 2;
+  const pad = 10;
+  return secoes.some(sec => {
+    if (sec.tipo === 'bars') return false;
+    const headers = sec.headers || [];
+    if (headers.length >= 8) return true;
+    teste.setFontSize(7);
+    const rows = (sec.rows || []).slice(0, 200);
+    const tipos = headers.map((h, i) => pdfTipoColuna(rows.map(r => r[i])));
+    let soma = 0;
+    headers.forEach((h, i) => {
+      teste.setFont(PDF_TEMA.fonte, 'bold');
+      const hMin = Math.max(...String(h).toUpperCase().split(/\s+/).map(w => teste.getTextWidth(w)), 0);
+      teste.setFont(PDF_TEMA.fonte, 'normal');
+      const maxC = Math.max(0, ...rows.map(r => teste.getTextWidth(pdfTexto(r[i]))));
+      soma += tipos[i] === 'texto' ? Math.max(hMin, Math.min(maxC, 60)) + pad : Math.max(hMin, maxC) + pad;
+    });
+    return soma > disp;
+  }) ? 'landscape' : 'portrait';
+}
+function gerarPDFMultiSecoes(titulo, secoes, opts = {}) {
+  const ctx = pdfCriar(titulo, opts, pdfOrientacao(secoes));
+  secoes.forEach(sec => pdfSecao(ctx, sec));
+  pdfRodapes(ctx);
+  if (opts.semSalvar) return ctx.doc;
+  ctx.doc.save((opts.arquivo || 'relatorio_' + String(titulo).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_')) + '.pdf');
+  return ctx.doc;
+}
+// Mantida por compatibilidade (relatório rápido: tabela + barras de um conjunto de itens).
+function gerarRelatorioPDF(opts) {
+  const { titulo, subtitulo, items, totalLabel = 'Total Geral' } = opts;
+  const temValor = items.some(i => i.valor !== undefined);
+  const totalQtd = items.reduce((a, i) => a + i.qtd, 0), totalValor = items.reduce((a, i) => a + (i.valor || 0), 0);
+  const tabela = secaoTabela('Resumo por item', items, temValor
+    ? [{ header: 'Item', get: i => i.label }, { header: 'Contagem', get: i => i.qtd.toLocaleString('pt-BR') }, { header: 'Valor', get: i => formatCurrency(i.valor) }]
+    : [{ header: 'Item', get: i => i.label }, { header: 'Contagem', get: i => i.qtd.toLocaleString('pt-BR') }],
+    { totalRow: temValor ? [totalLabel, totalQtd.toLocaleString('pt-BR'), formatCurrency(totalValor)] : [totalLabel, totalQtd.toLocaleString('pt-BR')] });
+  const barras = secaoGrafico('Distribuição por item', items.map(i => ({
+    label: i.label, value: i.qtd, display: temValor ? `${i.qtd.toLocaleString('pt-BR')}  (${formatCurrency(i.valor)})` : i.qtd.toLocaleString('pt-BR'),
+  })), { cor: '#1769e0', maxItems: items.length });
+  return gerarPDFMultiSecoes(titulo, [tabela, barras], { subtitulo, arquivo: (opts.arquivo || 'relatorio.pdf').replace(/\.pdf$/i, '') });
+}
+
 // Painel de checkboxes + botão, colocado no rodapé de cada página.
 // sections: [{id, label}] — o que aparece marcável.
 // getSecaoFns: { id: () => secaoTabela(...) } — como montar cada seção quando pedida.
@@ -4541,68 +4768,16 @@ function wirePdfExportPanel(titulo, getSecaoFns) {
     gerarPDFMultiSecoes(titulo, secoes);
   });
 }
-function gerarPDFMultiSecoes(titulo, secoes, opts = {}) {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: pdfOrientacao(secoes) });
-  const alturaPagina = doc.internal.pageSize.getHeight();
-  const geradoEm = new Date().toLocaleString('pt-BR');
-  // O topo (faixa + título + destaque da seção) é redesenhado em toda página,
-  // por isso ele precisa saber QUAL seção está sendo impressa naquela folha.
-  let ctx = { titulo, subtitulo: opts.subtitulo, geradoEm, secaoNome: '', heroNum: '', heroLabel: '' };
-  const desenhaTopo = () => pdfDesenhaTopo(doc, ctx);
-
-  secoes.forEach((sec, idx) => {
-    // o número de destaque é a própria contagem da seção; se o título trouxer
-    // "(X de Y ...)" — como no Detalhamento dos Serviços — usa o Y como base
-    const m = /\((\d[\d.]*)\s+de\s+([\d.]+)\s*([^)]*)\)/i.exec(sec.titulo || '');
-    ctx = {
-      titulo, subtitulo: opts.subtitulo, geradoEm,
-      secaoNome: String(sec.titulo || '').replace(/\s*\([^)]*\)\s*$/, ''),
-      heroNum: m ? m[1] : (sec.rows ? sec.rows.length.toLocaleString('pt-BR') : ''),
-      heroLabel: m ? `de ${m[2]} ${m[3] || 'registros'}`.trim() : 'registros',
-    };
-    if (idx === 0) desenhaTopo();
-    else { doc.addPage(); desenhaTopo(); }
-
-    let y = PDF_TOPO_ALTURA - 6;
-    if (sec.tipo === 'bars') {
-      drawBarChartPDF(doc, sec, y + 10);
-      return;
-    }
-    // cartões de indicador só na primeira folha da seção
-    y = pdfCartoesKpi(doc, pdfKpisDaSecao(sec), y);
-
-    const colStyles = {};
-    sec.alignRight.forEach((r,i) => { if (r) colStyles[i] = { halign: 'right' }; });
-    // alinhamento explícito da seção vence o padrão acima
-    (sec.align || []).forEach((a,i) => { if (a) colStyles[i] = { ...(colStyles[i]||{}), halign: a }; });
-    let primeira = true;
-    doc.autoTable({
-      startY: y,
-      head: [(sec.headers || []).map(h => String(h).toUpperCase())],
-      body: sec.rows, foot: sec.totalRows || undefined,
-      ...pdfEstiloTabela(colStyles, sec.headers),
-      // redesenha o topo nas folhas seguintes da MESMA seção, marcando
-      // "Continuação" (o modelo do cliente repete o cabeçalho em toda página)
-      didDrawPage: () => {
-        if (primeira) { primeira = false; return; }
-        pdfDesenhaTopo(doc, { ...ctx, secaoNome: ctx.secaoNome + ' — Continuação' });
-      },
-    });
-  });
-  pdfNumerarPaginas(doc);
-  doc.save((opts.arquivo || 'relatorio_' + titulo.toLowerCase().replace(/[^a-z0-9]+/g,'_')) + '.pdf');
-}
 function formatDate(v) {
   if (!v) return '-';
   const [y, m, d] = String(v).slice(0, 10).split('-');
   if (!y || !m || !d) return v;
   return `${d}/${m}/${y}`;
 }
-// MEMOIZADA: \u00e9 chamada milh\u00f5es de vezes por tela (cada ordem da Produ\u00e7\u00e3o \u00d7 cada
-// t\u00e9cnico \u00d7 cada tipo) e faz normalize + 3 regex \u2014 na Folha isso sozinho levava
+// MEMOIZADA: é chamada milhões de vezes por tela (cada ordem da Produção × cada
+// técnico × cada tipo) e faz normalize + 3 regex — na Folha isso sozinho levava
 // ~18 s com 41 mil ordens (medido em 21/09/2026). O conjunto de textos diferentes
-// \u00e9 pequeno (tipos, status, nomes), ent\u00e3o o cache acerta quase sempre.
+// é pequeno (tipos, status, nomes), então o cache acerta quase sempre.
 const _NORM_CACHE = new Map();
 function normalizeHeader(str) {
   if (str === null || str === undefined) return '';
@@ -7651,7 +7826,7 @@ function renderDashboard() {
             ? metricCard('Projeção do ciclo', formatCurrency(projecao), false, { sub: `Estimativa pelo ritmo de ${diasDecorridos} dia(s)` })
             : metricCard('Fechamento oficial', oficial > 0 ? formatCurrency(oficial) : '—', false, { sub: oficial > 0 && Math.abs(oficial - ordens.total) >= 1 ? `Diferença de ${formatCurrency(Math.abs(oficial - ordens.total))} para a Produção` : (oficial > 0 ? 'Confere com a Produção' : 'Aguardando importação do fechamento') })}
         </div>
-        ${painelValorGiga(ordens.itens, { nota: `Ordens concluídas de ${formatDate(escolhido.start)} a ${formatDate(escolhido.end)}${ordens.semTipo ? ` · ${ordens.semTipo} ordem(ns) de tipo sem preço ficaram de fora` : ''}.` })}`
+        ${ordens.semTipo ? `<p style="font-size:12px;color:var(--text-muted);margin:10px 0 0">${ordens.semTipo} ordem(ns) de tipo sem preço ficaram de fora da conta.</p>` : ''}`
         : `<div class="empty">Nenhuma ordem concluída de ${formatDate(escolhido.start)} a ${formatDate(escolhido.end)} na Produção. Importe a BASE PRODUÇÃO deste ciclo.</div>`}
       </div>`;
     document.getElementById('vivo-ciclo').addEventListener('change', pintarPainelVivo);
@@ -7905,13 +8080,24 @@ function renderDashboard() {
     };
     // IRR calculado pelo sistema (retornos do ciclo × preço da faixa) manda; sem
     // cobertura de retornos no ciclo, cai na planilha de Comparação
-    const irrAuto = despesasAutomaticasDoPeriodo(rotuloCiclo).valores['IRR'];
+    const autoRet = despesasAutomaticasDoPeriodo(rotuloCiclo);
+    const irrAuto = autoRet.valores['IRR'];
+    const ifiAuto = autoRet.valores['IFI'];
     const irrComparacao = irrAuto !== undefined ? irrAuto : valorDaComparacao('irr');
+    // IFI e IRR (quantidade e valor) ficam DENTRO desta tabela — antes eram 4 cartões
+    // soltos embaixo dos indicadores, com o mesmo conteúdo (pedido do cliente
+    // 21/09/2026). Valor e quantidade vêm da mesma conta do Financeiro (retornos do
+    // ciclo × preço da faixa do ofensor), então a tela inteira mostra UM número.
+    const retDoCiclo = autoRet.info.retornos || null;
+    const qtdDoMotivo = c => c === 'desc_irr' ? (retDoCiclo ? retDoCiclo.qtdIrr : qtdIrr) : c === 'desc_ifi' ? (retDoCiclo ? retDoCiclo.qtdIfi : qtdIfi) : null;
+    const tecnicosDoMotivo = (c, daFolha) => retDoCiclo && (c === 'desc_irr' || c === 'desc_ifi')
+      ? retDoCiclo.linhas.filter(l => (c === 'desc_irr' ? l.qtdIrr : l.qtdIfi) > 0).length : daFolha;
     const descontos = CAMPOS_DESCONTO
       .map(d => {
         const daFolha = somaNaFolha(d.c);
-        const v = (d.c === 'desc_irr' && irrComparacao !== undefined) ? irrComparacao : daFolha;
-        return { ...d, v, daFolha, n: folhaCiclo.filter(f => (f[d.c] || 0) > 0).length };
+        const v = (d.c === 'desc_irr' && irrComparacao !== undefined) ? irrComparacao
+          : (d.c === 'desc_ifi' && ifiAuto !== undefined) ? ifiAuto : daFolha;
+        return { ...d, v, daFolha, qtd: qtdDoMotivo(d.c), n: tecnicosDoMotivo(d.c, folhaCiclo.filter(f => (f[d.c] || 0) > 0).length) };
       })
       .filter(d => d.v > 0)
       .sort((a, b) => b.v - a.v);
@@ -7919,11 +8105,13 @@ function renderDashboard() {
     // total e a diferença cairia toda em "Outros lançamentos", que é justamente
     // a linha que serve pra denunciar desconto em coluna desconhecida
     const ajusteIrr = irrComparacao !== undefined ? irrComparacao - somaNaFolha('desc_irr') : 0;
-    const folhaDesc = somaNaFolha('total_descontos') + ajusteIrr;
+    const ajusteIfi = ifiAuto !== undefined ? ifiAuto - somaNaFolha('desc_ifi') : 0;
+    const folhaDesc = somaNaFolha('total_descontos') + ajusteIrr + ajusteIfi;
     // o que a planilha totaliza menos o que as colunas de motivo explicam —
     // se sobrar, é desconto lançado em coluna que o sistema ainda não conhece
     const descOutros = folhaDesc - descontos.reduce((a, d) => a + d.v, 0);
-    const nComDesconto = folhaCiclo.filter(f => (f.total_descontos || 0) > 0).length;
+    const nComDesconto = Math.max(folhaCiclo.filter(f => (f.total_descontos || 0) > 0).length,
+      retDoCiclo ? new Set(retDoCiclo.linhas.map(l => l.nome)).size : 0);
 
     // ---- RECEITA / DESPESA / LUCRO ----
     // Quando a planilha de COMPARAÇÃO estiver importada, ela manda: é a visão
@@ -8163,23 +8351,24 @@ function renderDashboard() {
       ${resumoFinanceiro}
       <div class="section-heading sem-toggle">Produção por tipo de serviço<span class="sec-nota">${totalOrdens.toLocaleString('pt-BR')} ordens concluídas no ciclo</span></div>
       <div class="panel" style="margin-bottom:1.5rem"><div id="dash-prod-tipo"></div></div>
-      ${painelValorGiga(itensGiga, { centralizar: true, nota: soSintetico ? 'Contagem das ordens concluídas na Produção × valor de contrato por serviço.' : 'Contagem da aba RELATORIO (fechamento do ciclo) × valor de contrato por serviço.' })}
-      <div class="section-heading sem-toggle">Valores do contrato aplicados neste ciclo</div>
+      <div class="section-heading sem-toggle">Valor das Ordens — pago pela GIGA<span class="sec-nota">${soSintetico ? 'Ordens concluídas na Produção' : 'Contagem da aba RELATORIO (fechamento do ciclo)'} × valor de contrato por serviço</span></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table dash-tab">
         <thead><tr><th>Serviço</th><th class="num">GIGA paga à JH</th><th class="num">JH paga ao técnico</th>
           <th class="num">Técnico com 26 dias</th><th class="num">Qtd. no ciclo</th><th class="num">Total GIGA</th></tr></thead>
         <tbody>
           ${precoCiclo.map((v, i) => {
             const q = [ativacao, reparos, me, mc, upgrade][i] || 0;
+            // o valor vem da conta por vigência de contrato (itensGiga), a mesma da tabela que existia antes
+            const g = itensGiga[[0, 3, 2, 1, 4][i]];
             return `<tr><td>${esc(v.label)}</td><td class="num">${formatCurrency(v.giga)}</td>
               <td class="num">${formatCurrency(v.normal)}</td><td class="num">${formatCurrency(v.d26)}</td>
               <td class="num">${q.toLocaleString('pt-BR')}</td>
-              <td class="num">${formatCurrency(q * v.giga)}</td></tr>`;
+              <td class="num">${g && g.valor !== null ? formatCurrency(g.valor) : '-'}</td></tr>`;
           }).join('')}
         </tbody>
-        <tfoot><tr class="total-row"><td>Total</td><td class="num"></td><td class="num"></td><td class="num"></td>
-          <td class="num">${totalOrdens.toLocaleString('pt-BR')}</td>
-          <td class="num">${formatCurrency(valorPagoGiga)}</td></tr></tfoot>
+        <tfoot><tr class="total-row"><td>Total Geral</td><td class="num"></td><td class="num"></td><td class="num"></td>
+          <td class="num">${totalQtdGiga.toLocaleString('pt-BR')}</td>
+          <td class="num">${formatCurrency(totalValorGiga)}</td></tr></tfoot>
       </table></div>
       ${tabelaFrota(tecProprios, 'Fechamento — carros próprios', 'aluguel é provento do técnico')}
       ${tabelaFrota(tecJH, 'Fechamento — carros da JH', 'aluguel é despesa da JH, pago à locadora')}
@@ -8189,22 +8378,23 @@ function renderDashboard() {
         <b>Carro JH:</b> a empresa aluga da locadora por ${formatCurrency(ALUGUEL_JH)} no ciclo — é despesa da JH e não entra no saldo do técnico.
         ${semProducao ? `<br>${semProducao} técnico(s) sem nenhuma ordem e sem dia trabalhado ficaram fora da tabela.` : ''}
       </p>
-      ${temFolha && folhaDesc > 0 ? `
+      ${folhaDesc > 0 ? `
       <div class="section-heading sem-toggle">Descontos da folha<span class="sec-nota">por que o técnico recebe menos que o valor das ordens</span></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table dash-tab">
-        <thead><tr><th>Motivo do desconto</th><th class="num">Valor</th>
+        <thead><tr><th>Motivo do desconto</th><th class="num">Qtd.</th><th class="num">Valor</th>
           <th class="num">% dos descontos</th><th class="num">Técnicos atingidos</th></tr></thead>
         <tbody>
           ${descontos.map(d => `<tr><td>${esc(d.rot)}</td>
+            <td class="num">${d.qtd === null ? '—' : d.qtd.toLocaleString('pt-BR')}</td>
             <td class="num" style="color:var(--danger);font-weight:700">${formatCurrency(d.v)}</td>
             <td class="num">${formatPct(d.v / folhaDesc * 100)}</td>
             <td class="num">${d.n}</td></tr>`).join('')}
-          ${descOutros > 0.01 ? `<tr><td>Outros lançamentos</td>
+          ${descOutros > 0.01 ? `<tr><td>Outros lançamentos</td><td class="num">—</td>
             <td class="num" style="color:var(--danger);font-weight:700">${formatCurrency(descOutros)}</td>
             <td class="num">${formatPct(descOutros / folhaDesc * 100)}</td>
             <td class="num">—</td></tr>` : ''}
         </tbody>
-        <tfoot><tr class="total-row"><td>Total dos descontos</td>
+        <tfoot><tr class="total-row"><td>Total dos descontos</td><td class="num">—</td>
           <td class="num" style="color:var(--danger)">${formatCurrency(folhaDesc)}</td>
           <td class="num">100,0%</td><td class="num">${nComDesconto}</td></tr></tfoot>
       </table></div>` : ''}
@@ -8219,12 +8409,6 @@ function renderDashboard() {
         É o índice do ciclo inteiro, não a média das porcentagens de cada técnico —
         essa média dá o mesmo peso a quem fez 200 ordens e a quem fez 10.
       </p>
-      <div class="cards-grid">
-        ${metricCard('Qtd. IFI', qtdIfi, false, {nivel:'compacto'})}
-        ${metricCard('Qtd. IRR', qtdIrr, false, {nivel:'compacto'})}
-        ${metricCard('Desconto IFI', formatCurrency(descIfi), descIfi>0, {nivel:'compacto'})}
-        ${metricCard('Desconto IRR', formatCurrency(descIrr), descIrr>0, {nivel:'compacto'})}
-      </div>
       <div class="section-heading sem-toggle">Ranking de técnicos</div>
       <div class="panel" style="margin-bottom:1.5rem">
         <h3>Top técnicos — valor das ordens (JH → técnico)</h3>
@@ -19639,7 +19823,7 @@ function renderPainelBI(alvoId = 'content') {
         <div class="panel"><h3>Despesas por Categoria (histórico importado)</h3><div id="bi-despesas"></div></div>
       </div>
 
-      ${painelValorGiga(itensGiga, { nota: 'Contagem da aba RELATORIO (fechamento do ciclo) × valor de contrato por serviço — mesmo número do Relatório de Eficiência. Este painel não acompanha o filtro de cidade, porque o fechamento é fechado por ciclo.' })}
+      ${alvoId === 'content' ? painelValorGiga(itensGiga, { nota: 'Contagem da aba RELATORIO (fechamento do ciclo) × valor de contrato por serviço — mesmo número do Relatório de Eficiência. Este painel não acompanha o filtro de cidade, porque o fechamento é fechado por ciclo.' }) : ''}   <!-- embutido no Dashboard, a tabela unificada de lá já mostra isso -->
 
       <div class="panel" style="margin-bottom:1.5rem"><h3>Produção por Cidade — Ativação × Reparo</h3><div id="bi-cidade-tipo"></div></div>
 
