@@ -2522,7 +2522,17 @@ let supabaseStatus = { ok: null, mensagem: '' }; // preenchido no primeiro uso
 // Envia um lote de linhas recém-importadas pro Supabase (upsert = atualiza se já existir).
 // Roda em segundo plano — se falhar (rede fora, tabela não criada ainda etc.), a
 // importação local já feita não é desfeita, só fica sem sincronizar dessa vez.
+// Quantas gravações no Supabase ainda estão no ar. A conferência automática de
+// Produção/Fechamento (conferirProducaoNoBanco) NÃO pode substituir dado local
+// enquanto isso for > 0: no meio do upsert o banco ainda tem a versão velha, e
+// recarregar dele apagaria as linhas que a própria pessoa acabou de importar.
+let SYNC_EM_ANDAMENTO = 0;
 async function syncBatchToSupabase(target, rows) {
+  SYNC_EM_ANDAMENTO++;
+  try { return await syncBatchToSupabaseInterno(target, rows); }
+  finally { SYNC_EM_ANDAMENTO--; }
+}
+async function syncBatchToSupabaseInterno(target, rows) {
   if (!supa || !rows.length) return { ok: true, skipped: !supa };
   const cfg = SUPABASE_TABLES[target];
   // tabela sem mapeamento (ex.: comparativoFinanceiro, tratada à parte): não dá
@@ -2857,6 +2867,19 @@ async function carregarTabela(tabela, conflict, onPagina) {
 // erro de conexão: o resto carrega normalmente, então em vez de um alerta
 // dizendo "não consegui carregar os dados" o sistema só anota quais faltam.
 let SUPABASE_TABELAS_FALTANDO = [];
+// Coloca as linhas que vieram do banco (ou do cache local) em DB.<tabela> e
+// refaz o índice. UM caminho só, usado no login e na atualização automática —
+// senão as duas cargas divergiriam em hydrate/dedupe.
+function aplicarTabelaCarregada(jsName, cfg, brutas) {
+  let rows = cfg.hydrate ? brutas.map(cfg.hydrate) : brutas;
+  if (cfg.dedupe) rows = cfg.dedupe(rows);
+  DB[jsName] = rows;
+  DB_INDEX[jsName] = new Map();
+  rows.forEach((r, i) => {
+    const key = cfg.conflict.split(',').map(c => r[c]).join('|');
+    DB_INDEX[jsName].set(key, i);
+  });
+}
 async function loadAllFromSupabase(onProgresso) {
   if (!supa) return;
   const entradas = Object.entries(SUPABASE_TABLES);
@@ -2865,15 +2888,7 @@ async function loadAllFromSupabase(onProgresso) {
   let prontas = 0;
   await Promise.all(entradas.map(async ([jsName, cfg]) => {
     try {
-      const brutas = await carregarTabela(cfg.table, cfg.conflict);
-      let rows = cfg.hydrate ? brutas.map(cfg.hydrate) : brutas;
-      if (cfg.dedupe) rows = cfg.dedupe(rows);
-      DB[jsName] = rows;
-      DB_INDEX[jsName] = new Map();
-      rows.forEach((r, i) => {
-        const key = cfg.conflict.split(',').map(c => r[c]).join('|');
-        DB_INDEX[jsName].set(key, i);
-      });
+      aplicarTabelaCarregada(jsName, cfg, await carregarTabela(cfg.table, cfg.conflict));
     } catch (e) {
       // "Could not find the table" = a tabela ainda não existe no banco; o
       // resto do sistema segue funcionando sem ela
@@ -3199,6 +3214,18 @@ const NOMES_ESCRITORIO_EDITAM = ['Thaís', 'Rebeca'];
 // Almoxarifado, Escritório e o resto do perfil "admin" (Matheus, Sebastião)
 // continuam de fora.
 function podeEditarPresencaEscritorio() { return !!currentUser && (currentUser.role === 'analista' || NOMES_ESCRITORIO_EDITAM.includes(currentUser.nome)); }
+// Gestão (21/09/2026, pedido do cliente): "deixe visível somente: Reunião
+// Técnica — Prazos e Retornos, Dashboard, Frota e Pedágio, Prazo do dia e mês de
+// reparo e Parcial do Dia". 'inicio' (Menu Inicial) precisa ficar: é onde todo
+// login aterrissa (getFirstAllowedRoute). 'prazo' é "Prazo — Reparo (24h)", a
+// tela que já traz a faixa do DIA e a do MÊS — Prazo de Ativações e Ofensores
+// de Prazo ficam de fora de propósito.
+// ATENÇÃO: o Dashboard embute o "Resumo financeiro do ciclo" (despesa por
+// categoria, lucro) — foi o motivo de a Gestão ter ficado sem ele em 03/09/2026.
+// Agora ela volta a ver, por pedido explícito.
+const ROTAS_SO_PERMITIDAS = {
+  gestao: ['inicio', 'reuniaoprazos', 'dashboard', 'fleet', 'toll', 'prazo', 'parcialdia'],
+};
 function podeAcessar(role, route) {
   // Presença — Escritório: ficou EXCLUSIVA do Analista em 04/09/2026, e o
   // cliente reabriu em 10/09/2026 — mas só pra Thaís e Rebeca por nome
@@ -3209,6 +3236,13 @@ function podeAcessar(role, route) {
   // mesmo NOMES_ESCRITORIO_EDITAM), Thaís/Rebeca voltam a poder editar.
   const perfil = perfilValido(role);
   if (route === 'presencaescritorio') return perfil === 'analista' || (!!currentUser && NOMES_ESCRITORIO_EDITAM.includes(currentUser.nome));
+  // Perfil com lista de PERMISSÃO (Gestão): só entra o que está na lista.
+  // ROUTE_PERMISSIONS é lista de BLOQUEIO — tela nova nasce liberada pra todo
+  // mundo até alguém bloquear. Pra um perfil que o cliente quer "só estas
+  // telas", isso vazava: cada rota criada no futuro apareceria pra ele sem
+  // ninguém perceber. Aqui é o contrário: rota nova nasce fechada.
+  const soPermitidas = ROTAS_SO_PERMITIDAS[perfil];
+  if (soPermitidas) return soPermitidas.includes(route);
   const bloqueadas = ROUTE_PERMISSIONS[perfil];
   return !bloqueadas || !bloqueadas.includes(route);
 }
@@ -3965,6 +3999,7 @@ document.getElementById('logout-btn').addEventListener('click', async () => {
   currentUser = null;
   // sem login o RLS devolve lista vazia — o timer do PCR não pode continuar
   if (PCR_POLL_TIMER) { clearInterval(PCR_POLL_TIMER); PCR_POLL_TIMER = null; }
+  if (AO_VIVO_TIMER) { clearInterval(AO_VIVO_TIMER); AO_VIVO_TIMER = null; }
 });
 
 // Barra lateral: em telas largas o botão recolhe/reexibe (libera espaço para os
@@ -5047,6 +5082,9 @@ function wireMultiSelectField(id, opts = {}, onChange) {
     updateLabel(); if (onChange) onChange();
   }));
   updateLabel();
+  // devolve o atualizador: quem restaura as caixas por fora (restaurarFiltros)
+  // precisa reescrever o texto do botão, senão ele mostra a seleção antiga
+  return updateLabel;
 }
 function getMultiSelectValues(id) {
   const panel = document.getElementById(id+'-panel');
@@ -6899,6 +6937,7 @@ function navigate(route) {
   ativarTogglesDeSecao();
   wireGerarImagemCartaoPrazo();
   agendarConferenciaPCR(route);
+  agendarAtualizacaoAoVivo(route);
 }
 // ---------- Filtro por coluna estilo Excel, em TODAS as tabelas ----------
 // Cada cabeçalho ganha um funil. Clicando, abre a lista de valores únicos
@@ -7358,47 +7397,119 @@ function renderDashboard() {
   });
   const ciclos = [...vistosCiclo.values()].sort((a, b) => String(b.end).localeCompare(String(a.end)));
   const curto = iso => { const [a, m, d] = String(iso).split('-'); return `${d}.${m}`; };
+  const rotuloDoCiclo = c => `${formatDate(c.start)} a ${formatDate(c.end)}`;
   // "Todos os ciclos" selecionado de cara ao entrar no Dashboard (pedido do
   // cliente, 09/09/2026 — antes abria sozinho no ciclo mais recente com
   // dado). f-start/f-end ficam em branco de propósito, é o sinal que o
   // load() já usa pra "todos" (ver mais abaixo). Ainda dá pra trocar pra
   // um ciclo só no seletor.
   document.getElementById('content').innerHTML = `
-    <input type="hidden" id="f-start" value=""><input type="hidden" id="f-end" value="">
     <input type="hidden" id="dash-tech-a" value=""><input type="hidden" id="dash-tech-b" value="">
     <div class="dash-cabecalho">
       <h2>Painel de Gestão</h2>
       <div class="toolbar" style="margin:10px 0 8px">
-        <div class="field"><label>Ciclo</label><select id="dash-ciclo">
-          <option value="todos" selected>— Todos os ciclos —</option>
-          ${ciclos.map(c => `<option value="${c.start}|${c.end}">${formatDate(c.start)} a ${formatDate(c.end)}</option>`).join('')}
-        </select></div>
+        ${multiSelectField('dash-ciclos', 'Ciclo(s)', ciclos.map(rotuloDoCiclo), { allLabel: 'Todos os ciclos', noneLabel: 'Nenhum', emptyMsg: 'Nenhum ciclo importado.' })}
+        <button type="button" id="f-apply" hidden></button>
       </div>
       <p id="dash-ciclo-desc"></p>
     </div>
+    <div id="dash-vivo"></div>
     <div id="dash-body"></div>`;
-  document.getElementById('dash-ciclo').addEventListener('change', function () {
-    if (this.value === 'todos') {
-      document.getElementById('f-start').value = '';
-      document.getElementById('f-end').value = '';
-    } else {
-      const [ini, fim] = this.value.split('|');
-      document.getElementById('f-start').value = ini;
-      document.getElementById('f-end').value = fim;
+  // Vários ciclos ao mesmo tempo (pedido do cliente 21/09/2026). O estado mora
+  // nas caixas do multiselect (regra do padrão de página), e f-apply — escondido
+  // — existe só pra navigate() reaplicar o filtro depois de restaurarFiltros;
+  // sem ele o painel abria com o texto do botão de uma seleção e o corpo de outra.
+  // ---- CICLO AO VIVO (pedido do cliente 21/09/2026: "já quero que tenha o período
+  // 21.08 a 21.09 com os serviços e quanto vamos ganhar da GIGA — sempre atualizado").
+  // O resto do Dashboard sai do fechamento (RELATORIO), que só existe DEPOIS do
+  // ciclo fechar; este painel sai direto da PRODUÇÃO, então mostra o ciclo em
+  // andamento (e o que acabou de fechar) sem esperar importação nenhuma.
+  // Abre no ciclo de ONTEM: no dia 21 ainda mostra o ciclo que acabou de fechar
+  // (é o que está sendo fechado), e do dia 22 em diante já é o novo.
+  const ciclosVivo = (() => {
+    const ontem = new Date(); ontem.setDate(ontem.getDate() - 1);
+    const lista = []; let c = cicloCalendarioDe(isoLocalDe(ontem));
+    for (let i = 0; i < 6; i++) {
+      lista.push(c);
+      // o dia antes do início (dia 21) é o dia 20 do MESMO mês — que já pertence
+      // ao ciclo anterior. (Voltar um mês a mais pulava um ciclo sim, um não.)
+      c = cicloCalendarioDe(c.start.slice(0, 8) + '20');
     }
-    load();
-  });
+    return lista;
+  })();
+  const pintarPainelVivo = () => {
+    const alvo = document.getElementById('dash-vivo');
+    if (!alvo) return;
+    const sel = document.getElementById('vivo-ciclo');
+    const escolhido = ciclosVivo.find(c => c.start === (sel ? sel.value : '')) || ciclosVivo[0];
+    const ordens = ordensEValoresDoPeriodo(escolhido.start, escolhido.end);
+    const hoje = hojeISOLocal();
+    const emAndamento = hoje <= escolhido.end;
+    // dias corridos do ciclo e quantos já passaram (até a última data com produção)
+    const dias = (a, b) => Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000) + 1;
+    const totalDias = dias(escolhido.start, escolhido.end);
+    let ultimaProducao = '';
+    DB.producao.forEach(r => { if (r.data && r.data >= escolhido.start && r.data <= escolhido.end && r.data > ultimaProducao) ultimaProducao = r.data; });
+    const diasDecorridos = ultimaProducao ? dias(escolhido.start, ultimaProducao) : 0;
+    // projeção linear só faz sentido com ciclo aberto e alguns dias de amostra
+    const projecao = emAndamento && diasDecorridos >= 3 ? (ordens.total / diasDecorridos) * totalDias : null;
+    const oficial = DB.fechamento.filter(f => overlaps(f.inicio, f.ate_o_dia, escolhido.start, escolhido.end))
+      .reduce((a, f) => a + (f.valor_pago_giga || 0), 0);
+    const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    alvo.innerHTML = `
+      <div class="panel" style="margin-bottom:1.5rem;border-color:var(--accent)">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px">
+          <h3 style="margin:0">Ciclo ao vivo — serviços e quanto a GIGA vai pagar</h3>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <select id="vivo-ciclo" class="topn-select">
+              ${ciclosVivo.map(c => `<option value="${c.start}"${c.start === escolhido.start ? ' selected' : ''}>${formatDate(c.start)} a ${formatDate(c.end)}${hoje <= c.end ? ' (em andamento)' : ''}</option>`).join('')}
+            </select>
+            <span style="font-size:12px;color:var(--text-muted)">conferido às ${agora}</span>
+          </div>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted);margin:0 0 14px">
+          Calculado na hora das ordens concluídas da Produção${ultimaProducao ? ` — produção importada até <b>${formatDate(ultimaProducao)}</b>` : ''}.
+          Atualiza sozinho quando alguém importa produção nova.
+        </p>
+        ${ordens.qtd ? `
+        <div class="cards-grid">
+          ${metricCard('A receber da GIGA', formatCurrency(ordens.total), false, { nivel: 'heroi', big: true, positive: true, sub: emAndamento ? 'até agora' : 'ciclo encerrado' })}
+          ${metricCard('Serviços concluídos', ordens.qtd.toLocaleString('pt-BR'), false, { nivel: 'primario', sub: `${totalDias} dias no ciclo` })}
+          ${projecao !== null
+            ? metricCard('Projeção do ciclo', formatCurrency(projecao), false, { sub: `ritmo de ${diasDecorridos} dia(s) corridos — estimativa` })
+            : metricCard('Fechamento oficial', oficial > 0 ? formatCurrency(oficial) : 'ainda não importado', false, { sub: oficial > 0 && Math.abs(oficial - ordens.total) >= 1 ? `difere ${formatCurrency(Math.abs(oficial - ordens.total))} da produção` : (oficial > 0 ? 'bate com a produção' : 'sai depois que o ciclo fecha') })}
+        </div>
+        ${painelValorGiga(ordens.itens, { nota: `Ordens concluídas de ${formatDate(escolhido.start)} a ${formatDate(escolhido.end)}${ordens.semTipo ? ` · ${ordens.semTipo} ordem(ns) de tipo sem preço ficaram de fora` : ''}.` })}`
+        : `<div class="empty">Nenhuma ordem concluída de ${formatDate(escolhido.start)} a ${formatDate(escolhido.end)} na Produção. Importe a BASE PRODUÇÃO deste ciclo.</div>`}
+      </div>`;
+    document.getElementById('vivo-ciclo').addEventListener('change', pintarPainelVivo);
+  };
+  pintarPainelVivo();
+  const atualizaRotuloCiclos = wireMultiSelectField('dash-ciclos', { noun: 'ciclo(s)', allLabel: 'Todos os ciclos' }, () => load());
+  document.getElementById('f-apply').addEventListener('click', () => load());
   load();
   function load() {
-    const s = document.getElementById('f-start').value, e = document.getElementById('f-end').value;
-    // "Todos os ciclos" (pedido do cliente 04/09/2026): f-start/f-end ficam
-    // em branco de propósito — é o sinal pro resto do load() não filtrar por
-    // período nenhum (ver `todos` logo abaixo).
+    atualizaRotuloCiclos();
+    const marcados = getMultiSelectValues('dash-ciclos');
+    const faixas = ciclos.filter(c => marcados.includes(rotuloDoCiclo(c)));   // mais novo primeiro
+    const unico = faixas.length === 1;
+    const todosOsCiclos = faixas.length === ciclos.length;
+    // s/e só existem quando é UM ciclo. Com "todos" ou vários, ficam em branco de
+    // propósito — é o sinal que o resto do load() já usa pra "agregado" (`todos`
+    // logo abaixo): não há UM período pra buscar folha/cadastro/ciclo anterior.
+    const s = unico ? faixas[0].start : '', e = unico ? faixas[0].end : '';
     const todos = !s || !e;
-    document.getElementById('dash-ciclo-desc').innerHTML = todos
-      ? `Fechamento de <b>todos os ciclos</b> importados · já com os valores de contrato reajustados`
-      : `Fechamento do ciclo <b>${formatDate(s)}</b> a <b>${formatDate(e)}</b> · já com os valores de contrato reajustados`;
     const body = document.getElementById('dash-body');
+    if (!faixas.length) {
+      document.getElementById('dash-ciclo-desc').innerHTML = '';
+      body.innerHTML = '<div class="panel"><div class="empty">Nenhum ciclo selecionado — marque pelo menos um no filtro acima.</div></div>';
+      return;
+    }
+    document.getElementById('dash-ciclo-desc').innerHTML = unico
+      ? `Fechamento do ciclo <b>${formatDate(s)}</b> a <b>${formatDate(e)}</b> · já com os valores de contrato reajustados`
+      : todosOsCiclos
+        ? `Fechamento de <b>todos os ciclos</b> importados · já com os valores de contrato reajustados`
+        : `Fechamento de <b>${faixas.length} ciclos</b> selecionados (${[...faixas].reverse().map(c => `${formatDate(c.start).slice(0, 5)} a ${formatDate(c.end).slice(0, 5)}`).join(' · ')}) · já com os valores de contrato reajustados`;
 
     // Todos os números desta página vêm exclusivamente da aba RELATORIO
     // (fechamento) — não mistura com outras planilhas (produção, prazo etc.),
@@ -7412,7 +7523,8 @@ function renderDashboard() {
     // achado real: técnico com total_geral 0, R$2.605,50 de despesa, sumia
     // da conta e criava uma diferença de R$2.605,50 entre tela e Excel.
     // "Todos os ciclos": pega tudo, sem filtrar por período (ver `todos` acima).
-    const fech = todos ? DB.fechamento.slice() : DB.fechamento.filter(f => overlaps(f.inicio, f.ate_o_dia, s, e));
+    const fech = todosOsCiclos ? DB.fechamento.slice()
+      : DB.fechamento.filter(f => faixas.some(c => overlaps(f.inicio, f.ate_o_dia, c.start, c.end)));
 
     // Resumo Despesas/Receitas do ciclo — pedido do cliente 04/09/2026: mostra
     // SÓ o ciclo escolhido no seletor do topo (nada de comparar com anteriores
@@ -7434,7 +7546,8 @@ function renderDashboard() {
     // ordem do array. Do mais ANTIGO pro mais NOVO (esquerda pra direita).
     const periodosOrdenados = pivotDash ? [...pivotDash.periodos].sort((a, b) =>
       String(datasDoPeriodoFolha(a).fim || '').localeCompare(String(datasDoPeriodoFolha(b).fim || ''))) : [];
-    const periodosParaResumo = todos ? periodosOrdenados : (periodosOrdenados.includes(rotuloPeriodo) ? [rotuloPeriodo] : []);
+    const rotulosSelecionados = new Set(faixas.map(rotuloDoCiclo));
+    const periodosParaResumo = todosOsCiclos ? periodosOrdenados : periodosOrdenados.filter(p => rotulosSelecionados.has(p));
     // pedido do cliente 09/09/2026: tira a coluna Total (comTotal sempre
     // false agora) — e centraliza a tabela quando é só 1 ciclo, senão ela
     // ocupa a largura inteira da seção mesmo tendo só 3 colunas (rótulo +
@@ -7443,7 +7556,7 @@ function renderDashboard() {
     // NÃO centraliza — ver `.dash-resumo-fin.centralizado` no CSS.
     const resumoFinanceiro = !periodosParaResumo.length ? '' : `
       <div class="dash-resumo-fin${todos ? '' : ' centralizado'}">
-        <div class="section-heading sem-toggle">Resumo financeiro do ciclo<span class="sec-nota">${todos ? 'todos os ciclos importados' : 'só o ciclo selecionado'}</span></div>
+        <div class="section-heading sem-toggle">Resumo financeiro do ciclo<span class="sec-nota">${unico ? 'só o ciclo selecionado' : todosOsCiclos ? 'todos os ciclos importados' : `${faixas.length} ciclos selecionados`}</span></div>
         ${tabelaFinanceiraComparativa(periodosParaResumo, pivotDash, { comSetas: false, comTotal: false })}
       </div>`;
 
@@ -7461,8 +7574,8 @@ function renderDashboard() {
       body.innerHTML = `${resumoFinanceiro}<div class="panel"><div class="empty">${tituloVazio}<br><span style="font-size:12px">${dica}</span>${botoes}</div></div>`;
       body.querySelectorAll('button[data-ciclo]').forEach(b => b.addEventListener('click', () => {
         const [ini, fim] = b.dataset.ciclo.split('|');
-        document.getElementById('f-start').value = ini;
-        document.getElementById('f-end').value = fim;
+        const rot = rotuloDoCiclo({ start: ini, end: fim });
+        document.querySelectorAll('#dash-ciclos-panel input[type=checkbox]').forEach(cb => { cb.checked = cb.value === rot; });
         load();
       }));
       return;
@@ -7676,10 +7789,35 @@ function renderDashboard() {
     // diferente de `cmpTem` (despesa): as duas têm fonte independente.
     const temValorPagoGiga = fech.some(f => (f.valor_pago_giga || 0) > 0);
     const cmpTemReceita = !temValorPagoGiga && !!(cmp && cmp.receitaOrdens && cmp.receitaOrdens[rotuloPeriodo] !== undefined);
-    const receitaFinal  = temValorPagoGiga ? valorPagoGiga : (cmpTemReceita ? cmp.receitaOrdens[rotuloPeriodo] : valorPagoGiga);
-    const despesaFinal  = cadTem ? cadDespesa    : (cmpTem ? cmp.totalDespesas[rotuloPeriodo]  : despesasTotal);
+    // VÁRIOS CICLOS (ou "todos"): soma CICLO A CICLO, cada um pela fonte de maior
+    // prioridade — a mesma coluna que o "Resumo financeiro" logo acima mostra
+    // (pivotDash). Antes o modo agregado somava o fechamento inteiro de uma vez:
+    // a receita de ciclo sem VALOR PAGO GIGA (ex.: 21/05–20/06) sumia, e o aluguel
+    // da locadora (27 × R$ 2.300) entrava UMA vez só, mesmo com 5 ciclos somados.
+    // Ciclo que não está no pivô (sem cadastro nem planilha) cai no fechamento.
+    const resultadoDoCiclo = c => {
+      const rot = rotuloDoCiclo(c);
+      if (pivotDash && pivotDash.periodos.includes(rot)) {
+        return { receita: pivotDash.receitaOrdens[rot] || 0, despesa: pivotDash.totalDespesas[rot] || 0, origem: 'resumo' };
+      }
+      const doCiclo = DB.fechamento.filter(f => overlaps(f.inicio, f.ate_o_dia, c.start, c.end));
+      return {
+        receita: doCiclo.reduce((a, f) => a + (f.valor_pago_giga || 0), 0),
+        despesa: doCiclo.reduce((a, f) => a + (f.despesas || 0), 0) + (doCiclo.length ? aluguelLocadora : 0),
+        origem: 'fechamento',
+      };
+    };
+    const agregadoCiclos = unico ? null : faixas.map(resultadoDoCiclo).reduce(
+      (a, r) => ({ receita: a.receita + r.receita, despesa: a.despesa + r.despesa, doFech: a.doFech + (r.origem === 'fechamento' ? 1 : 0) }),
+      { receita: 0, despesa: 0, doFech: 0 });
+    const receitaFinal  = agregadoCiclos ? agregadoCiclos.receita
+      : (temValorPagoGiga ? valorPagoGiga : (cmpTemReceita ? cmp.receitaOrdens[rotuloPeriodo] : valorPagoGiga));
+    const despesaFinal  = agregadoCiclos ? agregadoCiclos.despesa
+      : (cadTem ? cadDespesa : (cmpTem ? cmp.totalDespesas[rotuloPeriodo]  : despesasTotal));
     const lucroFinal    = receitaFinal - despesaFinal;
-    const fonteFin = cadTem
+    const fonteFin = agregadoCiclos
+      ? `soma de ${faixas.length} ciclo(s), cada um pela mesma fonte do Resumo financeiro (cadastro do Financeiro → planilha de Comparação → fechamento${agregadoCiclos.doFech ? ` — ${agregadoCiclos.doFech} ciclo(s) só pelo fechamento` : ''})`
+      : cadTem
       ? 'cadastro do Financeiro' + (cmpTemReceita ? ' (despesa) e da planilha de Comparação (receita — sem valor pago GIGA no fechamento desse ciclo)' : '')
       : (cmpTem ? 'despesa da planilha de Comparação' + (temValorPagoGiga ? ' (receita do fechamento por técnico)' : ' (sem valor pago GIGA no fechamento desse ciclo — receita também da planilha)') : 'fechamento por técnico');
     const lucroTotal = lucroFinal;
@@ -10380,6 +10518,90 @@ async function pcrAtualizarDoBanco() {
     PCR_CHECANDO = false;
   }
 }
+// ---------- Produção e Fechamento ao vivo (Dashboard e Financeiro) ----------
+// Pedido do cliente (21/09/2026): "preciso que seja sempre atualizado". A receita
+// do ciclo sai das ORDENS da Produção, então quando outro login importa a
+// produção nova, quem está com o Dashboard/Financeiro aberto precisa ver sem
+// sair e entrar. Mesma ideia e mesmas guardas do PCR (pcrAtualizarDoBanco):
+// só pergunta ao banco a contagem e o carimbo mais novo (duas consultas
+// minúsculas) e só relê a tabela quando diferem. A releitura usa carregarTabela,
+// que já é incremental (só as linhas alteradas) — não rebaixa a tabela inteira.
+// Exige a coluna atualizado_em (PASSO-24). Sem ela a consulta falha e a
+// conferência simplesmente não roda: nada quebra, só não se atualiza sozinho —
+// o botão "↻ Atualizar dados" continua valendo.
+const TABELAS_AO_VIVO = ['producao', 'fechamento'];
+let AO_VIVO_CHECANDO = false;
+async function assinaturaRemotaDaTabela(tabela) {
+  const [cont, novo] = await Promise.all([
+    supa.from(tabela).select('*', { count: 'exact', head: true }),
+    supa.from(tabela).select('atualizado_em').order('atualizado_em', { ascending: false }).limit(1),
+  ]);
+  if (cont.error || novo.error || typeof cont.count !== 'number') return null;
+  return { qtd: cont.count, maisNovo: novo.data && novo.data[0] ? Date.parse(novo.data[0].atualizado_em) || 0 : 0 };
+}
+function assinaturaLocalDaTabela(jsName) {
+  let maisNovo = 0;
+  (DB[jsName] || []).forEach(r => { const t = Date.parse(r.atualizado_em); if (t > maisNovo) maisNovo = t; });
+  return { qtd: (DB[jsName] || []).length, maisNovo };
+}
+// Devolve a lista das tabelas que mudaram e foram relidas.
+async function conferirProducaoNoBanco() {
+  if (!supa || !currentUser || AO_VIVO_CHECANDO || SYNC_EM_ANDAMENTO > 0) return [];
+  AO_VIVO_CHECANDO = true;
+  const mudaram = [];
+  try {
+    for (const jsName of TABELAS_AO_VIVO) {
+      const cfg = SUPABASE_TABLES[jsName];
+      let remota;
+      try { remota = await assinaturaRemotaDaTabela(cfg.table); } catch (e) { remota = null; }
+      if (!remota) continue;                              // sem atualizado_em / rede: não mexe
+      const local = assinaturaLocalDaTabela(jsName);
+      if (remota.qtd === local.qtd && remota.maisNovo === local.maisNovo) continue;
+      // banco vazio com dado local = sessão expirada (RLS devolve lista vazia sem
+      // erro): nunca trocar o que a pessoa está vendo por nada
+      if (remota.qtd === 0 && local.qtd > 0) continue;
+      if (SYNC_EM_ANDAMENTO > 0) break;                   // importação começou no meio
+      const brutas = await carregarTabela(cfg.table, cfg.conflict);
+      if (SYNC_EM_ANDAMENTO > 0) break;
+      aplicarTabelaCarregada(jsName, cfg, brutas);
+      mudaram.push(jsName);
+    }
+    if (mudaram.length) normalizarCidadesEmTudo();
+  } catch (e) {
+    /* rede caiu no meio: tenta de novo no próximo ciclo */
+  } finally {
+    AO_VIVO_CHECANDO = false;
+  }
+  return mudaram;
+}
+const ROTAS_AO_VIVO = new Set(['dashboard', 'finance']);
+let AO_VIVO_TIMER = null;
+async function producaoConferirEAtualizarTela() {
+  const rota = ROTA_ATUAL.nome;
+  if (!ROTAS_AO_VIVO.has(rota)) return;
+  const mudaram = await conferirProducaoNoBanco();
+  if (!mudaram.length || ROTA_ATUAL.nome !== rota) return;
+  if (rota === 'finance') {
+    // no Financeiro só refaz a receita: re-renderizar apagaria despesa digitada
+    if (typeof FIN_ATUALIZAR_RECEITA === 'function') FIN_ATUALIZAR_RECEITA();
+    toast('Receita atualizada com a produção nova.', 'ok', 3000);
+    return;
+  }
+  const ativo = document.activeElement;
+  const digitando = ativo && /^(INPUT|SELECT|TEXTAREA)$/.test(ativo.tagName) && document.getElementById('content').contains(ativo);
+  if (digitando) { toast('Produção atualizada. Reabra o Dashboard pra ver os números novos.', 'ok', 5000); return; }
+  navigate(rota);
+  toast('Dashboard atualizado com a produção nova.', 'ok', 3000);
+}
+function agendarAtualizacaoAoVivo(route) {
+  if (AO_VIVO_TIMER) { clearInterval(AO_VIVO_TIMER); AO_VIVO_TIMER = null; }
+  if (!ROTAS_AO_VIVO.has(route)) return;
+  producaoConferirEAtualizarTela();
+  AO_VIVO_TIMER = setInterval(producaoConferirEAtualizarTela, 180000);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') producaoConferirEAtualizarTela();
+});
 // Telas que leem DB.pcr — só nelas vale ficar conferindo.
 const ROTAS_COM_PCR = new Set(['pcr', 'parcialdia', 'chamadosgiga', 'reuniaoprazos']);
 let PCR_POLL_TIMER = null;
@@ -15708,6 +15930,76 @@ function receitaDoPeriodoFin(inicioISO, fimISO) {
     .filter(f => overlaps(f.inicio, f.ate_o_dia, inicioISO, fimISO))
     .reduce((a, f) => a + (f.valor_pago_giga || 0), 0);
 }
+// Ciclo 21→20 que contém uma data, calculado só pelo CALENDÁRIO. cicloQueContem
+// procura em DB.fechamento — e um ciclo que acabou de fechar (ou ainda está
+// aberto) não tem fechamento nenhum. Aritmética em inteiros, sem Date/UTC, pra
+// não escorregar um dia por fuso.
+function cicloCalendarioDe(iso) {
+  const [a, m, d] = String(iso).split('-').map(Number);
+  let ia = a, im = m;
+  if (d < 21) { im = m - 1; if (im === 0) { im = 12; ia = a - 1; } }
+  let fa = ia, fm = im + 1;
+  if (fm === 13) { fm = 1; fa = ia + 1; }
+  const p2 = n => String(n).padStart(2, '0');
+  return { start: `${ia}-${p2(im)}-21`, end: `${fa}-${p2(fm)}-20` };
+}
+// Ordens concluídas de um período e quanto a GIGA paga por elas — a tabela
+// "ordens × valores" que fundamenta a receita. Vem direto da PRODUÇÃO, então
+// existe assim que a produção do ciclo é importada, sem esperar o fechamento
+// (RELATORIO) sair. Preço pela vigência do FIM do período (mesma regra de
+// tabelaServicosGiga: nunca aplicar reajuste novo num ciclo já fechado) e só
+// ordem de TÉCNICO (ehRecursoTecnico, igual ao bônus e à folha).
+// Conferido em 21/09/2026 contra a planilha real: reproduz EXATAMENTE a
+// "RECEITA DAS ORDENS" do COMPARATIVO em 21/05–20/06 (R$ 474.623,30) e em
+// 21/06–20/07 (R$ 428.535,31), e fica a +0,04% do fechamento oficial em
+// 21/07–20/08 (2 reparos a mais na produção).
+function ordensEValoresDoPeriodo(inicioISO, fimISO) {
+  const vigentes = valoresVigentesEm(fimISO);
+  const contagem = new Map(vigentes.map(v => [v.label, 0]));
+  let semTipo = 0;
+  DB.producao.forEach(p => {
+    if (!p.data || !isConcluido(p.status) || !inRange(p.data, inicioISO, fimISO) || !ehRecursoTecnico(p.recurso)) return;
+    const t = normalizeHeader(p.tipo_atividade);
+    const linha = vigentes.find(v => v.re.test(t));
+    if (!linha) { semTipo++; return; }
+    contagem.set(linha.label, contagem.get(linha.label) + 1);
+  });
+  const itens = vigentes.map(v => ({ label: v.label, qtd: contagem.get(v.label), preco: v.giga, valor: contagem.get(v.label) * v.giga }));
+  return {
+    itens, semTipo,
+    qtd: itens.reduce((a, i) => a + i.qtd, 0),
+    total: itens.reduce((a, i) => a + i.valor, 0),
+  };
+}
+// Preenchido pela tela Financeiro a cada load(): refaz a receita no lugar.
+let FIN_ATUALIZAR_RECEITA = null;
+// Receita de um período COM a fonte que a originou — a regra de prioridade é UMA
+// só, usada por todo lugar que mostra "Receita das Ordens":
+//   1. fechamento (RELATORIO) com VALOR PAGO GIGA > 0 — o número oficial do ciclo;
+//   2. a planilha de Comparação (COMPARATIVO.xlsx) — o fechamento contábil que o
+//      cliente já fechou pro período (não deve "andar" sozinho depois);
+//   3. as ORDENS da Produção × valor GIGA (ordensEValoresDoPeriodo) — é o que
+//      preenche sozinho um ciclo novo, sem digitar nada (pedido do cliente
+//      21/09/2026: "criei o ciclo 21.08 a 20.09 só com as despesas; a receita
+//      quero que o sistema puxe as ordens e faça o cálculo");
+//   4. zero, quando não há de onde tirar.
+// ACHADO 21/09/2026 (cliente: "lucro negativo no período 21.05 a 20.06"): o
+// RELATORIO_GERAL só tem os ciclos de 21/06 em diante, então pra 21/05–20/06
+// não existe fechamento e a receita saía R$ 0,00 — o lucro virava exatamente
+// "-despesas" (-R$ 427.322,69), enquanto a planilha de Comparação tem R$
+// 474.623,30 de receita. O mesmo defeito já tinha sido corrigido em 09/09/2026
+// só no bloco "Resultado do Ciclo" do Dashboard; a tabela "Resumo financeiro"
+// (pivotDoCadastroFin) e a tela Financeiro chamavam receitaDoPeriodoFin direto.
+function receitaDoPeriodoComFonte(rotulo, inicioISO, fimISO) {
+  const doFechamento = receitaDoPeriodoFin(inicioISO, fimISO);
+  if (doFechamento > 0) return { valor: doFechamento, fonte: 'fechamento' };
+  const cmp = DB.comparativoFinanceiro;
+  const daPlanilha = cmp && cmp.receitaOrdens ? cmp.receitaOrdens[rotulo] : undefined;
+  if (typeof daPlanilha === 'number' && daPlanilha > 0) return { valor: daPlanilha, fonte: 'planilha' };
+  const ordens = ordensEValoresDoPeriodo(inicioISO, fimISO);
+  if (ordens.qtd > 0) return { valor: ordens.total, fonte: 'producao' };
+  return { valor: 0, fonte: 'nenhuma' };
+}
 // Despesas já cadastradas de um período: { 'Folha Técnica': 161824.27, ... }.
 // A busca é por nome NORMALIZADO porque dado antigo (vindo da planilha) grava
 // "FROTA -DESCONTO" enquanto o cadastro grava "Frota - Desconto" — é a mesma
@@ -15917,7 +16209,33 @@ function renderFinance() {
     const p = lista.find(x => x.rotulo === rotulo) || lista[0];
     if (!p) { document.getElementById('fin-body').innerHTML = '<div class="panel"><div class="empty">Nenhum período disponível — importe a produção primeiro.</div></div>'; return; }
     const valores = despesasDoPeriodoFin(rotulo);
-    const receita = receitaDoPeriodoFin(p.start, p.end);
+    // `let`: a receita se REFAZ sozinha quando entra produção nova (ver
+    // atualizarReceitaNaTela) — sem re-renderizar a tela, que apagaria o que a
+    // pessoa já digitou nos campos de despesa e ainda não salvou.
+    let recInfo = receitaDoPeriodoComFonte(rotulo, p.start, p.end);
+    let receita = recInfo.valor;
+    // Texto de onde veio o número + a tabela "ordens × valores" por trás dele.
+    const htmlReceitaOrdens = () => {
+      const ordens = ordensEValoresDoPeriodo(p.start, p.end);
+      const nFech = (DB.fechamento || []).filter(f => overlaps(f.inicio, f.ate_o_dia, p.start, p.end)).length;
+      const dif = receita - ordens.total;
+      // quando a fonte NÃO é a produção, diz quanto a produção daria — a pessoa
+      // precisa saber se os dois caminhos concordam
+      const comparacao = (recInfo.fonte !== 'producao' && ordens.qtd > 0)
+        ? ` Pelas ordens da Produção o cálculo dá <b>${formatCurrency(ordens.total)}</b>${Math.abs(dif) >= 1 ? ` (diferença de ${formatCurrency(Math.abs(dif))})` : ' — bate'}.`
+        : '';
+      const texto = recInfo.fonte === 'producao'
+        ? `<b>Receita calculada automaticamente</b> a partir das ordens concluídas neste ciclo (tabela abaixo) × o valor que a GIGA paga por tipo. Atualiza sozinha a cada importação da Produção; quando o fechamento (RELATORIO) do ciclo for importado, ele passa a valer.`
+        : recInfo.fonte === 'fechamento'
+          ? `Receita das ordens = soma de VALOR PAGO GIGA do fechamento deste ciclo (${nFech} técnico(s)).${comparacao}`
+          : recInfo.fonte === 'planilha'
+            ? `Receita das ordens vinda da <b>planilha de Comparação</b> (fechamento contábil deste ciclo).${comparacao}`
+            : `<b style="color:var(--danger)">Receita das ordens zerada:</b> não há ordem concluída deste ciclo na Produção, nem fechamento, nem receita na planilha de Comparação — o lucro sai negativo por falta de receita, não por excesso de despesa. Importe a Produção (BASE PRODUÇÃO) deste ciclo.`;
+      return `<p style="font-size:12px;color:var(--text-muted);margin:-6px 0 14px">${texto}</p>`
+        + (ordens.qtd > 0 ? painelValorGiga(ordens.itens, {
+            nota: `Ordens concluídas de ${formatDate(p.start)} a ${formatDate(p.end)}${ordens.semTipo ? ` · ${ordens.semTipo} ordem(ns) de tipo sem preço ficaram de fora` : ''}.`,
+          }) : '');
+    };
 
     // campo de dinheiro: os DÍGITOS viram centavos (mesma técnica do desconto
     // da Folha) — não dá pra digitar "R$ 1.234,56" livre num input e esperar
@@ -15946,8 +16264,8 @@ function renderFinance() {
         { tipo: 'despesa', rot: 'Total de Despesas', val: formatCurrency(0), id: 'fin-despesa' },
         { tipo: 'lucro', rot: 'Lucro', val: formatCurrency(0), id: 'fin-lucro' },
       ])}
+      <div id="fin-receita-detalhe">${htmlReceitaOrdens()}</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-6px 0 18px">
-        Receita das ordens = soma de VALOR PAGO GIGA do fechamento deste ciclo (${(DB.fechamento || []).filter(f => overlaps(f.inicio, f.ate_o_dia, p.start, p.end)).length} técnico(s)).
         Total de Despesas e Lucro são calculados sozinhos conforme você digita.
       </p>
       ${(() => {
@@ -16070,6 +16388,19 @@ function renderFinance() {
       elLucro.textContent = formatCurrency(lucro);
       elLucro.style.color = lucro < 0 ? 'var(--danger)' : 'var(--success)';
       return { despesa, lucro };
+    };
+    // Gancho da atualização automática (ver conferirProducaoNoBanco): refaz SÓ o
+    // card da receita, a tabela das ordens e o lucro — os campos de despesa não
+    // são tocados, então nada do que foi digitado se perde.
+    FIN_ATUALIZAR_RECEITA = () => {
+      const card = document.getElementById('fin-receita');
+      if (!card) return;
+      recInfo = receitaDoPeriodoComFonte(rotulo, p.start, p.end);
+      receita = recInfo.valor;
+      card.textContent = formatCurrency(receita);
+      const det = document.getElementById('fin-receita-detalhe');
+      if (det) det.innerHTML = htmlReceitaOrdens();
+      recalcular();
     };
     inputs().forEach(el => el.addEventListener('input', () => {
       const digitos = el.value.replace(/\D/g, '');
@@ -18034,8 +18365,11 @@ function pivotDoCadastroFin() {
     // reimportado) usava R$ 0,00 aqui antes desse ajuste, apagando a
     // receita real do histórico; nesse caso mantém o valor da planilha.
     const { inicio, fim } = datasDoPeriodoFolha(per);
-    const temFechamento = inicio && fim && DB.fechamento.some(f => overlaps(f.inicio, f.ate_o_dia, inicio, fim));
-    receitaOrdens[per] = temFechamento ? receitaDoPeriodoFin(inicio, fim) : planilha.receitaOrdens[per];
+    // usa a MESMA regra de fonte de todo lugar (ver receitaDoPeriodoComFonte):
+    // antes só olhava "tem linha de fechamento", e fechamento com VALOR PAGO
+    // GIGA vazio (importado antes da coluna existir) zerava a receita
+    const rec = inicio && fim ? receitaDoPeriodoComFonte(per, inicio, fim) : { valor: 0, fonte: 'nenhuma' };
+    receitaOrdens[per] = rec.fonte === 'nenhuma' ? (planilha.receitaOrdens[per] || 0) : rec.valor;
     lucro[per] = receitaOrdens[per] - totalDespesas[per];
   });
   doCadastro.forEach(p => {
@@ -18050,7 +18384,7 @@ function pivotDoCadastroFin() {
       const v = d[cat] || doCmp[cat] || 0;
       põe(porCategoria, cat, p.rotulo, v); soma += v;
     });
-    const receita = receitaDoPeriodoFin(p.start, p.end);
+    const receita = receitaDoPeriodoComFonte(p.rotulo, p.start, p.end).valor;
     totalDespesas[p.rotulo] = soma;
     receitaOrdens[p.rotulo] = receita;
     lucro[p.rotulo] = receita - soma;
