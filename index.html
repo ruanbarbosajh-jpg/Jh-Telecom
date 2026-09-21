@@ -7453,7 +7453,6 @@ function renderDashboard() {
           <div>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
               <h3 style="margin:0">Faturamento GIGA do ciclo</h3>
-              <span class="badge ok">● Ao vivo</span>
             </div>
             <p style="font-size:12.5px;color:var(--text-muted);margin:6px 0 0">
               Ordens concluídas na Produção × valor unitário da GIGA${ultimaProducao ? ` · Produção até <b>${formatDate(ultimaProducao)}</b>` : ''}
@@ -7518,8 +7517,18 @@ function renderDashboard() {
     // achado real: técnico com total_geral 0, R$2.605,50 de despesa, sumia
     // da conta e criava uma diferença de R$2.605,50 entre tela e Excel.
     // "Todos os ciclos": pega tudo, sem filtrar por período (ver `todos` acima).
-    const fech = todosOsCiclos ? DB.fechamento.slice()
+    // Ciclo SEM fechamento importado (o do mês corrente, por exemplo) entra com o
+    // fechamento sintético montado da Produção — senão os cartões e as tabelas
+    // sumiam e a tela ficava só com o resumo financeiro.
+    const temFechamentoNoCiclo = c => DB.fechamento.some(f => overlaps(f.inicio, f.ate_o_dia, c.start, c.end));
+    const fechReais = todosOsCiclos ? DB.fechamento.slice()
       : DB.fechamento.filter(f => faixas.some(c => overlaps(f.inicio, f.ate_o_dia, c.start, c.end)));
+    const fechSinteticos = faixas.filter(c => !temFechamentoNoCiclo(c)).flatMap(c => fechamentoSintetico(c.start, c.end));
+    const fech = [...fechReais, ...fechSinteticos];
+    const soSintetico = fech.length > 0 && fech.every(f => f._sintetico);
+    if (fechSinteticos.length) {
+      document.getElementById('dash-ciclo-desc').innerHTML += ` · ciclo(s) sem fechamento importado: números calculados da Produção`;
+    }
 
     // Resumo Despesas/Receitas do ciclo — pedido do cliente 04/09/2026: mostra
     // SÓ o ciclo escolhido no seletor do topo (nada de comparar com anteriores
@@ -7583,7 +7592,7 @@ function renderDashboard() {
     const valorPagoGiga = sum('valor_pago_giga');       // o que a GIGA realmente paga no ciclo
     const despesas = sum('despesas');
     const lucro = sum('lucros');
-    const gasolina = sum('gasolina');
+    const gasolina = soSintetico && unico ? (despesasEfetivasDoPeriodo(rotuloPeriodo).porCat['Combustível'] || 0) : sum('gasolina');
     const descIfi = sum('desc_ifi'), descIrr = sum('desc_irr');
     const qtdIfi = sum('qtd_ifi'), qtdIrr = sum('qtd_irr');
     const totalOrdens = sum('total_geral');
@@ -7835,7 +7844,15 @@ function renderDashboard() {
       if (!ant) return null;
       return { pct: ((atual - ant) / Math.abs(ant)) * 100, invertido: !!invertido };
     };
-    const varGiga = varDe(valorPagoGiga, 'valor_pago_giga');
+    // Compara receita com receita (a mesma fonte dos dois lados). Antes comparava o
+    // fechamento com o fechamento anterior, e um ciclo sem fechamento ficava sem
+    // variação; e a planilha e o fechamento não têm o mesmo número.
+    let varGiga = varDe(valorPagoGiga, 'valor_pago_giga');
+    if (unico && /-21$/.test(s)) {
+      const ant = cicloCalendarioDe(s.slice(0, 8) + '20');
+      const recAnt = receitaDoPeriodoComFonte(rotuloPeriodoFin(ant.start, ant.end), ant.start, ant.end).valor;
+      varGiga = recAnt > 0 ? { pct: ((receitaFinal - recAnt) / recAnt) * 100, invertido: false } : null;
+    }
 
     // A faixa "Pontos de atenção" saiu daqui a pedido do cliente (01/09/2026).
     // Os mesmos limites continuam valendo nos medidores de IFI/IRR mais abaixo.
@@ -7953,7 +7970,7 @@ function renderDashboard() {
           ? ' — inclui folha do escritório, imposto, aluguel da base e demais custos da empresa, que não aparecem no fechamento por técnico.'
           : '. Cadastre as despesas deste ciclo na tela Financeiro para ver o resultado da empresa inteira.'}
       </p>
-      ${cadFaltando.length ? `<p style="margin:0 0 20px;font-size:var(--fs-sm);color:var(--text-secondary);background:color-mix(in srgb, var(--accent) 7%, transparent);border:1px solid color-mix(in srgb, var(--accent) 30%, transparent);border-radius:var(--r-sm);padding:10px 12px">
+      ${cadFaltando.length && ehAnalista() ? `<p style="margin:0 0 20px;font-size:var(--fs-sm);color:var(--text-secondary);background:color-mix(in srgb, var(--accent) 7%, transparent);border:1px solid color-mix(in srgb, var(--accent) 30%, transparent);border-radius:var(--r-sm);padding:10px 12px">
         Cadastro do Financeiro <b>incompleto</b> pra ${esc(rotuloPeriodo)}: ${cadFaltando.length} categoria(s) sem valor digitado aqui
         (${cadFaltando.map(esc).join(', ')}) — a "Despesa total" e o "Lucro" acima já estão usando o valor da <b>planilha de Comparação</b> pra essas categorias, então a conta está certa.
         Pra deixar o cadastro completo (e não depender mais da planilha), use o botão "Usar do Comparativo (Excel)" na tela <b>Financeiro</b>.
@@ -7961,7 +7978,7 @@ function renderDashboard() {
       ${resumoFinanceiro}
       <div class="section-heading sem-toggle">Produção por tipo de serviço<span class="sec-nota">${totalOrdens.toLocaleString('pt-BR')} ordens concluídas no ciclo</span></div>
       <div class="panel" style="margin-bottom:1.5rem"><div id="dash-prod-tipo"></div></div>
-      ${painelValorGiga(itensGiga, { centralizar: true, nota: 'Contagem da aba RELATORIO (fechamento do ciclo) × valor de contrato por serviço.' })}
+      ${painelValorGiga(itensGiga, { centralizar: true, nota: soSintetico ? 'Contagem das ordens concluídas na Produção × valor de contrato por serviço.' : 'Contagem da aba RELATORIO (fechamento do ciclo) × valor de contrato por serviço.' })}
       <div class="section-heading sem-toggle">Valores do contrato aplicados neste ciclo</div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table dash-tab">
         <thead><tr><th>Serviço</th><th class="num">GIGA paga à JH</th><th class="num">JH paga ao técnico</th>
@@ -16085,6 +16102,54 @@ function cicloCalendarioDe(iso) {
   const p2 = n => String(n).padStart(2, '0');
   return { start: `${ia}-${p2(im)}-21`, end: `${fa}-${p2(fm)}-20` };
 }
+// FECHAMENTO SINTÉTICO: as mesmas linhas por técnico que a aba RELATORIO traz,
+// montadas da PRODUÇÃO. É o que faz o Dashboard funcionar em ciclo que ainda não
+// tem fechamento importado (ex.: 21/08–20/09 — pedido do cliente 21/09/2026:
+// "por que os cards não aparecem nesse período? deixe em todos"). Só entra onde
+// NÃO existe fechamento de verdade; onde existe, ele continua mandando.
+// Não inventa o que a Produção não tem: gasolina e despesas por técnico ficam 0.
+function fechamentoSintetico(inicio, fim) {
+  const vigentes = valoresVigentesEm(fim);
+  const campoDe = { 'Ativação': 'ativacao', 'Reparo': 'reparos', 'Mudança de Endereço': 'me', 'Mudança de Cômodo': 'mc', 'Upgrade/Downgrade': 'upgrade' };
+  const porTec = new Map();
+  DB.producao.forEach(p => {
+    if (!p.data || !isConcluido(p.status) || !inRange(p.data, inicio, fim) || !ehRecursoTecnico(p.recurso)) return;
+    const nome = String(p.recurso).trim();
+    if (!porTec.has(nome)) porTec.set(nome, { ativacao: 0, mc: 0, me: 0, reparos: 0, upgrade: 0, dias: new Set() });
+    const o = porTec.get(nome);
+    o.dias.add(p.data);
+    const t = normalizeHeader(p.tipo_atividade);
+    const linha = vigentes.find(v => v.re.test(t));
+    if (linha && campoDe[linha.label]) o[campoDe[linha.label]]++;
+  });
+  if (!porTec.size) return [];
+  const retornos = contarRetornosPorOfensor(inicio, fim);
+  const retLinhas = temCoberturaRetornos(inicio, fim) ? retornosDoPeriodoFin(inicio, fim).linhas : [];
+  const folha = (DB.folhaPagamento || []).filter(l => { const j = datasDoPeriodoFolha(l.periodo); return j.inicio && overlaps(j.inicio, j.fim, inicio, fim); });
+  const norm = normalizeHeader;
+  return [...porTec.entries()].map(([tecnico, o]) => {
+    const ret = Object.entries(retornos).find(([k]) => norm(k) === norm(tecnico));
+    const qtdIfi = ret ? ret[1].ifi : 0, qtdIrr = ret ? ret[1].irr : 0;
+    const rl = retLinhas.find(l => norm(l.nome) === norm(tecnico));
+    const baseIfi = o.ativacao + o.me;
+    const linhaFolha = folha.find(x => norm(x.tecnico) === norm(tecnico));
+    // faixa do técnico: a da Folha do ciclo; sem ela, a regra do bônus (mesma da Folha)
+    const apto = linhaFolha && String(linhaFolha.bonus || '').trim()
+      ? (/apto/i.test(linhaFolha.bonus) && !/inapto/i.test(linhaFolha.bonus))
+      : (o.dias.size >= BONUS_DIAS_MIN && (baseIfi ? qtdIfi / baseIfi * 100 : 0) <= BONUS_IFI_MAX && (o.reparos ? qtdIrr / o.reparos * 100 : 0) <= BONUS_IRR_MAX);
+    let giga = 0, valor = 0;
+    vigentes.forEach(v => { const q = o[campoDe[v.label]] || 0; giga += q * v.giga; valor += q * (apto ? v.d26 : v.normal); });
+    const frota = frotaDoTecnico(tecnico, inicio, fim);
+    return {
+      tecnico, inicio, ate_o_dia: fim, _sintetico: true,
+      ativacao: o.ativacao, mc: o.mc, me: o.me, reparos: o.reparos, upgrade: o.upgrade,
+      total_geral: o.ativacao + o.mc + o.me + o.reparos + o.upgrade, dias_trabalhados: o.dias.size,
+      valor_pago_giga: giga, valor_ordens: valor, despesas: 0, lucros: 0, gasolina: 0,
+      qtd_ifi: qtdIfi, qtd_irr: qtdIrr, desc_ifi: rl ? rl.valorIfi : 0, desc_irr: rl ? rl.valorIrr : 0,
+      frota, aluguel_carro: /propri/i.test(norm(frota)) ? +(o.dias.size * diariaDoAluguel(frota)).toFixed(2) : 0,
+    };
+  });
+}
 // Ordens concluídas de um período e quanto a GIGA paga por elas — a tabela
 // "ordens × valores" que fundamenta a receita. Vem direto da PRODUÇÃO, então
 // existe assim que a produção do ciclo é importada, sem esperar o fechamento
@@ -16309,6 +16374,7 @@ function conferenciaFinanceira(rotulo) {
            ok: temCmp && !conflitos.length && !autoDifs.length && !totalNaoFecha && !receitaDiverge };
 }
 function conferenciaFinanceiraHtml(periodos) {
+  if (!ehAnalista()) return ''; // conferência de dados é ferramenta do Analista (pedido do cliente 21/09/2026)
   const lista = periodos.map(conferenciaFinanceira);
   const comPlanilha = lista.filter(c => c.temCmp);
   if (!comPlanilha.length) {
