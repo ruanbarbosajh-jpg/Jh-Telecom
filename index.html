@@ -9757,6 +9757,20 @@ function renderOfensor() {
     const byCity = Object.entries(byCityMap).map(([city,total])=>({label:city,value:total})).sort((a,b)=>b.value-a.value);
     const topOfensor = byOfensor[0], topCity = byCity[0];
 
+    // IFI/IRR por cidade (pedido do cliente 22/09/2026) — mesma regra do
+    // indicador geral, só que o denominador (ativações/reparos) é escopado
+    // pra CADA cidade, senão o % de uma cidade pequena saía diluído pelo total
+    // da empresa inteira (mesmo cuidado do comentário acima, "bases").
+    const cidadeDe = p => p.cidade || 'Não informado';
+    const baseCidades = DB.producao.filter(p => inRange(p.data,s,e) && matchFiltros(p));
+    const porCidadeMap = {};
+    byCity.forEach(c => { porCidadeMap[c.label] = { cidade: c.label, ifi: 0, irr: 0 }; });
+    rows.forEach(r => { const c = cidadeDe(r); if (r.ifi_irr === 'IFI') porCidadeMap[c].ifi++; else if (r.ifi_irr === 'IRR') porCidadeMap[c].irr++; });
+    const ifiIrrPorCidade = Object.values(porCidadeMap).map(c => {
+      const bases = basesIfiIrr(baseCidades.filter(p => cidadeDe(p) === c.cidade));
+      return { ...c, total: c.ifi + c.irr, pctIfi: pctIndicador(c.ifi, bases.ativacoes), pctIrr: pctIndicador(c.irr, bases.reparos) };
+    }).sort((a, b) => b.total - a.total);
+
     body.innerHTML = `
       <div class="cards-grid wide">
         ${metricCard('Cidade com mais retornos', topCity ? topCity.label : '-', false, {sub: topCity ? topCity.value+' retorno(s)' : '', accent:true, big:true})}
@@ -9776,34 +9790,37 @@ function renderOfensor() {
         ${indicadorQualidadeHtml({ titulo: 'IRR', subtitulo: 'Índice de Retornos e Reincidências', icone: 'tendencia', valor: pctIrr, meta: 4.50, variante: 'b' })}
       </div>
       <div class="panel" style="margin-bottom:1.5rem"><h3>Total Geral — O.S</h3><div id="c-donut"></div></div>
-      <div class="panels-grid">
-        <div class="panel"><h3>IFI + IRR por Ofensor</h3><div id="c-ofensor"></div></div>
-        <!-- o gráfico é desenhado com { fill: true }, que usa height:100% +
-             space-evenly pra ocupar o painel todo. Sem a cadeia flex aqui
-             (painel em coluna + o container do gráfico com flex:1) esse
-             height:100% não resolve em nada e as barras ficavam amontoadas no
-             topo, com um vazio embaixo — foi o que o cliente apontou. -->
-        <div class="panel" style="display:flex;flex-direction:column"><h3>Total IFI + IRR por Cidade</h3><div id="c-city" style="flex:1;display:flex;flex-direction:column"></div></div>
-      </div>
+      <div class="panel" style="margin-bottom:1.5rem"><h3>IFI + IRR por Ofensor</h3><div id="c-ofensor"></div></div>
+      <div class="section-heading sem-toggle">IFI / IRR por cidade<span class="sec-nota">% de cada indicador sobre a base da PRÓPRIA cidade — não do total da empresa</span></div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+        <th>Cidade</th><th class="num">Qtd. IFI</th><th class="num">% IFI</th><th class="num">Qtd. IRR</th><th class="num">% IRR</th><th class="num">Total</th>
+      </tr></thead><tbody>
+        ${ifiIrrPorCidade.map(c => `<tr><td class="cat-cell">${esc(c.cidade)}</td>
+          <td class="num">${c.ifi}</td><td class="num" style="color:${c.pctIfi>2.50?'var(--danger)':'var(--success)'}">${formatPct(c.pctIfi,2)}</td>
+          <td class="num">${c.irr}</td><td class="num" style="color:${c.pctIrr>4.50?'var(--danger)':'var(--success)'}">${formatPct(c.pctIrr,2)}</td>
+          <td class="num"><b>${c.total}</b></td></tr>`).join('')}
+      </tbody><tfoot><tr class="total-row"><td>Total Geral</td><td class="num">${qtdIfi}</td><td class="num">${formatPct(pctIfi,2)}</td>
+        <td class="num">${qtdIrr}</td><td class="num">${formatPct(pctIrr,2)}</td><td class="num">${rows.length}</td></tr></tfoot>
+      </table></div>
       <div id="pdf-export-area"></div>
     `;
     donutChart('c-donut', [{label:'IRR', value:qtdIrr, color:'#4f7fff'}, {label:'IFI', value:qtdIfi, color:'#ef4444'}], { centroLabel: 'Retornos' });
     barsChartTopN('c-ofensor', byOfensor);
-    // sem "Top N": as cidades atendidas são poucas (as 6 do contrato mais as
-    // eventuais de fora), então cortar em 10 só escondia informação
-    barsChart('c-city', byCity.map(c=>({ ...c, color:'#38bdf8' })), { fill: true });
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'resumo', label: 'Resumo IFI/IRR' },
       { id: 'ofensor', label: 'Ranking de ofensores' },
-      { id: 'cidade', label: 'Ranking por cidade' }
+      { id: 'cidade', label: 'IFI/IRR por cidade' }
     ]);
     wirePdfExportPanel('Ofensor — IFI / IRR', {
       resumo: () => secaoTabela('Resumo IFI / IRR', [
         {l:'Qtd. IFI', v:qtdIfi}, {l:'Qtd. IRR', v:qtdIrr}, {l:'% IFI', v:formatPct(pctIfi, 2)}, {l:'% IRR', v:formatPct(pctIrr, 2)}, {l:'Total de retornos', v:rows.length}
       ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
       ofensor: () => secaoTabela('Ranking de Ofensores', byOfensor, [{header:'Ofensor', get:r=>r.label}, {header:'Retornos', get:r=>r.value}]),
-      cidade: () => secaoTabela('Ranking por Cidade', byCity, [{header:'Cidade', get:r=>r.label}, {header:'Retornos', get:r=>r.value}]),
+      cidade: () => secaoTabela('IFI / IRR por Cidade', ifiIrrPorCidade, [
+        {header:'Cidade', get:r=>r.cidade}, {header:'Qtd. IFI', get:r=>r.ifi}, {header:'% IFI', get:r=>formatPct(r.pctIfi,2)},
+        {header:'Qtd. IRR', get:r=>r.irr}, {header:'% IRR', get:r=>formatPct(r.pctIrr,2)}, {header:'Total', get:r=>r.total}
+      ], { totalRow: ['Total Geral', qtdIfi, formatPct(pctIfi,2), qtdIrr, formatPct(pctIrr,2), rows.length] }),
     });
   }
 }
@@ -11316,32 +11333,28 @@ async function producaoConferirEAtualizarTela(forcar) {
   navigate(rota);   // os filtros voltam sozinhos (restaurarFiltros)
   toast('Dados atualizados.', 'ok', 3000);
 }
+// Atualização automática (timer + voltar pra aba) DESLIGADA a pedido do
+// cliente em 22/09/2026: toda vez que ela disparava, a tela chamava
+// navigate() de novo e o navigate() dá scrollTo(0,0) — pra quem estava lendo
+// no meio da página, a tela "subia sozinha" a cada 4 min (Produção/Fechamento)
+// ou 90s (PCR), mesmo já preservando filtro e dado. Incômodo demais pro
+// ganho. Agora o dado só atualiza mesmo em F5/reabrir o sistema (que já
+// carrega tudo de novo via loadAllFromSupabase) — sem botão de atualizar
+// manual (foi tirado antes, 21/09/2026) e sem timer.
+// As funções de verdade (producaoConferirEAtualizarTela, pcrConferirEAtualizarTela,
+// conferirProducaoNoBanco, pcrAtualizarDoBanco) continuam inteiras logo acima/abaixo —
+// só ninguém mais AGENDA a chamada. Pra religar: descomentar o corpo destas
+// duas funções e os dois listeners de visibilitychange.
 function agendarAtualizacaoAoVivo(route) {
   if (AO_VIVO_TIMER) { clearInterval(AO_VIVO_TIMER); AO_VIVO_TIMER = null; }
-  if (ROTAS_SEM_AO_VIVO.has(route)) return;
-  producaoConferirEAtualizarTela();
-  AO_VIVO_TIMER = setInterval(producaoConferirEAtualizarTela, 240000);
 }
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') producaoConferirEAtualizarTela();
-});
-// Telas que leem DB.pcr — só nelas vale ficar conferindo.
+// Telas que leem DB.pcr — só nelas vale ficar conferindo (quando a conferência
+// automática estiver ligada de novo).
 const ROTAS_COM_PCR = new Set(['pcr', 'parcialdia', 'chamadosgiga', 'reuniaoprazos']);
 let PCR_POLL_TIMER = null;
-// Chamada a cada navegação: religa (ou desliga) a conferência periódica conforme
-// a tela aberta. Sem o clearInterval aqui o timer se acumulava a cada troca de
-// aba — a mesma armadilha do PCR_LIVE_TIMER (CLAUDE.md §8, item 8).
 function agendarConferenciaPCR(route) {
   if (PCR_POLL_TIMER) { clearInterval(PCR_POLL_TIMER); PCR_POLL_TIMER = null; }
-  if (!ROTAS_COM_PCR.has(route)) return;
-  pcrConferirEAtualizarTela();
-  PCR_POLL_TIMER = setInterval(pcrConferirEAtualizarTela, 90000);
 }
-// Voltar pra aba do navegador depois de um tempo parado é o momento em que mais
-// provavelmente alguém importou enquanto isso.
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') pcrConferirEAtualizarTela();
-});
 async function pcrConferirEAtualizarTela() {
   if (!ROTAS_COM_PCR.has(ROTA_ATUAL.nome)) return;
   const r = await pcrAtualizarDoBanco();
