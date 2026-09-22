@@ -12915,7 +12915,7 @@ function renderParcialDoDia() {
     const efetividade = l => { const base = l.total - (l.cancelado || 0); return base > 0 ? (l.concluido / base) * 100 : 0; };
     // Só a EXIBIÇÃO some com o cancelado; Total O.S e Efetividade seguem a mesma conta
     const bucketsTabela = canceladosVisiveis ? buckets : buckets.filter(b => b !== 'cancelado');
-    const thStatus = b => `<th${b === 'concluido' ? ' style="color:var(--success)"' : ''}>${bucketLabel[b]}</th>`;
+    const thStatus = b => `<th>${bucketLabel[b]}</th>`;
     const btnCancelados = `<button type="button" class="btn-mini pd-toggle-cancelados">${canceladosVisiveis ? 'Ocultar cancelados' : 'Mostrar cancelados'}</button>`;
     const statusTable = tiposFixos.map(([label,re]) => {
       const linhas = rows.filter(r => re.test(normalizeHeader(r.tipo_atividade)));
@@ -14557,53 +14557,168 @@ function renderOfensoresPrazo() {
 //                mas é a única fonte com hora real de início/limite/fim
 //   DB.producao  BASE PRODUÇÃO / REPAROS OK — retornos IFI/IRR, ofensor e dias
 //
-// ---------- Exportação em PowerPoint (branco e azul) ----------
+// ---------- Exportação em PowerPoint ----------
+// Redesenhado em 22/09/2026 a partir de um modelo visual que o cliente trouxe
+// (capa e fechamento escuros, cartão com barra de cor lateral/superior, pílula
+// de status, ranking com selo colorido, caixa de destaque com o "porquê" do
+// número) — pedido explícito: "quero que as apresentações... sejam semelhantes
+// a esse modelo", "mais visual, profissional". Regra que não muda: o slide é
+// um ESPELHO da tela, nunca recalcula — só troca a CASCA visual dos mesmos
+// números que `d` já traz prontos. Onde o modelo tinha texto "de opinião"
+// (ex.: "Ação Recomendada" por técnico) que o sistema não tem como calcular de
+// verdade, não foi copiado — os textos de destaque abaixo só saem de contas
+// que já existem em `d` (maior/menor, % vs. meta, motivo #1 etc).
 // Paleta fixa em hex (não usa os tokens de tema do sistema de propósito): o
 // .pptx é um arquivo que vai ser aberto fora daqui, num projetor, e precisa ser
-// sempre claro — tema escuro projetado em sala de reunião não lê.
+// sempre claro nos slides de conteúdo (só capa/fechamento são escuros, igual
+// ao modelo) — tema escuro projetado em sala de reunião não lê.
 const PPT_COR = {
-  azul: '1D4ED8', azulEscuro: '12275B', azulClaro: 'EAF1FE', zebra: 'F6F9FF',
-  branco: 'FFFFFF', texto: '13233D', muted: '64748B', linha: 'D6E0F0',
+  azul: '1D4ED8', azulEscuro: '12275B', azulClaro: 'EAF1FE', zebra: 'F8FAFC',
+  branco: 'FFFFFF', texto: '13233D', muted: '64748B', linha: 'E2E8F0',
   verde: '15803D', vermelho: 'C5221F',
+  fundoEscuro: '0B1120', cardEscuro: '141B33', linhaEscura: '253256', mutedEscuro: '8B96B8',
+  laranja: 'C2410C', laranjaClaro: 'FFF1E8', laranjaTxt: '9A3412',
+  verdeClaro: 'E9F9EF', verdeTxt: '15803D',
+  vermelhoClaro: 'FDECEC', vermelhoTxt: 'C5221F',
+  azulClaro2: 'EAF1FE', azulTxt: '1D4ED8',
+  cabecalhoTab: 'F1F5F9',
 };
-function pptSlide(pptx, titulo, subtitulo) {
+// Pílula pequena (rótulo com fundo claro) — usada em cartões e como selo de
+// status nas tabelas. A cor SEMPRE vem de uma conta real (meta batida ou não),
+// nunca é decoração solta.
+function pptPilula(pptx, slide, texto, x, y, w, opts = {}) {
+  const h = opts.h || 0.28;
+  slide.addShape(pptx.ShapeType.roundRect, { x, y, w, h, fill: { color: opts.fundo || PPT_COR.azulClaro2 }, line: { type: 'none' }, rectRadius: 0.09 });
+  slide.addText(String(texto), { x, y, w, h, fontSize: opts.fontSize || 9, bold: true, align: 'center', valign: 'middle', color: opts.cor || PPT_COR.azulTxt, fontFace: 'Segoe UI' });
+}
+// Cabeçalho dos slides de conteúdo: rótulo pequeno (kicker) + título grande,
+// linha fina embaixo e, opcionalmente, uma pílula de status no canto direito
+// (só quando dá pra afirmar algo real: dentro/fora da meta).
+function pptSlide(pptx, kicker, titulo, opts = {}) {
   const s = pptx.addSlide();
   s.background = { color: PPT_COR.branco };
-  s.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.72, fill: { color: PPT_COR.azul } });
-  s.addText(String(titulo), { x: 0.45, y: 0.06, w: 9.1, h: 0.6, fontSize: 22, bold: true, color: PPT_COR.branco, valign: 'middle', fontFace: 'Segoe UI' });
-  if (subtitulo) s.addText(String(subtitulo), { x: 0.45, y: 0.78, w: 9.1, h: 0.28, fontSize: 11, color: PPT_COR.muted, fontFace: 'Segoe UI' });
+  s.addText(String(kicker).toUpperCase(), { x: 0.5, y: 0.32, w: 6.8, h: 0.26, fontSize: 11, bold: true, color: PPT_COR.azul, charSpacing: 1, fontFace: 'Segoe UI' });
+  s.addText(String(titulo), { x: 0.5, y: 0.56, w: 7.3, h: 0.46, fontSize: 22, bold: true, color: PPT_COR.texto, fontFace: 'Segoe UI' });
+  if (opts.badge) {
+    const bw = opts.badgeW || 3.0;
+    pptPilula(pptx, s, opts.badge, 9.5 - bw, 0.4, bw, { fundo: opts.badgeFundo || PPT_COR.azulClaro2, cor: opts.badgeCor || PPT_COR.azulTxt, fontSize: 9.5, h: 0.3 });
+  }
+  s.addShape(pptx.ShapeType.line, { x: 0.5, y: 1.0, w: 9.0, h: 0, line: { color: PPT_COR.linha, width: 1 } });
+  s.addText('JH TELECOM — LITORAL SUL', { x: 0.5, y: 5.32, w: 4, h: 0.24, fontSize: 8, color: PPT_COR.muted, fontFace: 'Segoe UI' });
+  s.slideNumber = { x: 9.1, y: 5.32, w: 0.4, fontSize: 8, color: PPT_COR.muted, fontFace: 'Segoe UI' };
   return s;
 }
-// Até 3 cartões grandes de número — é o que o cliente quer ver de longe
-function pptKpis(pptx, slide, itens, y = 1.2) {
-  const larg = 2.95, gap = 0.22;
-  itens.slice(0, 3).forEach((k, i) => {
-    const x = 0.45 + i * (larg + gap);
-    slide.addShape(pptx.ShapeType.roundRect, { x, y, w: larg, h: 1.55, fill: { color: PPT_COR.azulClaro }, line: { color: PPT_COR.linha, width: 1 }, rectRadius: 0.06 });
-    slide.addText(String(k.valor), { x, y: y + 0.16, w: larg, h: 0.66, fontSize: k.corpo || 30, bold: true, align: 'center', color: k.cor || PPT_COR.azul, fontFace: 'Segoe UI' });
-    slide.addText(String(k.rotulo), { x: x + 0.08, y: y + 0.84, w: larg - 0.16, h: 0.3, fontSize: 11, align: 'center', color: PPT_COR.texto, fontFace: 'Segoe UI' });
-    if (k.sub) slide.addText(String(k.sub), { x: x + 0.1, y: y + 1.14, w: larg - 0.2, h: 0.32, fontSize: 9, align: 'center', color: PPT_COR.muted, fontFace: 'Segoe UI' });
+// Até 4 cartões de número — o que o cliente quer ver de longe. Cada cartão
+// tem uma tarja de cor (lateral) e, embaixo do valor, uma pílula com o
+// complemento (quantidade, meta, sub-indicador).
+function pptKpis(pptx, slide, itens, y = 1.25) {
+  const n = Math.min(itens.length, 4);
+  const larg = n <= 3 ? 2.9 : 2.12, gap = 0.2, h = 1.5;
+  itens.slice(0, 4).forEach((k, i) => {
+    const x = 0.5 + i * (larg + gap);
+    const cor = k.cor || PPT_COR.azul;
+    slide.addShape(pptx.ShapeType.roundRect, { x, y, w: larg, h, fill: { color: PPT_COR.branco }, line: { color: PPT_COR.linha, width: 1 }, rectRadius: 0.05 });
+    slide.addShape(pptx.ShapeType.rect, { x, y: y + 0.05, w: 0.045, h: h - 0.1, fill: { color: cor } });
+    slide.addText(String(k.rotulo).toUpperCase(), { x: x + 0.18, y: y + 0.12, w: larg - 0.32, h: 0.4, fontSize: 8.5, bold: true, color: PPT_COR.muted, fontFace: 'Segoe UI' });
+    slide.addText(String(k.valor), { x: x + 0.16, y: y + 0.42, w: larg - 0.3, h: 0.5, fontSize: k.corpo || (n <= 3 ? 27 : 22), bold: true, color: cor, fontFace: 'Segoe UI' });
+    if (k.sub) pptPilula(pptx, slide, k.sub, x + 0.16, y + h - 0.42, larg - 0.32, { fundo: k.corFundo || PPT_COR.azulClaro2, cor, fontSize: 8, h: 0.28 });
   });
 }
+// Caixa de destaque (o "porquê" do número, igual ao "Diagnóstico Rápido" do
+// modelo) — corpo é texto simples, sempre montado a partir de campos que já
+// vieram prontos em `d` (nunca um número novo).
+function pptDestaque(pptx, slide, titulo, corpo, opts = {}) {
+  const x = opts.x ?? 0.5, y = opts.y ?? 1.25, w = opts.w ?? 9.0, h = opts.h ?? 1.35;
+  const cor = opts.cor || PPT_COR.azul, fundo = opts.fundo || PPT_COR.azulClaro2;
+  slide.addShape(pptx.ShapeType.roundRect, { x, y, w, h, fill: { color: fundo }, line: { type: 'none' }, rectRadius: 0.05 });
+  slide.addShape(pptx.ShapeType.rect, { x, y, w: 0.06, h, fill: { color: cor } });
+  slide.addText(String(titulo), { x: x + 0.28, y: y + 0.14, w: w - 0.55, h: 0.3, fontSize: 12.5, bold: true, color: PPT_COR.texto, fontFace: 'Segoe UI' });
+  slide.addText(String(corpo), { x: x + 0.28, y: y + 0.46, w: w - 0.55, h: h - 0.6, fontSize: 10.5, color: PPT_COR.texto, valign: 'top', fontFace: 'Segoe UI' });
+}
+// Tabela com cabeçalho claro (não mais azul sólido — fica mais perto do
+// modelo) e zebra sutil. Uma célula pode vir pré-formatada como pílula de
+// status: { pill:true, texto, cor, fundo } — dá pra colorir só aquela célula.
 function pptTabela(pptx, slide, headers, linhas, opts = {}) {
   if (!linhas.length) {
-    slide.addText('Sem dados no período/filtro selecionado.', { x: 0.45, y: opts.y || 1.3, w: 9.1, h: 0.4, fontSize: 12, color: PPT_COR.muted, fontFace: 'Segoe UI' });
+    slide.addText('Sem dados no período/filtro selecionado.', { x: 0.5, y: opts.y || 1.3, w: 9.0, h: 0.4, fontSize: 12, color: PPT_COR.muted, fontFace: 'Segoe UI' });
     return;
   }
-  const cabecalho = headers.map(h => ({ text: String(h), options: { bold: true, color: PPT_COR.branco, fill: { color: PPT_COR.azul } } }));
-  const corpo = linhas.map((l, i) => l.map((c, ci) => ({
-    text: String(c === null || c === undefined ? '' : c),
-    options: { color: ci === 1 ? PPT_COR.azulEscuro : PPT_COR.texto, bold: ci === 1, fill: { color: i % 2 ? PPT_COR.zebra : PPT_COR.branco } },
-  })));
+  const cabecalho = headers.map(h => ({ text: String(h), options: { bold: true, color: PPT_COR.texto, fill: { color: PPT_COR.cabecalhoTab } } }));
+  const corpo = linhas.map((l, i) => l.map((c, ci) => {
+    const zebra = i % 2 ? PPT_COR.zebra : PPT_COR.branco;
+    if (c && typeof c === 'object' && c.pill) {
+      return { text: c.texto, options: { color: c.cor, fill: { color: zebra }, bold: true, align: 'center' } };
+    }
+    return {
+      text: String(c === null || c === undefined ? '' : c),
+      options: { color: ci === 1 ? PPT_COR.azulEscuro : PPT_COR.texto, bold: ci === 1, fill: { color: zebra } },
+    };
+  }));
   slide.addTable([cabecalho, ...corpo], {
-    x: 0.45, y: opts.y || 1.25, w: 9.1, colW: opts.colW,
-    fontSize: opts.fontSize || 12, fontFace: 'Segoe UI',
+    x: 0.5, y: opts.y || 1.25, w: 9.0, colW: opts.colW,
+    fontSize: opts.fontSize || 11.5, fontFace: 'Segoe UI',
     border: { type: 'solid', pt: 0.5, color: PPT_COR.linha },
-    valign: 'middle', rowH: opts.rowH || 0.3, autoPage: false,
+    valign: 'middle', rowH: opts.rowH || 0.32, autoPage: false,
   });
 }
 function pptRodape(slide, texto) {
-  slide.addText(String(texto), { x: 0.45, y: 5.05, w: 9.1, h: 0.3, fontSize: 9, italic: true, color: PPT_COR.muted, fontFace: 'Segoe UI' });
+  slide.addText(String(texto), { x: 0.5, y: 4.98, w: 8.6, h: 0.3, fontSize: 9, italic: true, color: PPT_COR.muted, fontFace: 'Segoe UI' });
+}
+// Grade de cartões por cidade (igual ao "Desempenho de SLA por Cidade" do
+// modelo) — tarja no topo colorida pela severidade real do número (pior/
+// melhor da lista, ou comparado à meta), nunca por ordem alfabética.
+function pptCidadesCards(pptx, slide, cidades, y, opts = {}) {
+  const lista = cidades.slice(0, 5);
+  if (!lista.length) { slide.addText('Sem dados no período/filtro selecionado.', { x: 0.5, y, w: 9, h: 0.4, fontSize: 12, color: PPT_COR.muted, fontFace: 'Segoe UI' }); return; }
+  const n = lista.length, gap = 0.16, larg = (9.0 - (n - 1) * gap) / n, h = 1.55;
+  lista.forEach((c, i) => {
+    const x = 0.5 + i * (larg + gap);
+    const st = statusCidadePpt(c, i, lista);
+    slide.addShape(pptx.ShapeType.roundRect, { x, y, w: larg, h, fill: { color: PPT_COR.branco }, line: { color: PPT_COR.linha, width: 1 }, rectRadius: 0.05 });
+    slide.addShape(pptx.ShapeType.rect, { x, y, w: larg, h: 0.05, fill: { color: st.faixa } });
+    slide.addText(String(c.nome), { x: x + 0.1, y: y + 0.16, w: larg - 0.2, h: 0.3, fontSize: 10, bold: true, color: PPT_COR.texto, fontFace: 'Segoe UI' });
+    slide.addText(formatPct(c.pctF, 1), { x: x + 0.1, y: y + 0.44, w: larg - 0.2, h: 0.5, fontSize: 20, bold: true, color: st.cor, fontFace: 'Segoe UI' });
+    pptPilula(pptx, slide, `${st.texto} (${formatPct(c.pctD, 1)} OK)`, x + 0.08, y + h - 0.4, larg - 0.16, { fundo: st.fundo, cor: st.cor, fontSize: 7.2, h: 0.3 });
+  });
+}
+// Lista de barras horizontais (igual ao ranking de motivos do modelo) — a
+// primeira (maior %) sai em vermelho pra chamar atenção, o resto em azul.
+function pptBarras(pptx, slide, itens, y, opts = {}) {
+  const lista = itens.slice(0, opts.max || 5);
+  const w = opts.w || 5.6, x = opts.x ?? 0.5;
+  if (!lista.length) { slide.addText('Sem dados no período/filtro selecionado.', { x, y, w, h: 0.4, fontSize: 12, color: PPT_COR.muted, fontFace: 'Segoe UI' }); return; }
+  const maxPct = Math.max(...lista.map(l => l.pct), 0.0001);
+  lista.forEach((it, i) => {
+    const linhaY = y + i * 0.62;
+    slide.addText(`${String(i + 1).padStart(2, '0')}. ${it.nome}`, { x, y: linhaY, w: w - 1.3, h: 0.26, fontSize: 10.5, bold: true, color: PPT_COR.texto, fontFace: 'Segoe UI' });
+    slide.addText(formatPct(it.pct, opts.casas ?? 1), { x: x + w - 1.25, y: linhaY, w: 1.25, h: 0.26, fontSize: 11, bold: true, align: 'right', color: i === 0 ? PPT_COR.vermelho : PPT_COR.azul, fontFace: 'Segoe UI' });
+    slide.addShape(pptx.ShapeType.roundRect, { x, y: linhaY + 0.29, w, h: 0.13, fill: { color: PPT_COR.linha }, line: { type: 'none' }, rectRadius: 0.06 });
+    const larguraBarra = Math.max(0.08, w * (it.pct / maxPct));
+    slide.addShape(pptx.ShapeType.roundRect, { x, y: linhaY + 0.29, w: larguraBarra, h: 0.13, fill: { color: i === 0 ? PPT_COR.vermelho : PPT_COR.azul }, line: { type: 'none' }, rectRadius: 0.06 });
+  });
+}
+// Severidade de uma cidade no ranking de prazo: pior/melhor da lista (que já
+// vem ordenada por % fora do prazo) ganham selo próprio; as do meio comparam
+// contra a meta de prazo (PRAZO_META).
+function statusCidadePpt(c, idx, lista) {
+  if (idx === 0 && lista.length > 1) return { texto: 'Maior Atraso', cor: PPT_COR.vermelhoTxt, fundo: PPT_COR.vermelhoClaro, faixa: PPT_COR.vermelho };
+  if (idx === lista.length - 1) return { texto: c.pctD >= PRAZO_META ? 'Destaque' : 'Melhor da Região', cor: PPT_COR.verdeTxt, fundo: PPT_COR.verdeClaro, faixa: PPT_COR.verde };
+  if (c.pctD < PRAZO_META - 5) return { texto: 'Crítico', cor: PPT_COR.vermelhoTxt, fundo: PPT_COR.vermelhoClaro, faixa: PPT_COR.vermelho };
+  if (c.pctD < PRAZO_META) return { texto: 'Atenção', cor: PPT_COR.laranjaTxt, fundo: PPT_COR.laranjaClaro, faixa: PPT_COR.laranja };
+  return { texto: 'Acima da Meta', cor: PPT_COR.verdeTxt, fundo: PPT_COR.verdeClaro, faixa: PPT_COR.verde };
+}
+// Selo de status de um técnico no ranking de entrega no prazo (comparado à
+// meta oficial PRAZO_META, não a um corte inventado).
+function statusEntregaPpt(pctD) {
+  if (pctD >= PRAZO_META + 8) return { pill: true, texto: 'Excelência', cor: PPT_COR.verdeTxt };
+  if (pctD >= PRAZO_META) return { pill: true, texto: 'Acima da Meta', cor: PPT_COR.verdeTxt };
+  if (pctD >= PRAZO_META - 10) return { pill: true, texto: 'Atenção', cor: PPT_COR.laranjaTxt };
+  return { pill: true, texto: 'Abaixo da Meta', cor: PPT_COR.vermelhoTxt };
+}
+function statusOfensorPpt(pctF) {
+  if (pctF >= 20) return { pill: true, texto: 'Crítico', cor: PPT_COR.vermelhoTxt };
+  if (pctF >= 100 - PRAZO_META) return { pill: true, texto: 'Atenção', cor: PPT_COR.laranjaTxt };
+  return { pill: true, texto: 'Moderado', cor: PPT_COR.azulTxt };
 }
 // Monta o .pptx inteiro a partir do que a tela já calculou (`d`), pra não ter
 // duas contas diferentes pro mesmo número — o slide é um espelho da tela.
@@ -14614,125 +14729,204 @@ function exportarPptReuniao(d) {
   pptx.author = 'JH TELECOM · Nexus System';
   pptx.title = 'Reunião Técnica — Prazos e Retornos';
 
-  // ---- capa ----
+  // ---- capa (escura, igual ao modelo) ----
   const capa = pptx.addSlide();
-  capa.background = { color: PPT_COR.branco };
-  capa.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 3.1, h: '100%', fill: { color: PPT_COR.azul } });
-  capa.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.14, h: '100%', fill: { color: PPT_COR.azulEscuro } });
-  capa.addText('JH TELECOM', { x: 0.45, y: 2.1, w: 2.4, h: 0.4, fontSize: 18, bold: true, color: PPT_COR.branco, fontFace: 'Segoe UI' });
-  capa.addText('LITORAL SUL', { x: 0.45, y: 2.5, w: 2.4, h: 0.3, fontSize: 11, color: PPT_COR.azulClaro, fontFace: 'Segoe UI' });
-  capa.addText('Reunião Técnica', { x: 3.6, y: 1.7, w: 6, h: 0.6, fontSize: 32, bold: true, color: PPT_COR.azulEscuro, fontFace: 'Segoe UI' });
-  capa.addText('Prazos e Retornos', { x: 3.6, y: 2.3, w: 6, h: 0.6, fontSize: 32, bold: true, color: PPT_COR.azul, fontFace: 'Segoe UI' });
-  capa.addShape(pptx.ShapeType.rect, { x: 3.62, y: 3.05, w: 1.6, h: 0.05, fill: { color: PPT_COR.azul } });
-  capa.addText(d.periodoTxt, { x: 3.6, y: 3.25, w: 6, h: 0.35, fontSize: 15, color: PPT_COR.texto, fontFace: 'Segoe UI' });
-  capa.addText(`Gerado em ${new Date().toLocaleString('pt-BR')}`, { x: 3.6, y: 3.65, w: 6, h: 0.3, fontSize: 10, color: PPT_COR.muted, fontFace: 'Segoe UI' });
+  capa.background = { color: PPT_COR.fundoEscuro };
+  capa.addShape(pptx.ShapeType.roundRect, { x: 0.5, y: 0.42, w: 0.55, h: 0.55, fill: { color: PPT_COR.azul }, rectRadius: 0.12 });
+  capa.addText('JH', { x: 0.5, y: 0.42, w: 0.55, h: 0.55, fontSize: 15, bold: true, align: 'center', valign: 'middle', color: PPT_COR.branco, fontFace: 'Segoe UI' });
+  capa.addText('JH TELECOM', { x: 1.18, y: 0.44, w: 3, h: 0.28, fontSize: 13, bold: true, color: PPT_COR.branco, fontFace: 'Segoe UI' });
+  capa.addText('LITORAL SUL', { x: 1.18, y: 0.7, w: 3, h: 0.22, fontSize: 9, color: PPT_COR.azulClaro, fontFace: 'Segoe UI' });
+  pptPilula(pptx, capa, 'Relatório de Performance Operacional', 6.0, 0.5, 3.0, { fundo: PPT_COR.cardEscuro, cor: PPT_COR.azulClaro, fontSize: 9, h: 0.34 });
+  capa.addText('REUNIÃO TÉCNICA DE ALINHAMENTO', { x: 0.55, y: 1.95, w: 8, h: 0.28, fontSize: 12, bold: true, color: PPT_COR.azulClaro, charSpacing: 1, fontFace: 'Segoe UI' });
+  capa.addText('Prazos e Retornos', { x: 0.5, y: 2.28, w: 8.8, h: 0.9, fontSize: 38, bold: true, color: PPT_COR.branco, fontFace: 'Segoe UI' });
+  capa.addText('Diagnóstico de cumprimento de prazo (24h/36h), produtividade de campo e indicadores de retorno (IRR e IFI).',
+    { x: 0.55, y: 3.12, w: 7.6, h: 0.5, fontSize: 12.5, color: PPT_COR.mutedEscuro, fontFace: 'Segoe UI' });
+  [['PERÍODO', d.periodoTxt], ['DATA DA EMISSÃO', new Date().toLocaleDateString('pt-BR')]].forEach(([rotulo, valor], i) => {
+    const x = 0.55 + i * 2.55;
+    capa.addShape(pptx.ShapeType.roundRect, { x, y: 3.85, w: 2.35, h: 0.72, fill: { color: PPT_COR.cardEscuro }, line: { color: PPT_COR.linhaEscura, width: 1 }, rectRadius: 0.05 });
+    capa.addText(rotulo, { x: x + 0.16, y: 3.93, w: 2.1, h: 0.22, fontSize: 8, bold: true, color: PPT_COR.mutedEscuro, charSpacing: 1, fontFace: 'Segoe UI' });
+    capa.addText(String(valor), { x: x + 0.16, y: 4.13, w: 2.1, h: 0.34, fontSize: 14, bold: true, color: PPT_COR.branco, fontFace: 'Segoe UI' });
+  });
+  capa.addText('JH TELECOM — LITORAL SUL · Nexus System', { x: 0.5, y: 5.32, w: 5, h: 0.24, fontSize: 8, color: PPT_COR.mutedEscuro, fontFace: 'Segoe UI' });
 
-  // ---- 1. prazo do mês ----
-  const s1 = pptSlide(pptx, 'Prazo do mês', d.periodoTxt + ' · reparos concluídos · prazo de 24h');
+  // ---- 1. prazo do mês (resumo executivo) ----
+  const dentroMeta1 = d.pctNoPrazo >= PRAZO_META;
+  const s1 = pptSlide(pptx, 'Visão Geral de Desempenho', 'Resumo Executivo do Período', {
+    badge: dentroMeta1 ? 'Dentro da Meta Operacional' : 'Abaixo da Meta Operacional',
+    badgeFundo: dentroMeta1 ? PPT_COR.verdeClaro : PPT_COR.vermelhoClaro, badgeCor: dentroMeta1 ? PPT_COR.verdeTxt : PPT_COR.vermelhoTxt, badgeW: 3.4,
+  });
   pptKpis(pptx, s1, [
-    { valor: formatPct(d.pctNoPrazo, 1), rotulo: 'No prazo (até 24h)', sub: `${d.dentro24} ordem(ns)`, cor: d.pctNoPrazo >= PRAZO_META ? PPT_COR.verde : PPT_COR.vermelho },
-    { valor: formatPct(d.pctForaPrazo, 1), rotulo: 'Fora do prazo', sub: `${d.foraPrazo} ordem(ns)`, cor: PPT_COR.vermelho },
-    { valor: String(d.totalReparos), rotulo: 'Reparos no período', sub: `meta de prazo: ${formatPct(PRAZO_META, 0)}` },
+    { valor: String(d.totalReparos), rotulo: 'Reparos no período', sub: 'ordens concluídas' },
+    { valor: formatPct(d.pctNoPrazo, 1), rotulo: 'No prazo (até 24h)', sub: `${d.dentro24} O.S · meta ${formatPct(PRAZO_META, 0)}`, cor: dentroMeta1 ? PPT_COR.verde : PPT_COR.vermelho, corFundo: dentroMeta1 ? PPT_COR.verdeClaro : PPT_COR.vermelhoClaro },
+    { valor: formatPct(d.pctForaPrazo, 1), rotulo: 'Fora do prazo (>24h)', sub: `${d.foraPrazo} O.S atrasada(s)`, cor: PPT_COR.vermelho, corFundo: PPT_COR.vermelhoClaro },
+    { valor: formatPct(d.pctIrr, 2), rotulo: 'Índice de retorno (IRR)', sub: `${d.qtdIrr} retorno(s) · meta ${formatPct(BONUS_IRR_MAX, 2)}`, cor: d.pctIrr > BONUS_IRR_MAX ? PPT_COR.vermelho : PPT_COR.verde, corFundo: d.pctIrr > BONUS_IRR_MAX ? PPT_COR.vermelhoClaro : PPT_COR.verdeClaro },
   ]);
   pptRodape(s1, 'Fonte: planilha de prazo (BASE DE DADOS). Ordem sem faixa válida não entra na conta.');
 
   // ---- 2. quem mais produz ----
-  const s2 = pptSlide(pptx, 'Quem mais produz — e o prazo deles', 'Ordenado pela produção do período');
-  pptTabela(pptx, s2, ['#', 'Técnico', '% no prazo', '% fora do prazo'],
-    d.melhores.slice(0, 8).map((t, i) => [String(i + 1).padStart(2, '0'), t.nome, formatPct(t.pctD, 1), formatPct(t.pctF, 1)]),
-    { colW: [0.6, 5.0, 1.8, 1.7] });
+  const s2 = pptSlide(pptx, 'Performance Individual', 'Destaques de Produção e SLA de Prazo', { badge: 'Ordenado pela Produção do Período', badgeW: 3.3 });
+  pptTabela(pptx, s2, ['#', 'Técnico', '% no prazo', '% fora do prazo', 'Status'],
+    d.melhores.slice(0, 7).map((t, i) => [String(i + 1).padStart(2, '0'), t.nome, formatPct(t.pctD, 1), formatPct(t.pctF, 1), statusEntregaPpt(t.pctD)]),
+    { colW: [0.5, 4.1, 1.5, 1.6, 1.3] });
 
   // ---- 3. ofensores de prazo ----
-  const s3 = pptSlide(pptx, 'Ofensores — quem mais perde prazo', 'Ordenado pelo volume de reparos fora do prazo');
-  pptTabela(pptx, s3, ['#', 'Técnico', '% fora do prazo', '% no prazo'],
-    d.piores.slice(0, 8).map((t, i) => [String(i + 1).padStart(2, '0'), t.nome, formatPct(t.pctF, 1), formatPct(t.pctD, 1)]),
-    { colW: [0.6, 5.0, 1.8, 1.7] });
+  const s3 = pptSlide(pptx, 'Ponto de Atenção', 'Técnicos Ofensores de Prazo (>24h)', { badge: 'Maior Volume Fora do Prazo', badgeFundo: PPT_COR.vermelhoClaro, badgeCor: PPT_COR.vermelhoTxt, badgeW: 2.9 });
+  pptTabela(pptx, s3, ['#', 'Técnico ofensor', '% fora do prazo', '% no prazo', 'Situação'],
+    d.piores.slice(0, 7).map((t, i) => [String(i + 1).padStart(2, '0'), t.nome, formatPct(t.pctF, 1), formatPct(t.pctD, 1), statusOfensorPpt(t.pctF)]),
+    { colW: [0.5, 4.1, 1.6, 1.5, 1.3] });
+  if (d.piores.length) {
+    const mediaPctF = d.piores.slice(0, 5).reduce((a, t) => a + t.pctF, 0) / Math.min(5, d.piores.length);
+    pptDestaque(pptx, s3, 'Diagnóstico Rápido',
+      `Os ${Math.min(5, d.piores.length)} técnicos com mais reparos fora do prazo concentram, em média, ${formatPct(mediaPctF, 1)} de atraso sobre a própria produção — ${mediaPctF > (100 - PRAZO_META) ? 'acima' : 'abaixo'} da referência da meta corporativa (${formatPct(100 - PRAZO_META, 0)} de tolerância).`,
+      { x: 0.5, y: 3.55, w: 9.0, h: 1.35, cor: PPT_COR.vermelho, fundo: PPT_COR.vermelhoClaro });
+  }
 
-  // ---- 4. cidades ----
-  const s4 = pptSlide(pptx, 'Cidades ofensoras', 'Percentual de reparo fora do prazo da própria cidade');
-  pptTabela(pptx, s4, ['#', 'Cidade', '% fora do prazo', '% no prazo'],
-    d.cidades.slice(0, 8).map((c, i) => [String(i + 1).padStart(2, '0'), c.nome, formatPct(c.pctF, 1), formatPct(c.pctD, 1)]),
-    { colW: [0.6, 5.0, 1.8, 1.7] });
+  // ---- 4. cidades (cartões, igual ao modelo) ----
+  const s4 = pptSlide(pptx, 'Análise Territorial', 'Desempenho de Prazo por Cidade', { badge: 'Percentual Fora do Prazo por Município', badgeW: 3.6 });
+  pptCidadesCards(pptx, s4, d.cidades, 1.25);
+  if (d.cidades.length > 1) {
+    const pior = d.cidades[0], melhor = d.cidades[d.cidades.length - 1];
+    pptDestaque(pptx, s4, `Gargalo Territorial: ${pior.nome}`,
+      `${pior.nome} tem a maior taxa de estouro de prazo (${formatPct(pior.pctF, 1)}). Em contrapartida, ${melhor.nome} se destaca com ${formatPct(melhor.pctD, 1)} das ordens dentro do SLA de 24h.`,
+      { x: 0.5, y: 3.15, w: 9.0, h: 1.15 });
+  }
 
   // ---- 5. período ofensor ----
-  const s5 = pptSlide(pptx, 'Período ofensor de prazo', 'Período definido pela hora do TEMPO LIMITE da ordem');
+  const s5 = pptSlide(pptx, 'Janela Temporal', 'Concentração do Atraso por Período', { badge: 'Manhã × Tarde (hora do Tempo Limite)', badgeW: 3.6 });
   pptKpis(pptx, s5, [
     { valor: formatPct(d.pctManha, 1), rotulo: 'Perdas de prazo na manhã', cor: d.periodoPior === 'manha' ? PPT_COR.vermelho : PPT_COR.azul },
     { valor: formatPct(d.pctTarde, 1), rotulo: 'Perdas de prazo na tarde', cor: d.periodoPior === 'tarde' ? PPT_COR.vermelho : PPT_COR.azul },
-    { valor: d.rotuloPior, rotulo: 'Período que mais perde prazo', corpo: 26, cor: PPT_COR.vermelho },
+    { valor: d.rotuloPior, rotulo: 'Período que mais perde prazo', corpo: 22, cor: PPT_COR.vermelho },
   ]);
+  s5.addText('Técnicos ofensores do período', { x: 0.5, y: 3.05, w: 6, h: 0.26, fontSize: 12, bold: true, color: PPT_COR.texto, fontFace: 'Segoe UI' });
   pptTabela(pptx, s5, ['#', 'Técnico ofensor do período', '% das perdas'],
     d.rankPeriodo.slice(0, 5).map((o, i) => [String(i + 1).padStart(2, '0'), o.nome, formatPct(o.pct, 1)]),
-    { y: 3.0, colW: [0.6, 6.0, 2.5], rowH: 0.28 });
+    { y: 3.35, colW: [0.6, 6.0, 2.4], rowH: 0.28 });
 
-  // ---- 6. motivos da baixa ----
-  const s6 = pptSlide(pptx, 'Motivos da baixa — reparos fora do prazo', 'Motivo vindo da Produção, pela mesma O.S.');
-  pptTabela(pptx, s6, ['#', 'Motivo da baixa', '% das perdas'],
-    d.motivosFora.slice(0, 8).map((m, i) => [String(i + 1).padStart(2, '0'), m.nome, formatPct(m.pct, 1)]),
-    { colW: [0.6, 6.0, 2.5] });
+  // ---- 6. motivos da baixa (barras, igual ao modelo) ----
+  const s6 = pptSlide(pptx, 'Causa Raiz Operacional', 'Motivos da Baixa nos Reparos Fora do Prazo', { badge: 'Classificação dos Serviços', badgeW: 2.9 });
+  pptBarras(pptx, s6, d.motivosFora.map(m => ({ nome: m.nome, pct: m.pct })), 1.35, { w: 5.5 });
+  if (d.motivosFora.length) {
+    const top3 = d.motivosFora.slice(0, 3).reduce((a, m) => a + m.pct, 0);
+    pptDestaque(pptx, s6, 'Highlights Técnicos',
+      `${d.motivosFora[0].nome} é o principal motivo de baixa fora do prazo (${formatPct(d.motivosFora[0].pct, 1)}). Os 3 principais motivos somam ${formatPct(top3, 1)} das perdas — concentrar treinamento neles tem o maior efeito no indicador.`,
+      { x: 6.3, y: 1.35, w: 3.2, h: 3.2 });
+  }
+  pptRodape(s6, 'Motivo vindo da Produção, cruzado pela mesma O.S.');
 
   // ---- 7. prazo já vencido ao receber ----
   if (d.temPcr) {
     if (d.temEstourado) {
-      const s7 = pptSlide(pptx, 'Reparo recebido com o prazo já vencido', 'Percentual sobre o total de reparos do período');
+      const s7 = pptSlide(pptx, 'Despacho e Logística', 'Reparos Recebidos com Prazo Vencido', { badge: 'Estouro Pré-Campo', badgeW: 2.6 });
       pptKpis(pptx, s7, [
-        { valor: formatPct(d.pctEstouradoSobreTotal, 1), rotulo: 'Recebidos com prazo vencido', cor: PPT_COR.vermelho },
-        { valor: formatPct(d.pctVencidoEmCampo, 1), rotulo: 'Prazo vencido em campo', cor: PPT_COR.azul },
+        { valor: formatPct(d.pctEstouradoSobreTotal, 1), rotulo: 'Recebidos com prazo vencido', sub: 'sobre o total de reparos', cor: PPT_COR.laranja, corFundo: PPT_COR.laranjaClaro },
+        { valor: formatPct(d.pctVencidoEmCampo, 1), rotulo: 'Prazo vencido em campo', sub: 'ordens que venceram com o técnico', cor: PPT_COR.verde, corFundo: PPT_COR.verdeClaro },
       ]);
+      s7.addText('Incidência por Cidade', { x: 0.5, y: 3.05, w: 6, h: 0.26, fontSize: 12, bold: true, color: PPT_COR.texto, fontFace: 'Segoe UI' });
       pptTabela(pptx, s7, ['Cidade', 'Recebido com prazo vencido', 'Prazo vencido em campo'],
         d.estouradoPorCidade.slice(0, 6).map(c => [c.nome, formatPct(c.pctRecebido, 1), formatPct(c.pctCampo, 1)]),
-        { y: 3.0, colW: [3.5, 3.0, 2.6], rowH: 0.28 });
+        { y: 3.35, colW: [3.5, 3.0, 2.5], rowH: 0.28 });
     }
 
     // ---- 8. horário de início ----
-    const s8 = pptSlide(pptx, 'Horário de início do dia', 'Hora média do primeiro início de cada técnico');
-    s8.addText('Por cidade', { x: 0.45, y: 1.12, w: 4, h: 0.26, fontSize: 12, bold: true, color: PPT_COR.azulEscuro, fontFace: 'Segoe UI' });
+    const s8 = pptSlide(pptx, 'Janela Temporal', 'Concentração do Atraso e Horário de Início', { badge: 'Análise de Horário Limite', badgeW: 2.9 });
+    s8.addText('Por cidade', { x: 0.5, y: 1.12, w: 4, h: 0.26, fontSize: 12, bold: true, color: PPT_COR.texto, fontFace: 'Segoe UI' });
     pptTabela(pptx, s8, ['Cidade', 'Início médio', 'Dias medidos'],
-      d.cidadesInicio.slice(0, 5).map(c => [c.nome, c.hora, c.dias]), { y: 1.42, colW: [4.6, 2.4, 2.1], rowH: 0.28 });
-    s8.addText('Quem começa mais tarde', { x: 0.45, y: 3.25, w: 4, h: 0.26, fontSize: 12, bold: true, color: PPT_COR.azulEscuro, fontFace: 'Segoe UI' });
+      d.cidadesInicio.slice(0, 5).map(c => [c.nome, c.hora, c.dias]), { y: 1.42, colW: [4.6, 2.4, 2.0], rowH: 0.28 });
+    s8.addText('Quem começa mais tarde', { x: 0.5, y: 3.25, w: 4, h: 0.26, fontSize: 12, bold: true, color: PPT_COR.texto, fontFace: 'Segoe UI' });
     pptTabela(pptx, s8, ['Técnico', 'Início médio', 'Dias'],
-      d.tecnicosTarde.slice(0, 4).map(t => [t.nome, t.hora, t.dias]), { y: 3.55, colW: [4.6, 2.4, 2.1], rowH: 0.28 });
+      d.tecnicosTarde.slice(0, 4).map(t => [t.nome, t.hora, t.dias]), { y: 3.55, colW: [4.6, 2.4, 2.0], rowH: 0.28 });
   }
 
-  // ---- 9. retornos ----
-  const s9 = pptSlide(pptx, 'Retornos — quanto do serviço volta', 'IFI sobre ativações + M.E · IRR sobre reparos');
+  // ---- 9. retornos (resumo) ----
+  const dentroMetaRet = d.pctIrr <= BONUS_IRR_MAX && d.pctIfi <= BONUS_IFI_MAX;
+  const s9 = pptSlide(pptx, 'Qualidade do Serviço', 'Indicadores de Retorno (IRR e IFI)', {
+    badge: dentroMetaRet ? 'Dentro das Metas Globais' : 'Fora da Meta em algum indicador',
+    badgeFundo: dentroMetaRet ? PPT_COR.verdeClaro : PPT_COR.vermelhoClaro, badgeCor: dentroMetaRet ? PPT_COR.verdeTxt : PPT_COR.vermelhoTxt, badgeW: 3.2,
+  });
   pptKpis(pptx, s9, [
-    { valor: formatPct(d.pctIrr, 2), rotulo: '% IRR — reparo que voltou', sub: `${d.qtdIrr} retorno(s) · meta ${formatPct(BONUS_IRR_MAX, 2)}`, cor: d.pctIrr > BONUS_IRR_MAX ? PPT_COR.vermelho : PPT_COR.verde },
-    { valor: formatPct(d.pctIfi, 2), rotulo: '% IFI — ativação/M.E que voltou', sub: `${d.qtdIfi} retorno(s) · meta ${formatPct(BONUS_IFI_MAX, 2)}`, cor: d.pctIfi > BONUS_IFI_MAX ? PPT_COR.vermelho : PPT_COR.verde },
+    { valor: formatPct(d.pctIrr, 2), rotulo: 'IRR — retorno de reparos', sub: `${d.qtdIrr} retorno(s) · meta < ${formatPct(BONUS_IRR_MAX, 2)}`, cor: d.pctIrr > BONUS_IRR_MAX ? PPT_COR.vermelho : PPT_COR.verde, corFundo: d.pctIrr > BONUS_IRR_MAX ? PPT_COR.vermelhoClaro : PPT_COR.verdeClaro },
+    { valor: formatPct(d.pctIfi, 2), rotulo: 'IFI — retorno de ativação/M.E.', sub: `${d.qtdIfi} retorno(s) · meta < ${formatPct(BONUS_IFI_MAX, 2)}`, cor: d.pctIfi > BONUS_IFI_MAX ? PPT_COR.vermelho : PPT_COR.verde, corFundo: d.pctIfi > BONUS_IFI_MAX ? PPT_COR.vermelhoClaro : PPT_COR.verdeClaro },
     { valor: d.mediaDias, rotulo: 'Tempo médio até voltar', sub: `IRR ${d.mediaDiasIrr} · IFI ${d.mediaDiasIfi}` },
   ]);
+  pptDestaque(pptx, s9, 'Qualidade Técnica Operacional',
+    dentroMetaRet
+      ? 'Tanto o índice de reparo que voltou (IRR) quanto o de instalação (IFI) estão dentro das metas no período.'
+      : `${d.pctIrr > BONUS_IRR_MAX ? 'IRR' : ''}${d.pctIrr > BONUS_IRR_MAX && d.pctIfi > BONUS_IFI_MAX ? ' e ' : ''}${d.pctIfi > BONUS_IFI_MAX ? 'IFI' : ''} ${d.pctIrr > BONUS_IRR_MAX && d.pctIfi > BONUS_IFI_MAX ? 'estão' : 'está'} acima da meta no período — ver ofensores e motivos nos próximos slides.`,
+    { y: 3.05, h: 1.1, cor: dentroMetaRet ? PPT_COR.verde : PPT_COR.vermelho, fundo: dentroMetaRet ? PPT_COR.verdeClaro : PPT_COR.vermelhoClaro });
 
   // ---- 10. cidades de retorno ----
-  const s10 = pptSlide(pptx, 'Retornos — cidades ofensoras', 'Percentual de retorno sobre os serviços da cidade');
+  const s10 = pptSlide(pptx, 'Análise de Reincidência', 'Ofensores de Retorno — Cidades', { badge: 'Concentração de Refazimento', badgeW: 3.0 });
   pptTabela(pptx, s10, ['#', 'Cidade', '% de retorno', '% IRR', '% IFI'],
     d.cidadesRet.slice(0, 8).map((c, i) => [String(i + 1).padStart(2, '0'), c.nome, formatPct(c.pct, 2), formatPct(c.pctIrr, 2), formatPct(c.pctIfi, 2)]),
-    { colW: [0.6, 3.9, 1.7, 1.5, 1.4] });
+    { colW: [0.5, 4.0, 1.6, 1.5, 1.4] });
 
   // ---- 11. ofensores de retorno ----
-  const s11 = pptSlide(pptx, 'Retornos — principais ofensores', 'Quem fez o serviço que voltou');
-  pptTabela(pptx, s11, ['#', 'Ofensor', '% dos retornos', 'IRR', 'IFI'],
+  const s11 = pptSlide(pptx, 'Análise de Reincidência', 'Ofensores de Retorno — Técnicos', { badge: 'Quem Fez o Serviço que Voltou', badgeW: 3.1 });
+  pptTabela(pptx, s11, ['#', 'Técnico ofensor', '% dos retornos', 'IRR', 'IFI'],
     d.ofensoresRet.slice(0, 8).map((o, i) => [String(i + 1).padStart(2, '0'), o.nome, formatPct(o.pct, 1), o.irr, o.ifi]),
-    { colW: [0.6, 4.6, 1.8, 1.0, 1.1] });
+    { colW: [0.5, 4.6, 1.7, 1.0, 1.1] });
 
-  // ---- 12. motivo da baixa dos retornos ----
-  const s12 = pptSlide(pptx, 'Motivo da baixa dos retornos', 'Como a visita de retorno foi encerrada');
-  pptTabela(pptx, s12, ['#', 'Motivo', '% dos retornos', 'IRR', 'IFI'],
-    d.motivosRet.slice(0, 8).map((m, i) => [String(i + 1).padStart(2, '0'), m.nome, formatPct(m.pct, 1), m.irr, m.ifi]),
-    { colW: [0.6, 4.9, 1.7, 0.9, 1.0] });
+  // ---- 12. motivo da baixa dos retornos (barras) ----
+  const s12 = pptSlide(pptx, 'Diagnóstico de Campo', 'Motivo dos Retornos e Recorrência de Falhas', { badge: 'Como a Visita de Retorno Foi Encerrada', badgeW: 3.6 });
+  pptBarras(pptx, s12, d.motivosRet.map(m => ({ nome: m.nome, pct: m.pct })), 1.35, { w: 5.5 });
+  if (d.motivosRet.length) {
+    pptDestaque(pptx, s12, 'Principal Motivo de Retorno',
+      `${d.motivosRet[0].nome} responde por ${formatPct(d.motivosRet[0].pct, 1)} dos retornos do período (IRR ${d.motivosRet[0].irr} · IFI ${d.motivosRet[0].ifi}).`,
+      { x: 6.3, y: 1.35, w: 3.2, h: 1.6, cor: PPT_COR.vermelho, fundo: PPT_COR.vermelhoClaro });
+  }
 
   // ---- 13. IRR: motivo anterior x retorno ----
   if (d.paresIrrTotal) {
-    const s13 = pptSlide(pptx, 'IRR — o problema voltou pelo mesmo motivo?', 'Motivo do serviço anterior × motivo do retorno');
+    const s13 = pptSlide(pptx, 'Diagnóstico de Campo', 'IRR — Voltou pelo Mesmo Motivo?', { badge: 'Motivo Anterior × Motivo do Retorno', badgeW: 3.4 });
     pptKpis(pptx, s13, [
-      { valor: formatPct(d.pctMesmoMotivo, 1), rotulo: 'Voltou pelo MESMO motivo', sub: `${d.iguais} de ${d.paresIrrTotal} par(es)`, cor: PPT_COR.vermelho },
+      { valor: formatPct(d.pctMesmoMotivo, 1), rotulo: 'Voltou pelo MESMO motivo', sub: `${d.iguais} de ${d.paresIrrTotal} par(es)`, cor: PPT_COR.vermelho, corFundo: PPT_COR.vermelhoClaro },
       { valor: formatPct(100 - d.pctMesmoMotivo, 1), rotulo: 'Voltou por motivo diferente', cor: PPT_COR.azul },
-      { valor: String(d.paresIrrTotal), rotulo: 'Pares analisados', sub: d.irrSemPar ? `${d.irrSemPar} sem par encontrado` : 'todos casaram' },
+      { valor: String(d.paresIrrTotal), rotulo: 'Pares analisados', sub: d.irrSemPar ? `${d.irrSemPar} sem par` : 'todos casaram' },
     ]);
+    s13.addText('Combinações mais comuns', { x: 0.5, y: 3.05, w: 6, h: 0.26, fontSize: 12, bold: true, color: PPT_COR.texto, fontFace: 'Segoe UI' });
     pptTabela(pptx, s13, ['Serviço anterior ➜ retorno', '% dos pares', 'Pares'],
       d.paresRank.slice(0, 5).map(p => [p.nome, formatPct(p.pct, 1), p.total]),
-      { y: 3.0, colW: [6.1, 1.6, 1.4], rowH: 0.28, fontSize: 11 });
+      { y: 3.35, colW: [6.0, 1.6, 1.4], rowH: 0.28, fontSize: 11 });
     pptRodape(s13, 'Par achado por contrato + data da ordem anterior (a planilha não traz a O.S. anterior) — correspondência aproximada.');
   }
+
+  // ---- fechamento (escuro, plano de ação — textos só de contas que já vieram em `d`) ----
+  const fim = pptx.addSlide();
+  fim.background = { color: PPT_COR.fundoEscuro };
+  fim.addText('PLANO DE AÇÃO OPERACIONAL', { x: 0.55, y: 0.55, w: 8, h: 0.28, fontSize: 12, bold: true, color: PPT_COR.azulClaro, charSpacing: 1, fontFace: 'Segoe UI' });
+  fim.addText('Direcionamento Estratégico para o Próximo Ciclo', { x: 0.5, y: 0.85, w: 8.8, h: 0.6, fontSize: 26, bold: true, color: PPT_COR.branco, fontFace: 'Segoe UI' });
+  const cartoes = [];
+  if (d.temPcr && d.tecnicosTarde.length) {
+    cartoes.push({ icone: '⏱', titulo: 'Ajuste do Início de Turno',
+      corpo: `Atuar com os técnicos que iniciam depois das ${d.tecnicosTarde[0].hora} para reduzir o acúmulo de estouros no turno da tarde (${formatPct(d.pctTarde, 1)}).` });
+  } else {
+    cartoes.push({ icone: '⏱', titulo: 'Período Ofensor', corpo: `${d.rotuloPior} concentra ${formatPct(Math.max(d.pctManha, d.pctTarde), 1)} das perdas de prazo do período — priorizar reforço nesse turno.` });
+  }
+  if (d.motivosRet.length) {
+    cartoes.push({ icone: '🔧', titulo: 'Reciclagem Técnica',
+      corpo: `Reciclagem focada em "${d.motivosRet[0].nome}" para reduzir os ${formatPct(d.motivosRet[0].pct, 1)} de retornos causados por esse motivo.` });
+  } else if (d.motivosFora.length) {
+    cartoes.push({ icone: '🔧', titulo: 'Reciclagem Técnica',
+      corpo: `Reciclagem focada em "${d.motivosFora[0].nome}" — principal motivo de baixa fora do prazo (${formatPct(d.motivosFora[0].pct, 1)}).` });
+  }
+  if (d.cidades.length >= 2) {
+    cartoes.push({ icone: '🎯', titulo: 'Foco Regional',
+      corpo: `Reorganização das rotas e reforço de equipe em ${d.cidades[0].nome} e ${d.cidades[1].nome}, as cidades com maior taxa de perda de prazo no período.` });
+  }
+  const nCartoes = Math.min(cartoes.length, 3) || 1;
+  const largCartao = (9.0 - (nCartoes - 1) * 0.2) / nCartoes;
+  cartoes.slice(0, 3).forEach((c, i) => {
+    const x = 0.5 + i * (largCartao + 0.2), y = 1.7, h = 2.3;
+    fim.addShape(pptx.ShapeType.roundRect, { x, y, w: largCartao, h, fill: { color: PPT_COR.cardEscuro }, line: { color: PPT_COR.linhaEscura, width: 1 }, rectRadius: 0.06 });
+    fim.addShape(pptx.ShapeType.roundRect, { x: x + 0.22, y: y + 0.22, w: 0.5, h: 0.5, fill: { color: PPT_COR.azul }, rectRadius: 0.12 });
+    fim.addText(c.icone, { x: x + 0.22, y: y + 0.22, w: 0.5, h: 0.5, fontSize: 16, align: 'center', valign: 'middle', fontFace: 'Segoe UI' });
+    fim.addText(c.titulo, { x: x + 0.22, y: y + 0.86, w: largCartao - 0.44, h: 0.5, fontSize: 13, bold: true, color: PPT_COR.branco, fontFace: 'Segoe UI' });
+    fim.addText(c.corpo, { x: x + 0.22, y: y + 1.34, w: largCartao - 0.44, h: h - 1.5, fontSize: 9.5, color: PPT_COR.mutedEscuro, valign: 'top', fontFace: 'Segoe UI' });
+  });
+  fim.addShape(pptx.ShapeType.line, { x: 0.5, y: 5.05, w: 9.0, h: 0, line: { color: PPT_COR.linhaEscura, width: 1 } });
+  fim.addText('JH TELECOM — LITORAL SUL', { x: 0.5, y: 5.15, w: 4, h: 0.3, fontSize: 10, bold: true, color: PPT_COR.branco, fontFace: 'Segoe UI' });
+  fim.addText('Aberto para Dúvidas e Discussão de Equipe', { x: 5.5, y: 5.15, w: 4.0, h: 0.3, fontSize: 10, bold: true, align: 'right', color: PPT_COR.azulClaro, fontFace: 'Segoe UI' });
 
   pptx.writeFile({ fileName: `reuniao-tecnica-prazos-retornos-${hojeISOLocal()}.pptx` })
     .then(() => toast('PowerPoint gerado.', 'ok', 2500))
