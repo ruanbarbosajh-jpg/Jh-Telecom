@@ -4029,8 +4029,19 @@ async function abrirSistema(user) {
   document.getElementById('app-shell').classList.add('active');
   applySidebarPermissions();
   recolherMenuLateralNoLogin();
-  navigate(getFirstAllowedRoute(user.role));
+  navigate(rotaDeEntrada(user));
   mostrarAvisoSupabase();
+}
+// Onde abrir depois do login: a ÚLTIMA tela que esse perfil viu (guardada em
+// navigate()), se ainda existir e ainda for permitida pra ele — senão cai no
+// Menu Inicial de sempre. Cobre F5/sessão salva ("não quero que quando
+// atualizar a tela volte pro início", 22/09/2026) sem prender ninguém numa
+// rota que sumiu ou que foi bloqueada depois (ex.: Presença, ver §6).
+function rotaDeEntrada(user) {
+  let salva = null;
+  try { salva = localStorage.getItem('jh_ultima_rota_' + user.role); } catch (e) {}
+  if (salva && PAGES[salva] && podeAcessar(user.role, salva)) return salva;
+  return getFirstAllowedRoute(user.role);
 }
 // Se a pessoa já entrou nesse navegador, o Supabase guarda a sessão — então
 // recarregar a página não pede senha de novo (a sessão expira sozinha).
@@ -7227,6 +7238,11 @@ function navigate(route) {
   closeSidebar();
   refreshNameLists();
   ROTA_ATUAL.nome = route;
+  // Lembra a última tela pra sobreviver a um F5/sessão salva sem cair sempre
+  // no Menu Inicial (pedido do cliente 22/09/2026: "não quero que quando
+  // atualizar a tela volte pro início"). Chave por perfil — cada login abre
+  // de volta na SUA última tela, não na de quem usou o navegador antes.
+  if (currentUser) { try { localStorage.setItem('jh_ultima_rota_' + currentUser.role, route); } catch (e) {} }
   PAGES[route].render();
   // recoloca os filtros e refaz a busca com eles — em DUAS passadas. A tela
   // nasce com o período PADRÃO da própria página (não o que a pessoa tinha
@@ -15344,32 +15360,25 @@ function pleitoRowsBrutas(tipo, s, e, cidades) {
 
 // ===================== FROTA =====================
 function renderFleet() {
-  // O período começa cobrindo TODO o histórico de frota que existe (manutenções
-  // e multas costumam ser de meses atrás). Se abrisse no mês corrente, como as
-  // outras telas, a página apareceria zerada e pareceria que sumiu dado.
-  const datasFrota = [...DB.frotaManutencao.map(r => r.data), ...DB.frotaMultas.map(r => r.data_infracao)].filter(Boolean).sort();
-  const inicioFrota = datasFrota[0] || defaultPeriod().start;
-  const fimFrota = hojeISOLocal();
-  document.getElementById('content').innerHTML = `${periodToolbar(inicioFrota, fimFrota > (datasFrota[datasFrota.length-1] || '') ? fimFrota : datasFrota[datasFrota.length-1], `
+  // Sem filtro de data (pedido do cliente 22/09/2026 — tirou o "De/Até" que
+  // existia aqui): a tela sempre mostra o histórico INTEIRO de manutenções e
+  // multas, sem precisar filtrar por período pra ver dado antigo.
+  document.getElementById('content').innerHTML = `<div class="toolbar">
     <div class="field"><label>Condutor</label><input type="text" id="f-condutor" placeholder="Nome" list="condutor-list"></div>
     <div class="field"><label>Placa</label><input type="text" id="f-placa" placeholder="Placa"></div>
-  `)}<div id="fleet-body"></div>`;
+    <button class="btn" id="f-apply">Filtrar</button>
+  </div><div id="fleet-body"></div>`;
   document.getElementById('f-apply').addEventListener('click', load);
   load();
   function load() {
     const condutor = document.getElementById('f-condutor').value.toLowerCase();
     const placa = document.getElementById('f-placa').value.toLowerCase();
-    const s = document.getElementById('f-start').value, e = document.getElementById('f-end').value;
     const matchC = v => !condutor || (v||'').toLowerCase().includes(condutor);
     const matchP = v => !placa || (v||'').toLowerCase().includes(placa);
-    // As datas da barra existiam mas não eram lidas: mexer nelas não mudava
-    // nada na tela. Agora valem para o que TEM data (manutenções e multas);
-    // vínculos e desvinculações não têm data de evento, então seguem completos.
-    const noPeriodo = d => !d || inRange(d, s, e);
 
     const links = DB.frotaLinks.filter(r => matchC(r.motorista) && matchP(r.placa));
-    const maint = DB.frotaManutencao.filter(r => matchC(r.condutor) && matchP(r.placa) && noPeriodo(r.data));
-    const multas = DB.frotaMultas.filter(r => matchC(r.condutor) && matchP(r.placa) && noPeriodo(r.data_infracao));
+    const maint = DB.frotaManutencao.filter(r => matchC(r.condutor) && matchP(r.placa));
+    const multas = DB.frotaMultas.filter(r => matchC(r.condutor) && matchP(r.placa));
     const desvinc = DB.frotaDesvinc.filter(r => matchC(r.condutor) && matchP(r.placa));
     // Revisões: a lista útil é "o que vem pela frente", então ela NÃO é cortada
     // pelo período da barra (revisão marcada para daqui a 3 meses cairia fora).
@@ -15393,10 +15402,6 @@ function renderFleet() {
         ${metricCard('Revisões vencidas', revVencidas.length, revVencidas.length > 0)}
         ${metricCard('Revisões em até 15 dias', revProximas.length, revProximas.length > 0)}
       </div>
-      <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
-        O período filtra manutenções (pela data do serviço) e multas (pela data da infração).
-        Vínculos e desvinculações não têm data de evento na planilha, então aparecem sempre completos.
-      </p>
       <div class="panels-grid">
         <div class="panel"><h3>Veículos por Locadora</h3><div id="fleet-locadora"></div></div>
         <div class="panel"><h3>Veículos por Cidade</h3><div id="fleet-cidade"></div></div>
