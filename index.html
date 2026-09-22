@@ -18195,6 +18195,18 @@ function renderFolhaPagamento(modo) {
           ? ` O <b>bônus</b> (Apto/Inapto) foi recalculado à parte, com os retornos de <b>${formatDate(bonusIni)}</b> a <b>${formatDate(bonusFim)}</b> — normalmente o ciclo de 1 a 30 do mês.`
           : ' O bônus (Apto/Inapto) segue o valor da planilha; preencha "Retornos (bônus)" pra recalcular numa janela própria (ex.: 1 a 30 do mês).'}
       </p>
+      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
+        <b>Frota/Aluguel:</b> carro <b>próprio</b> — o técnico roda com o veículo dele e o aluguel é
+        provento (entra no saldo dele). Carro <b>JH</b> — a empresa aluga da locadora direto (~R$ 2.300 no
+        ciclo, despesa da JH); o técnico não roda com carro próprio nesse caso, então não tem aluguel pra
+        receber. "Frota" e "Valor Aluguel" abaixo vêm como a planilha da folha trouxe; quando o cadastro da
+        aba <b>Frota</b> discorda (⚠ ao lado) ou um carro marcado "JH" ainda assim tem aluguel &gt; R$ 0,00
+        (⚠ vermelho), vale conferir a importação — pode ser planilha desatualizada.
+        <b>Dias Trab.</b> também mostra "⚠ Prod.: X" quando o número da planilha de RH diverge do calculado
+        na hora pela Produção (dias distintos com ordem concluída — mesma conta do Acompanhamento Técnico,
+        "Bônus dos técnicos"). As duas contas são de fontes diferentes de propósito; a divergência não é
+        corrigida sozinha, é só um aviso pra conferir qual dos dois está certo pra esse técnico/período.
+      </p>
       ${renderFolhaCompleta(ranking, pct, IFI_TARGET, IRR_TARGET)}
       ${(podeEditarFolhaPagamento() || podeEditarFolhaMaterial()) ? `<div class="fin-salvar-barra">
         <button class="btn" id="folha-salvar" disabled>Salvar alterações</button>
@@ -18773,6 +18785,35 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     cachePorTipo.set(chave, porTipo);
     return porTipo;
   };
+  // Frota "de verdade" do técnico nesse período — mesma função que o
+  // Dashboard usa (fechamento do ciclo, senão frota_links). Vazio quando não
+  // dá pra saber (sem fechamento nem cadastro de frota pra ele).
+  const cacheFrotaReal = new Map();
+  const frotaRealDaLinha = r => {
+    const chave = `${r.tecnico}|${r.periodo}`;
+    if (cacheFrotaReal.has(chave)) return cacheFrotaReal.get(chave);
+    const janela = datasDoPeriodoFolha(r.periodo);
+    const real = janela.inicio ? frotaDoTecnico(r.tecnico, janela.inicio, janela.fim) : '';
+    cacheFrotaReal.set(chave, real);
+    return real;
+  };
+  // Dias trabalhados "de verdade": dias DISTINTOS com ao menos 1 ordem
+  // concluída na Produção, no período da linha — mesma regra da tela
+  // Acompanhamento Técnico (renderBonusAoVivo). null quando o período não
+  // tem data no nome (não dá pra recortar a Produção).
+  const cacheDiasReais = new Map();
+  const diasTrabalhadosReaisDaLinha = r => {
+    const chave = `${r.tecnico}|${r.periodo}`;
+    if (cacheDiasReais.has(chave)) return cacheDiasReais.get(chave);
+    const janela = datasDoPeriodoFolha(r.periodo);
+    let real = null;
+    if (janela.inicio && janela.fim) {
+      const ordens = (producaoPorTecnico[normalizeHeader(r.tecnico)] || []).filter(p => inRange(p.data, janela.inicio, janela.fim));
+      real = new Set(ordens.map(p => p.data)).size;
+    }
+    cacheDiasReais.set(chave, real);
+    return real;
+  };
   const inputNumero = (r, campo, valor) => `<input type="number" class="folha-edit" step="1" min="0"
     data-campo="${campo}" ${attrsChave(r)} value="${valor || 0}" style="width:64px">`;
   // Desconto em R$: campo de TEXTO com máscara de moeda (não dá pra digitar
@@ -18819,7 +18860,22 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
       return `<span class="folha-valor-tipo" data-tipo="${t.chave}">${v ? money(v) : '-'}</span>`;
     }]),
     ['Valor Ordens', r=>`<span class="folha-valor-ordens">${money(r.valor_total_ordens)}</span>`],
-    ['Dias Trab.', r => podePagamento(r) ? inputNumero(r, 'dias_trab', r.dias_trab) : r.dias_trab],
+    // Cruza o "Dias Trab." da planilha com o mesmo cálculo que a tela
+    // Acompanhamento Técnico usa em "Bônus dos técnicos — situação de agora"
+    // (dias DISTINTOS com ao menos 1 ordem concluída baixada, na Produção) —
+    // pedido do cliente 22/09/2026: "os dias trabalhados não estão conferindo
+    // com a tabela de bônus". As duas contas são de FONTES diferentes de
+    // propósito (a folha traz o que veio da planilha de RH, essa aqui é
+    // calculada ao vivo da Produção) — não é bug de uma sobrescrever a outra,
+    // mas quando divergem vale conferir: planilha de RH pode contar dia
+    // presente sem ordem concluída (folga, administrativo), ou a Produção
+    // daquele período pode ainda estar incompleta.
+    ['Dias Trab.', r => {
+      const editor = podePagamento(r) ? inputNumero(r, 'dias_trab', r.dias_trab) : String(r.dias_trab ?? '-');
+      const real = diasTrabalhadosReaisDaLinha(r);
+      if (real === null || Number(r.dias_trab) === real) return editor;
+      return `${editor} <span style="color:var(--warn-text);font-size:11px;white-space:nowrap" title="A Produção mostra ${real} dia(s) distinto(s) com ordem concluída nesse período — mesma conta da tela Acompanhamento Técnico, 'Bônus dos técnicos — situação de agora'. A folha traz ${r.dias_trab}.">⚠ Prod.: ${real}</span>`;
+    }],
     ['Bônus', r => podePagamento(r)
       // cor no PRÓPRIO <select> (não só num badge ao lado) — verde quando a
       // opção marcada é APTO, vermelho quando é INAPTO. Atualizada nas duas
@@ -18832,7 +18888,29 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     ['Qtd IFI', r=>r.qtd_ifi], ['Qtd IRR', r=>r.qtd_irr],
     ['% IFI', r=>`<span class="badge ${pct(r.ifi_pct, r)<=IFI_TARGET?'ok':'warn'}">${formatPct(pct(r.ifi_pct, r), 2)}</span>`],
     ['% IRR', r=>`<span class="badge ${pct(r.irr_pct, r)<=IRR_TARGET?'ok':'warn'}">${formatPct(pct(r.irr_pct, r), 2)}</span>`],
-    ['Frota', r=>r.frota], ['Dias Aluguel', r=>r.dias_aluguel], ['Valor Aluguel', r=>money(r.valor_aluguel)],
+    // Cruza o que a planilha da FOLHA diz sobre o carro do técnico com o que
+    // o cadastro de verdade da Frota (aba FROTA LITORAL) diz — mesma função
+    // que o Dashboard já usa (frotaDoTecnico: fechamento do ciclo, senão
+    // frota_links). Pedido do cliente 22/09/2026: "faça a relação com a
+    // frota" — antes a Folha só mostrava a coluna da planilha, sem checar se
+    // batia com o cadastro. Cacheia por técnico+período (a mesma linha é lida
+    // 3x: Frota, Dias Aluguel e Valor Aluguel).
+    ['Frota', r => {
+      const informado = r.frota || '';
+      const real = frotaRealDaLinha(r);
+      const ehJhInformado = /jh/i.test(informado) && !/propri/i.test(informado);
+      const ehJhReal = /jh/i.test(real);
+      const bate = !real || ehJhInformado === ehJhReal;
+      return bate ? esc(informado || '-')
+        : `<span style="color:var(--warn-text)" title="A aba Frota diz &quot;${esc(real)}&quot; pra este técnico nesse período — a planilha da folha diz &quot;${esc(informado || '-')}&quot;. Confira: pode ser cadastro ou importação desatualizada.">${esc(informado || '-')} ⚠</span>`;
+    }],
+    ['Dias Aluguel', r=>r.dias_aluguel],
+    ['Valor Aluguel', r => {
+      const v = Number(r.valor_aluguel) || 0;
+      const ehJh = /jh/i.test(r.frota || '') && !/propri/i.test(r.frota || '');
+      if (ehJh && v > 0) return `<span style="color:var(--danger)" title="Frota marcada como JH (empresa aluga da locadora direto) — o técnico não deveria receber aluguel nesse caso. Confira a planilha da folha.">${money(v)} ⚠</span>`;
+      return money(v);
+    }],
     ['Empréstimo', r=>money(r.emprestimo)],
     ['Desc. IFI', r=>money(r.desc_ifi)], ['Desc. IRR', r=>money(r.desc_irr)],
     ['Desc. Equipamento', r => podeMaterial(r) ? inputMoeda(r, 'desc_equipamento', r.desc_equipamento) : money(r.desc_equipamento)],
