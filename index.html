@@ -8529,8 +8529,12 @@ function renderTopTechniciansTable(rows) {
 // contamos os dias distintos com ordem na base de produção, em vez de confiar
 // só na coluna DIAS TRABALHADOS da planilha.
 const BONUS_IFI_MAX = 2.50, BONUS_IRR_MAX = 4.50, BONUS_DIAS_MIN = 26;
-// mesma ideia na página da Folha de Pagamento
-const FOLHA_RET_PERIODO = { inicio: '', fim: '' };
+// Folha de Pagamento: DOIS filtros de retorno separados (pedido do cliente
+// 22/09/2026) — o desconto (dinheiro) segue o ciclo da folha, 21 a 20; o
+// bônus (Apto/Inapto) segue o calendário do mês, 1 a 30, que é OUTRA janela.
+// Antes era um filtro só, e não dava pra isolar as duas contas.
+const FOLHA_RET_DESC_PERIODO = { inicio: '', fim: '' };
+const FOLHA_RET_BONUS_PERIODO = { inicio: '', fim: '' };
 // "21/07/2026 a 20/08/2026" -> { inicio:'2026-07-21', fim:'2026-08-20' }
 function datasDoPeriodoFolha(periodo) {
   const achadas = String(periodo || '').match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/g) || [];
@@ -17887,8 +17891,10 @@ function renderFolhaPagamento(modo) {
       ${periodosNomeados.map(p=>`<option value="${esc(p)}"${p === periodoPadraoFolha ? ' selected' : ''}>${esc(p)}</option>`).join('')}
       ${temSemPeriodo ? `<option value="__sem_periodo__">(sem período definido)</option>` : ''}
     </select></div>` : ''}
-    <div class="field"><label>Retornos IFI/IRR — de</label><input type="date" id="fol-ret-de"></div>
-    <div class="field"><label>até</label><input type="date" id="fol-ret-ate"></div>
+    <div class="field"><label>Retornos (desconto) — de</label><input type="date" id="fol-ret-desc-de"></div>
+    <div class="field"><label>até</label><input type="date" id="fol-ret-desc-ate"></div>
+    <div class="field"><label>Retornos (bônus) — de</label><input type="date" id="fol-ret-bonus-de"></div>
+    <div class="field"><label>até</label><input type="date" id="fol-ret-bonus-ate"></div>
     ${soRelatorio ? `
     <div class="field"><label>Colaborador (Escritório)</label><input type="text" id="f-esc-nome" placeholder="Nome"></div>
     <div class="field"><label>Período (Escritório)</label><select id="f-esc-periodo">
@@ -17917,9 +17923,12 @@ function renderFolhaPagamento(modo) {
   <div id="folha-body"></div>`;
   document.getElementById('f-apply').addEventListener('click', load);
   document.getElementById('fol-ret-reset').addEventListener('click', () => {
-    document.getElementById('fol-ret-de').value = '';
-    document.getElementById('fol-ret-ate').value = '';
-    FOLHA_RET_PERIODO.inicio = ''; FOLHA_RET_PERIODO.fim = '';
+    document.getElementById('fol-ret-desc-de').value = '';
+    document.getElementById('fol-ret-desc-ate').value = '';
+    document.getElementById('fol-ret-bonus-de').value = '';
+    document.getElementById('fol-ret-bonus-ate').value = '';
+    FOLHA_RET_DESC_PERIODO.inicio = ''; FOLHA_RET_DESC_PERIODO.fim = '';
+    FOLHA_RET_BONUS_PERIODO.inicio = ''; FOLHA_RET_BONUS_PERIODO.fim = '';
     load();
   });
   // ---- planilha de retornos da GIGA ----
@@ -17980,46 +17989,68 @@ function renderFolhaPagamento(modo) {
     const body = document.getElementById('folha-body');
     if (!brutas.length) { body.innerHTML = '<div class="panel"><div class="empty">Nenhum lançamento encontrado. Importe a aba "FOLHA DE PAGAMENTO".</div></div>'; return; }
 
-    // ---- período dos retornos (mesma ideia da tabela de bônus) ----
-    // Vazio = usa a quantidade e o % que vieram fechados na planilha da folha.
-    // Preenchido = conta os IFI/IRR baixados nesse intervalo (pelo ofensor) e
-    // refaz o %, o "dentro/fora" e o bônus com os critérios da empresa.
+    // ---- dois filtros de retorno, INDEPENDENTES (pedido do cliente 22/09/2026)
+    // Antes era um filtro só, usado pras duas contas ao mesmo tempo — sem jeito
+    // de isolar uma da outra. DESCONTO (dinheiro) acompanha o ciclo da folha,
+    // 21 a 20; vazio usa a planilha (ou a lente automática enquanto a GIGA não
+    // manda o arquivo do mês, ver abaixo). BÔNUS (Apto/Inapto) é outra janela,
+    // normalmente 1 a 30 do mês — decide só o Apto/Inapto, não mexe no desconto.
     const janelaFolha = datasDoPeriodoFolha(periodo || (brutas[0] && brutas[0].periodo));
-    const elDe = document.getElementById('fol-ret-de'), elAte = document.getElementById('fol-ret-ate');
-    if (elDe && !elDe.value && FOLHA_RET_PERIODO.inicio) elDe.value = FOLHA_RET_PERIODO.inicio;
-    if (elAte && !elAte.value && FOLHA_RET_PERIODO.fim) elAte.value = FOLHA_RET_PERIODO.fim;
-    const retIni = elDe ? elDe.value : '', retFim = elAte ? elAte.value : '';
-    FOLHA_RET_PERIODO.inicio = retIni; FOLHA_RET_PERIODO.fim = retFim;
-    const recalcula = !!(retIni && retFim);
-    // Denominador (ativações/reparos): o CICLO da folha. Se a planilha da folha
-    // não trouxe o período, usa o ciclo do fechamento que contém a data final
-    // dos retornos; em último caso, a própria janela escolhida.
+    const elDescDe = document.getElementById('fol-ret-desc-de'), elDescAte = document.getElementById('fol-ret-desc-ate');
+    if (elDescDe && !elDescDe.value && FOLHA_RET_DESC_PERIODO.inicio) elDescDe.value = FOLHA_RET_DESC_PERIODO.inicio;
+    if (elDescAte && !elDescAte.value && FOLHA_RET_DESC_PERIODO.fim) elDescAte.value = FOLHA_RET_DESC_PERIODO.fim;
+    const descIni = elDescDe ? elDescDe.value : '', descFim = elDescAte ? elDescAte.value : '';
+    FOLHA_RET_DESC_PERIODO.inicio = descIni; FOLHA_RET_DESC_PERIODO.fim = descFim;
+    const recalculaDesc = !!(descIni && descFim);
+
+    const elBonusDe = document.getElementById('fol-ret-bonus-de'), elBonusAte = document.getElementById('fol-ret-bonus-ate');
+    if (elBonusDe && !elBonusDe.value && FOLHA_RET_BONUS_PERIODO.inicio) elBonusDe.value = FOLHA_RET_BONUS_PERIODO.inicio;
+    if (elBonusAte && !elBonusAte.value && FOLHA_RET_BONUS_PERIODO.fim) elBonusAte.value = FOLHA_RET_BONUS_PERIODO.fim;
+    const bonusIni = elBonusDe ? elBonusDe.value : '', bonusFim = elBonusAte ? elBonusAte.value : '';
+    FOLHA_RET_BONUS_PERIODO.inicio = bonusIni; FOLHA_RET_BONUS_PERIODO.fim = bonusFim;
+    const recalculaBonus = !!(bonusIni && bonusFim);
+
+    // Denominador do DESCONTO (ativações/reparos): o CICLO da folha. Se a
+    // planilha da folha não trouxe o período, usa o ciclo do fechamento que
+    // contém a data final da janela de desconto; em último caso, a própria
+    // janela escolhida.
     const janelaBase = janelaFolha.inicio ? janelaFolha
-      : (cicloQueContem(retFim).inicio ? cicloQueContem(retFim) : { inicio: retIni, fim: retFim });
-    const contagemRet = recalcula ? contarRetornosPorOfensor(retIni, retFim) : null;
-    // ---- ENQUANTO A PLANILHA DA GIGA NÃO CHEGA (pedido do cliente 03/09/2026)
-    // A GIGA só manda o arquivo de retornos depois que o ciclo fecha. Até lá, a
-    // Qtd. IFI/IRR da folha ficava parada no que existia na hora em que o
-    // período foi gerado — quem importasse a planilha de IFI/IRR depois disso
-    // não via a folha mudar.
-    // Agora, linha que ainda NÃO recebeu a planilha da GIGA (retorno_origem
-    // diferente de 'giga') tem os retornos recontados na hora, direto da base
-    // de IFI/IRR já importada (mesma conta de sempre: contarRetornosPorOfensor,
-    // atribuindo ao ofensor). Assim que a planilha da GIGA for enviada, aquela
-    // linha passa a valer a contagem dela e para de ser recalculada.
-    // Não grava nada: é uma LENTE sobre a tela. O número oficial só muda quando
-    // alguém gera o período ou envia a planilha da GIGA.
-    const autoRetorno = !recalcula && janelaFolha.inicio && janelaFolha.fim
+      : (cicloQueContem(descFim).inicio ? cicloQueContem(descFim) : { inicio: descIni, fim: descFim });
+    const contagemRetDesc = recalculaDesc ? contarRetornosPorOfensor(descIni, descFim) : null;
+    const contagemRetBonus = recalculaBonus ? contarRetornosPorOfensor(bonusIni, bonusFim) : null;
+
+    // ---- 1) BÔNUS primeiro — o PREÇO do desconto depende da faixa do técnico
+    // (apto/inapto, ver precoRetornoDoTecnico), então o bônus precisa estar
+    // decidido ANTES do desconto rodar. Sem janela própria, o bônus segue
+    // como veio da planilha (a linha de desconto, abaixo, não mexe nele).
+    const linhasComBonus = !recalculaBonus ? brutas : brutas.map(r => {
+      const c = contagemRetBonus[r.tecnico] || { ifi: 0, irr: 0 };
+      const base = baseDoTecnico(r.tecnico, bonusIni, bonusFim);
+      const ifiPctBonus = base.ativacao ? (c.ifi / base.ativacao) * 100 : 0;
+      const irrPctBonus = base.reparos ? (c.irr / base.reparos) * 100 : 0;
+      const apto = ifiPctBonus <= IFI_TARGET && irrPctBonus <= IRR_TARGET && (r.dias_trab || 0) >= BONUS_DIAS_MIN;
+      return { ...r, bonus: apto ? 'APTO' : 'INAPTO', _bonusRecalculado: true };
+    });
+
+    // ---- 2) DESCONTO — ENQUANTO A PLANILHA DA GIGA NÃO CHEGA (pedido do
+    // cliente 03/09/2026): a GIGA só manda o arquivo de retornos depois que o
+    // ciclo fecha. Até lá, linha que ainda NÃO recebeu a planilha da GIGA
+    // (retorno_origem diferente de 'giga') tem os retornos recontados na hora,
+    // direto da base de IFI/IRR já importada, atribuídos ao ofensor. Assim que
+    // a planilha da GIGA for enviada, aquela linha passa a valer a contagem
+    // dela e para de ser recalculada. Não grava nada: é uma LENTE sobre a tela.
+    const autoRetorno = !recalculaDesc && janelaFolha.inicio && janelaFolha.fim
       ? contarRetornosPorOfensor(janelaFolha.inicio, janelaFolha.fim) : null;
     let quantosAuto = 0;
-    const brutasComRetorno = !autoRetorno ? brutas : brutas.map(r => {
+    const brutasComRetorno = !autoRetorno ? linhasComBonus : linhasComBonus.map(r => {
       if (r.retorno_origem === 'giga') return r;
       const c = autoRetorno[r.tecnico]
         || autoRetorno[Object.keys(autoRetorno).find(k => normalizeHeader(k) === normalizeHeader(r.tecnico)) || ''];
       // recontar a QUANTIDADE sem refazer o DESCONTO deixava a tela mostrando
       // "1 IFI" com "R$ 0,00" de desconto ao lado — foi o que o cliente viu.
       // aplicarDescontoRetorno refaz desconto, % e TOTAL A RECEBER de uma vez,
-      // na faixa do técnico (48,50/53,00 e 38,50/42,00).
+      // na faixa do técnico (48,50/53,00 e 38,50/42,00) — a faixa vem do
+      // r.bonus já decidido no passo 1 acima.
       if (!c) {
         if (!r.qtd_ifi && !r.qtd_irr) return r;
         return aplicarDescontoRetorno({ ...r, qtd_ifi: 0, qtd_irr: 0, _retornoAuto: true }, janelaFolha);
@@ -18027,14 +18058,11 @@ function renderFolhaPagamento(modo) {
       quantosAuto++;
       return aplicarDescontoRetorno({ ...r, qtd_ifi: c.ifi, qtd_irr: c.irr, _retornoAuto: true, _recalculado: true }, janelaFolha);
     });
-    const rows = !recalcula ? brutasComRetorno : brutas.map(r => {
-      const c = contagemRet[r.tecnico] || { ifi: 0, irr: 0 };
-      const base = baseDoTecnico(r.tecnico, janelaBase.inicio, janelaBase.fim);
-      const ifiPct = base.ativacao ? (c.ifi / base.ativacao) * 100 : 0;
-      const irrPct = base.reparos ? (c.irr / base.reparos) * 100 : 0;
-      const apto = ifiPct <= IFI_TARGET && irrPct <= IRR_TARGET && (r.dias_trab || 0) >= BONUS_DIAS_MIN;
-      return { ...r, qtd_ifi: c.ifi, qtd_irr: c.irr, ifi_pct: ifiPct, irr_pct: irrPct,
-               bonus: apto ? 'APTO' : 'INAPTO', _recalculado: true };
+    const rows = !recalculaDesc ? brutasComRetorno : linhasComBonus.map(r => {
+      const c = contagemRetDesc[r.tecnico] || { ifi: 0, irr: 0 };
+      const linha = { ...r, qtd_ifi: c.ifi, qtd_irr: c.irr, _recalculado: true };
+      aplicarDescontoRetorno(linha, janelaBase.inicio && janelaBase.fim ? janelaBase : { inicio: descIni, fim: descFim });
+      return linha;
     });
 
     const totalReceber = rows.reduce((a,r)=>a+r.total_receber,0);
@@ -18154,17 +18182,18 @@ function renderFolhaPagamento(modo) {
       </div>
       <div id="folha-export-aviso"></div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
-        ${recalcula
-          ? `Qtd. e % de IFI/IRR e o Bônus foram <b>recalculados</b> com os retornos baixados de <b>${formatDate(retIni)}</b> a <b>${formatDate(retFim)}</b>,
+        ${recalculaDesc
+          ? `Qtd., % e <b>desconto</b> de IFI/IRR foram recalculados com os retornos baixados de <b>${formatDate(descIni)}</b> a <b>${formatDate(descFim)}</b>,
              atribuídos ao técnico ofensor. Denominadores (ativações e reparos) são os do ciclo
-             ${janelaBase.inicio ? formatDate(janelaBase.inicio) + ' a ' + formatDate(janelaBase.fim) : 'do próprio intervalo'}.
-             Valores em dinheiro são os da planilha e não mudam com esse filtro.`
+             ${janelaBase.inicio ? formatDate(janelaBase.inicio) + ' a ' + formatDate(janelaBase.fim) : 'do próprio intervalo'}.`
           : quantosAuto
-            ? `Qtd. e % de IFI/IRR de <b>${quantosAuto} técnico(s)</b> estão sendo contados agora pela base de <b>IFI/IRR já importada</b>,
+            ? `Qtd. e desconto de IFI/IRR de <b>${quantosAuto} técnico(s)</b> estão sendo contados agora pela base de <b>IFI/IRR já importada</b>,
                atribuídos ao ofensor — é o que vale enquanto a planilha da GIGA daquele ciclo não é enviada.
-               Assim que você enviar a planilha da GIGA no painel acima, a contagem dela passa a valer e estes números param de ser recalculados.
-               O resto dos valores é o da folha e não muda com isso.`
-            : 'Números como vieram na planilha da folha. Preencha as datas de "Retornos IFI/IRR" na barra de cima para recontar pelos retornos baixados num intervalo.'}
+               Assim que você enviar a planilha da GIGA no painel acima, a contagem dela passa a valer e estes números param de ser recalculados.`
+            : 'Qtd. e desconto de IFI/IRR como vieram na planilha da folha. Preencha "Retornos (desconto)" na barra de cima para recontar pelos retornos baixados num intervalo.'}
+        ${recalculaBonus
+          ? ` O <b>bônus</b> (Apto/Inapto) foi recalculado à parte, com os retornos de <b>${formatDate(bonusIni)}</b> a <b>${formatDate(bonusFim)}</b> — normalmente o ciclo de 1 a 30 do mês.`
+          : ' O bônus (Apto/Inapto) segue o valor da planilha; preencha "Retornos (bônus)" pra recalcular numa janela própria (ex.: 1 a 30 do mês).'}
       </p>
       ${renderFolhaCompleta(ranking, pct, IFI_TARGET, IRR_TARGET)}
       ${(podeEditarFolhaPagamento() || podeEditarFolhaMaterial()) ? `<div class="fin-salvar-barra">
