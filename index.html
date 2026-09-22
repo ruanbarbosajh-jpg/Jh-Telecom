@@ -133,7 +133,7 @@
     --accent-solid: #2456c9;      /* fundo — branco em cima = 6.46:1 */
     --accent-dark: #1a3fa8;
     --success: #15803d;           /* era #22c55e (2.28:1!) — agora 5.02:1 */
-    --danger: #c81e1e;            /* era #ef4444 (3.76:1) — agora 5.74:1 */
+    --danger: #991b1b;            /* era #ef4444 (3.76:1), depois #c81e1e (5.74:1) — pedido do cliente 22/09/2026 pra escurecer mais, agora 8.4:1 */
     --success-bg: #dcfce7; --danger-bg: #fee2e2; --accent-bg: #e0e9fd;
     --warn-bg: #fdf3d8; --warn-text: #8a6410; --warn-borda: #e3cd94;
     --frota-laranja: #c2410c;     /* laranja de verdade (o --warn-text é marrom): 5.2:1 no branco */
@@ -15522,6 +15522,8 @@ function renderToll() {
     <div class="field"><label>Condutor</label><input type="text" id="f-condutor" placeholder="Nome" list="condutor-list"></div>
     <div class="field"><label>Placa</label><input type="text" id="f-placa" placeholder="Placa"></div>
     <div class="field"><label>Endereço</label><input type="text" id="f-endereco" placeholder="Endereço, cidade, rodovia..."></div>
+    <div class="field"><label>Hora de</label><input type="time" id="f-hora-min"></div>
+    <div class="field"><label>Hora até</label><input type="time" id="f-hora-max"></div>
     <div class="field"><label>Valor mín.</label><input type="number" id="f-valor-min" placeholder="0,00" step="0.01"></div>
     <div class="field"><label>Valor máx.</label><input type="number" id="f-valor-max" placeholder="0,00" step="0.01"></div>
     <div class="field"><label>Status</label><select id="f-status">
@@ -15548,6 +15550,10 @@ function renderToll() {
     const s = document.getElementById('f-start').value, e = document.getElementById('f-end').value;
     const condutor = document.getElementById('f-condutor').value.toLowerCase(), placa = document.getElementById('f-placa').value.toLowerCase();
     const endereco = document.getElementById('f-endereco').value.toLowerCase();
+    // "HH:MM" compara certinho como texto (24h, dois dígitos) — sem precisar
+    // converter pra minutos. Pedido do cliente 22/09/2026: filtrar a tabela
+    // por horário, não só por data.
+    const horaMin = document.getElementById('f-hora-min').value, horaMax = document.getElementById('f-hora-max').value;
     const valorMinStr = document.getElementById('f-valor-min').value, valorMaxStr = document.getElementById('f-valor-max').value;
     const valorMin = valorMinStr !== '' ? parseFloat(valorMinStr) : null, valorMax = valorMaxStr !== '' ? parseFloat(valorMaxStr) : null;
     const statusFilter = document.getElementById('f-status').value;
@@ -15560,6 +15566,8 @@ function renderToll() {
       && (!condutor || (r.cadastro||'').toLowerCase().includes(condutor) || (r.condutor_atual||'').toLowerCase().includes(condutor))
       && (!placa || (r.placa||'').toLowerCase().includes(placa))
       && (!endereco || (r.endereco||'').toLowerCase().includes(endereco))
+      && (!horaMin || (r.hora||'') >= horaMin)
+      && (!horaMax || (r.hora||'') <= horaMax)
       && (valorMin === null || (r.valor||0) >= valorMin)
       && (valorMax === null || (r.valor||0) <= valorMax)
       && (!statusFilter || (statusFilter==='fora' ? /fora/i.test(r.status||'') : !/fora/i.test(r.status||'')))
