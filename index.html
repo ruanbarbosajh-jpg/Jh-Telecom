@@ -12313,10 +12313,16 @@ function formatTempoGastoPrazo(agingDias) {
 }
 // Motivo: histórico (`historicoMotivosPrazo`) quando a O.S teve mais de uma
 // tentativa no PCR, senão o motivo oficial da Produção (`motivoDoPrazo`).
+// A tentativa que fechou como "Concluído" pinta em verde escuro (23/09/2026,
+// pedido do cliente) — destaca no meio do histórico qual visita deu certo,
+// já que as outras linhas (ausência, troca de peça etc.) são motivo de falha.
+function pintaMotivoBaixa(m) {
+  return /^conclu[ií]d[oa]$/i.test(m.trim()) ? `<span style="color:var(--success);font-weight:700">${esc(m)}</span>` : esc(m);
+}
 function htmlMotivoPrazo(r) {
   const hist = historicoMotivosPrazo(r.os);
-  if (hist.length > 1) return hist.map((m, i) => `${i + 1}º: ${esc(m)}`).join('<br>');
-  return esc(hist[0] || motivoDoPrazo(r));
+  if (hist.length > 1) return hist.map((m, i) => `${i + 1}º: ${pintaMotivoBaixa(m)}`).join('<br>');
+  return pintaMotivoBaixa(hist[0] || motivoDoPrazo(r));
 }
 function htmlForaDoPrazoDetalhe(encerradas) {
   // Só CONCLUÍDA entra (pedido do cliente 23/09/2026): "não concluído" e
@@ -12330,7 +12336,7 @@ function htmlForaDoPrazoDetalhe(encerradas) {
   return `
     <div class="section-heading">Ordens Fora do Prazo — Detalhe<span class="sec-nota">${ordenado.length} O.S nessa data, da pior pra menos grave</span></div>
     <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
-      <th>Faixa</th><th>O.S</th><th>Cidade</th><th>Técnico</th><th>Abertura</th><th>Motivo da baixa</th><th>Tempo gasto</th>
+      <th>Faixa</th><th>O.S</th><th>Cidade</th><th>Técnico</th><th>Abertura</th><th>Motivo da baixa</th><th>Tempo até a Conclusão</th>
     </tr></thead><tbody>
       ${ordenado.map(r => {
         const info = FAIXA_INFO_PRAZO[r.faixa] || { rotulo: r.faixa, classe: 'neutral' };
@@ -12364,7 +12370,7 @@ function htmlForaDoPrazoDetalheMes(rows) {
   return `
     <div class="section-heading">Ordens Fora do Prazo — Detalhe<span class="sec-nota">${ordenado.length} O.S nesse mês, da pior pra menos grave</span></div>
     <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
-      <th>Faixa</th><th>O.S</th><th>Cidade</th><th>Técnico</th><th>Data</th><th>Motivo da baixa</th><th>Tempo gasto</th>
+      <th>Faixa</th><th>O.S</th><th>Cidade</th><th>Técnico</th><th>Data</th><th>Motivo da baixa</th><th>Tempo até a Conclusão</th>
     </tr></thead><tbody>
       ${ordenado.map(({ r, faixa }) => {
         const info = FAIXA_INFO_PRAZO[faixa] || { rotulo: faixa, classe: 'neutral' };
@@ -14363,6 +14369,8 @@ function renderPrazo() {
       body.innerHTML = montarPrazoReparoDoDia(selDiaPz ? selDiaPz.value : '', cidadesSelecionadas)
         + faixaDeSecao('Prazo do MÊS — Reparo (24h)', 'planilha PRAZOS_ESCRITÓRIO (BASE DE DADOS)', 'mes')
         + `<div class="panel"><div class="empty">Sem dados de prazo no período/cidades selecionadas.<br><span style="font-size:12px">${dica}</span></div></div>`;
+      wireGerarImagemCartaoPrazo();
+      ativarBotoesImagem(body);
       return;
     }
 
@@ -14442,6 +14450,7 @@ function renderPrazo() {
     `;
     barsChart('c-bucket', buckets, { fill: true });
     wireGerarImagemCartaoPrazo();
+    ativarBotoesImagem(body);
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'resumo', label: 'Resumo geral do prazo' },
