@@ -1284,6 +1284,10 @@
   .bar-row-clicavel { cursor: pointer; border-radius: 7px; padding: 3px 6px; margin: -3px -6px; transition: background .15s ease; }
   .bar-row-clicavel:hover { background: var(--row-hover); }
   .bar-row-clicavel .bar-label { color: var(--accent); text-decoration: underline dotted; text-underline-offset: 3px; }
+  /* linha de tabela clicável (tabelaRankingTopN) — mesma ideia do
+     .bar-row-clicavel acima, só que pra <tr> em vez de linha de gráfico */
+  tr.tr-clicavel { cursor: pointer; }
+  tr.tr-clicavel:hover td { background: var(--row-hover); }
 
   /* width:100% + flex:1 pra ocupar a largura/altura toda do card em vez de
      ficar um círculo pequeno flutuando no meio de um painel largo — pedido:
@@ -5477,6 +5481,46 @@ function barsChartTopN(elId, items, opts = {}) {
   document.getElementById(selId).addEventListener('change', draw);
   draw();
 }
+// Ranking em TABELA (pílula de posição + nome + valor) com o mesmo seletor
+// "Mostrar N" que `barsChartTopN` já usa — pedido do cliente 23/09/2026:
+// trocar o gráfico de barra dos painéis "Técnicos que mais/menos se
+// deslocam" pelo mesmo visual de tabela com pílula numerada que a Reunião
+// Técnica já usa (mesmo padrão do `tabelaRankingReuniao`, aqui com o
+// seletor de quantidade que os painéis de Produção já tinham). `clicavel`
+// mantém o clique na linha abrindo o detalhe (mesmo comportamento que o
+// gráfico de barra já tinha, ver `wireDeslocDetalhe`) — a linha vem com
+// `data-label`, não mais `.bar-row-clicavel` (isso era específico do
+// desenho de barra).
+function tabelaRankingTopN(elId, items, opts = {}) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const options = opts.options || [5, 10, 15, 20, 'Todos'];
+  const defaultN = opts.defaultN || 10;
+  const selId = elId + '-topn-sel';
+  const tabId = elId + '-tab';
+  el.innerHTML = `<div style="text-align:right;margin-bottom:8px">
+    <select class="topn-select" id="${selId}">
+      ${options.map(o => `<option value="${o}" ${String(o) === String(defaultN) ? 'selected' : ''}>${o === 'Todos' ? 'Mostrar todos' : 'Top ' + o}</option>`).join('')}
+    </select>
+  </div><div id="${tabId}"></div>`;
+  function draw() {
+    const val = document.getElementById(selId).value;
+    const sliced = val === 'Todos' ? items : items.slice(0, parseInt(val, 10));
+    const cor = opts.cor || 'azul';
+    document.getElementById(tabId).innerHTML = !sliced.length ? '<div class="empty">Sem dados.</div>' : `
+      <div class="table-wrap"><table class="data-table"><thead><tr>
+        <th>Posição</th><th>${esc(opts.rotuloNome || 'Técnico')}</th><th>${esc(opts.rotuloValor || 'Valor')}</th>
+      </tr></thead><tbody>
+        ${sliced.map((it, i) => `<tr${opts.clicavel ? ` class="tr-clicavel" data-label="${esc(it.label)}" title="Clique para ver o detalhe"` : ''}>
+          <td><span class="badge ${cor}">${String(i + 1).padStart(2, '0')}</span></td>
+          <td class="cat-cell"${it.labelColor ? ` style="color:${it.labelColor}"` : ''}>${esc(it.label)}</td>
+          <td style="font-weight:700">${it.value}</td>
+        </tr>`).join('')}
+      </tbody></table></div>`;
+  }
+  document.getElementById(selId).addEventListener('change', draw);
+  draw();
+}
 // Anel de progresso (KPI redondo, estilo painel executivo) — usado só para
 // indicadores que já são um percentual (0 a 100), nunca em cima de valor
 // bruto (moeda/contagem) sem significado de "quanto falta pra 100%".
@@ -9381,8 +9425,8 @@ function renderProduction() {
     barsChart('c-city-rank', cityRankColored);
     barsChartTopN('c-tech-top', marcarFrota(techList), {color:'#22c55e', defaultN:5});
     barsChartTopN('c-tech-bottom', marcarFrota(bottomTechList), {color:'#ef4444', defaultN:5});
-    barsChartTopN('c-desloc-mais', marcarFrota(deslocList), {color:'#38bdf8', defaultN:5, clicavel:true});
-    barsChartTopN('c-desloc-menos', marcarFrota(bottomDeslocList), {color:'#94a3c4', defaultN:5, clicavel:true});
+    tabelaRankingTopN('c-desloc-mais', marcarFrota(deslocList), {cor:'azul', defaultN:5, clicavel:true, rotuloValor:'Cidades atendidas'});
+    tabelaRankingTopN('c-desloc-menos', marcarFrota(bottomDeslocList), {cor:'neutral', defaultN:5, clicavel:true, rotuloValor:'Cidades atendidas'});
     wireDeslocDetalhe();
 
     // Clicar no nome do técnico abre um card com as cidades que ele atendeu no
@@ -9395,7 +9439,7 @@ function renderProduction() {
         const cont = document.getElementById(id);
         if (!cont) return;
         cont.addEventListener('click', ev => {
-          const linha = ev.target.closest('.bar-row-clicavel');
+          const linha = ev.target.closest('[data-label]');
           if (!linha) return;
           mostrarDetalheDesloc(linha.dataset.label);
         });
