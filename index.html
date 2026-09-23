@@ -5129,18 +5129,36 @@ function avisoTipoAtividade(rows) {
 // (faixa azul-marinho, colunas coloridas, linha de total) e baixa como PNG.
 // É desenho próprio de propósito: não depende de biblioteca externa, então
 // funciona igual em qualquer navegador e mesmo sem internet.
+// Ícone de situação da coluna de "alerta" (a coluna que mostra o que ainda
+// está na mão do técnico). Mesma leitura do print que o cliente usa na
+// dinâmica do Excel: quem tem pouca coisa em aberto sai com o certo verde,
+// quem passa do limite sai com a exclamação, e a linha de TOTAL sai com o X
+// vermelho (somar "certo" não quer dizer nada — ali o número é o do dia todo).
+// Nada disso muda o número: é só o sinal ao lado dele.
+const IMG_LIMITE_ALERTA = 3;
+function iconeAlertaImagem(valor, ehTotal) {
+  if (ehTotal) return '❌';
+  const n = Number(String(valor).replace(/\D/g, ''));
+  if (!n) return '';
+  return n >= IMG_LIMITE_ALERTA ? '❗' : '✅';
+}
 function baixarTabelaComoImagem({ titulo, subtitulo, colunas, linhas, total, nomeArquivo }) {
   const ESC = 2;                       // desenha em 2x pra sair nítido
   const NEGRITO = '700 14px "Segoe UI", Arial, sans-serif';
+  // fonte própria pro ícone: sem "Segoe UI Emoji" na frente, o Chrome desenha
+  // o glifo em preto e branco (ou uma caixinha) no canvas
+  const FONTE_ICONE = '15px "Segoe UI Emoji", "Segoe UI Symbol", "Segoe UI", sans-serif';
+  const ICONE_L = 17, ICONE_GAP = 6;   // espaço do ícone + respiro até o número
   const medidor = document.createElement('canvas').getContext('2d');
   const larguraTexto = (txt, f) => { medidor.font = f; return medidor.measureText(String(txt)).width; };
 
-  const H_TITULO = 30, H_CAB = 30, H_LINHA = 26, PAD = 12;
-  // largura de cada coluna = maior conteúdo dela
+  const H_TITULO = 30, H_CAB = 30, H_LINHA = 28, PAD = 12;
+  // largura de cada coluna = maior conteúdo dela (+ o ícone, nas de alerta)
   const larguras = colunas.map((c, i) => {
     let max = larguraTexto(c.titulo, NEGRITO);
     linhas.forEach(l => { max = Math.max(max, larguraTexto(l.celulas[i], NEGRITO)); });
     if (total) max = Math.max(max, larguraTexto(total.celulas[i], NEGRITO));
+    if (c.alerta) max += ICONE_L + ICONE_GAP;
     return Math.ceil(max) + PAD * 2;
   });
   const L = larguras.reduce((a, b) => a + b, 0);
@@ -5168,6 +5186,27 @@ function baixarTabelaComoImagem({ titulo, subtitulo, colunas, linhas, total, nom
     g.fillText(c.titulo, i === 0 ? x + PAD : x + larguras[i] / 2, H_TITULO + H_CAB / 2);
     x += larguras[i];
   });
+  // Desenha o conteúdo de uma célula: nas colunas de alerta o ícone vai colado
+  // ao número (os dois centralizados juntos, como um bloco só), no resto é o
+  // texto centralizado de sempre.
+  const escreveCelula = (txt, c, i, cx, meioY, ehTotal) => {
+    const icone = c.alerta ? iconeAlertaImagem(txt, ehTotal) : '';
+    if (!icone) {
+      g.textAlign = i === 0 ? 'left' : 'center';
+      g.fillText(txt, i === 0 ? cx + PAD : cx + larguras[i] / 2, meioY);
+      return;
+    }
+    const corTexto = g.fillStyle;
+    const larguraNum = larguraTexto(txt, g.font);
+    const bloco = ICONE_L + ICONE_GAP + larguraNum;
+    const inicio = cx + (larguras[i] - bloco) / 2;
+    const fonteNum = g.font;
+    g.textAlign = 'left';
+    g.font = FONTE_ICONE;
+    g.fillText(icone, inicio, meioY);
+    g.font = fonteNum; g.fillStyle = corTexto;
+    g.fillText(txt, inicio + ICONE_L + ICONE_GAP, meioY);
+  };
   // linhas
   let y = H_TITULO + H_CAB;
   linhas.forEach(l => {
@@ -5179,9 +5218,7 @@ function baixarTabelaComoImagem({ titulo, subtitulo, colunas, linhas, total, nom
       g.fillRect(cx, y, larguras[i], H_LINHA);
       g.strokeStyle = BORDA; g.lineWidth = 1; g.strokeRect(cx + 0.5, y + 0.5, larguras[i] - 1, H_LINHA - 1);
       g.fillStyle = l.destaque ? '#ffffff' : MARINHO; g.font = '700 14px "Segoe UI", Arial, sans-serif';
-      g.textAlign = i === 0 ? 'left' : 'center';
-      const txt = String(l.celulas[i] ?? '');
-      g.fillText(txt, i === 0 ? cx + PAD : cx + larguras[i] / 2, y + H_LINHA / 2);
+      escreveCelula(String(l.celulas[i] ?? ''), c, i, cx, y + H_LINHA / 2, false);
       cx += larguras[i];
     });
     y += H_LINHA;
@@ -5192,8 +5229,7 @@ function baixarTabelaComoImagem({ titulo, subtitulo, colunas, linhas, total, nom
     let cx = 0;
     colunas.forEach((c, i) => {
       g.fillStyle = '#ffffff'; g.font = '700 14px "Segoe UI", Arial, sans-serif';
-      g.textAlign = i === 0 ? 'left' : 'center';
-      g.fillText(String(total.celulas[i] ?? ''), i === 0 ? cx + PAD : cx + larguras[i] / 2, y + H_LINHA / 2);
+      escreveCelula(String(total.celulas[i] ?? ''), c, i, cx, y + H_LINHA / 2, true);
       cx += larguras[i];
     });
   }
@@ -5209,7 +5245,7 @@ function baixarTabelaComoImagem({ titulo, subtitulo, colunas, linhas, total, nom
 // têm pelo menos uma ordem no dia — igual à dinâmica do Excel, que não cria
 // coluna vazia).
 const COLUNAS_REMANEJAMENTO = [
-  { bucket: 'pendente',      titulo: 'A Executar',     fundo: '#ffffff' },
+  { bucket: 'pendente',      titulo: 'A Executar',     fundo: '#ffffff', alerta: true },
   { bucket: 'nao_concluido', titulo: 'Bx. não exec.',  fundo: '#EDEDED' },
   { bucket: 'concluido',     titulo: 'Bx. Totalmente', fundo: '#E2EFDA' },
   { bucket: 'em_rota',       titulo: 'Em Desloc.',     fundo: '#FFFFFF' },
@@ -5239,7 +5275,7 @@ function imagemRemanejamento(linhasDoDia, tipoLabel, tipoRegex, data) {
   const colsStatus = COLUNAS_REMANEJAMENTO.filter(c => usados.has(c.bucket))
     .concat(usados.has('suspenso') ? [{ bucket: 'suspenso', titulo: 'Suspenso', fundo: '#ffffff' }] : []);
   const colunas = [{ titulo: 'TÉCNICOS', fundo: '#ffffff' }]
-    .concat(colsStatus.map(c => ({ titulo: c.titulo, fundo: c.fundo })))
+    .concat(colsStatus.map(c => ({ titulo: c.titulo, fundo: c.fundo, alerta: c.alerta })))
     .concat([{ titulo: 'Total Geral', fundo: '#ffffff' }]);
   const nomes = Object.keys(porTec).sort((a, b) => a.localeCompare(b, 'pt-BR'));
   const vazio = v => (v ? String(v) : '');
@@ -10772,7 +10808,7 @@ function ligarAExecutar(aExecutar, dia) {
     });
     baixarTabelaComoImagem({
       titulo: 'A EXECUTAR — JH TELECOM', subtitulo: formatDate(dia),
-      colunas: [{ titulo: 'TIPO DA O.S' }, { titulo: 'Concluídos' }, { titulo: 'A Executar' }, { titulo: 'Total Geral' }],
+      colunas: [{ titulo: 'TIPO DA O.S' }, { titulo: 'Concluídos' }, { titulo: 'A Executar', alerta: true }, { titulo: 'Total Geral' }],
       linhas: linhasImg,
       total: { celulas: ['Total Geral', String(aExecutar.concluido), String(aExecutar.pendente), String(aExecutar.total)] },
       nomeArquivo: 'a-executar-' + dia,
