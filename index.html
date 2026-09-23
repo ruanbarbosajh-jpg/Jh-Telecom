@@ -15836,17 +15836,26 @@ function renderToll() {
       condutor: r.condutor_atual === 'NÃO ENCONTRADA' ? 'Não encontrada' : (r.condutor_atual || 'Não informado'),
       data: r.data_transacao, hora: r.hora || '', placa: r.placa, local: r.endereco || 'Não informado', valor: r.valor,
     })).sort((a,b) => String(a.data).localeCompare(String(b.data)) || String(a.hora).localeCompare(String(b.hora)));
-    // Coluna "Data/Hora": o funil de coluna reduz "DD/MM/AAAA HH:MM" pro só o
-    // DIA antes de comparar (ativarFiltrosDeColuna faz isso pra não listar um
-    // item por horário) — o getter usado em filtrarPorColunasAtivas precisa
-    // devolver o MESMO texto reduzido, senão nada bate e o filtro por data
-    // zera a tabela inteira (foi exatamente esse o bug: filtrar por dia deixava
-    // o TOTAL em R$ 0,00 mesmo com linhas visíveis).
-    const dataHoraChave = d => {
-      const txt = formatDate(d.data) + ' ' + d.hora;
-      const m = /^(\d{2}\/\d{2}\/\d{4})\s+\d{1,2}:\d{2}/.exec(txt);
-      return m ? m[1] : txt;
-    };
+    // Data e Horário são DUAS colunas (pedido do cliente 23/09/2026). Antes era
+    // uma só ("Data/Hora") e o funil do cabeçalho tinha que reduzir o texto pro
+    // dia antes de comparar, senão listava uma opção por passagem — com as
+    // colunas separadas isso deixou de ser necessário: a Data já é só o dia e o
+    // Horário já é só a hora. ATENÇÃO: os getters de filtrarPorColunasAtivas
+    // abaixo têm que seguir a MESMA ordem das colunas da tabela, senão o filtro
+    // compara a coluna errada e o TOTAL sai zerado com linhas visíveis (já
+    // aconteceu quando a coluna era combinada).
+    const getDetalhe = [
+      d => formatDate(d.data), d => d.hora || '-', d => d.placa,
+      d => d.local, d => formatCurrency(d.valor),
+    ];
+    // Mesma ideia pra "Todas as Passagens" (id ped-tab-todas): na MESMA ordem
+    // das colunas da tela, pra o PDF sair com o que o funil deixou visível.
+    const getTodas = [
+      r => formatDate(r.data_transacao), r => r.hora || '-', r => r.placa,
+      r => `${r.marca || ''} ${r.modelo || ''}`.trim(), r => r.cadastro,
+      r => r.condutor_atual === 'NÃO ENCONTRADA' ? 'Não encontrada' : r.condutor_atual,
+      r => r.endereco, r => formatCurrency(r.valor),
+    ];
     body.innerHTML = `
       <div class="cards-grid">${metricCard('Total de passagens', rows.length)}${metricCard('Valor total', formatCurrency(totalValue))}${metricCard('Fora do horário', foraHorario, foraHorario>0)}${metricCard('Fora das cidades cobradas', foraCidade, foraCidade>0)}${metricCard('Condutor não encontrado', naoEncontrada, naoEncontrada>0)}</div>
       ${divergent.length?`<div class="warning-box">${divergent.length} passagem(ns) com condutor atual diferente do cadastrado.</div>`:''}
@@ -15860,22 +15869,32 @@ function renderToll() {
           <option value="99999"${limitePed>=99999?' selected':''}>Mostrar todas</option>
         </select>
       </div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
-        <th>Data/Hora</th><th>Placa</th><th>Marca/Modelo</th><th>Cadastro</th><th>Condutor atual</th><th>Endereço</th><th>Valor</th>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="ped-tab-todas"><thead><tr>
+        <th>Data</th><th>Horário</th><th>Placa</th><th>Marca/Modelo</th><th>Cadastro</th><th>Condutor atual</th><th>Endereço</th><th>Valor</th>
       </tr></thead><tbody>
       ${rows.slice(0,limitePed).map(r=>{
         const fora = /fora/i.test(r.status||'');
         const foraCid = enderecoForaDasCidades(r.endereco);
-        return `<tr><td>${formatDate(r.data_transacao)} ${esc(r.hora)||''}</td><td>${esc(r.placa)}</td><td>${esc(r.marca)} ${esc(r.modelo)||''}</td>
+        // Data e Horário em colunas SEPARADAS (pedido do cliente 23/09/2026):
+        // juntas, o funil do cabeçalho listava um item por "dia + minuto" (uma
+        // opção por passagem), o que não dá pra usar. Separadas, o funil da
+        // Data lista dia e o do Horário lista hora — e o horário segue a mesma
+        // cor do nome quando a passagem é fora do horário permitido.
+        return `<tr><td>${formatDate(r.data_transacao)}</td>
+        <td style="${fora?'color:var(--danger);font-weight:600':''}">${esc(r.hora)||'-'}</td><td>${esc(r.placa)}</td><td>${esc(r.marca)} ${esc(r.modelo)||''}</td>
         <td style="${fora?'color:var(--danger);font-weight:600':''}">${esc(r.cadastro)}</td>
         <td>${r.condutor_atual==='NÃO ENCONTRADA'?`<span class="badge warn">Não encontrada</span>`:`<span style="color:${fora?'var(--danger)':'var(--text-primary)'}">${esc(r.condutor_atual)}</span>`}</td>
         <td style="${foraCid?'color:#fb923c':''}">${esc(r.endereco)}</td><td>${formatCurrency(r.valor)}</td></tr>`;
       }).join('')}
       </tbody></table></div>
-      <div class="section-heading">Gasto de Pedágio por Veículo</div>
-      <div class="panel" style="margin-bottom:1.5rem"><div id="c-placa"></div></div>
-      <div class="section-heading">Ofensores de Pedágio</div>
-      <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Um veículo por linha, do que mais gastou pro que menos gastou — clique no funil do cabeçalho pra filtrar qualquer coluna, igual numa tabela dinâmica.</p>
+      <!-- "Gasto de Pedágio por Veículo" (gráfico) e "Ofensores de Pedágio"
+           (tabela) eram DUAS seções com o MESMO dado (as duas saem de byPlaca)
+           — juntadas numa só em 23/09/2026, pedido do cliente. O gráfico é o
+           ranking visual, a tabela é o mesmo ranking com condutor e total; um
+           "ocultar" só agora esconde os dois juntos. -->
+      <div class="section-heading">Gasto de Pedágio por Veículo<span class="sec-nota">ofensores — do que mais gastou pro que menos gastou</span></div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Gráfico e tabela são o mesmo dado: um veículo por linha, do maior gasto pro menor. Clique no funil do cabeçalho pra filtrar qualquer coluna, igual numa tabela dinâmica.</p>
+      <div class="panel" style="margin-bottom:1rem"><div id="c-placa"></div></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
         <th>Placa</th><th>Condutor em Sistema</th><th>Condutor Atual</th><th>Valor Total</th>
       </tr></thead><tbody>
@@ -15898,12 +15917,12 @@ function renderToll() {
       <div class="section-heading">Detalhamento por Condutor e Local <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(pra desconto)</span></div>
       <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Uma linha por passagem, com data e placa — endereço e valor de CADA pedágio, não só o mais frequente.</p>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="ped-tab-detalhe"><thead><tr>
-        <th>Data/Hora</th><th>Placa</th><th>Endereço</th><th>Valor</th>
+        <th>Data</th><th>Horário</th><th>Placa</th><th>Endereço</th><th>Valor</th>
       </tr></thead><tbody>
-        ${detalhamentoLocal.map(d => `<tr><td class="cat-cell">${formatDate(d.data)} ${d.hora}</td><td>${esc(d.placa)}</td>
+        ${detalhamentoLocal.map(d => `<tr><td class="cat-cell">${formatDate(d.data)}</td><td>${esc(d.hora)||'-'}</td><td>${esc(d.placa)}</td>
           <td style="${enderecoForaDasCidades(d.local)?'color:#fb923c':''}">${esc(d.local)}</td>
           <td style="font-weight:600">${formatCurrency(d.valor)}</td></tr>`).join('')}
-        <tr class="total-row" id="ped-detalhe-total"><td class="cat-cell">TOTAL</td><td>-</td><td>-</td><td>${formatCurrency(totalValue)}</td></tr>
+        <tr class="total-row" id="ped-detalhe-total"><td class="cat-cell">TOTAL</td><td>-</td><td>-</td><td>-</td><td>${formatCurrency(totalValue)}</td></tr>
       </tbody></table></div>
       <div id="pdf-export-area"></div>
     `;
@@ -15921,11 +15940,10 @@ function renderToll() {
     const tabDetalhe = document.getElementById('ped-tab-detalhe');
     if (tabDetalhe) {
       const atualizarTotalDetalhe = () => {
-        const visiveis = filtrarPorColunasAtivas(tabDetalhe, detalhamentoLocal, [
-          dataHoraChave, d => d.placa, d => d.local, d => formatCurrency(d.valor)
-        ]);
+        const visiveis = filtrarPorColunasAtivas(tabDetalhe, detalhamentoLocal, getDetalhe);
         const totalLinha = document.getElementById('ped-detalhe-total');
-        if (totalLinha) totalLinha.children[3].textContent = formatCurrency(visiveis.reduce((a, d) => a + d.valor, 0));
+        // children[4] = coluna Valor (Data, Horário, Placa, Endereço, Valor)
+        if (totalLinha) totalLinha.children[4].textContent = formatCurrency(visiveis.reduce((a, d) => a + d.valor, 0));
       };
       tabDetalhe.addEventListener('filtro-aplicado', atualizarTotalDetalhe);
     }
@@ -15970,7 +15988,8 @@ function renderToll() {
 
     document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
       { id: 'resumo', label: 'Resumo de pedágio' },
-      { id: 'placa', label: 'Ofensores de pedágio (por veículo)' },
+      { id: 'todas', label: 'Todas as passagens' },
+      { id: 'placa', label: 'Gasto por veículo (ofensores)' },
       { id: 'condutor', label: 'Pedágio por condutor' },
       { id: 'detalhelocal', label: 'Detalhamento por condutor e local (desconto)' }
     ]);
@@ -15979,7 +15998,19 @@ function renderToll() {
         {l:'Total de passagens', v:rows.length}, {l:'Valor total', v:formatCurrency(totalValue)},
         {l:'Fora do horário', v:foraHorario}, {l:'Fora das cidades cobradas', v:foraCidade}, {l:'Condutor não encontrado', v:naoEncontrada}
       ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
-      placa: () => secaoTabela('Ofensores de Pedágio', byPlaca, [
+      // Leva TODAS as passagens que passaram pelo filtro da barra + funil de
+      // coluna (não só as que couberam no "Mostrar 200/500" da tela — no PDF
+      // não faz sentido cortar a lista).
+      todas: () => {
+        const linhas = filtrarPorColunasAtivas(document.getElementById('ped-tab-todas'), rows, getTodas);
+        return secaoTabela(`Todas as Passagens — ${linhas.length} de ${rows.length} passagem(ns)`, linhas, [
+          {header:'Data', get:r=>formatDate(r.data_transacao)}, {header:'Horário', get:r=>r.hora || '-'},
+          {header:'Placa', get:r=>r.placa}, {header:'Cadastro', get:r=>r.cadastro},
+          {header:'Condutor atual', get:r=>r.condutor_atual === 'NÃO ENCONTRADA' ? 'Não encontrada' : r.condutor_atual},
+          {header:'Endereço', get:r=>r.endereco}, {header:'Valor', get:r=>formatCurrency(r.valor)}
+        ], { totalRow: ['TOTAL', '-', '-', '-', '-', '-', formatCurrency(linhas.reduce((a,r)=>a+r.valor,0))] });
+      },
+      placa: () => secaoTabela('Gasto de Pedágio por Veículo (ofensores)', byPlaca, [
         {header:'Placa', get:r=>r.placa}, {header:'Condutor em Sistema', get:r=>r.cadastro}, {header:'Condutor Atual', get:r=>r.condutor},
         {header:'Valor Total', get:r=>formatCurrency(r.value)}
       ], { totalRow: ['TOTAL GERAL', '-', '-', formatCurrency(byPlaca.reduce((a,p)=>a+p.value,0))] }),
@@ -15994,13 +16025,11 @@ function renderToll() {
       },
       detalhelocal: () => {
         const tabDet = document.getElementById('ped-tab-detalhe');
-        const linhas = filtrarPorColunasAtivas(tabDet, detalhamentoLocal, [
-          dataHoraChave, d => d.placa, d => d.local, d => formatCurrency(d.valor)
-        ]);
+        const linhas = filtrarPorColunasAtivas(tabDet, detalhamentoLocal, getDetalhe);
         return secaoTabela(`Detalhamento por Condutor e Local (pra desconto) — ${linhas.length} de ${detalhamentoLocal.length} passagem(ns)`, linhas, [
-          {header:'Endereço', get:r=>r.local}, {header:'Data/Hora', get:r=>formatDate(r.data)+' '+r.hora},
+          {header:'Endereço', get:r=>r.local}, {header:'Data', get:r=>formatDate(r.data)}, {header:'Horário', get:r=>r.hora || '-'},
           {header:'Placa', get:r=>r.placa}, {header:'Valor', get:r=>formatCurrency(r.valor)}
-        ], { totalRow: ['TOTAL', '-', '-', formatCurrency(linhas.reduce((a,r)=>a+r.valor,0))] });
+        ], { totalRow: ['TOTAL', '-', '-', '-', formatCurrency(linhas.reduce((a,r)=>a+r.valor,0))] });
       },
     });
   }
