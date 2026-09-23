@@ -12254,6 +12254,34 @@ function historicoMotivosPrazo(os) {
     .sort((a, b) => String(a.data).localeCompare(String(b.data)) || ((a.inicio ? +a.inicio : 0) - (b.inicio ? +b.inicio : 0)))
     .map(p => p.motivo.trim());
 }
+// Faixa/cor compartilhada pelas duas versões da tabela "Fora do Prazo —
+// Detalhe" (DIA e MÊS), pra não duplicar a régua de cor em dois lugares.
+const ORDEM_FAIXA_PRAZO = { outlier: 0, maior48: 1, ate48: 2 };
+const FAIXA_INFO_PRAZO = {
+  ate48: { rotulo: 'Até 48hrs', classe: 'azul' },
+  maior48: { rotulo: 'Maior que 48hrs', classe: 'laranja' },
+  outlier: { rotulo: 'Outlier', classe: 'roxo' },
+};
+// aging vem em DIAS (mesma unidade de faixaPorAging, no DIA e no MÊS) — em
+// horas fica mais fácil de comparar com o prazo contratado, que também é em
+// horas (24h reparo). Pedido do cliente 23/09/2026. "Xh" com casa decimal
+// (ex.: "24.8h") confundia — parecia "24h08min" e é na verdade "24h48min"
+// (0,8 é FRAÇÃO da hora, não minuto). "Xh Ymin" por extenso não deixa dúvida
+// (mesma correção de arredondamento de minuto que `textoFalta`, na PCR, já usa).
+function formatTempoGastoPrazo(agingDias) {
+  if (agingDias === null || agingDias === undefined || agingDias === '' || !isFinite(Number(agingDias))) return '-';
+  const totalHoras = Number(agingDias) * 24;
+  let hh = Math.floor(totalHoras), mm = Math.round((totalHoras - hh) * 60);
+  if (mm === 60) { hh += 1; mm = 0; }
+  return mm === 0 ? `${hh}h` : `${hh}h ${mm}min`;
+}
+// Motivo: histórico (`historicoMotivosPrazo`) quando a O.S teve mais de uma
+// tentativa no PCR, senão o motivo oficial da Produção (`motivoDoPrazo`).
+function htmlMotivoPrazo(r) {
+  const hist = historicoMotivosPrazo(r.os);
+  if (hist.length > 1) return hist.map((m, i) => `${i + 1}º: ${esc(m)}`).join('<br>');
+  return esc(hist[0] || motivoDoPrazo(r));
+}
 function htmlForaDoPrazoDetalhe(encerradas) {
   // Só CONCLUÍDA entra (pedido do cliente 23/09/2026): "não concluído" e
   // "cancelado" também podem sair com faixa marcada (o aging é calculado em
@@ -12261,47 +12289,57 @@ function htmlForaDoPrazoDetalhe(encerradas) {
   // de reparo" — é uma visita que nem terminou o serviço.
   const foraDoPrazo = encerradas.filter(r => r.faixa && r.faixa !== 'ate24' && isConcluido(r.status));
   if (!foraDoPrazo.length) return '';
-  const ORDEM_FAIXA = { outlier: 0, maior48: 1, ate48: 2 };
-  const FAIXA_INFO = {
-    ate48: { rotulo: 'Até 48hrs', classe: 'azul' },
-    maior48: { rotulo: 'Maior que 48hrs', classe: 'laranja' },
-    outlier: { rotulo: 'Outlier', classe: 'roxo' },
-  };
   const ordenado = [...foraDoPrazo].sort((a, b) =>
-    (ORDEM_FAIXA[a.faixa] - ORDEM_FAIXA[b.faixa]) || ((Number(b.aging) || 0) - (Number(a.aging) || 0)));
+    (ORDEM_FAIXA_PRAZO[a.faixa] - ORDEM_FAIXA_PRAZO[b.faixa]) || ((Number(b.aging) || 0) - (Number(a.aging) || 0)));
   return `
     <div class="section-heading">Ordens Fora do Prazo — Detalhe<span class="sec-nota">${ordenado.length} O.S nessa data, da pior pra menos grave</span></div>
     <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
       <th>Faixa</th><th>O.S</th><th>Cidade</th><th>Técnico</th><th>Abertura</th><th>Motivo da baixa</th><th>Tempo gasto</th>
     </tr></thead><tbody>
       ${ordenado.map(r => {
-        const info = FAIXA_INFO[r.faixa] || { rotulo: r.faixa, classe: 'neutral' };
-        // aging vem em DIAS (mesma unidade de faixaPorAging) — em horas fica
-        // mais fácil de comparar com o prazo contratado, que também é em
-        // horas (24h reparo). Pedido do cliente 23/09/2026. "Xh" com casa
-        // decimal (ex.: "24.8h") confundia — parecia "24h08min" e é na
-        // verdade "24h48min" (0,8 é FRAÇÃO da hora, não minuto). Trocado por
-        // "Xh Ymin" por extenso (mesma correção de arredondamento de minuto
-        // que `textoFalta`, aqui embutida no local, já usa na PCR).
-        let tempo = '-';
-        if (r.aging !== null && r.aging !== undefined && r.aging !== '' && isFinite(Number(r.aging))) {
-          const totalHoras = Number(r.aging) * 24;
-          let hh = Math.floor(totalHoras), mm = Math.round((totalHoras - hh) * 60);
-          if (mm === 60) { hh += 1; mm = 0; }
-          tempo = mm === 0 ? `${hh}h` : `${hh}h ${mm}min`;
-        }
+        const info = FAIXA_INFO_PRAZO[r.faixa] || { rotulo: r.faixa, classe: 'neutral' };
         return `<tr>
           <td><span class="badge ${info.classe}">${esc(info.rotulo)}</span></td>
           <td class="cat-cell">${esc(r.os) || '-'}</td>
           <td>${esc(r.cidade) || '-'}</td>
           <td>${ehRecursoTecnico(r.recurso) ? esc(r.recurso) : '-'}</td>
           <td>${fmtDT(r.abertura)}</td>
-          <td>${(() => {
-            const hist = historicoMotivosPrazo(r.os);
-            if (hist.length > 1) return hist.map((m, i) => `${i + 1}º: ${esc(m)}`).join('<br>');
-            return esc(hist[0] || motivoDoPrazo(r));
-          })()}</td>
-          <td style="font-weight:700;color:var(--danger)">${tempo}</td>
+          <td>${htmlMotivoPrazo(r)}</td>
+          <td style="font-weight:700;color:var(--danger)">${formatTempoGastoPrazo(r.aging)}</td>
+        </tr>`;
+      }).join('')}
+    </tbody></table></div>`;
+}
+// Mesma tabela, versão MÊS (planilha PRAZOS_ESCRITÓRIO/BASE DE DADOS —
+// `renderPrazo`, pedido do cliente 23/09/2026: "faça a mesma tabela para o
+// prazo mês"). A fonte é outra e NÃO tem tudo que o CSV da PCR tem: a faixa
+// vem de `status_prazo` (texto já classificado pela planilha, não de um
+// campo `.faixa` pronto) e não existe coluna de "abertura" nessa aba — só
+// `data` (o dia da ordem). Por isso a coluna vira "Data", não "Abertura", pra
+// não fingir uma informação que a planilha não traz. Motivo e Tempo Gasto
+// reaproveitam os MESMOS helpers do DIA (motivo cruza com o PCR/Produção
+// independente de mês; aging já vem em dias igual ao do DIA).
+function htmlForaDoPrazoDetalheMes(rows) {
+  const comFaixa = rows.map(r => ({ r, faixa: classifyBucket(r.status_prazo) }))
+    .filter(x => x.faixa !== 'ate24' && x.faixa !== 'outro');
+  if (!comFaixa.length) return '';
+  const ordenado = [...comFaixa].sort((a, b) =>
+    (ORDEM_FAIXA_PRAZO[a.faixa] - ORDEM_FAIXA_PRAZO[b.faixa]) || ((Number(b.r.aging) || 0) - (Number(a.r.aging) || 0)));
+  return `
+    <div class="section-heading">Ordens Fora do Prazo — Detalhe<span class="sec-nota">${ordenado.length} O.S nesse mês, da pior pra menos grave</span></div>
+    <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+      <th>Faixa</th><th>O.S</th><th>Cidade</th><th>Técnico</th><th>Data</th><th>Motivo da baixa</th><th>Tempo gasto</th>
+    </tr></thead><tbody>
+      ${ordenado.map(({ r, faixa }) => {
+        const info = FAIXA_INFO_PRAZO[faixa] || { rotulo: faixa, classe: 'neutral' };
+        return `<tr>
+          <td><span class="badge ${info.classe}">${esc(info.rotulo)}</span></td>
+          <td class="cat-cell">${esc(r.os) || '-'}</td>
+          <td>${esc(r.cidade) || '-'}</td>
+          <td>${ehRecursoTecnico(r.recurso) ? esc(r.recurso) : '-'}</td>
+          <td>${r.data ? formatDate(r.data) : '-'}</td>
+          <td>${htmlMotivoPrazo(r)}</td>
+          <td style="font-weight:700;color:var(--danger)">${formatTempoGastoPrazo(r.aging)}</td>
         </tr>`;
       }).join('')}
     </tbody></table></div>`;
@@ -14362,6 +14400,7 @@ function renderPrazo() {
       </div>
       ${renderCartaoPrazo({ id: 'pzcard-mes', titulo: 'ACOMPANHAMENTO DE PRAZOS — MÊS', rotulo: rotuloMes,
         badgeLabel: 'Prazo geral 24hrs', pct, meta: TARGET, within: within24, total: rows.length, byCity, totals })}
+      ${htmlForaDoPrazoDetalheMes(rows)}
       ${dupHtml}
       <div id="pdf-export-area"></div>
     `;
