@@ -14908,6 +14908,7 @@ function exportarPptReuniao(d) {
       pptKpis(pptx, s7, [
         { valor: formatPct(d.pctEstouradoSobreTotal, 1), rotulo: 'Recebidos com prazo vencido', sub: 'sobre o total de reparos', cor: PPT_COR.laranja, corFundo: PPT_COR.laranjaClaro },
         { valor: formatPct(d.pctVencidoEmCampo, 1), rotulo: 'Prazo vencido em campo', sub: 'ordens que venceram com o técnico', cor: PPT_COR.verde, corFundo: PPT_COR.verdeClaro },
+        { valor: d.mediaEstouradoPorDia === null ? '-' : d.mediaEstouradoPorDia.toFixed(1), rotulo: 'Média por dia', sub: `${d.qtdJaChegouEstourado} O.S no período` },
       ]);
       s7.addText('Incidência por Cidade', { x: 0.5, y: 3.05, w: 6, h: 0.26, fontSize: 12, bold: true, color: PPT_COR.texto, fontFace: 'Segoe UI' });
       pptTabela(pptx, s7, ['Cidade', 'Recebido com prazo vencido', 'Prazo vencido em campo'],
@@ -15190,6 +15191,13 @@ function renderReuniaoPrazos() {
     const vencidoEmCampoQtd = semTentFora.length - jaChegouEstourado.length;
     const pctEstouradoSobreTotal = totalReparosPcr ? (jaChegouEstourado.length / totalReparosPcr) * 100 : 0;
     const pctVencidoEmCampo = totalReparosPcr ? (vencidoEmCampoQtd / totalReparosPcr) * 100 : 0;
+    // Média por DIA (pedido do cliente 23/09/2026, além do %): quantos reparos
+    // "já chegaram vencidos" (sem tentativa anterior — nunca teve improdutiva
+    // nem concluído antes — e o técnico só começou depois do prazo já ter
+    // estourado) caem em cada dia coberto pelo PCR do período. Mesmo
+    // denominador `diasPcr` que o resto da tela já usa pra dizer "baseado em
+    // quantos dias importados".
+    const mediaEstouradoPorDia = diasPcr ? jaChegouEstourado.length / diasPcr : null;
     const estouradoCidadeMap = {};
     pcrReparo.forEach(r => {
       const c = r.cidade || 'Não informado';
@@ -15398,6 +15406,7 @@ function renderReuniaoPrazos() {
       <div class="cards-grid">
         ${metricCard('Recebidos com prazo vencido', formatPct(pctEstouradoSobreTotal, 1), true, { big: true, nivel: 'heroi', sub: 'do total de reparos do período' })}
         ${metricCard('Prazo vencido em campo', formatPct(pctVencidoEmCampo, 1), false, { big: true, sub: 'técnico começou com prazo ainda válido' })}
+        ${metricCard('Média por dia', mediaEstouradoPorDia === null ? '-' : mediaEstouradoPorDia.toFixed(1), jaChegouEstourado.length > 0, { big: true, sub: `${jaChegouEstourado.length} O.S em ${diasPcr} dia(s) de PCR` })}
       </div>
       <div class="panel" style="margin-bottom:1.5rem">
         <h3>Por cidade</h3>
@@ -15523,6 +15532,7 @@ function renderReuniaoPrazos() {
       temPcr: !!semTentFora.length || !!inicios.length,
       diasPcr,
       pctEstouradoSobreTotal, pctVencidoEmCampo, temEstourado: !!semTentFora.length,
+      mediaEstouradoPorDia, qtdJaChegouEstourado: jaChegouEstourado.length,
       estouradoPorCidade,
       cidadesInicio: cidadesInicio.map(c => ({ nome: c.nome, hora: horaDeDecimal(mediaHora(c)), dias: c.dias })),
       tecnicosTarde: tecnicosTarde.map(t => ({ nome: t.nome, hora: horaDeDecimal(mediaHora(t)), dias: t.dias })),
