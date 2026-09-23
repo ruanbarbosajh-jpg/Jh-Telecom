@@ -4702,7 +4702,10 @@ function wirePdfExportPanel(titulo, getSecaoFns) {
   btn.addEventListener('click', () => {
     const marcados = [...document.querySelectorAll('[data-pdf-section]:checked')].map(c => c.dataset.pdfSection);
     if (!marcados.length) { toast('Selecione ao menos uma seção pra exportar.', 'aviso'); return; }
-    const secoes = marcados.map(id => getSecaoFns[id] && getSecaoFns[id]()).filter(Boolean);
+    // .flat() deixa passar direto quem devolve UMA seção (o caso comum) e
+    // "abre" quem devolve um array de seções (ex.: um item do painel que vira
+    // duas tabelas no PDF, como "Período Ofensor" — manhã e tarde).
+    const secoes = marcados.map(id => getSecaoFns[id] && getSecaoFns[id]()).filter(Boolean).flat();
     if (!secoes.length) { toast('Sem dados pra exportar nessa seleção.', 'aviso'); return; }
     gerarPDFMultiSecoes(titulo, secoes);
   });
@@ -14877,7 +14880,7 @@ function pptDestaque(pptx, slide, titulo, corpo, opts = {}) {
 // status: { pill:true, texto, cor, fundo } — dá pra colorir só aquela célula.
 function pptTabela(pptx, slide, headers, linhas, opts = {}) {
   if (!linhas.length) {
-    slide.addText('Sem dados no período/filtro selecionado.', { x: 0.5, y: opts.y || 1.3, w: 9.0, h: 0.4, fontSize: 12, color: PPT_COR.muted, fontFace: 'Segoe UI' });
+    slide.addText('Sem dados no período/filtro selecionado.', { x: opts.x || 0.5, y: opts.y || 1.3, w: opts.w || 9.0, h: 0.4, fontSize: 12, color: PPT_COR.muted, fontFace: 'Segoe UI' });
     return;
   }
   const cabecalho = headers.map(h => ({ text: String(h), options: { bold: true, color: PPT_COR.texto, fill: { color: PPT_COR.cabecalhoTab } } }));
@@ -14892,7 +14895,7 @@ function pptTabela(pptx, slide, headers, linhas, opts = {}) {
     };
   }));
   slide.addTable([cabecalho, ...corpo], {
-    x: 0.5, y: opts.y || 1.25, w: 9.0, colW: opts.colW,
+    x: opts.x || 0.5, y: opts.y || 1.25, w: opts.w || 9.0, colW: opts.colW,
     fontSize: opts.fontSize || 11.5, fontFace: 'Segoe UI',
     border: { type: 'solid', pt: 0.5, color: PPT_COR.linha },
     valign: 'middle', rowH: opts.rowH || 0.32, autoPage: false,
@@ -15035,10 +15038,16 @@ function exportarPptReuniao(d) {
     { valor: formatPct(d.pctTarde, 1), rotulo: 'Perdas de prazo na tarde', cor: d.periodoPior === 'tarde' ? PPT_COR.vermelho : PPT_COR.azul },
     { valor: d.rotuloPior, rotulo: 'Período que mais perde prazo', corpo: 22, cor: PPT_COR.vermelho },
   ]);
-  s5.addText('Técnicos ofensores do período', { x: 0.5, y: 3.05, w: 6, h: 0.26, fontSize: 12, bold: true, color: PPT_COR.texto, fontFace: 'Segoe UI' });
-  pptTabela(pptx, s5, ['#', 'Técnico ofensor do período', '% das perdas'],
-    d.rankPeriodo.slice(0, 5).map((o, i) => [String(i + 1).padStart(2, '0'), o.nome, formatPct(o.pct, 1)]),
-    { y: 3.35, colW: [0.6, 6.0, 2.4], rowH: 0.28 });
+  // Manhã e tarde lado a lado (23/09/2026, pedido do cliente: quer os dois
+  // períodos, não só o ranking do pior) — espelha a tela.
+  s5.addText('Ofensores — manhã', { x: 0.5, y: 3.05, w: 4.3, h: 0.26, fontSize: 12, bold: true, color: PPT_COR.texto, fontFace: 'Segoe UI' });
+  pptTabela(pptx, s5, ['#', 'Técnico', '%'],
+    d.rankManha.slice(0, 5).map((o, i) => [String(i + 1).padStart(2, '0'), o.nome, formatPct(o.pct, 1)]),
+    { x: 0.5, w: 4.3, y: 3.35, colW: [0.5, 2.7, 1.1], rowH: 0.28 });
+  s5.addText('Ofensores — tarde', { x: 5.2, y: 3.05, w: 4.3, h: 0.26, fontSize: 12, bold: true, color: PPT_COR.texto, fontFace: 'Segoe UI' });
+  pptTabela(pptx, s5, ['#', 'Técnico', '%'],
+    d.rankTarde.slice(0, 5).map((o, i) => [String(i + 1).padStart(2, '0'), o.nome, formatPct(o.pct, 1)]),
+    { x: 5.2, w: 4.3, y: 3.35, colW: [0.5, 2.7, 1.1], rowH: 0.28 });
 
   // ---- 6. motivos da baixa (barras, igual ao modelo) ----
   const s6 = pptSlide(pptx, 'Causa Raiz Operacional', 'Motivos da Baixa nos Reparos Fora do Prazo', { badge: 'Classificação dos Serviços', badgeW: 2.9 });
@@ -15272,19 +15281,23 @@ function renderReuniaoPrazos() {
     const totalPeriodo = contaPeriodo.manha + contaPeriodo.tarde;
     const periodoPior = contaPeriodo.manha >= contaPeriodo.tarde ? 'manha' : 'tarde';
     const rotuloPeriodo = p => p === 'manha' ? 'Manhã' : 'Tarde';
-    const ofensoresDoPeriodo = {};
-    foraPrazo.filter(r => periodoDoPrazo(r) === periodoPior).forEach(r => {
-      const t = r.recurso || 'Não informado';
-      ofensoresDoPeriodo[t] = (ofensoresDoPeriodo[t] || 0) + 1;
-    });
-    const totalPior = contaPeriodo[periodoPior];
-    const rankPeriodo = Object.entries(ofensoresDoPeriodo)
-      .map(([nome, qtd]) => ({ nome, qtd }))
-      .sort((a, b) => b.qtd - a.qtd).slice(0, 10)
-      .map(o => ({
-        nome: o.nome,
-        valor: `<span style="color:var(--danger)">${formatPct(totalPior ? (o.qtd / totalPior) * 100 : 0, 1)}</span>`,
-      }));
+    // Ranking de ofensores por MANHÃ e por TARDE (23/09/2026, pedido do cliente:
+    // antes só mostrava o ranking do período que mais perdia prazo; ele quer os
+    // dois períodos lado a lado, não só o pior).
+    const rankOfensoresPeriodo = periodo => {
+      const mapa = {};
+      foraPrazo.filter(r => periodoDoPrazo(r) === periodo).forEach(r => {
+        const t = r.recurso || 'Não informado';
+        mapa[t] = (mapa[t] || 0) + 1;
+      });
+      const total = contaPeriodo[periodo];
+      return Object.entries(mapa)
+        .map(([nome, qtd]) => ({ nome, qtd, pct: total ? (qtd / total) * 100 : 0 }))
+        .sort((a, b) => b.qtd - a.qtd).slice(0, 10);
+    };
+    const rankManha = rankOfensoresPeriodo('manha');
+    const rankTarde = rankOfensoresPeriodo('tarde');
+    const itemOfensorPeriodo = o => ({ nome: o.nome, valor: `<span style="color:var(--danger)">${formatPct(o.pct, 1)}</span>` });
 
     // ---------- Motivos da baixa dos reparos fora do prazo ----------
     const motivoForaMap = {};
@@ -15480,9 +15493,15 @@ function renderReuniaoPrazos() {
         ${metricCard('Perdas de prazo ocorridas na tarde', totalPeriodo ? formatPct((contaPeriodo.tarde / totalPeriodo) * 100, 1) : '-', periodoPior === 'tarde', { big: true })}
         ${metricCard('Período que mais perde prazo', totalPeriodo ? rotuloPeriodo(periodoPior) : '-', true, { big: true, nivel: 'heroi' })}
       </div>
-      <div class="panel" style="margin-bottom:1.5rem">
-        <h3>Técnicos ofensores da ${esc(rotuloPeriodo(periodoPior).toLowerCase())}</h3>
-        ${tabelaRankingReuniao(rankPeriodo, { rotuloNome: 'Técnico', rotuloValor: '% das perdas do período', vazio: 'Sem ordens fora do prazo com período identificado.' })}
+      <div class="panels-grid" style="margin-bottom:1.5rem">
+        <div class="panel">
+          <h3>Técnicos ofensores da manhã${periodoPior === 'manha' ? ' <span class="badge warn" style="font-size:10px;vertical-align:middle">pior período</span>' : ''}</h3>
+          ${tabelaRankingReuniao(rankManha.map(itemOfensorPeriodo), { rotuloNome: 'Técnico', rotuloValor: '% das perdas da manhã', vazio: 'Sem ordens fora do prazo pela manhã.' })}
+        </div>
+        <div class="panel">
+          <h3>Técnicos ofensores da tarde${periodoPior === 'tarde' ? ' <span class="badge warn" style="font-size:10px;vertical-align:middle">pior período</span>' : ''}</h3>
+          ${tabelaRankingReuniao(rankTarde.map(itemOfensorPeriodo), { rotuloNome: 'Técnico', rotuloValor: '% das perdas da tarde', vazio: 'Sem ordens fora do prazo à tarde.' })}
+        </div>
       </div>
 
       <div class="section-heading">5. Motivos da baixa — reparos fora do prazo</div>
@@ -15599,8 +15618,7 @@ function renderReuniaoPrazos() {
       pctManha: totalPeriodo ? (contaPeriodo.manha / totalPeriodo) * 100 : 0,
       pctTarde: totalPeriodo ? (contaPeriodo.tarde / totalPeriodo) * 100 : 0,
       periodoPior, rotuloPior: totalPeriodo ? rotuloPeriodo(periodoPior) : '-',
-      rankPeriodo: Object.entries(ofensoresDoPeriodo).map(([nome, qtd]) => ({ nome, qtd, pct: totalPior ? (qtd / totalPior) * 100 : 0 }))
-        .sort((a, b) => b.qtd - a.qtd),
+      rankManha, rankTarde,
       motivosFora: motivosFora.map(m => ({ nome: m.nome, total: m.total, pct: foraPrazo.length ? (m.total / foraPrazo.length) * 100 : 0 })),
       temPcr: !!inicios.length,
       diasPcr,
@@ -15645,10 +15663,16 @@ function renderReuniaoPrazos() {
         { header: 'Cidade', get: c => c.nome }, { header: '% fora do prazo', get: c => formatPct(pctF(c), 1) },
         { header: '% no prazo', get: c => formatPct(pctD(c), 1) }, { header: 'Reparos', get: c => c.total },
       ]),
-      periodo: () => secaoTabela(`Período Ofensor — ${rotuloPeriodo(periodoPior)}`, rankPeriodo.map((o, i) => ({ ...o, pos: i + 1 })), [
-        { header: '#', get: o => o.pos }, { header: 'Técnico', get: o => o.nome },
-        { header: '% das perdas do período', get: o => stripTags(o.valor) },
-      ]),
+      periodo: () => [
+        secaoTabela('Período Ofensor — Manhã', rankManha.map((o, i) => ({ ...o, pos: i + 1 })), [
+          { header: '#', get: o => o.pos }, { header: 'Técnico', get: o => o.nome },
+          { header: '% das perdas da manhã', get: o => formatPct(o.pct, 1) },
+        ]),
+        secaoTabela('Período Ofensor — Tarde', rankTarde.map((o, i) => ({ ...o, pos: i + 1 })), [
+          { header: '#', get: o => o.pos }, { header: 'Técnico', get: o => o.nome },
+          { header: '% das perdas da tarde', get: o => formatPct(o.pct, 1) },
+        ]),
+      ],
       motivos: () => secaoTabela('Motivos da Baixa — Reparo Fora do Prazo', motivosFora, [
         { header: 'Motivo', get: m => m.nome }, { header: 'Ordens', get: m => m.total },
         { header: '% das perdas', get: m => formatPct(foraPrazo.length ? (m.total / foraPrazo.length) * 100 : 0, 1) },
