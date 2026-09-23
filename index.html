@@ -12764,6 +12764,36 @@ function linhasDoCsvPorDia(dia) {
   });
   return [...porOS.values()];
 }
+// Ordem fixa das cidades na tabela "Mão de Obra e Produção do Dia" (pedido do
+// cliente 23/09/2026: por volume a linha trocava de lugar a cada atualização,
+// difícil de achar a cidade de cabeça). Cidade fora dessa lista entra numa
+// linha só, "Outras Cidades", no fim — soma tudo que sobrou.
+const ORDEM_CIDADES_MAO_DE_OBRA = ['GUARUJA', 'BERTIOGA', 'SANTOS', 'SAO VICENTE', 'PRAIA GRANDE', 'CUBATAO'];
+// Monta as linhas na ordem fixa acima: cidade sem ordem no dia ainda aparece
+// (com zero), pra a posição nunca sumir. `moDaCidadeLinha`/`moDoDia` são as
+// MESMAS funções que a tela já usa pra cada linha — "Outras Cidades" soma o
+// resultado delas cidade a cidade; ela não tem chave própria em
+// porCidadeMO/MO_MANUAL, por isso o M.O dela sai só-leitura (não tem UMA
+// cidade pra salvar a correção).
+function linhasMaoDeObraFixas(cidadesList, moDaCidadeLinha, moDoDia) {
+  const porNome = new Map(cidadesList.map(c => [normalizeHeader(c.cidade), c]));
+  const usados = new Set();
+  const fixas = ORDEM_CIDADES_MAO_DE_OBRA.map(nome => {
+    const chave = normalizeHeader(nome);
+    const real = porNome.get(chave);
+    if (real) usados.add(chave);
+    return real || { cidade: nome };
+  });
+  const resto = cidadesList.filter(c => !usados.has(normalizeHeader(c.cidade)));
+  if (!resto.length) return fixas;
+  const soma = resto.reduce((a, c) => {
+    const m = moDaCidadeLinha(c.cidade);
+    a.ativacao += m.ativacao; a.reparo += m.reparo; a.me += m.me; a.mc += m.mc; a.upgrade += m.upgrade; a.total += m.total;
+    a.mo += moDoDia(c);
+    return a;
+  }, { ativacao: 0, reparo: 0, me: 0, mc: 0, upgrade: 0, total: 0, mo: 0 });
+  return [...fixas, { cidade: 'Outras Cidades', agregado: true, ...soma }];
+}
 function renderParcialDoDia() {
   // Os dias vêm da BASE DO DIA (xlsx) e também do CSV de atividades importado
   // aqui ou na PCR — assim o dia importado hoje já aparece na lista.
@@ -12858,6 +12888,10 @@ function renderParcialDoDia() {
     // o número que o coordenador ajusta numa tela vale na outra
     const moDoDia = c => { const k = data + '|' + c.cidade; return MO_MANUAL[k] !== undefined ? MO_MANUAL[k] : moDaCidadeLinha(c.cidade).tecnicos.size; };
     const moTotalDia = () => cidadesList.reduce((a,c)=>a + moDoDia(c), 0);
+    // Linhas da tabela "Mão de Obra e Produção do Dia" em ordem fixa — as
+    // outras tabelas da tela (Status Detalhado, Prazo, Faixa) continuam
+    // usando `cidadesList` (por volume), só essa muda.
+    const linhasMO = linhasMaoDeObraFixas(cidadesList, moDaCidadeLinha, moDoDia);
 
     // ---- Tabela 2: Prazo geral do dia por cidade ----
     // fonte preferida: aba "PRAZO REPARO DO DIA" (já vem com NO PRAZO/FORA DO PRAZO prontos)
@@ -13015,7 +13049,12 @@ function renderParcialDoDia() {
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
         <th>Cidades</th><th>Ativação</th><th>Reparo</th><th>M.E</th><th>M.C</th><th>Upgrade</th><th>Total</th><th>M.O</th><th>Média</th>
       </tr></thead><tbody>
-        ${cidadesList.map(c=>{
+        ${linhasMO.map(c=>{
+          if (c.agregado) {
+            return `<tr><td class="cat-cell">${esc(c.cidade)}</td><td>${c.ativacao}</td><td>${c.reparo}</td><td>${c.me}</td><td>${c.mc}</td><td>${c.upgrade}</td><td>${c.total}</td>
+            <td style="color:var(--text-muted)" title="Soma das cidades fora da lista fixa — não tem UMA cidade pra editar o M.O aqui.">${c.mo}</td>
+            <td>${c.mo?(c.total/c.mo).toFixed(1):'-'}</td></tr>`;
+          }
           const m = moDaCidadeLinha(c.cidade);
           const chave = data + '|' + c.cidade;
           const mo = moDoDia(c);
@@ -13190,15 +13229,18 @@ function renderParcialDoDia() {
       ...(aExecutar.total ? [{ id: 'exec', label: 'A executar — por cidade e tipo de serviço' }] : [])
     ]);
     wirePdfExportPanel('Parcial do Dia — ' + formatDate(data), {
-      maodeobra: () => secaoTabela('Mão de Obra e Produção do Dia (pendentes)', [...cidadesList, {cidade:'TOTAL', ...totais}], [
+      // linhasMO já vem na ordem fixa (+ "Outras Cidades" agregada quando
+      // sobra alguma) — os getters tratam TOTAL e o agregado do mesmo jeito
+      // (campos já somados), só a cidade de verdade chama moDaCidadeLinha/moDoDia.
+      maodeobra: () => secaoTabela('Mão de Obra e Produção do Dia (pendentes)', [...linhasMO, {cidade:'TOTAL', ...totais}], [
         {header:'Cidade', get:r=>r.cidade},
-        {header:'Ativação', get:r=>r.cidade==='TOTAL'?r.ativacao:moDaCidadeLinha(r.cidade).ativacao},
-        {header:'Reparo', get:r=>r.cidade==='TOTAL'?r.reparo:moDaCidadeLinha(r.cidade).reparo},
-        {header:'M.E', get:r=>r.cidade==='TOTAL'?r.me:moDaCidadeLinha(r.cidade).me},
-        {header:'M.C', get:r=>r.cidade==='TOTAL'?r.mc:moDaCidadeLinha(r.cidade).mc},
-        {header:'Upgrade', get:r=>r.cidade==='TOTAL'?r.upgrade:moDaCidadeLinha(r.cidade).upgrade},
-        {header:'Total', get:r=>r.cidade==='TOTAL'?r.total:moDaCidadeLinha(r.cidade).total},
-        {header:'M.O', get:r=>r.cidade==='TOTAL'?r.mo:moDoDia(r)}
+        {header:'Ativação', get:r=>r.cidade==='TOTAL'||r.agregado?r.ativacao:moDaCidadeLinha(r.cidade).ativacao},
+        {header:'Reparo', get:r=>r.cidade==='TOTAL'||r.agregado?r.reparo:moDaCidadeLinha(r.cidade).reparo},
+        {header:'M.E', get:r=>r.cidade==='TOTAL'||r.agregado?r.me:moDaCidadeLinha(r.cidade).me},
+        {header:'M.C', get:r=>r.cidade==='TOTAL'||r.agregado?r.mc:moDaCidadeLinha(r.cidade).mc},
+        {header:'Upgrade', get:r=>r.cidade==='TOTAL'||r.agregado?r.upgrade:moDaCidadeLinha(r.cidade).upgrade},
+        {header:'Total', get:r=>r.cidade==='TOTAL'||r.agregado?r.total:moDaCidadeLinha(r.cidade).total},
+        {header:'M.O', get:r=>r.cidade==='TOTAL'||r.agregado?r.mo:moDoDia(r)}
       ]),
       status: () => secaoTabela('Status Detalhado por Tipo de Serviço', statusTable, [
         {header:'Serviço', get:r=>r.label}, ...bucketsTabela.map(b=>({header:bucketLabel[b], get:r=>r[b]})), {header:'Total', get:r=>r.total}
