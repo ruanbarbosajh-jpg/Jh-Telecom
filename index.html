@@ -15727,8 +15727,7 @@ function renderToll() {
     <div class="field"><label>Condutor</label><input type="text" id="f-condutor" placeholder="Nome" list="condutor-list"></div>
     <div class="field"><label>Placa</label><input type="text" id="f-placa" placeholder="Placa"></div>
     <div class="field"><label>Endereço</label><input type="text" id="f-endereco" placeholder="Endereço, cidade, rodovia..."></div>
-    <div class="field"><label>Hora de</label><input type="time" id="f-hora-min"></div>
-    <div class="field"><label>Hora até</label><input type="time" id="f-hora-max"></div>
+    <div class="field"><label>A partir de</label><input type="time" id="f-hora-min"></div>
     <div class="field"><label>Valor mín.</label><input type="number" id="f-valor-min" placeholder="0,00" step="0.01"></div>
     <div class="field"><label>Valor máx.</label><input type="number" id="f-valor-max" placeholder="0,00" step="0.01"></div>
     <div class="field"><label>Status</label><select id="f-status">
@@ -15757,8 +15756,11 @@ function renderToll() {
     const endereco = document.getElementById('f-endereco').value.toLowerCase();
     // "HH:MM" compara certinho como texto (24h, dois dígitos) — sem precisar
     // converter pra minutos. Pedido do cliente 22/09/2026: filtrar a tabela
-    // por horário, não só por data.
-    const horaMin = document.getElementById('f-hora-min').value, horaMax = document.getElementById('f-hora-max').value;
+    // por horário, não só por data. Virou só "A partir de" (23/09/2026, pedido
+    // do cliente) — um campo só, mostra tudo a partir daquele horário em
+    // diante (o "Hora até" saiu; quem quiser um teto usa o funil da coluna
+    // Horário nas tabelas, que já filtra por valor exato).
+    const horaMin = document.getElementById('f-hora-min').value;
     const valorMinStr = document.getElementById('f-valor-min').value, valorMaxStr = document.getElementById('f-valor-max').value;
     const valorMin = valorMinStr !== '' ? parseFloat(valorMinStr) : null, valorMax = valorMaxStr !== '' ? parseFloat(valorMaxStr) : null;
     const statusFilter = document.getElementById('f-status').value;
@@ -15772,7 +15774,6 @@ function renderToll() {
       && (!placa || (r.placa||'').toLowerCase().includes(placa))
       && (!endereco || (r.endereco||'').toLowerCase().includes(endereco))
       && (!horaMin || (r.hora||'') >= horaMin)
-      && (!horaMax || (r.hora||'') <= horaMax)
       && (valorMin === null || (r.valor||0) >= valorMin)
       && (valorMax === null || (r.valor||0) <= valorMax)
       && (!statusFilter || (statusFilter==='fora' ? /fora/i.test(r.status||'') : !/fora/i.test(r.status||'')))
@@ -15895,7 +15896,7 @@ function renderToll() {
       <div class="section-heading">Gasto de Pedágio por Veículo<span class="sec-nota">ofensores — do que mais gastou pro que menos gastou</span></div>
       <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Gráfico e tabela são o mesmo dado: um veículo por linha, do maior gasto pro menor. Clique no funil do cabeçalho pra filtrar qualquer coluna, igual numa tabela dinâmica.</p>
       <div class="panel" style="margin-bottom:1rem"><div id="c-placa"></div></div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="ped-tab-placa"><thead><tr>
         <th>Placa</th><th>Condutor em Sistema</th><th>Condutor Atual</th><th>Valor Total</th>
       </tr></thead><tbody>
         ${byPlaca.map(p => `<tr><td class="cat-cell">${esc(p.placa)}</td><td>${esc(p.cadastro)}</td>
@@ -15967,6 +15968,79 @@ function renderToll() {
       };
       tabCondutor.addEventListener('filtro-aplicado', atualizarTotaisCondutor);
     }
+    // "Gasto de Pedágio por Veículo" é 1 linha por PLACA (já soma) — não tem
+    // grupo pra recalcular por dentro, só a linha TOTAL GERAL por cima do que
+    // ficou visível.
+    const tabPlaca = document.getElementById('ped-tab-placa');
+    if (tabPlaca) {
+      const atualizarTotalPlaca = () => {
+        const linhasTr = [...tabPlaca.querySelectorAll('tbody tr:not(.total-row)')];
+        let total = 0;
+        linhasTr.forEach((tr, i) => { if (tr.style.display !== 'none') total += byPlaca[i].value; });
+        const trTotal = tabPlaca.querySelector('tbody tr.total-row');
+        if (trTotal) trTotal.children[3].textContent = formatCurrency(total);
+      };
+      tabPlaca.addEventListener('filtro-aplicado', atualizarTotalPlaca);
+    }
+    // ---- O funil de uma tabela vale pra TELA INTEIRA (pedido do cliente
+    // 23/09/2026: "o que eu filtrar em uma tabela seja filtrada em todas") ----
+    // As tabelas daqui têm colunas diferentes — duas são passagem a passagem
+    // (Todas/Detalhamento) e duas são somadas (por veículo/por condutor) —,
+    // então NÃO dá pra espelhar por índice de coluna: o que se espelha é o
+    // CAMPO. Filtrou "Placa" numa, filtra "Placa" em todas as que têm placa.
+    // Só entra campo com o MESMO significado E a mesma granularidade: "Valor"
+    // (de UMA passagem) não vai pro "Valor Total" da tabela por veículo, que é
+    // soma — filtrar R$ 9,50 lá esconderia o veículo errado. Tabela que não tem
+    // o campo fica como está: pra isso a barra do topo já filtra a tela toda.
+    // Na tabela por condutor as linhas filtráveis são as de LOCAL (as do
+    // condutor são total-row, que o motor nunca esconde), por isso a coluna 0
+    // dela é tratada como endereço.
+    const CAMPO_DA_COLUNA = {
+      'ped-tab-todas':    ['data', 'hora', 'placa', 'marca', 'cadastro', 'condutor', 'endereco', 'valor'],
+      'ped-tab-detalhe':  ['data', 'hora', 'placa', 'endereco', 'valor'],
+      'ped-tab-placa':    ['placa', 'cadastro', 'condutor', null],
+      'ped-tab-condutor': ['endereco', null, null],
+    };
+    // trava: aplicar() dispara 'filtro-aplicado' de novo em cada tabela que
+    // recebe o espelho — sem isso, uma tabela reespelharia na outra sem parar
+    let espelhandoFiltro = false;
+    function espelharFiltros(origem) {
+      if (espelhandoFiltro) return;
+      const camposOrigem = CAMPO_DA_COLUNA[origem.id];
+      const estadoOrigem = FILTROS_TABELA.get(origem);
+      if (!camposOrigem || !estadoOrigem) return;
+      const porCampo = {};
+      Object.entries(estadoOrigem).forEach(([idx, sel]) => {
+        const campo = camposOrigem[+idx];
+        if (campo && sel && sel.size) porCampo[campo] = sel;
+      });
+      espelhandoFiltro = true;
+      Object.entries(CAMPO_DA_COLUNA).forEach(([id, campos]) => {
+        if (id === origem.id) return;
+        const tab = document.getElementById(id);
+        const estado = tab && FILTROS_TABELA.get(tab);
+        if (!tab || !estado || !tab.__aplicarFiltros) return;
+        let mudou = false;
+        campos.forEach((campo, idx) => {
+          if (!campo) return;
+          const querido = porCampo[campo];
+          const atual = estado[idx];
+          if (querido) {
+            // só mexe se o conjunto for mesmo diferente — senão reaplica à toa
+            if (!atual || atual.size !== querido.size || [...querido].some(v => !atual.has(v))) {
+              estado[idx] = new Set(querido); mudou = true;
+            }
+          } else if (atual && atual.size) { delete estado[idx]; mudou = true; }
+        });
+        if (mudou) tab.__aplicarFiltros();
+      });
+      espelhandoFiltro = false;
+    }
+    Object.keys(CAMPO_DA_COLUNA).forEach(id => {
+      const tab = document.getElementById(id);
+      if (tab) tab.addEventListener('filtro-aplicado', () => espelharFiltros(tab));
+    });
+
     // versão "achatada" (1 linha por condutor+local) de porCondutor, só com o
     // que sobrou visível na tela — usada pelo export de PDF/Excel, senão o PDF
     // levava tudo, ignorando o funil (mesmo problema que o Detalhamento tinha).
