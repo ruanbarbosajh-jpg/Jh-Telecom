@@ -12755,6 +12755,11 @@ function linhasMaoDeObraFixas(cidadesList, moDaCidadeLinha, moDoDia) {
     a.mo += moDoDia(c);
     return a;
   }, { ativacao: 0, reparo: 0, me: 0, mc: 0, upgrade: 0, total: 0, mo: 0 });
+  // Cidade "de fora" que teve ordem no dia mas nenhuma EM ABERTO (só
+  // concluída/cancelada) soma zero em tudo aqui — essa tabela é só sobre o
+  // que falta, então a linha "Outras Cidades" sem nada pendente é ruído, não
+  // informação (pedido do cliente 23/09/2026: "tire esse Outras Cidades").
+  if (!soma.total) return fixas;
   return [...fixas, { cidade: 'Outras Cidades', agregado: true, ...soma }];
 }
 function renderParcialDoDia() {
@@ -12953,9 +12958,14 @@ function renderParcialDoDia() {
     // padrao", só em Parcial do Dia, menos Mão de Obra — essa continua no
     // print padrão) — reaproveitado pelas 3 tabelas "Status Detalhado por..."
     // (Tipo/Cidade/Técnico), que só mudam o rótulo da 1ª coluna e as linhas.
+    // Concluído/Pendente ganham um fundo leve (verde/laranja) nas CÉLULAS —
+    // o título da coluna nunca pinta (o cabeçalho é sempre a faixa
+    // azul-marinho do motor), pedido do cliente 23/09/2026: "concluido verde
+    // claro leve, pendente laranja leve".
+    const FUNDO_BALDE_IMG = { concluido: '#E2EFDA', pendente: '#FDEBD3' };
     function imagemStatusPorBalde(titulo, rotuloPrimeira, linhas, totalLinha, nomeArquivo) {
       const colunas = [{ titulo: rotuloPrimeira }]
-        .concat(bucketsTabela.map(b => ({ titulo: bucketLabel[b] })))
+        .concat(bucketsTabela.map(b => ({ titulo: bucketLabel[b], fundo: FUNDO_BALDE_IMG[b] })))
         .concat([{ titulo: 'Total O.S' }, { titulo: 'Efetividade' }]);
       const linhasImg = linhas.map(l => ({
         celulas: [l.label, ...bucketsTabela.map(b => String(l[b])), String(l.total), formatPct(efetividade(l), 0)],
