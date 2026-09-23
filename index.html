@@ -12242,7 +12242,11 @@ function montarPrazoReparoDoDia(dia, cidades) {
 // igual à do cartão de cima (.pzcard-roxo/laranja/azul), pra bater o olho e
 // já saber de qual faixa é sem ler o texto.
 function htmlForaDoPrazoDetalhe(encerradas) {
-  const foraDoPrazo = encerradas.filter(r => r.faixa && r.faixa !== 'ate24');
+  // Só CONCLUÍDA entra (pedido do cliente 23/09/2026): "não concluído" e
+  // "cancelado" também podem sair com faixa marcada (o aging é calculado em
+  // cima do tempo até a baixa, não importa qual), mas aí não é "perdeu prazo
+  // de reparo" — é uma visita que nem terminou o serviço.
+  const foraDoPrazo = encerradas.filter(r => r.faixa && r.faixa !== 'ate24' && isConcluido(r.status));
   if (!foraDoPrazo.length) return '';
   const ORDEM_FAIXA = { outlier: 0, maior48: 1, ate48: 2 };
   const FAIXA_INFO = {
@@ -12255,7 +12259,7 @@ function htmlForaDoPrazoDetalhe(encerradas) {
   return `
     <div class="section-heading">Ordens Fora do Prazo — Detalhe<span class="sec-nota">${ordenado.length} O.S nessa data, da pior pra menos grave</span></div>
     <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
-      <th>Faixa</th><th>O.S</th><th>Cidade</th><th>Técnico</th><th>Motivo da baixa</th><th>Tempo gasto</th>
+      <th>Faixa</th><th>O.S</th><th>Cidade</th><th>Técnico</th><th>Abertura</th><th>Motivo da baixa</th><th>Tempo gasto</th>
     </tr></thead><tbody>
       ${ordenado.map(r => {
         const info = FAIXA_INFO[r.faixa] || { rotulo: r.faixa, classe: 'neutral' };
@@ -12265,6 +12269,7 @@ function htmlForaDoPrazoDetalhe(encerradas) {
           <td class="cat-cell">${esc(r.os) || '-'}</td>
           <td>${esc(r.cidade) || '-'}</td>
           <td>${ehRecursoTecnico(r.recurso) ? esc(r.recurso) : '-'}</td>
+          <td>${fmtDT(r.abertura)}</td>
           <td>${esc(motivoDoPrazo(r))}</td>
           <td style="font-weight:700;color:var(--danger)">${tempo}</td>
         </tr>`;
