@@ -15850,6 +15850,28 @@ function renderToll() {
     body.innerHTML = `
       <div class="cards-grid">${metricCard('Total de passagens', rows.length)}${metricCard('Valor total', formatCurrency(totalValue))}${metricCard('Fora do horário', foraHorario, foraHorario>0)}${metricCard('Fora das cidades cobradas', foraCidade, foraCidade>0)}${metricCard('Condutor não encontrado', naoEncontrada, naoEncontrada>0)}</div>
       ${divergent.length?`<div class="warning-box">${divergent.length} passagem(ns) com condutor atual diferente do cadastrado.</div>`:''}
+      <div class="section-heading">Todas as Passagens</div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Nome em <span style="color:var(--danger)">vermelho</span> = fora do horário. Endereço em <span style="color:#fb923c">laranja</span> = fora das cidades cobradas (Guarujá, Bertioga, Cubatão, Santos, São Vicente, Praia Grande).</p>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+        <span style="font-size:12px;color:var(--text-muted)">${rows.length} passagem(ns) no filtro${rows.length > limitePed ? ` — mostrando as ${limitePed} mais recentes` : ''}</span>
+        <select class="topn-select" id="ped-limite">
+          <option value="200"${limitePed===200?' selected':''}>Mostrar 200</option>
+          <option value="500"${limitePed===500?' selected':''}>Mostrar 500</option>
+          <option value="99999"${limitePed>=99999?' selected':''}>Mostrar todas</option>
+        </select>
+      </div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+        <th>Data/Hora</th><th>Placa</th><th>Marca/Modelo</th><th>Cadastro</th><th>Condutor atual</th><th>Endereço</th><th>Valor</th>
+      </tr></thead><tbody>
+      ${rows.slice(0,limitePed).map(r=>{
+        const fora = /fora/i.test(r.status||'');
+        const foraCid = enderecoForaDasCidades(r.endereco);
+        return `<tr><td>${formatDate(r.data_transacao)} ${esc(r.hora)||''}</td><td>${esc(r.placa)}</td><td>${esc(r.marca)} ${esc(r.modelo)||''}</td>
+        <td style="${fora?'color:var(--danger);font-weight:600':''}">${esc(r.cadastro)}</td>
+        <td>${r.condutor_atual==='NÃO ENCONTRADA'?`<span class="badge warn">Não encontrada</span>`:`<span style="color:${fora?'var(--danger)':'var(--text-primary)'}">${esc(r.condutor_atual)}</span>`}</td>
+        <td style="${foraCid?'color:#fb923c':''}">${esc(r.endereco)}</td><td>${formatCurrency(r.valor)}</td></tr>`;
+      }).join('')}
+      </tbody></table></div>
       <div class="section-heading">Gasto de Pedágio por Veículo</div>
       <div class="panel" style="margin-bottom:1.5rem"><div id="c-placa"></div></div>
       <div class="section-heading">Ofensores de Pedágio</div>
@@ -15882,28 +15904,6 @@ function renderToll() {
           <td style="${enderecoForaDasCidades(d.local)?'color:#fb923c':''}">${esc(d.local)}</td>
           <td style="font-weight:600">${formatCurrency(d.valor)}</td></tr>`).join('')}
         <tr class="total-row" id="ped-detalhe-total"><td class="cat-cell">TOTAL</td><td>-</td><td>-</td><td>${formatCurrency(totalValue)}</td></tr>
-      </tbody></table></div>
-      <div class="section-heading">Todas as Passagens</div>
-      <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Nome em <span style="color:var(--danger)">vermelho</span> = fora do horário. Endereço em <span style="color:#fb923c">laranja</span> = fora das cidades cobradas (Guarujá, Bertioga, Cubatão, Santos, São Vicente, Praia Grande).</p>
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
-        <span style="font-size:12px;color:var(--text-muted)">${rows.length} passagem(ns) no filtro${rows.length > limitePed ? ` — mostrando as ${limitePed} mais recentes` : ''}</span>
-        <select class="topn-select" id="ped-limite">
-          <option value="200"${limitePed===200?' selected':''}>Mostrar 200</option>
-          <option value="500"${limitePed===500?' selected':''}>Mostrar 500</option>
-          <option value="99999"${limitePed>=99999?' selected':''}>Mostrar todas</option>
-        </select>
-      </div>
-      <div class="table-wrap"><table class="data-table"><thead><tr>
-        <th>Data/Hora</th><th>Placa</th><th>Marca/Modelo</th><th>Cadastro</th><th>Condutor atual</th><th>Endereço</th><th>Valor</th>
-      </tr></thead><tbody>
-      ${rows.slice(0,limitePed).map(r=>{
-        const fora = /fora/i.test(r.status||'');
-        const foraCid = enderecoForaDasCidades(r.endereco);
-        return `<tr><td>${formatDate(r.data_transacao)} ${esc(r.hora)||''}</td><td>${esc(r.placa)}</td><td>${esc(r.marca)} ${esc(r.modelo)||''}</td>
-        <td style="${fora?'color:var(--danger);font-weight:600':''}">${esc(r.cadastro)}</td>
-        <td>${r.condutor_atual==='NÃO ENCONTRADA'?`<span class="badge warn">Não encontrada</span>`:`<span style="color:${fora?'var(--danger)':'var(--text-primary)'}">${esc(r.condutor_atual)}</span>`}</td>
-        <td style="${foraCid?'color:#fb923c':''}">${esc(r.endereco)}</td><td>${formatCurrency(r.valor)}</td></tr>`;
-      }).join('')}
       </tbody></table></div>
       <div id="pdf-export-area"></div>
     `;
