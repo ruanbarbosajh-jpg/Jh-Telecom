@@ -12241,6 +12241,19 @@ function montarPrazoReparoDoDia(dia, cidades) {
 // mais tempo primeiro — o pior caso do dia sempre no topo. Cor da pílula
 // igual à do cartão de cima (.pzcard-roxo/laranja/azul), pra bater o olho e
 // já saber de qual faixa é sem ler o texto.
+// Histórico de motivos de uma O.S, da PRIMEIRA baixa até a ÚLTIMA (pedido do
+// cliente 23/09/2026: "quero que tenha desde a primeira até a última baixa" —
+// ex.: 1º ausente, 2º drop refeito). `motivoDoPrazo` só olha a Produção (1
+// motivo só, o oficial) — aqui é o PCR inteiro (TODOS os dias importados, não
+// só o dia desta tabela): a mesma O.S pode ter sido tentada em dias
+// anteriores até "vingar", e cada tentativa tem o motivo da SUA baixa.
+function historicoMotivosPrazo(os) {
+  if (!os) return [];
+  return DB.pcr
+    .filter(p => p.os === os && (p.motivo || '').trim())
+    .sort((a, b) => String(a.data).localeCompare(String(b.data)) || ((a.inicio ? +a.inicio : 0) - (b.inicio ? +b.inicio : 0)))
+    .map(p => p.motivo.trim());
+}
 function htmlForaDoPrazoDetalhe(encerradas) {
   // Só CONCLUÍDA entra (pedido do cliente 23/09/2026): "não concluído" e
   // "cancelado" também podem sair com faixa marcada (o aging é calculado em
@@ -12270,7 +12283,11 @@ function htmlForaDoPrazoDetalhe(encerradas) {
           <td>${esc(r.cidade) || '-'}</td>
           <td>${ehRecursoTecnico(r.recurso) ? esc(r.recurso) : '-'}</td>
           <td>${fmtDT(r.abertura)}</td>
-          <td>${esc(motivoDoPrazo(r))}</td>
+          <td>${(() => {
+            const hist = historicoMotivosPrazo(r.os);
+            if (hist.length > 1) return hist.map((m, i) => `${i + 1}º: ${esc(m)}`).join('<br>');
+            return esc(hist[0] || motivoDoPrazo(r));
+          })()}</td>
           <td style="font-weight:700;color:var(--danger)">${tempo}</td>
         </tr>`;
       }).join('')}
