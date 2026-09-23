@@ -7322,7 +7322,18 @@ function ativarFiltrosDeColuna(raiz) {
     // diferente na lista do filtro — dezenas de entradas repetindo o mesmo dia.
     // Aqui a lista mostra só o DIA, e o filtro casa por esse prefixo.
     const SO_DATA = /^(\d{2}\/\d{2}\/\d{4})\s+\d{1,2}:\d{2}/;
-    const chaveFiltro = txt => { const m = SO_DATA.exec(txt); return m ? m[1] : txt; };
+    // "Status Prazo" da tabela unificada de Prazo (PCR) marca faixa ainda não
+    // fechada com "(em aberto)" no fim (textoFaixaEfetiva) — pro filtro isso
+    // duplicava cada faixa em duas linhas ("Até 24hrs" e "Até 24hrs (em
+    // aberto)"), pedido do cliente pra unificar (23/09/2026): o filtro agrupa
+    // as duas sob o mesmo item; a TABELA continua mostrando a diferença, só o
+    // filtro que deixa de duplicar.
+    const SEM_EM_ABERTO = /\s*\(em aberto\)\s*$/i;
+    const chaveFiltro = txt => {
+      const m = SO_DATA.exec(txt);
+      if (m) return m[1];
+      return txt.replace(SEM_EM_ABERTO, '');
+    };
     // célula com um <select> dentro (ex.: status do dia na Gestão de Presença):
     // textContent junta o texto de TODAS as <option>, não só a marcada — teria
     // que ler o valor selecionado, não o texto da célula inteira.
