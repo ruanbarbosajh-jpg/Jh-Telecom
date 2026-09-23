@@ -1249,6 +1249,10 @@
      alerta no resto do sistema), iniciado = azul */
   .badge.laranja { background: rgba(245,158,11,0.18); color: #f59e0b; }
   .badge.azul { background: rgba(56,189,248,0.18); color: #38bdf8; }
+  /* mesma cor do "Outlier" no cartão de Acompanhamento de Prazos
+     (.pzcard-roxo) — usado no detalhe de O.S fora do prazo, pra faixa bater
+     com a cor que a pessoa já associa no cartão de cima */
+  .badge.roxo { background: rgba(147,51,234,0.16); color: #9333ea; }
 
   /* Diagnóstico em texto corrido: barra de destaque na lateral pra separar do
      resto sem virar mais um "card". Fundo levemente destacado, mas os tokens
@@ -12226,7 +12230,46 @@ function montarPrazoReparoDoDia(dia, cidades) {
   const pct = tot.total ? (tot.ate24/tot.total)*100 : 0;
   return cabecalho
     + renderCartaoPrazo({ id: 'pzcard-dia', titulo: 'ACOMPANHAMENTO DE PRAZOS — DIA', rotulo: formatDate(dia),
-        badgeLabel: 'Prazo do dia 24hrs', pct, meta: PRAZO_META, within: tot.ate24, total: tot.total, byCity: lista, totals: tot });
+        badgeLabel: 'Prazo do dia 24hrs', pct, meta: PRAZO_META, within: tot.ate24, total: tot.total, byCity: lista, totals: tot })
+    + htmlForaDoPrazoDetalhe(encerradas);
+}
+// Detalhe das O.S fora do prazo, logo abaixo do cartão de Acompanhamento
+// (pedido do cliente 23/09/2026: "mostrar de forma visualmente bonita as
+// ordens que perderam prazo") — mesmas linhas do cartão (`encerradas`), só
+// que uma linha por O.S em vez de somado por cidade. Pior faixa primeiro
+// (Outlier > Maior que 48hrs > Até 48hrs) e, dentro da faixa, quem gastou
+// mais tempo primeiro — o pior caso do dia sempre no topo. Cor da pílula
+// igual à do cartão de cima (.pzcard-roxo/laranja/azul), pra bater o olho e
+// já saber de qual faixa é sem ler o texto.
+function htmlForaDoPrazoDetalhe(encerradas) {
+  const foraDoPrazo = encerradas.filter(r => r.faixa && r.faixa !== 'ate24');
+  if (!foraDoPrazo.length) return '';
+  const ORDEM_FAIXA = { outlier: 0, maior48: 1, ate48: 2 };
+  const FAIXA_INFO = {
+    ate48: { rotulo: 'Até 48hrs', classe: 'azul' },
+    maior48: { rotulo: 'Maior que 48hrs', classe: 'laranja' },
+    outlier: { rotulo: 'Outlier', classe: 'roxo' },
+  };
+  const ordenado = [...foraDoPrazo].sort((a, b) =>
+    (ORDEM_FAIXA[a.faixa] - ORDEM_FAIXA[b.faixa]) || ((Number(b.aging) || 0) - (Number(a.aging) || 0)));
+  return `
+    <div class="section-heading">Ordens Fora do Prazo — Detalhe<span class="sec-nota">${ordenado.length} O.S nessa data, da pior pra menos grave</span></div>
+    <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+      <th>Faixa</th><th>O.S</th><th>Cidade</th><th>Técnico</th><th>Motivo da baixa</th><th>Tempo gasto</th>
+    </tr></thead><tbody>
+      ${ordenado.map(r => {
+        const info = FAIXA_INFO[r.faixa] || { rotulo: r.faixa, classe: 'neutral' };
+        const tempo = r.aging !== null && r.aging !== undefined && r.aging !== '' && isFinite(Number(r.aging)) ? `${Number(r.aging).toFixed(1)} dia(s)` : '-';
+        return `<tr>
+          <td><span class="badge ${info.classe}">${esc(info.rotulo)}</span></td>
+          <td class="cat-cell">${esc(r.os) || '-'}</td>
+          <td>${esc(r.cidade) || '-'}</td>
+          <td>${ehRecursoTecnico(r.recurso) ? esc(r.recurso) : '-'}</td>
+          <td>${esc(motivoDoPrazo(r))}</td>
+          <td style="font-weight:700;color:var(--danger)">${tempo}</td>
+        </tr>`;
+      }).join('')}
+    </tbody></table></div>`;
 }
 // Prazo de ativação DO DIA, direto do CSV de atividades: o mesmo recorte da
 // planilha, só que do dia importado. Concluídas viram % dentro de 36h; as que
