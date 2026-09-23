@@ -12278,8 +12278,18 @@ function htmlForaDoPrazoDetalhe(encerradas) {
         const info = FAIXA_INFO[r.faixa] || { rotulo: r.faixa, classe: 'neutral' };
         // aging vem em DIAS (mesma unidade de faixaPorAging) — em horas fica
         // mais fácil de comparar com o prazo contratado, que também é em
-        // horas (24h reparo). Pedido do cliente 23/09/2026.
-        const tempo = r.aging !== null && r.aging !== undefined && r.aging !== '' && isFinite(Number(r.aging)) ? `${(Number(r.aging) * 24).toFixed(1)}h` : '-';
+        // horas (24h reparo). Pedido do cliente 23/09/2026. "Xh" com casa
+        // decimal (ex.: "24.8h") confundia — parecia "24h08min" e é na
+        // verdade "24h48min" (0,8 é FRAÇÃO da hora, não minuto). Trocado por
+        // "Xh Ymin" por extenso (mesma correção de arredondamento de minuto
+        // que `textoFalta`, aqui embutida no local, já usa na PCR).
+        let tempo = '-';
+        if (r.aging !== null && r.aging !== undefined && r.aging !== '' && isFinite(Number(r.aging))) {
+          const totalHoras = Number(r.aging) * 24;
+          let hh = Math.floor(totalHoras), mm = Math.round((totalHoras - hh) * 60);
+          if (mm === 60) { hh += 1; mm = 0; }
+          tempo = mm === 0 ? `${hh}h` : `${hh}h ${mm}min`;
+        }
         return `<tr>
           <td><span class="badge ${info.classe}">${esc(info.rotulo)}</span></td>
           <td class="cat-cell">${esc(r.os) || '-'}</td>
