@@ -7882,14 +7882,14 @@ function renderDashboard() {
     const ligarImagemResumoFin = () => {
       const btnGiga = document.getElementById('dash-valor-giga-img');
       if (btnGiga) btnGiga.addEventListener('click', () => {
-        const r = imagemPadraoDaTabela(document.getElementById('dash-valor-giga-tab'), 'Valor das Ordens — Pago pela GIGA', rotuloPeriodo, 'valor-ordens-giga-' + hojeISOLocal());
+        const r = imagemVisualDaTabela(document.getElementById('dash-valor-giga-tab'), 'Valor das Ordens — Pago pela GIGA', 'valor-ordens-giga-' + hojeISOLocal());
         if (!r) toast('Nada visível pra gerar imagem.', 'aviso');
       });
       const btn = document.getElementById('dash-resumo-img');
       if (!btn) return;
       btn.addEventListener('click', () => {
         const tab = document.querySelector('.dash-resumo-fin table');
-        const r = imagemPadraoDaTabela(tab, 'Resumo Financeiro do Ciclo', rotuloPeriodo, 'resumo-financeiro-' + hojeISOLocal());
+        const r = imagemVisualDaTabela(tab, 'Resumo financeiro do ciclo — ' + rotuloPeriodo, 'resumo-financeiro-' + hojeISOLocal());
         if (!r) toast('Nada visível pra gerar imagem.', 'aviso');
       });
     };
@@ -10414,6 +10414,24 @@ function imagemPadraoDaTabela(tabela, titulo, subtitulo, nomeArquivo) {
   if (!linhas.length) return null;
   baixarTabelaComoImagem({ titulo, subtitulo, colunas, linhas, total: trTotal ? daLinha(trTotal) : undefined, nomeArquivo });
   return { linhas: linhas.length };
+}
+// Imagem com o VISUAL DA TELA (captura de DOM, sempre no tema claro) — pro
+// Dashboard, onde o cliente NÃO quer o padrão azul-marinho dos outros
+// (24/09/2026: "a imagem não precisa aplicar o mesmo design dos outros").
+// Clona título + tabela pra um wrapper fora da tela, igual ativarBotoesImagem.
+function imagemVisualDaTabela(tabela, titulo, nomeArquivo) {
+  if (!tabela) return false;
+  const bloco = tabela.closest('.table-wrap') || tabela;
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = `position:fixed;top:0;left:-${bloco.clientWidth + 400}px;width:${Math.max(bloco.clientWidth, 480)}px;background:var(--bg-page);padding:16px;`;
+  const h = document.createElement('div');
+  h.className = 'section-heading sem-toggle';
+  h.textContent = titulo;
+  wrapper.appendChild(h);
+  wrapper.appendChild(bloco.cloneNode(true));
+  document.body.appendChild(wrapper);
+  capturarElementoComoImagem(wrapper, nomeArquivo, () => wrapper.remove());
+  return true;
 }
 function exportarTabelaImagem(tabela, nomeArquivo, titulo) {
   if (!tabela) return null;
