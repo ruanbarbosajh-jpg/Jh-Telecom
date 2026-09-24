@@ -265,7 +265,7 @@
   .network-packet.np4 { offset-path: path('M680 260 L760 420'); animation: jhFiberMove 2.2s linear infinite; animation-delay: -.3s; }
   .network-packet.np5 { offset-path: path('M760 420 L900 540'); animation: jhFiberMove 2.6s linear infinite; animation-delay: -1.6s; }
   .network-packet.np6 { offset-path: path('M300 560 L620 620'); animation: jhFiberMove 2.3s linear infinite; animation-delay: -.9s; }
-  .login-card { position: relative; z-index: 1; width: 360px; animation: cardIn .5s cubic-bezier(.2,.8,.3,1) both; }
+  .login-card { position: relative; z-index: 1; width: min(360px, calc(100vw - 24px)); animation: cardIn .5s cubic-bezier(.2,.8,.3,1) both; }
   @keyframes cardIn { from { opacity: 0; transform: translateY(14px) scale(.98); } to { opacity: 1; transform: none; } }
   .login-logo {
     width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center;
@@ -579,7 +579,9 @@
     flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
     font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted);
   }
-  .hol-assina span { display: block; border-top: 1px solid var(--text-muted); width: 300px; margin: 0 0 6px; }
+  .hol-assina { min-width: 0; }
+  /* min(300px, 100%): no celular a linha fixa de 300px empurrava a data pra fora do cartão */
+  .hol-assina span { display: block; border-top: 1px solid var(--text-muted); width: min(300px, 100%); margin: 0 0 6px; }
   .hol-data { font-size: 10px; color: var(--text-muted); font-style: italic; white-space: nowrap; }
   /* ---- IMPRESSÃO DO HOLERITE ----
      Três coisas quebravam o papel e estão resolvidas aqui:
@@ -1694,7 +1696,10 @@
   @media (max-width: 900px) {
     .sidebar { transform: translateX(-100%); transition: transform .2s ease;
       width: min(280px, 82vw); box-shadow: var(--sombra-flutuante); }
-    .sidebar.open { transform: translateX(0); }
+    /* body.sidebar-collapsed (aplicada no login desde 01/09/2026) tem especificidade
+       MAIOR que .sidebar.open — sem o 2º seletor o ☰ marcava a gaveta como aberta
+       mas ela nunca deslizava pra dentro (achado na auditoria de celular, 24/09/2026). */
+    .sidebar.open, body.sidebar-collapsed .sidebar.open { transform: translateX(0); }
     .main { margin-left: 0; min-width: 0; }
     .menu-toggle { display: inline-flex; }
     .sidebar-backdrop.open { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 15; }
@@ -2071,6 +2076,33 @@
     .ini-grid { grid-template-columns: 1fr; }
     .ini-card { padding: 18px; }
   }
+  /* ---- TOQUE (celular/tablet) — 24/09/2026 ----
+     Auditoria no viewport de 375px: quase toda tela tinha campo com fonte < 16px
+     (o iPhone dá zoom sozinho ao focar e a tela fica "pulando") e botões de
+     28px / 26px / links de 17px de altura, difíceis de acertar com o dedo.
+     Só toque: no desktop nada muda. Campos DENTRO de tabela ficam de fora do
+     16px (Folha/Financeiro/M.O têm célula estreita e o número cortaria). */
+  @media (max-width: 640px), (hover: none) and (pointer: coarse) {
+    input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=hidden]):not([type=file]),
+    select, textarea { font-size: 16px; }
+    table input, table select, table textarea { font-size: 13px; }
+    .secao-toggle, .btn-mini, .btn-export-img, .btn-export-xls { min-height: 40px; }
+    .btn-icon { width: 36px; height: 36px; }
+    .topn-select { min-height: 38px; }
+    input[type=checkbox], input[type=radio] { width: 20px; height: 20px; }
+    a.link-tec, a.link-dia-pcr { display: inline-block; padding: 8px 0; }
+    .mt-fechar { min-width: 40px; min-height: 40px; }
+    /* o login usa seletor por #id (mais forte que o de elemento acima) */
+    #login-form input, #login-form select { font-size: 16px; }
+  }
+  /* Celular deitado / tela baixa: o login tinha altura fixa de 100vh com
+     overflow escondido — o botão Entrar ficava abaixo da dobra e sem rolagem.
+     Aqui ele vira rolável (e os brilhos decorativos saem, senão criam rolagem
+     fantasma no fim da página). */
+  @media (max-height: 640px) {
+    .login-body { height: auto; min-height: 100vh; align-items: flex-start; padding: 16px 0; overflow-x: hidden; overflow-y: auto; }
+    .login-body::before, .login-body::after { display: none; }
+  }
 </style>
 </head>
 <body>
@@ -2085,8 +2117,8 @@
   </defs>
 </svg>
 
-<div id="toast-area"></div>
-<div id="cmdk"><div class="cmdk-caixa"><input id="cmdk-busca" type="text" placeholder="Buscar tela..." autocomplete="off"><div class="cmdk-lista" id="cmdk-lista"></div><div class="cmdk-dica"><span>↑↓ navegar</span><span>Enter abrir</span><span>Esc fechar</span></div></div></div>
+<div id="toast-area" role="status" aria-live="polite"></div>
+<div id="cmdk" role="dialog" aria-modal="true" aria-label="Buscar tela"><div class="cmdk-caixa"><input id="cmdk-busca" type="text" placeholder="Buscar tela..." aria-label="Buscar tela" autocomplete="off"><div class="cmdk-lista" id="cmdk-lista"></div><div class="cmdk-dica"><span>↑↓ navegar</span><span>Enter abrir</span><span>Esc fechar</span></div></div></div>
 <div id="splash">
   <div class="splash-conteudo">
     <div class="splash-icone-anel">
@@ -2099,7 +2131,7 @@
   </div>
 </div>
 
-<div id="modal-trocar" class="modal-backdrop">
+<div id="modal-trocar" class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Trocar de usuário">
   <div class="modal-card">
     <h3>Alterar usuário</h3>
     <p id="tr-ajuda">Entre com o e-mail e a senha da outra conta.</p>
@@ -2135,9 +2167,9 @@
   </div>
 </div>
 
-<div id="modal-tecnico" class="modal-backdrop">
+<div id="modal-tecnico" class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Detalhe do técnico">
   <div class="modal-card modal-largo">
-    <button type="button" class="mt-fechar" id="mt-fechar">✕</button>
+    <button type="button" class="mt-fechar" id="mt-fechar" aria-label="Fechar">✕</button>
     <div class="mt-corpo"></div>
   </div>
 </div>
@@ -2234,7 +2266,7 @@
 </div>
 
 <div id="app-shell" class="app-shell">
-  <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+  <div class="sidebar-backdrop" id="sidebar-backdrop" aria-hidden="true"></div>
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand"><h1>JH <span class="brand-gradient-text">TELECOM</span></h1><p>OMEGA SYSTEM</p></div>
     <nav class="sidebar-nav" id="sidebar-nav">
@@ -2293,7 +2325,7 @@
     <div class="demo-banner" id="demo-banner">Demo em arquivo único — dados ficam só nesta aba, se recarregar a página tudo é perdido. Não é o sistema final.</div>
     <header class="topbar">
       <div style="display:flex;align-items:center;gap:12px">
-        <button class="menu-toggle" id="menu-toggle">☰</button>
+        <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Abrir ou fechar o menu" aria-controls="sidebar" aria-expanded="false">☰</button>
         <!-- Menu Inicial saiu do menu lateral e virou botão do topo (cliente,
              02/09/2026): é a vitrine de telas, não uma tela de trabalho, então
              fica sempre à mão sem ocupar linha na lista da esquerda. -->
@@ -2304,8 +2336,8 @@
         <!-- Escape hatch do cache local: joga fora a cópia guardada no
              navegador e busca tudo de novo do Supabase. Serve pra "tá
              estranho, recarrega do zero" sem precisar de suporte. -->
-        <button class="icon-btn" id="btn-tema" title="Alternar tema claro/escuro"><span id="btn-tema-icone">☀</span><span id="btn-tema-texto">Tema claro</span></button>
-        <button class="icon-btn" id="btn-trocar-usuario" title="Entrar com outro perfil">⇄ Alterar usuário</button>
+        <button class="icon-btn" id="btn-tema" type="button" title="Alternar tema claro/escuro" aria-label="Alternar tema claro/escuro"><span id="btn-tema-icone">☀</span><span id="btn-tema-texto">Tema claro</span></button>
+        <button class="icon-btn" id="btn-trocar-usuario" type="button" title="Entrar com outro perfil" aria-label="Entrar com outro perfil">⇄ Alterar usuário</button>
         <div class="topbar-user" id="user-name"></div>
       </div>
     </header>
@@ -4057,6 +4089,7 @@ document.getElementById('logout-btn').addEventListener('click', async () => {
 function closeSidebar() {
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('sidebar-backdrop').classList.remove('open');
+  document.getElementById('menu-toggle').setAttribute('aria-expanded', 'false');
 }
 // Ao entrar no sistema o menu lateral começa RECOLHIDO (pedido do cliente,
 // 01/09/2026): quem acabou de logar cai no Menu Inicial, que já é a vitrine
@@ -4078,6 +4111,7 @@ document.getElementById('menu-toggle').addEventListener('click', () => {
   if (window.innerWidth <= 900) {
     document.getElementById('sidebar').classList.toggle('open');
     document.getElementById('sidebar-backdrop').classList.toggle('open');
+    document.getElementById('menu-toggle').setAttribute('aria-expanded', String(document.getElementById('sidebar').classList.contains('open')));
   } else {
     document.body.classList.toggle('sidebar-collapsed');
   }
@@ -4825,7 +4859,7 @@ function defaultPeriod(refISO) {
   let start, end;
   if (day >= 21) { start = new Date(today.getFullYear(), today.getMonth(), 21); end = new Date(today.getFullYear(), today.getMonth()+1, 20); }
   else { start = new Date(today.getFullYear(), today.getMonth()-1, 21); end = new Date(today.getFullYear(), today.getMonth(), 20); }
-  const iso = d => d.toISOString().slice(0,10);
+  const iso = isoLocalDe; // local, não UTC (toISOString devolve o dia seguinte depois das 21h)
   return { start: iso(start), end: iso(end) };
 }
 // Ciclos (21 a 20) que realmente existem no fechamento importado, do mais novo
@@ -4847,7 +4881,7 @@ function defaultMonthPeriod() {
   const today = new Date();
   const start = new Date(today.getFullYear(), today.getMonth(), 1);
   const end = new Date(today.getFullYear(), today.getMonth()+1, 0);
-  const iso = d => d.toISOString().slice(0,10);
+  const iso = isoLocalDe; // local, não UTC (toISOString devolve o dia seguinte depois das 21h)
   return { start: iso(start), end: iso(end) };
 }
 // As telas de mês abrem no mês do CALENDÁRIO (defaultMonthPeriod). No dia 1º —
@@ -11102,7 +11136,7 @@ function importarCsvPCR(texto) {
     const hInicio = iInicio >= 0 ? pcrParseHora(l[iInicio]) : null;
     const inicio = hInicio ? new Date(dataDia.getFullYear(), dataDia.getMonth(), dataDia.getDate(), hInicio.h, hInicio.m) : null;
     out.push({
-      data: dataDia.toISOString().slice(0,10), abertura, limite, encerramento, inicio,
+      data: isoLocalDe(dataDia), abertura, limite, encerramento, inicio,
       aging, horas_prazo: horasPrazo,
       // faixa na régua do próprio serviço: 24/48/>48 no reparo, 36/48/>48 na ativação
       faixa: faixaPorAging(aging, horasPrazo),
@@ -12822,8 +12856,8 @@ function renderPrazoAtivacao() {
   if (mesSel) mesSel.addEventListener('change', () => {
     if (!mesSel.value) return;
     const [y, m] = mesSel.value.split('-').map(Number);
-    document.getElementById('f-start').value = new Date(y, m-1, 1).toISOString().slice(0,10);
-    document.getElementById('f-end').value = new Date(y, m, 0).toISOString().slice(0,10);
+    document.getElementById('f-start').value = isoLocalDe(new Date(y, m-1, 1));
+    document.getElementById('f-end').value = isoLocalDe(new Date(y, m, 0));
     load();
   });
   document.getElementById('f-tipo-at').addEventListener('change', load);
@@ -14421,8 +14455,8 @@ function renderPrazo() {
     if (!mesSel.value) return;
     // o mês escolhido define o intervalo (dia 1 até o último dia do mês)
     const [y,m] = mesSel.value.split('-').map(Number);
-    document.getElementById('f-start').value = new Date(y, m-1, 1).toISOString().slice(0,10);
-    document.getElementById('f-end').value = new Date(y, m, 0).toISOString().slice(0,10);
+    document.getElementById('f-start').value = isoLocalDe(new Date(y, m-1, 1));
+    document.getElementById('f-end').value = isoLocalDe(new Date(y, m, 0));
     load();
   });
   load();
@@ -17530,11 +17564,11 @@ function proximoCicloSugeridoFin(lista) {
   if (!lista.length) return defaultPeriod();
   const d = new Date(lista[0].end + 'T00:00:00');
   d.setDate(d.getDate() + 1);
-  const start = d.toISOString().slice(0, 10);
+  const start = isoLocalDe(d);
   const dEnd = new Date(d);
   dEnd.setMonth(dEnd.getMonth() + 1);
   dEnd.setDate(dEnd.getDate() - 1);
-  return { start, end: dEnd.toISOString().slice(0, 10) };
+  return { start, end: isoLocalDe(dEnd) };
 }
 function renderFinance() {
   const { lista, atual } = periodosDoCadastroFin();
@@ -20946,7 +20980,7 @@ function renderRelatoriosDia() {
     if (mes) {
       const ini = mes + '-01';
       const [ano, m] = mes.split('-').map(Number);
-      const fim = new Date(ano, m, 0).toISOString().slice(0,10);
+      const fim = isoLocalDe(new Date(ano, m, 0));
       const rowsMes = DB.prazo.filter(p => inRange(p.data, ini, fim) && isConcluido(p.status) && cidades.includes(p.cidade)
         && ehPrazoDeReparo(p) && classifyBucket(p.status_prazo) !== 'outro');
       if (rowsMes.length) {
