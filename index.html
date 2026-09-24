@@ -7872,7 +7872,7 @@ function renderDashboard() {
     const resumoFinanceiro = !periodosParaResumo.length ? '' : `
       <div class="dash-resumo-fin${todos ? '' : ' centralizado'}">
         <div class="section-heading sem-toggle">Resumo financeiro do ciclo<span class="sec-nota">${unico ? 'só o ciclo selecionado' : todosOsCiclos ? 'todos os ciclos importados' : `${faixas.length} ciclos selecionados`}</span><button type="button" class="btn-export-img" id="dash-resumo-img">🖼 Gerar imagem</button></div>
-        ${tabelaFinanceiraComparativa(periodosParaResumo, pivotDash, { comSetas: false, comTotal: false })}
+        ${tabelaFinanceiraComparativa(periodosParaResumo, pivotDash, { comSetas: false, comTotal: false, ordemTopo: ['Folha Técnica', 'Folha Escritório', 'IFI', 'IRR'] })}
         ${conferenciaFinanceiraHtml(periodosParaResumo)}
       </div>`;
 
@@ -18179,7 +18179,13 @@ function tabelaFinanceiraComparativa(periodos, pivotDash, opts = {}) {
   };
   const somaTotal = obj => periodos.reduce((a, p) => a + valDash(obj, p), 0);
   const celTotal = (obj, cor) => !comTotal ? '' : `<td class="num col-total"${cor ? ` style="color:${cor}"` : ''}>${formatCurrency(somaTotal(obj))}</td>`;
-  const categorias = pivotDash.porCategoria ? Object.keys(pivotDash.porCategoria).filter(c => periodos.some(p => pivotDash.porCategoria[c][p])) : [];
+  let categorias = pivotDash.porCategoria ? Object.keys(pivotDash.porCategoria).filter(c => periodos.some(p => pivotDash.porCategoria[c][p])) : [];
+  // `opts.ordemTopo`: nomes que sobem pro topo, nessa ordem; o resto mantém a
+  // ordem de antes (Dashboard, 24/09/2026 — folhas e IFI/IRR primeiro).
+  if (opts.ordemTopo && opts.ordemTopo.length) {
+    const pos = c => { const i = opts.ordemTopo.findIndex(n => normalizeHeader(n) === normalizeHeader(c)); return i < 0 ? Infinity : i; };
+    categorias = categorias.map((c, i) => ({ c, i })).sort((a, b) => (pos(a.c) - pos(b.c)) || (a.i - b.i)).map(x => x.c);
+  }
   const totalLucro = somaTotal(pivotDash.lucro);
   return `<div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table cmp-dash">
     <thead><tr><th>Despesas / Receitas</th>${periodos.map(p => `<th class="num">${esc(p)}</th>`).join('')}${comTotal ? '<th class="num col-total">Total</th>' : ''}</tr></thead>
