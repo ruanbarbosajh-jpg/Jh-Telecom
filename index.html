@@ -7880,6 +7880,11 @@ function renderDashboard() {
     // padrão único do sistema, só da tabela de despesas/receitas (não da
     // conferência que vem logo abaixo, dentro do mesmo bloco).
     const ligarImagemResumoFin = () => {
+      const btnGiga = document.getElementById('dash-valor-giga-img');
+      if (btnGiga) btnGiga.addEventListener('click', () => {
+        const r = imagemPadraoDaTabela(document.getElementById('dash-valor-giga-tab'), 'Valor das Ordens — Pago pela GIGA', rotuloPeriodo, 'valor-ordens-giga-' + hojeISOLocal());
+        if (!r) toast('Nada visível pra gerar imagem.', 'aviso');
+      });
       const btn = document.getElementById('dash-resumo-img');
       if (!btn) return;
       btn.addEventListener('click', () => {
@@ -8326,8 +8331,8 @@ function renderDashboard() {
       ${resumoFinanceiro}
       <div class="section-heading sem-toggle">Produção por tipo de serviço<span class="sec-nota">${totalOrdens.toLocaleString('pt-BR')} ordens concluídas no ciclo</span></div>
       <div class="panel" style="margin-bottom:1.5rem"><div id="dash-prod-tipo"></div></div>
-      <div class="section-heading sem-toggle">Valor das Ordens — pago pela GIGA<span class="sec-nota">${soSintetico ? 'Ordens concluídas na Produção' : 'Contagem da aba RELATORIO (fechamento do ciclo)'} × valor de contrato por serviço</span></div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table dash-tab">
+      <div class="section-heading sem-toggle">Valor das Ordens — pago pela GIGA<span class="sec-nota">${soSintetico ? 'Ordens concluídas na Produção' : 'Contagem da aba RELATORIO (fechamento do ciclo)'} × valor de contrato por serviço</span><button type="button" class="btn-export-img" id="dash-valor-giga-img">🖼 Gerar imagem</button></div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table dash-tab" id="dash-valor-giga-tab">
         <thead><tr><th>Serviço</th><th class="num">GIGA paga à JH</th><th class="num">JH paga ao técnico</th>
           <th class="num">Técnico com 26 dias</th><th class="num">Qtd. no ciclo</th><th class="num">Total GIGA</th></tr></thead>
         <tbody>
@@ -10401,11 +10406,13 @@ function imagemPadraoDaTabela(tabela, titulo, subtitulo, nomeArquivo) {
   if (!tabela) return null;
   const cabLinha = [...tabela.querySelectorAll('thead tr')].filter(tr => tr.querySelector('th')).pop();
   const colunas = [...cabLinha.querySelectorAll('th')].map(th => ({ titulo: th.textContent.replace('▾', '').trim() }));
-  const linhas = [...tabela.querySelectorAll('tbody tr')]
-    .filter(tr => tr.style.display !== 'none' && tr.querySelector('td'))
-    .map(tr => ({ celulas: [...tr.querySelectorAll('td')].map(textoCelulaExport) }));
+  const visiveis = [...tabela.querySelectorAll('tbody tr')].filter(tr => tr.style.display !== 'none' && tr.querySelector('td'));
+  const daLinha = tr => ({ celulas: [...tr.querySelectorAll('td')].map(textoCelulaExport) });
+  // linha .total-row da tela vira a linha de total do motor (faixa azul-marinho)
+  const trTotal = visiveis.find(tr => tr.classList.contains('total-row')) || tabela.querySelector('tfoot tr.total-row');
+  const linhas = visiveis.filter(tr => tr !== trTotal).map(daLinha);
   if (!linhas.length) return null;
-  baixarTabelaComoImagem({ titulo, subtitulo, colunas, linhas, nomeArquivo });
+  baixarTabelaComoImagem({ titulo, subtitulo, colunas, linhas, total: trTotal ? daLinha(trTotal) : undefined, nomeArquivo });
   return { linhas: linhas.length };
 }
 function exportarTabelaImagem(tabela, nomeArquivo, titulo) {
