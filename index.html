@@ -10380,6 +10380,20 @@ function textoCelulaExport(td) {
 // (ele não segue CSS custom property), por isso duplicado aqui como hex.
 const PALETA_IMG_ESCURO = { fundo: '#0b1220', titulo: '#e8ecf7', cabFundo: '#1a2540', cabTexto: '#93a0bd', zebra1: '#0f1830', zebra2: '#131c30', texto: '#e8ecf7', borda: '#223054' };
 const PALETA_IMG_CLARO  = { fundo: '#ffffff', titulo: '#0d1526', cabFundo: '#e4eaf6', cabTexto: '#3a4763', zebra1: '#ffffff', zebra2: '#f1f4fa', texto: '#0d1526', borda: '#d5ddec' };
+// Imagem no padrão único do sistema (`baixarTabelaComoImagem`: faixa azul-marinho,
+// cabeçalho branco) a partir de uma tabela da tela — só as linhas visíveis, então
+// respeita o funil das colunas, igual ao Excel. Pedido do cliente 24/09/2026.
+function imagemPadraoDaTabela(tabela, titulo, subtitulo, nomeArquivo) {
+  if (!tabela) return null;
+  const cabLinha = [...tabela.querySelectorAll('thead tr')].filter(tr => tr.querySelector('th')).pop();
+  const colunas = [...cabLinha.querySelectorAll('th')].map(th => ({ titulo: th.textContent.replace('▾', '').trim() }));
+  const linhas = [...tabela.querySelectorAll('tbody tr')]
+    .filter(tr => tr.style.display !== 'none' && tr.querySelector('td'))
+    .map(tr => ({ celulas: [...tr.querySelectorAll('td')].map(textoCelulaExport) }));
+  if (!linhas.length) return null;
+  baixarTabelaComoImagem({ titulo, subtitulo, colunas, linhas, nomeArquivo });
+  return { linhas: linhas.length };
+}
 function exportarTabelaImagem(tabela, nomeArquivo, titulo) {
   if (!tabela) return null;
   const cabLinha = [...tabela.querySelectorAll('thead tr')].filter(tr => tr.querySelector('th')).pop();
@@ -12147,7 +12161,7 @@ function renderPCR() {
     });
     const btnImg = document.getElementById('pcr-img');
     if (btnImg) btnImg.addEventListener('click', () => {
-      const r = exportarTabelaImagem(tabPrazos(), 'prazos-do-dia-' + dia, 'Prazos do Dia — ' + formatDate(dia));
+      const r = imagemPadraoDaTabela(tabPrazos(), 'Prazos do Dia — Detalhado', formatDate(dia), 'prazos-do-dia-' + dia);
       aviso(btnImg, r ? `🖼 ${r.linhas} linha(s)` : '🖼 nada visível', '🖼 Gerar imagem');
     });
     const btnRetExp = document.getElementById('ret-export');
@@ -12158,7 +12172,7 @@ function renderPCR() {
     ligarMapaOS(mapaOS);
     const btnRetImg = document.getElementById('ret-img');
     if (btnRetImg) btnRetImg.addEventListener('click', () => {
-      const r = exportarTabelaImagem(tabRetornos(), 'retornos-ifi-irr-' + dia, 'Retornos IFI/IRR — ' + formatDate(dia));
+      const r = imagemPadraoDaTabela(tabRetornos(), 'Retornos do Dia (IFI / IRR)', formatDate(dia), 'retornos-ifi-irr-' + dia);
       aviso(btnRetImg, r ? `🖼 ${r.linhas} linha(s)` : '🖼 nada visível', '🖼 Gerar imagem');
     });
 
