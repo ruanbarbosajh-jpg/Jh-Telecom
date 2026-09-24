@@ -7871,11 +7871,23 @@ function renderDashboard() {
     // NÃO centraliza — ver `.dash-resumo-fin.centralizado` no CSS.
     const resumoFinanceiro = !periodosParaResumo.length ? '' : `
       <div class="dash-resumo-fin${todos ? '' : ' centralizado'}">
-        <div class="section-heading sem-toggle">Resumo financeiro do ciclo<span class="sec-nota">${unico ? 'só o ciclo selecionado' : todosOsCiclos ? 'todos os ciclos importados' : `${faixas.length} ciclos selecionados`}</span></div>
+        <div class="section-heading sem-toggle">Resumo financeiro do ciclo<span class="sec-nota">${unico ? 'só o ciclo selecionado' : todosOsCiclos ? 'todos os ciclos importados' : `${faixas.length} ciclos selecionados`}</span><button type="button" class="btn-export-img" id="dash-resumo-img">🖼 Gerar imagem</button></div>
         ${tabelaFinanceiraComparativa(periodosParaResumo, pivotDash, { comSetas: false, comTotal: false })}
         ${conferenciaFinanceiraHtml(periodosParaResumo)}
       </div>`;
 
+    // "🖼 Gerar imagem" do resumo (24/09/2026, pedido do cliente) — imagem no
+    // padrão único do sistema, só da tabela de despesas/receitas (não da
+    // conferência que vem logo abaixo, dentro do mesmo bloco).
+    const ligarImagemResumoFin = () => {
+      const btn = document.getElementById('dash-resumo-img');
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        const tab = document.querySelector('.dash-resumo-fin table');
+        const r = imagemPadraoDaTabela(tab, 'Resumo Financeiro do Ciclo', rotuloPeriodo, 'resumo-financeiro-' + hojeISOLocal());
+        if (!r) toast('Nada visível pra gerar imagem.', 'aviso');
+      });
+    };
     if (!fech.length) {
       const ciclos = ciclosDoFechamento().lista;
       const dica = !DB.fechamento.length
@@ -7888,6 +7900,7 @@ function renderDashboard() {
         : '';
       const tituloVazio = resumoFinanceiro ? 'Sem dados de PRODUÇÃO neste ciclo — o resumo financeiro acima usa o cadastro da tela Financeiro, não depende disso.' : 'Sem dados no período.';
       body.innerHTML = `${resumoFinanceiro}<div class="panel"><div class="empty">${tituloVazio}<br><span style="font-size:12px">${dica}</span>${botoes}</div></div>`;
+      ligarImagemResumoFin();
       body.querySelectorAll('button[data-ciclo]').forEach(b => b.addEventListener('click', () => {
         const [ini, fim] = b.dataset.ciclo.split('|');
         const rot = rotuloDoCiclo({ start: ini, end: fim });
@@ -8408,6 +8421,7 @@ function renderDashboard() {
     // "exibir". O clique programático usa o mesmo botão que o usuário usa,
     // então abrir e fechar depois continua funcionando normal.
     renderPainelBI('dash-complementar');
+    ligarImagemResumoFin();
     ativarTogglesDeSecao(body);
     const tituloComplementar = document.getElementById('dash-complementar-titulo');
     const btnComplementar = tituloComplementar && tituloComplementar.querySelector('.secao-toggle');
