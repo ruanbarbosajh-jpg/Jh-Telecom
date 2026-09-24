@@ -11771,7 +11771,6 @@ function renderPCR() {
       // acima). Sem esse caso, ativação/m.endereço dentro do prazo aparecia em
       // VERMELHO (mesma cor de estourado), porque só 'ate24' caía em verde.
       const corFaixa = (faixa==='ate24'||faixa==='ate36')?'var(--success)':faixa==='ate48'?'#38bdf8':faixa?'var(--danger)':'var(--text-muted)';
-      const divergiu = r.periodo && r.periodo_sistema && normalizeHeader(r.periodo)!==normalizeHeader(r.periodo_sistema);
       const tec = ehRecursoTecnico(r.recurso) ? r.recurso : '';
       return `<tr>
         <td style="color:${corFalta};font-weight:700">${h!==null && h<0 ? '⚠️ ' : ''}${textoFalta(r)}</td>
@@ -11780,7 +11779,8 @@ function renderPCR() {
         <td>${formatDate(r.data)}</td><td class="cat-cell">${esc(r.os) || '-'}</td><td>${esc(r.cliente) || '-'}</td>
         <td style="${estiloSituacao(classifyStatusGranular(r.status))}">${esc(r.status) || '-'}</td>
         <td>${fmtDT(r.abertura)}</td><td>${fmtH(r.limite)}</td><td>${fmtDT(r.limite)}</td>
-        <td${divergiu?' title="O sistema gravou como '+esc(r.periodo_sistema)+'" style="color:#f59e0b;font-weight:700"':''}>${esc(r.periodo) || '-'}</td>
+        <td>${esc(r.periodo) || '-'}</td>
+        <td>${esc(r.periodo_sistema) || '-'}</td>
         <td style="color:${corFaixa};font-weight:700"${abertaAgora && faixa ? ' title="Ainda em aberto — faixa calculada pelo tempo decorrido até agora, não é definitiva"' : ''}>${textoFaixaEfetiva(r)}</td>
       </tr>`;
     };
@@ -12094,13 +12094,13 @@ function renderPCR() {
         Em <b>Status Prazo</b>, o "(em aberto)" marca faixa AINDA NÃO DEFINITIVA — calculada pelo tempo já decorrido de uma
         ordem que continua aberta, não pelo aging final.
         O período vem da HORA DO LIMITE (abertura + 24h), não do turno gravado no sistema —
-        um prazo que vence 09:00 é MANHÃ mesmo que o sistema tenha registrado "Tarde"
-        (destacado em laranja, com o valor original no balão). Nesse dia,
+        um prazo que vence 09:00 é MANHÃ mesmo que o sistema tenha registrado "Tarde".
+        A coluna <b>Período da Ordem</b> mostra o turno gravado no sistema, pra comparar. Nesse dia,
         ${rowsReparo.filter(r=>r.periodo && r.periodo_sistema && normalizeHeader(r.periodo)!==normalizeHeader(r.periodo_sistema)).length} ordens divergem.
       </p>
       <div class="table-wrap" style="margin-bottom:1.5rem;max-height:560px;overflow:auto"><table class="data-table" id="tab-prazos"><thead><tr>
         <th>Falta</th><th>Cidade</th><th>Técnico</th><th>Data</th><th>O.S</th><th>Nome Cliente</th><th>Status O.S</th>
-        <th>Data de Abertura</th><th>Vencimento</th><th>Limite</th><th>Período</th><th>Status Prazo</th>
+        <th>Data de Abertura</th><th>Vencimento</th><th>Limite</th><th>Período</th><th>Período da Ordem</th><th>Status Prazo</th>
       </tr></thead><tbody>
         ${prazoUnificado.map(linhaPrazoUnificado).join('')}
       </tbody></table></div>
@@ -12218,7 +12218,7 @@ function renderPCR() {
         {header:'Falta',get:textoFalta},{header:'Cidade',get:r=>r.cidade||'-'},{header:'Técnico',get:r=>ehRecursoTecnico(r.recurso)?r.recurso:'-'},
         {header:'O.S',get:r=>r.os||'-'},{header:'Cliente',get:r=>r.cliente||'-'},{header:'Status',get:r=>r.status||'-'},
         {header:'Abertura',get:r=>fmtDT(r.abertura)},{header:'Vencimento',get:r=>fmtH(r.limite)},{header:'Limite',get:r=>fmtDT(r.limite)},
-        {header:'Período',get:r=>r.periodo||'-'},{header:'Status Prazo',get:textoFaixaEfetiva}
+        {header:'Período',get:r=>r.periodo||'-'},{header:'Período da Ordem',get:r=>r.periodo_sistema||'-'},{header:'Status Prazo',get:textoFaixaEfetiva}
       ]),
     });
   }
