@@ -10450,7 +10450,7 @@ function exportarTabelaImagem(tabela, nomeArquivo, titulo) {
   return { linhas: corpo.length };
 }
 // Exporta pro Excel escolhendo e REORDENANDO as colunas pelo cabeçalho.
-function exportarTabelaVisivel(tabela, nomeArquivo, ordemColunas) {
+function exportarTabelaVisivel(tabela, nomeArquivo, ordemColunas, separarDataHora) {
   if (!tabela) return;
   const cabLinha = [...tabela.querySelectorAll('thead tr')].filter(tr => tr.querySelector('th')).pop();
   let cab = [...cabLinha.querySelectorAll('th')].map(th => th.textContent.replace('▾','').trim());
@@ -10462,6 +10462,27 @@ function exportarTabelaVisivel(tabela, nomeArquivo, ordemColunas) {
     if (idxs.length) {
       cab = idxs.map(i => cab[i]);
       corpo = corpo.map(l => idxs.map(i => l[i]));
+    }
+  }
+  // Coluna "dd/mm/aaaa hh:mm" vira duas: "Data X" e "Hora X" (pedido do cliente
+  // 24/09/2026, Excel dos Prazos do Dia) — só quando TODA célula preenchida da
+  // coluna tem data+hora, pra nunca separar uma coluna de texto por engano.
+  if (separarDataHora) {
+    const DH = /^(\d{2}\/\d{2}\/\d{4})\s+(\d{1,2}:\d{2})$/;
+    const ehDH = i => corpo.some(l => DH.test(String(l[i] || '').trim())) && corpo.every(l => !String(l[i] || '').trim() || DH.test(String(l[i]).trim()));
+    const idxDH = cab.map((_, i) => i).filter(ehDH);
+    if (idxDH.length) {
+      const novoCab = [], novoCorpo = corpo.map(() => []);
+      cab.forEach((c, i) => {
+        if (idxDH.includes(i)) {
+          novoCab.push('Data ' + c, 'Hora ' + c);
+          corpo.forEach((l, k) => { const m = DH.exec(String(l[i] || '').trim()); novoCorpo[k].push(m ? m[1] : '', m ? m[2] : ''); });
+        } else {
+          novoCab.push(c);
+          corpo.forEach((l, k) => novoCorpo[k].push(l[i]));
+        }
+      });
+      cab = novoCab; corpo = novoCorpo;
     }
   }
   const dados = [cab, ...corpo];
@@ -12156,7 +12177,7 @@ function renderPCR() {
     const btnExp = document.getElementById('pcr-export');
     if (btnExp) btnExp.addEventListener('click', () => {
       // ordem pedida para a planilha: cliente, limite, técnico
-      const r = exportarTabelaVisivel(tabPrazos(), 'prazos-do-dia-' + dia, ['Nome Cliente', 'Limite', 'Técnico']);
+      const r = exportarTabelaVisivel(tabPrazos(), 'prazos-do-dia-' + dia, ['Nome Cliente', 'Limite', 'Técnico'], true);
       if (r) aviso(btnExp, `⤓ ${r.linhas} linha(s)`, '⤓ Excel (só o filtrado)');
     });
     const btnImg = document.getElementById('pcr-img');
