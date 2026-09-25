@@ -392,6 +392,13 @@
 
   /* filtro por coluna estilo Excel: funil no próprio cabeçalho */
   th.th-filtravel { position: relative; padding-right: 26px !important; }
+  th.th-ordenavel { cursor: pointer; user-select: none; }
+  th.th-ordenavel:hover { color: var(--accent); }
+  .ord-ind { margin-left: 5px; font-size: 10px; color: var(--accent); }
+  th.ord-ativa { color: var(--accent); }
+  .fm-ordem { display: flex; gap: 12px; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+  .fm-ordem a { color: var(--text-secondary); text-decoration: none; font-weight: 600; }
+  .fm-ordem a:hover { color: var(--accent); }
   .filtro-btn {
     position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
     width: 18px; height: 18px; line-height: 18px; text-align: center; border-radius: 4px;
@@ -7371,9 +7378,104 @@ function ativarTogglesDeSecao(raiz) {
     h3.appendChild(criarBotao(alvosPainel));
   });
 }
+// ---------- Ordenar qualquer coluna (menor→maior / maior→menor) ----------
+// Pedido do cliente (25/09/2026): "em todas as tabelas, poder ordenar do menor pro
+// maior e vice-versa em qualquer coluna". Clique no título da coluna alterna
+// menor→maior, maior→menor e volta pra ordem original; o menu do funil também tem
+// os dois botões. A chave de ordenação entende o formato brasileiro: moeda
+// ("R$ 1.234,56"), percentual ("87,5% (61 de 70)"), data com/sem hora, hora,
+// "Xh Ymin" e número solto; o resto vai por texto (pt-BR, com número natural).
+// Célula vazia ou "-" fica SEMPRE no fim, em qualquer sentido.
+function chaveOrdenacaoCelula(td) {
+  const campo = td.querySelector('input, select, textarea');
+  const txt = (campo ? String(campo.value == null ? '' : campo.value) : (td.textContent || '')).replace(/\s+/g, ' ').trim();
+  if (!txt || txt === '-' || txt === '—' || txt === '(vazio)') return { vazio: true };
+  let m = /^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/.exec(txt);
+  if (m) return { n: (+m[3]) * 1e8 + (+m[2]) * 1e6 + (+m[1]) * 1e4 + (+(m[4] || 0)) * 100 + (+(m[5] || 0)) };
+  // variação com seta ("▲ 50,0 p.p." / "▼ 3,9 p.p." / "= 0,0 p.p."): ▼ é negativo
+  m = /^([▲▼=])\s*(\d+(?:,\d+)?)/.exec(txt);
+  if (m) return { n: (m[1] === '▼' ? -1 : m[1] === '=' ? 0 : 1) * parseFloat(m[2].replace(',', '.')) };
+  m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(txt);
+  if (m) return { n: (+m[1]) * 60 + (+m[2]) };
+  m = /^(\d+)\s*h(?:\s*(\d+)\s*min)?$/i.exec(txt);
+  if (m) return { n: (+m[1]) * 60 + (+(m[2] || 0)) };
+  m = /^(?:R\$\s*)?([+-]?\d{1,3}(?:\.\d{3})+(?:,\d+)?|[+-]?\d+(?:,\d+)?|[+-]?\d+\.\d+)(?=\s|%|$|\(|\D)/.exec(txt);
+  if (m && /^[R$\s\d+-]/.test(txt)) {
+    let s = m[1];
+    if (/,/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
+    else if (/^[+-]?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+    const n = parseFloat(s);
+    if (!isNaN(n)) return { n };
+  }
+  return { s: txt };
+}
+function ativarOrdenacaoDeColuna(tab, ths, tbody) {
+  const linhas = () => [...tbody.querySelectorAll('tr')].filter(tr => !tr.classList.contains('total-row') && tr.querySelector('td'));
+  const estado = { idx: null, dir: null };
+  let seq = 0;
+  function pintar() {
+    ths.forEach((th, i) => {
+      th.classList.toggle('ord-ativa', estado.idx === i);
+      const ind = th.querySelector('.ord-ind');
+      if (ind) ind.textContent = estado.idx === i ? (estado.dir === 'asc' ? '▲' : '▼') : '';
+      if (estado.idx === i) th.setAttribute('aria-sort', estado.dir === 'asc' ? 'ascending' : 'descending'); else th.removeAttribute('aria-sort');
+    });
+  }
+  function ordenar(idx, dir) {
+    const rows = linhas();
+    if (!rows.length) return;
+    // tabela com linha "de detalhe"/colspan no meio: reordenar quebraria o par — não mexe
+    if (!rows.every(tr => tr.querySelectorAll('td').length === ths.length)) return;
+    rows.forEach(tr => { if (tr.dataset.ordOrig === undefined) tr.dataset.ordOrig = String(seq++); });
+    estado.idx = dir ? idx : null; estado.dir = dir;
+    let ordenadas;
+    if (!dir) {
+      ordenadas = rows.slice().sort((a, b) => +a.dataset.ordOrig - +b.dataset.ordOrig);
+    } else {
+      const chaves = new Map(rows.map(tr => [tr, chaveOrdenacaoCelula(tr.querySelectorAll('td')[idx])]));
+      const f = dir === 'asc' ? 1 : -1;
+      ordenadas = rows.slice().sort((a, b) => {
+        const ka = chaves.get(a), kb = chaves.get(b);
+        if (ka.vazio || kb.vazio) return ka.vazio && kb.vazio ? +a.dataset.ordOrig - +b.dataset.ordOrig : (ka.vazio ? 1 : -1);
+        let c;
+        if (ka.n !== undefined && kb.n !== undefined) c = ka.n - kb.n;
+        else if (ka.n !== undefined) c = -1;        // número antes de texto
+        else if (kb.n !== undefined) c = 1;
+        else c = String(ka.s).localeCompare(String(kb.s), 'pt-BR', { numeric: true, sensitivity: 'base' });
+        return c ? c * f : +a.dataset.ordOrig - +b.dataset.ordOrig;
+      });
+      // vazio no fim mesmo no sentido decrescente (o f acima inverteria só quem tem valor)
+    }
+    const totais = [...tbody.querySelectorAll('tr.total-row')];
+    ordenadas.forEach(tr => tbody.appendChild(tr));
+    totais.forEach(tr => tbody.appendChild(tr));
+    pintar();
+  }
+  ths.forEach((th, idx) => {
+    if (th.querySelector('.ord-ind')) return;
+    th.classList.add('th-ordenavel');
+    const ind = document.createElement('span');
+    ind.className = 'ord-ind';
+    th.insertBefore(ind, th.querySelector('.filtro-btn'));
+    th.addEventListener('click', ev => {
+      if (ev.target.closest('.filtro-btn, input, select, button, a, textarea')) return;
+      ordenar(idx, estado.idx === idx ? (estado.dir === 'asc' ? 'desc' : null) : 'asc');
+    });
+  });
+  tab.__ordenar = ordenar;
+}
 function ativarFiltrosDeColuna(raiz) {
   const alvo = raiz || document.getElementById('content');
   if (!alvo) return;
+  // cartão "Acompanhamento de Prazos" (pzcard-table): sem funil, só ordenar
+  alvo.querySelectorAll('table.pzcard-table').forEach(tab => {
+    const thead = tab.querySelector('thead'), tbody = tab.querySelector('tbody');
+    if (!thead || !tbody || tab.dataset.semOrdenar === '1') return;
+    const linhaCab = [...thead.querySelectorAll('tr')].filter(tr => tr.querySelector('th')).pop();
+    if (!linhaCab || linhaCab.dataset.ordOk === '1') return;
+    linhaCab.dataset.ordOk = '1';
+    ativarOrdenacaoDeColuna(tab, [...linhaCab.querySelectorAll('th')], tbody);
+  });
   alvo.querySelectorAll('table.data-table').forEach(tab => {
     // Tabela com células "vivas" (ex.: o <select> de status por dia da Gestão
     // Presença) não pode entrar aqui: textContent de um <select> junta o texto
@@ -7399,6 +7501,7 @@ function ativarFiltrosDeColuna(raiz) {
       btn.addEventListener('click', ev => { ev.stopPropagation(); abrirMenu(th, idx, rotulo); });
       th.appendChild(btn);
     });
+    if (tab.dataset.semOrdenar !== '1') ativarOrdenacaoDeColuna(tab, ths, tbody);
 
     function linhasDados() {
       return [...tbody.querySelectorAll('tr')].filter(tr => !tr.classList.contains('total-row') && tr.querySelector('td'));
@@ -7475,6 +7578,7 @@ function ativarFiltrosDeColuna(raiz) {
       menu.className = 'filtro-menu'; menu.dataset.col = idx;
       menu.innerHTML = `
         <div class="fm-topo">${rotulo || 'Coluna'}</div>
+        ${tab.__ordenar ? '<div class="fm-ordem"><a href="#" class="fm-asc">▲ Menor → maior</a><a href="#" class="fm-desc">▼ Maior → menor</a></div>' : ''}
         <input type="text" class="fm-busca" placeholder="Buscar...">
         <div class="fm-acoes"><a href="#" class="fm-todos">Selecionar tudo</a><a href="#" class="fm-nenhum">Limpar</a></div>
         <div class="fm-lista"></div>
@@ -7504,6 +7608,10 @@ function ativarFiltrosDeColuna(raiz) {
       menu.querySelector('.fm-todos').addEventListener('click', e => { e.preventDefault(); valores.forEach(v => sel.add(v)); pintarLista(menu.querySelector('.fm-busca').value); });
       menu.querySelector('.fm-nenhum').addEventListener('click', e => { e.preventDefault(); sel.clear(); pintarLista(menu.querySelector('.fm-busca').value); });
       menu.querySelector('.fm-cancela').addEventListener('click', () => fecharMenusFiltro());
+      [['.fm-asc', 'asc'], ['.fm-desc', 'desc']].forEach(([sel2, dir]) => {
+        const a = menu.querySelector(sel2);
+        if (a) a.addEventListener('click', e => { e.preventDefault(); fecharMenusFiltro(); tab.__ordenar(idx, dir); });
+      });
       menu.querySelector('.fm-ok').addEventListener('click', () => {
         // marcar tudo = sem filtro nessa coluna (igual ao Excel)
         if (sel.size === valores.length) delete estado[idx]; else estado[idx] = sel;
