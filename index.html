@@ -12484,7 +12484,7 @@ function htmlForaDoPrazoDetalhe(encerradas) {
 // diferença em pontos percentuais pro dia da linha de cima, com ▲/▼.
 // `itens` = [{ data, dentro }] (uma entrada por O.S). Não usa `.panel` de
 // propósito: `ativarBotoesImagem` daria um botão por painel além do do título.
-function tabelaAndamentoPrazo(rotulo, itens, meta) {
+function tabelaAndamentoPrazo(rotulo, itens, meta, diasLista) {
   const porDia = {};
   itens.forEach(x => {
     const d = x.data || '';
@@ -12492,33 +12492,53 @@ function tabelaAndamentoPrazo(rotulo, itens, meta) {
     porDia[d].qtd++;
     if (x.dentro) porDia[d].dentro++;
   });
-  const dias = Object.keys(porDia).sort();
+  // Sempre do dia 01 em ordem (25/09/2026, pedido do cliente): `diasLista` traz
+  // TODOS os dias do mês até o último com dado, então as duas tabelas ficam com
+  // as mesmas datas na mesma linha; dia sem O.S aparece com 0 e traço.
+  const dias = diasLista && diasLista.length ? diasLista : Object.keys(porDia).sort();
+  const vazio = { qtd: 0, dentro: 0 };
   const pctDe = o => o.qtd ? (o.dentro / o.qtd) * 100 : 0;
-  const cel = o => `<span style="font-weight:700;color:${pctDe(o) >= meta ? 'var(--success)' : 'var(--danger)'}">${formatPct(pctDe(o), 1)}</span> <span style="color:var(--text-muted);font-size:12px">(${o.dentro} de ${o.qtd})</span>`;
+  const cel = o => !o.qtd ? '<span style="color:var(--text-muted)">-</span>'
+    : `<span style="font-weight:700;color:${pctDe(o) >= meta ? 'var(--success)' : 'var(--danger)'}">${formatPct(pctDe(o), 1)}</span> <span style="color:var(--text-muted);font-size:12px">(${o.dentro} de ${o.qtd})</span>`;
   const vs = (atual, ant) => {
-    if (!ant) return '<span style="color:var(--text-muted)">-</span>';
+    if (!atual.qtd || !ant) return '<span style="color:var(--text-muted)">-</span>';
     const d = pctDe(atual) - pctDe(ant);
     if (Math.abs(d) < 0.05) return '<span class="cmp-seta igual">= 0,0 p.p.</span>';
     return `<span class="cmp-seta ${d > 0 ? 'bom' : 'ruim'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d).toFixed(1).replace('.', ',')} p.p.</span>`;
   };
-  const tot = dias.reduce((a, d) => ({ qtd: a.qtd + porDia[d].qtd, dentro: a.dentro + porDia[d].dentro }), { qtd: 0, dentro: 0 });
+  const tot = Object.values(porDia).reduce((a, o) => ({ qtd: a.qtd + o.qtd, dentro: a.dentro + o.dentro }), { qtd: 0, dentro: 0 });
+  let anterior = null; // último dia COM dado (dia vazio não vira base de comparação)
+  const linhas = dias.map(d => {
+    const o = porDia[d] || vazio;
+    const html = `<tr><td class="cat-cell">${d ? formatDate(d) : '-'}</td><td>${o.qtd.toLocaleString('pt-BR')}</td><td>${cel(o)}</td><td>${vs(o, anterior)}</td></tr>`;
+    if (o.qtd) anterior = o;
+    return html;
+  });
   return `<div>
     <div style="font-size:13px;font-weight:700;color:var(--text-secondary);margin:0 0 6px">${esc(rotulo)}</div>
-    ${!dias.length ? '<div class="empty">Sem O.S nesse recorte.</div>' : `
+    ${!tot.qtd ? '<div class="empty">Sem O.S nesse recorte.</div>' : `
     <div class="table-wrap"><table class="data-table"><thead><tr>
       <th>Data</th><th>Qtd. de O.S</th><th>Prazo (até 24h)</th><th>vs anterior</th>
     </tr></thead><tbody>
-      ${dias.map((d, i) => `<tr><td class="cat-cell">${d ? formatDate(d) : '-'}</td><td>${porDia[d].qtd.toLocaleString('pt-BR')}</td><td>${cel(porDia[d])}</td><td>${vs(porDia[d], i ? porDia[dias[i - 1]] : null)}</td></tr>`).join('')}
+      ${linhas.join('')}
     </tbody><tfoot><tr class="total-row"><td class="cat-cell">Total</td><td>${tot.qtd.toLocaleString('pt-BR')}</td><td>${cel(tot)}</td><td></td></tr></tfoot></table></div>`}
   </div>`;
 }
-function htmlAndamentoPrazoPorDia(itensDia, itensMes, meta) {
+function htmlAndamentoPrazoPorDia(itensDia, itensMes, meta, inicioISO) {
   if (!itensDia.length && !itensMes.length) return '';
+  // do dia 01 até o último dia que tem dado em qualquer das duas tabelas
+  const comDado = [...itensDia, ...itensMes].map(x => x.data).filter(Boolean).sort();
+  const ultimo = comDado[comDado.length - 1];
+  const diasLista = [];
+  if (inicioISO && ultimo) {
+    const [y, m, d] = inicioISO.split('-').map(Number);
+    for (let dt = new Date(y, m - 1, d); isoLocalDe(dt) <= ultimo; dt.setDate(dt.getDate() + 1)) diasLista.push(isoLocalDe(dt));
+  }
   return `
     <div class="section-heading">Andamento do Prazo por Dia<span class="sec-nota">reparos · meta ${formatPct(meta, 0)} em até 24h · esquerda: dias do CSV (PCR) · direita: mês da planilha</span></div>
     <div class="panels-grid" style="margin-bottom:1.5rem">
-      ${tabelaAndamentoPrazo('DIA — CSV de atividades (PCR)', itensDia, meta)}
-      ${tabelaAndamentoPrazo('MÊS — planilha PRAZOS_ESCRITÓRIO', itensMes, meta)}
+      ${tabelaAndamentoPrazo('DIA — CSV de atividades (PCR)', itensDia, meta, diasLista)}
+      ${tabelaAndamentoPrazo('MÊS — planilha PRAZOS_ESCRITÓRIO', itensMes, meta, diasLista)}
     </div>`;
 }
 function htmlForaDoPrazoDetalheMes(rows) {
@@ -14589,7 +14609,8 @@ function renderPrazo() {
 
     // dias do CSV (PCR) — mesma regra do cartão do DIA: reparo já encerrado (com faixa)
     const itensAndamentoDia = [];
-    diasCsvPrazo.forEach(dia => linhasDoCsvPorDia(dia)
+    // só os dias DENTRO do mês escolhido (antes entravam todos os dias importados, de qualquer mês)
+    diasCsvPrazo.filter(dia => inRange(dia, s, e)).forEach(dia => linhasDoCsvPorDia(dia)
       .filter(r => ehServicoReparo(r.tipo_atividade) && cidadesSelecionadas.includes(r.cidade) && r.faixa)
       .forEach(r => itensAndamentoDia.push({ data: dia, dentro: r.faixa === 'ate24' })));
     // rótulo do mês escolhido, pra deixar claro de que período é cada bloco
@@ -14612,7 +14633,7 @@ function renderPrazo() {
         badgeLabel: 'Prazo geral 24hrs', pct, meta: TARGET, within: within24, total: rows.length, byCity, totals })}
       ${htmlForaDoPrazoDetalheMes(rows)}
       ${dupHtml}
-      ${htmlAndamentoPrazoPorDia(itensAndamentoDia, rows.map(r => ({ data: r.data, dentro: classifyBucket(r.status_prazo) === 'ate24' })), TARGET)}
+      ${htmlAndamentoPrazoPorDia(itensAndamentoDia, rows.map(r => ({ data: r.data, dentro: classifyBucket(r.status_prazo) === 'ate24' })), TARGET, s)}
       <div id="pdf-export-area"></div>
     `;
     barsChart('c-bucket', buckets, { fill: true });
