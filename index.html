@@ -2076,6 +2076,13 @@
     .ini-grid { grid-template-columns: 1fr; }
     .ini-card { padding: 18px; }
   }
+  /* Andamento do Prazo por Dia: cada lado com filtro de data próprio */
+  .pzand { min-width: 0; } /* sem isso a célula do grid cresce até a largura da tabela e estoura a tela no celular */
+  .pzand-topo { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 0 0 8px; }
+  .pzand-filtro { display: flex; gap: 10px; flex-wrap: wrap; }
+  .pzand-filtro label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
+  .pzand-filtro input { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-page); color: var(--text-primary); font-size: 12.5px; }
+  .pzand-grafico { margin: 0 0 12px; }
   /* ---- TOQUE (celular/tablet) — 24/09/2026 ----
      Auditoria no viewport de 375px: quase toda tela tinha campo com fonte < 16px
      (o iPhone dá zoom sozinho ao focar e a tela fica "pulando") e botões de
@@ -5583,7 +5590,11 @@ function trendChart(elId, series, opts = {}) {
   const comValores = series.filter(s => s.points && s.points.length);
   if (!comValores.length) { el.innerHTML = '<div class="empty">Sem dados.</div>'; return; }
   const labels = comValores[0].points.map(p => p.label);
-  const max = Math.max(...comValores.flatMap(s => s.points.map(p => p.value)), 1);
+  // opts.yMin/yMax: escala fixa (ex.: percentual de 60 a 100 pra mostrar a subida/queda
+  // do prazo dia a dia — começando do 0 a linha ficava achatada). opts.legendaSemTotal:
+  // a legenda soma os pontos da série, o que não faz sentido pra percentual.
+  const max = opts.yMax !== undefined ? opts.yMax : Math.max(...comValores.flatMap(s => s.points.map(p => p.value)), 1);
+  const min = opts.yMin || 0;
   // opts.expandir: o viewBox fixo de 600 combinado com preserveAspectRatio
   // "meet" fazia o desenho ser escalado pela ALTURA e depois centralizado —
   // num painel de 1150px de largura sobrava um terço vazio de cada lado. Com a
@@ -5593,7 +5604,7 @@ function trendChart(elId, series, opts = {}) {
   const W = opts.expandir && el.clientWidth > 600 ? Math.round(el.clientWidth) : 600;
   const n = labels.length;
   const x = i => n > 1 ? PADX + (i / (n - 1)) * (W - 2 * PADX) : W / 2;
-  const y = v => H - PADY_B - (v / max) * (H - PADY_T - PADY_B);
+  const y = v => H - PADY_B - (((v - min) / ((max - min) || 1)) * (H - PADY_T - PADY_B));
   // eixo Y: sem valor nenhum os dados "flutuavam" sem referência de escala —
   // 3 rótulos (0, metade, topo) nas mesmas alturas das 3 linhas de grade.
   const yLabel = v => v >= 1000 ? Math.round(v).toLocaleString('pt-BR') : Math.round(v);
@@ -5623,14 +5634,14 @@ function trendChart(elId, series, opts = {}) {
   el.innerHTML = `
     <div class="trend-legend">${comValores.map(s => {
       const totalSerie = s.points.reduce((a,p) => a + p.value, 0);
-      return `<span class="legend-item"><span class="legend-dot" style="background:${s.color}"></span>${esc(s.name)}<b>${totalSerie.toLocaleString('pt-BR')}</b></span>`;
+      return `<span class="legend-item"><span class="legend-dot" style="background:${s.color}"></span>${esc(s.name)}${opts.legendaSemTotal ? '' : `<b>${totalSerie.toLocaleString('pt-BR')}</b>`}</span>`;
     }).join('')}</div>
     <div class="trend-chart-wrap">
     <svg viewBox="0 0 ${W} ${H}" class="trend-chart-svg${opts.suave ? ' trend-suave' : ''}" preserveAspectRatio="xMidYMid meet">
       ${[0, 0.5, 1].map(f => {
         const yy = (H - PADY_B - f * (H - PADY_T - PADY_B)).toFixed(1);
         return `<line x1="${PADX}" y1="${yy}" x2="${W - PADX}" y2="${yy}" class="trend-gridline" stroke-dasharray="3 3"/>
-        <text x="${PADX - 8}" y="${yy}" dy="3.5" text-anchor="end" class="trend-axis-y-label">${yLabel(max * f)}</text>`;
+        <text x="${PADX - 8}" y="${yy}" dy="3.5" text-anchor="end" class="trend-axis-y-label">${yLabel(min + (max - min) * f)}${opts.sufixoY || ''}</text>`;
       }).join('')}
       ${comValores.map(s => `
         ${s.semArea ? '' : `<path d="${areaPath(s.points)}" fill="${s.color}" opacity="0.12" stroke="none"/>`}
@@ -12516,7 +12527,7 @@ function tabelaAndamentoPrazo(rotulo, itens, meta, diasLista) {
     return html;
   });
   return `<div>
-    <div style="font-size:13px;font-weight:700;color:var(--text-secondary);margin:0 0 6px">${esc(rotulo)}</div>
+    ${rotulo ? `<div style="font-size:13px;font-weight:700;color:var(--text-secondary);margin:0 0 6px">${esc(rotulo)}</div>` : ''}
     ${!tot.qtd ? '<div class="empty">Sem O.S nesse recorte.</div>' : `
     <div class="table-wrap"><table class="data-table"><thead><tr>
       <th>Data</th><th>Qtd. de O.S</th><th>Prazo (até 24h)</th><th>vs anterior</th>
@@ -12525,22 +12536,61 @@ function tabelaAndamentoPrazo(rotulo, itens, meta, diasLista) {
     </tbody><tfoot><tr class="total-row"><td class="cat-cell">Total</td><td>${tot.qtd.toLocaleString('pt-BR')}</td><td>${cel(tot)}</td><td></td></tr></tfoot></table></div>`}
   </div>`;
 }
-function htmlAndamentoPrazoPorDia(itensDia, itensMes, meta, inicioISO) {
-  if (!itensDia.length && !itensMes.length) return '';
-  // do dia 01 até o último dia que tem dado em qualquer das duas tabelas
-  const comDado = [...itensDia, ...itensMes].map(x => x.data).filter(Boolean).sort();
-  const ultimo = comDado[comDado.length - 1];
-  const diasLista = [];
-  if (inicioISO && ultimo) {
-    const [y, m, d] = inicioISO.split('-').map(Number);
-    for (let dt = new Date(y, m - 1, d); isoLocalDe(dt) <= ultimo; dt.setDate(dt.getDate() + 1)) diasLista.push(isoLocalDe(dt));
-  }
-  return `
-    <div class="section-heading">Andamento do Prazo por Dia<span class="sec-nota">reparos · meta ${formatPct(meta, 0)} em até 24h · esquerda: dias do CSV (PCR) · direita: mês da planilha</span></div>
-    <div class="panels-grid" style="margin-bottom:1.5rem">
-      ${tabelaAndamentoPrazo('DIA — CSV de atividades (PCR)', itensDia, meta, diasLista)}
-      ${tabelaAndamentoPrazo('MÊS — planilha PRAZOS_ESCRITÓRIO', itensMes, meta, diasLista)}
+// Casca do bloco (25/09/2026, pedido do cliente): CADA lado tem o PRÓPRIO filtro de
+// data (De/Até) e o próprio gráfico de linha (evolução do % no prazo dia a dia
+// contra a meta) — `pintarAndamento(tipo)` em `renderPrazo.load()` preenche. Os
+// campos de data NÃO têm id de propósito: `guardarFiltros` lê input[id] e
+// restauraria valor num bloco que ainda nem foi desenhado.
+function htmlAndamentoPrazoPorDia(meta, deISO, ateISO) {
+  const bloco = (tipo, titulo) => `
+    <div class="pzand" data-tipo="${tipo}">
+      <div class="pzand-topo">
+        <div style="font-size:13px;font-weight:700;color:var(--text-secondary)">${esc(titulo)}</div>
+        <div class="pzand-filtro">
+          <label>De <input type="date" class="pzand-de" value="${esc(deISO)}"></label>
+          <label>Até <input type="date" class="pzand-ate" value="${esc(ateISO)}"></label>
+        </div>
+      </div>
+      <div class="pzand-grafico" id="pzand-${tipo}-graf"></div>
+      <div class="pzand-tabela"></div>
     </div>`;
+  return `
+    <div class="section-heading">Andamento do Prazo por Dia<span class="sec-nota">reparos · meta ${formatPct(meta, 0)} em até 24h · cada lado tem o seu filtro de data</span></div>
+    <div class="panels-grid" style="margin-bottom:1.5rem">
+      ${bloco('dia', 'DIA — CSV de atividades (PCR)')}
+      ${bloco('mes', 'MÊS — planilha PRAZOS_ESCRITÓRIO')}
+    </div>`;
+}
+// Lista ISO de `de` até `ate` (inclusive), em data local.
+function diasDoIntervaloISO(de, ate) {
+  const out = [];
+  if (!de || !ate) return out;
+  const [y, m, d] = de.split('-').map(Number);
+  for (let dt = new Date(y, m - 1, d); isoLocalDe(dt) <= ate && out.length < 800; dt.setDate(dt.getDate() + 1)) out.push(isoLocalDe(dt));
+  return out;
+}
+// Tabela + gráfico de um lado. `itens` = [{ data, dentro }].
+function pintarAndamentoBloco(bloco, itens, meta) {
+  const de = bloco.querySelector('.pzand-de').value;
+  const comDado = itens.map(x => x.data).filter(Boolean).sort();
+  const ultimo = comDado.length ? comDado[comDado.length - 1] : '';
+  const dias = de && ultimo ? diasDoIntervaloISO(de, ultimo) : [];
+  bloco.querySelector('.pzand-tabela').innerHTML = tabelaAndamentoPrazo('', itens, meta, dias);
+  ativarFiltrosDeColuna(bloco.querySelector('.pzand-tabela'));
+  // gráfico: só dias COM O.S (dia vazio não é 0%)
+  const porDia = {};
+  itens.forEach(x => { const o = porDia[x.data] || (porDia[x.data] = { qtd: 0, dentro: 0 }); o.qtd++; if (x.dentro) o.dentro++; });
+  const diasComDado = Object.keys(porDia).sort();
+  const grafEl = bloco.querySelector('.pzand-grafico');
+  if (!diasComDado.length) { grafEl.innerHTML = ''; return; }
+  const pct = d => (porDia[d].dentro / porDia[d].qtd) * 100;
+  const rotulo = d => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+  const menor = Math.min(...diasComDado.map(pct), meta);
+  const yMin = Math.max(0, Math.floor((menor - 5) / 10) * 10);
+  trendChart(grafEl.id, [
+    { name: 'Prazo (até 24h)', color: '#38bdf8', points: diasComDado.map(d => ({ label: rotulo(d), value: Number(pct(d).toFixed(1)), display: `${formatPct(pct(d), 1)} (${porDia[d].dentro} de ${porDia[d].qtd})` })) },
+    { name: `Meta ${formatPct(meta, 0)}`, color: '#f59e0b', tracejado: true, semArea: true, points: diasComDado.map(d => ({ label: rotulo(d), value: meta, display: formatPct(meta, 0) })) },
+  ], { yMin, yMax: 100, sufixoY: '%', legendaSemTotal: true, maxLabels: 16 });
 }
 function htmlForaDoPrazoDetalheMes(rows) {
   const comFaixa = rows.map(r => ({ r, faixa: classifyBucket(r.status_prazo) }))
@@ -14608,12 +14658,27 @@ function renderPrazo() {
         </tbody></table></div>
       </div>`;
 
-    // dias do CSV (PCR) — mesma regra do cartão do DIA: reparo já encerrado (com faixa)
-    const itensAndamentoDia = [];
-    // só os dias DENTRO do mês escolhido (antes entravam todos os dias importados, de qualquer mês)
-    diasCsvPrazo.filter(dia => inRange(dia, s, e)).forEach(dia => linhasDoCsvPorDia(dia)
-      .filter(r => ehServicoReparo(r.tipo_atividade) && cidadesSelecionadas.includes(r.cidade) && r.faixa)
-      .forEach(r => itensAndamentoDia.push({ data: dia, dentro: r.faixa === 'ate24' })));
+    // Andamento por dia: cada lado filtra pelo PRÓPRIO De/Até (o padrão é o mês da tela).
+    // function (hoisted) e não const: `pintarAndamento` roda logo abaixo do innerHTML.
+    function itensAndamento(tipo, de, ate) {
+      if (tipo === 'mes') {
+        // mesmas regras da tabela do MÊS (concluído, reparo, faixa válida, cidades e técnico da tela)
+        return DB.prazo.filter(p => inRange(p.data, de, ate) && isConcluido(p.status) && cidadesSelecionadas.includes(p.cidade)
+          && (!tech || (p.recurso || '').toLowerCase().includes(tech)) && classifyBucket(p.status_prazo) !== 'outro' && ehPrazoDeReparo(p))
+          .map(p => ({ data: p.data, dentro: classifyBucket(p.status_prazo) === 'ate24' }));
+      }
+      // dias do CSV (PCR) — mesma regra do cartão do DIA: reparo já encerrado (com faixa)
+      const out = [];
+      diasCsvPrazo.filter(dia => inRange(dia, de, ate)).forEach(dia => linhasDoCsvPorDia(dia)
+        .filter(r => ehServicoReparo(r.tipo_atividade) && cidadesSelecionadas.includes(r.cidade) && r.faixa)
+        .forEach(r => out.push({ data: dia, dentro: r.faixa === 'ate24' })));
+      return out;
+    }
+    function pintarAndamento(tipo) {
+      const bloco = body.querySelector('.pzand[data-tipo="' + tipo + '"]');
+      if (!bloco) return;
+      pintarAndamentoBloco(bloco, itensAndamento(tipo, bloco.querySelector('.pzand-de').value, bloco.querySelector('.pzand-ate').value), TARGET);
+    }
     // rótulo do mês escolhido, pra deixar claro de que período é cada bloco
     const rotuloMes = (mesesDisponiveis.find(x => x.value === s.slice(0,7)) || {}).label || `${formatDate(s)} a ${formatDate(e)}`;
     body.innerHTML = `
@@ -14634,10 +14699,14 @@ function renderPrazo() {
         badgeLabel: 'Prazo geral 24hrs', pct, meta: TARGET, within: within24, total: rows.length, byCity, totals })}
       ${htmlForaDoPrazoDetalheMes(rows)}
       ${dupHtml}
-      ${htmlAndamentoPrazoPorDia(itensAndamentoDia, rows.map(r => ({ data: r.data, dentro: classifyBucket(r.status_prazo) === 'ate24' })), TARGET, s)}
+      ${htmlAndamentoPrazoPorDia(TARGET, s, e)}
       <div id="pdf-export-area"></div>
     `;
     barsChart('c-bucket', buckets, { fill: true });
+    ['dia', 'mes'].forEach(tp => {
+      pintarAndamento(tp);
+      body.querySelectorAll('.pzand[data-tipo="' + tp + '"] input').forEach(inp => inp.addEventListener('change', () => pintarAndamento(tp)));
+    });
     wireGerarImagemCartaoPrazo();
     ativarTogglesDeSecao(body); // o Filtrar refaz o HTML e o global só roda no 1º render
     ativarBotoesImagem(body);
