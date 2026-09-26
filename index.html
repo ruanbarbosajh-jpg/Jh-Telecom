@@ -7409,7 +7409,22 @@ function chaveOrdenacaoCelula(td) {
   }
   return { s: txt };
 }
+// Tabela PLANA = toda linha de dado com o mesmo nº de colunas do cabeçalho e linha de
+// total só no FIM. Tabela agrupada (ex.: "Pedágio por Condutor": linha do condutor
+// como total-row e os locais embaixo) não pode ser reordenada — o total do grupo
+// iria parar longe dos locais dele. Nesse caso a ordenação nem é ligada.
+function tabelaPlanaParaOrdenar(tbody, nColunas) {
+  let viuTotal = false;
+  for (const tr of tbody.querySelectorAll('tr')) {
+    if (!tr.querySelector('td')) continue;
+    if (tr.classList.contains('total-row')) { viuTotal = true; continue; }
+    if (viuTotal) return false;
+    if (tr.querySelectorAll('td').length !== nColunas) return false;
+  }
+  return true;
+}
 function ativarOrdenacaoDeColuna(tab, ths, tbody) {
+  if (!tabelaPlanaParaOrdenar(tbody, ths.length)) return;
   const linhas = () => [...tbody.querySelectorAll('tr')].filter(tr => !tr.classList.contains('total-row') && tr.querySelector('td'));
   const estado = { idx: null, dir: null };
   let seq = 0;
@@ -7425,7 +7440,7 @@ function ativarOrdenacaoDeColuna(tab, ths, tbody) {
     const rows = linhas();
     if (!rows.length) return;
     // tabela com linha "de detalhe"/colspan no meio: reordenar quebraria o par — não mexe
-    if (!rows.every(tr => tr.querySelectorAll('td').length === ths.length)) return;
+    if (!tabelaPlanaParaOrdenar(tbody, ths.length)) return;
     rows.forEach(tr => { if (tr.dataset.ordOrig === undefined) tr.dataset.ordOrig = String(seq++); });
     estado.idx = dir ? idx : null; estado.dir = dir;
     let ordenadas;
@@ -16434,7 +16449,7 @@ function renderToll() {
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="ped-tab-placa"><thead><tr>
         <th>Placa</th><th>Condutor em Sistema</th><th>Condutor Atual</th><th>Valor Total</th>
       </tr></thead><tbody>
-        ${byPlaca.map(p => `<tr><td class="cat-cell">${esc(p.placa)}</td><td>${esc(p.cadastro)}</td>
+        ${byPlaca.map(p => `<tr data-valor="${p.value}"><td class="cat-cell">${esc(p.placa)}</td><td>${esc(p.cadastro)}</td>
           <td>${p.condutor === 'Não encontrada' ? `<span class="badge warn">Não encontrada</span>` : esc(p.condutor)}</td>
           <td style="font-weight:600">${formatCurrency(p.value)}</td></tr>`).join('')}
         <tr class="total-row"><td class="cat-cell">TOTAL GERAL</td><td>-</td><td>-</td><td>${formatCurrency(byPlaca.reduce((a,p)=>a+p.value,0))}</td></tr>
@@ -16465,6 +16480,10 @@ function renderToll() {
     const selPed = document.getElementById('ped-limite');
     if (selPed) selPed.addEventListener('change', () => { limitePed = +selPed.value; load(); });
     barsChartTopN('c-placa', byPlaca);
+    // "🖼 Gerar imagem" em cada bloco (25/09/2026, pedido do cliente: pra mostrar os
+    // ofensores etc.) — o do "Gasto de Pedágio por Veículo" leva gráfico + tabela.
+    ativarTogglesDeSecao(body); // o Filtrar refaz o HTML e o global só roda no 1º render
+    ativarBotoesImagem(body);
 
     // ---- filtro por coluna (funil ▾) também muda o cálculo, não só esconde
     // linha — pedido do cliente. "Detalhamento" é lista plana: soma direto as
@@ -16511,7 +16530,9 @@ function renderToll() {
       const atualizarTotalPlaca = () => {
         const linhasTr = [...tabPlaca.querySelectorAll('tbody tr:not(.total-row)')];
         let total = 0;
-        linhasTr.forEach((tr, i) => { if (tr.style.display !== 'none') total += byPlaca[i].value; });
+        // pelo data-valor da PRÓPRIA linha (e não pela posição em byPlaca): o cliente
+        // pode ordenar a tabela clicando no título e a posição deixa de bater
+        linhasTr.forEach(tr => { if (tr.style.display !== 'none') total += Number(tr.dataset.valor) || 0; });
         const trTotal = tabPlaca.querySelector('tbody tr.total-row');
         if (trTotal) trTotal.children[3].textContent = formatCurrency(total);
       };
