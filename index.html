@@ -16410,7 +16410,7 @@ function renderToll() {
     body.innerHTML = `
       <div class="cards-grid">${metricCard('Total de passagens', rows.length)}${metricCard('Valor total', formatCurrency(totalValue))}${metricCard('Fora do horário', foraHorario, foraHorario>0)}${metricCard('Fora das cidades cobradas', foraCidade, foraCidade>0)}${metricCard('Condutor não encontrado', naoEncontrada, naoEncontrada>0)}</div>
       ${divergent.length?`<div class="warning-box">${divergent.length} passagem(ns) com condutor atual diferente do cadastrado.</div>`:''}
-      <div class="section-heading">Todas as Passagens</div>
+      <div class="section-heading" data-ped="todas">Todas as Passagens</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Nome em <span style="color:var(--danger)">vermelho</span> = fora do horário. Endereço em <span style="color:#fb923c">laranja</span> = fora das cidades cobradas (Guarujá, Bertioga, Cubatão, Santos, São Vicente, Praia Grande).</p>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
         <span style="font-size:12px;color:var(--text-muted)">${rows.length} passagem(ns) no filtro${rows.length > limitePed ? ` — mostrando as ${limitePed} mais recentes` : ''}</span>
@@ -16443,7 +16443,7 @@ function renderToll() {
            — juntadas numa só em 23/09/2026, pedido do cliente. O gráfico é o
            ranking visual, a tabela é o mesmo ranking com condutor e total; um
            "ocultar" só agora esconde os dois juntos. -->
-      <div class="section-heading">Gasto de Pedágio por Veículo<span class="sec-nota">ofensores — do que mais gastou pro que menos gastou</span></div>
+      <div class="section-heading" data-ped="placa">Gasto de Pedágio por Veículo<span class="sec-nota">ofensores — do que mais gastou pro que menos gastou</span></div>
       <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Gráfico e tabela são o mesmo dado: um veículo por linha, do maior gasto pro menor. Clique no funil do cabeçalho pra filtrar qualquer coluna, igual numa tabela dinâmica.</p>
       <div class="panel" style="margin-bottom:1rem"><div id="c-placa"></div></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="ped-tab-placa"><thead><tr>
@@ -16454,7 +16454,7 @@ function renderToll() {
           <td style="font-weight:600">${formatCurrency(p.value)}</td></tr>`).join('')}
         <tr class="total-row"><td class="cat-cell">TOTAL GERAL</td><td>-</td><td>-</td><td>${formatCurrency(byPlaca.reduce((a,p)=>a+p.value,0))}</td></tr>
       </tbody></table></div>
-      <div class="section-heading">Pedágio por Condutor</div>
+      <div class="section-heading" data-ped="condutor">Pedágio por Condutor</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Todos os pedágios de cada condutor, do mais frequente pro menos frequente.</p>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="ped-tab-condutor"><thead><tr>
         <th>Condutor / Pedágio</th><th>Passagens</th><th>Valor</th>
@@ -16465,7 +16465,7 @@ function renderToll() {
             <td>${l.passagens}</td><td>${formatCurrency(l.valor)}</td></tr>`).join('')}`).join('')}
         <tr class="total-row"><td class="cat-cell">TOTAL GERAL</td><td>${rows.length}</td><td>${formatCurrency(totalValue)}</td></tr>
       </tbody></table></div>
-      <div class="section-heading">Detalhamento por Condutor e Local <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(pra desconto)</span></div>
+      <div class="section-heading" data-ped="detalhelocal">Detalhamento por Condutor e Local <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(pra desconto)</span></div>
       <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Uma linha por passagem, com data e placa — endereço e valor de CADA pedágio, não só o mais frequente.</p>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="ped-tab-detalhe"><thead><tr>
         <th>Data</th><th>Horário</th><th>Placa</th><th>Endereço</th><th>Valor</th>
@@ -16623,7 +16623,7 @@ function renderToll() {
       { id: 'condutor', label: 'Pedágio por condutor' },
       { id: 'detalhelocal', label: 'Detalhamento por condutor e local (desconto)' }
     ]);
-    wirePdfExportPanel('Pedágio', {
+    const secoesPdfPedagio = {
       resumo: () => secaoTabela('Resumo de Pedágio', [
         {l:'Total de passagens', v:rows.length}, {l:'Valor total', v:formatCurrency(totalValue)},
         {l:'Fora do horário', v:foraHorario}, {l:'Fora das cidades cobradas', v:foraCidade}, {l:'Condutor não encontrado', v:naoEncontrada}
@@ -16661,6 +16661,49 @@ function renderToll() {
           {header:'Placa', get:r=>r.placa}, {header:'Valor', get:r=>formatCurrency(r.valor)}
         ], { totalRow: ['TOTAL', '-', '-', '-', formatCurrency(linhas.reduce((a,r)=>a+r.valor,0))] });
       },
+    };
+    wirePdfExportPanel('Pedágio', secoesPdfPedagio);
+
+    // Mais dois botões em CADA bloco (25/09/2026, pedido do cliente): imagem no PADRÃO
+    // AZUL do sistema (`baixarTabelaComoImagem`, o mesmo das outras telas) e PDF só
+    // daquele bloco. O "🖼 Gerar imagem" automático (captura da tela) continua.
+    // As linhas saem do que está VISÍVEL (funil + ordem). A tabela por condutor é
+    // agrupada, então a imagem dela sai achatada (condutor | pedágio | passagens | valor).
+    const periodoPed = `${formatDate(s)} a ${formatDate(e)}`;
+    const IMG_PED = {
+      todas: { tab: 'ped-tab-todas', titulo: 'Todas as Passagens', arq: 'pedagio-todas-passagens' },
+      placa: { tab: 'ped-tab-placa', titulo: 'Gasto de Pedágio por Veículo (ofensores)', arq: 'pedagio-por-veiculo' },
+      condutor: { tab: 'ped-tab-condutor', titulo: 'Pedágio por Condutor', arq: 'pedagio-por-condutor' },
+      detalhelocal: { tab: 'ped-tab-detalhe', titulo: 'Detalhamento por Condutor e Local', arq: 'pedagio-detalhamento' },
+    };
+    body.querySelectorAll('.section-heading[data-ped]').forEach(h => {
+      const chave = h.dataset.ped, cfg = IMG_PED[chave];
+      if (!cfg || h.querySelector('.btn-ped-extra')) return;
+      const mk = (rotulo, aoClicar) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'secao-toggle btn-ped-extra'; b.textContent = rotulo;
+        b.addEventListener('click', aoClicar);
+        h.appendChild(b);
+      };
+      mk('🖼 Imagem (padrão azul)', () => {
+        if (chave === 'condutor') {
+          const linhas = condutorFiltradoAchatado();
+          if (!linhas.length) { toast('Nada visível pra gerar imagem.', 'aviso'); return; }
+          baixarTabelaComoImagem({
+            titulo: cfg.titulo, subtitulo: periodoPed, nomeArquivo: `${cfg.arq}-${hojeISOLocal()}`,
+            colunas: ['Condutor', 'Pedágio', 'Passagens', 'Valor'].map(x => ({ titulo: x })),
+            linhas: linhas.map(r => ({ celulas: [r.condutor, r.local, r.passagens, formatCurrency(r.valor)] })),
+            total: { celulas: ['TOTAL GERAL', '', linhas.reduce((a, r) => a + r.passagens, 0), formatCurrency(linhas.reduce((a, r) => a + r.valor, 0))] },
+          });
+          return;
+        }
+        if (!imagemPadraoDaTabela(document.getElementById(cfg.tab), cfg.titulo, periodoPed, `${cfg.arq}-${hojeISOLocal()}`)) toast('Nada visível pra gerar imagem.', 'aviso');
+      });
+      mk('📄 Gerar PDF', () => {
+        const secao = secoesPdfPedagio[chave] && secoesPdfPedagio[chave]();
+        if (!secao) { toast('Sem dados pra exportar.', 'aviso'); return; }
+        gerarPDFMultiSecoes('Pedágio', [secao]);
+      });
     });
   }
 }
