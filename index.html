@@ -15857,9 +15857,17 @@ function pleitoRowsBrutas(tipo, s, e, cidades) {
 
 // ===================== FROTA =====================
 function renderFleet() {
-  // Sem filtro de data (pedido do cliente 22/09/2026 — tirou o "De/Até" que
-  // existia aqui): a tela sempre mostra o histórico INTEIRO de manutenções e
-  // multas, sem precisar filtrar por período pra ver dado antigo.
+  // Filtro de data De/Até (28/09/2026, pedido do cliente: "quero um filtro de
+  // data que se aplica a multas e outras coisas e nao a tabela" — a tabela
+  // que ele quis de fora é "Vínculos condutor/veículo") — volta parcialmente
+  // atrás da remoção de 22/09/2026 ("tirou o De/Até... histórico INTEIRO sem
+  // precisar filtrar"): agora o campo existe, mas OPCIONAL (vazio por padrão
+  // = continua mostrando tudo, igual antes) e só corta Manutenção, Multas e
+  // Desvinculações — as três tabelas com data de evento de verdade. NÃO corta:
+  // "Vínculos condutor/veículo" (pedido explícito do cliente — é o estado
+  // ATUAL do carro, não um histórico) nem "Revisões Programadas" (já era de
+  // propósito "olhar pra frente", ver comentário mais abaixo — revisão daqui
+  // a 3 meses sumiria se entrasse no corte).
   // Gráficos (Veículos por Locadora/Cidade) foram pro FIM da tela (28/09/2026,
   // pedido do cliente: "deixe os graficos pro final, mostre primeiro a
   // tabela") — a ordem virou: cartões -> Vínculos -> Revisões -> Manutenção ->
@@ -15869,6 +15877,8 @@ function renderFleet() {
   document.getElementById('content').innerHTML = `<div class="toolbar">
     <div class="field"><label>Condutor</label><input type="text" id="f-condutor" placeholder="Nome" list="condutor-list"></div>
     <div class="field"><label>Placa</label><input type="text" id="f-placa" placeholder="Placa"></div>
+    <div class="field"><label>De <span style="font-weight:400;color:var(--text-muted)">(Manutenção/Multas/Desvinc.)</span></label><input type="date" id="f-start"></div>
+    <div class="field"><label>Até</label><input type="date" id="f-end"></div>
     <button class="btn" id="f-apply">Filtrar</button>
   </div><div id="fleet-body"></div>`;
   document.getElementById('f-apply').addEventListener('click', load);
@@ -15878,6 +15888,11 @@ function renderFleet() {
     const placa = document.getElementById('f-placa').value.toLowerCase();
     const matchC = v => !condutor || (v||'').toLowerCase().includes(condutor);
     const matchP = v => !placa || (v||'').toLowerCase().includes(placa);
+    // De/Até vazios = sem corte nenhum lado (mantém o comportamento antigo de
+    // mostrar tudo); `inRange` não serve aqui porque ela trata limite vazio
+    // como "não bate nada", não como "sem limite".
+    const de = document.getElementById('f-start').value, ate = document.getElementById('f-end').value;
+    const dataOk = d => (!de || (d && d >= de)) && (!ate || (d && d <= ate));
 
     const links = DB.frotaLinks.filter(r => matchC(r.motorista) && matchP(r.placa));
     // Agrupa por motorista pra tabela "Vínculos condutor / veículo" (28/09/2026,
@@ -15906,9 +15921,9 @@ function renderFleet() {
         return { ...atual, anteriores };
       });
     })();
-    const maint = DB.frotaManutencao.filter(r => matchC(r.condutor) && matchP(r.placa));
-    const multas = DB.frotaMultas.filter(r => matchC(r.condutor) && matchP(r.placa));
-    const desvinc = DB.frotaDesvinc.filter(r => matchC(r.condutor) && matchP(r.placa));
+    const maint = DB.frotaManutencao.filter(r => matchC(r.condutor) && matchP(r.placa) && dataOk(r.data));
+    const multas = DB.frotaMultas.filter(r => matchC(r.condutor) && matchP(r.placa) && dataOk(r.data_infracao));
+    const desvinc = DB.frotaDesvinc.filter(r => matchC(r.condutor) && matchP(r.placa) && dataOk(r.desvinculado));
     // Revisões: a lista útil é "o que vem pela frente", então ela NÃO é cortada
     // pelo período da barra (revisão marcada para daqui a 3 meses cairia fora).
     // Ordena da mais próxima de vencer para a mais distante.
