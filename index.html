@@ -2089,7 +2089,6 @@
   .pzand-filtro { display: flex; gap: 10px; flex-wrap: wrap; }
   .pzand-filtro label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
   .pzand-filtro input { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-page); color: var(--text-primary); font-size: 12.5px; }
-  .pzand-grafico { margin: 0 0 12px; }
   /* Tabela com rolagem PRÓPRIA (25/09/2026, pedido do cliente: "quero que o
      título da tabela mantenha fixo enquanto vou abaixando a tela") — sem uma
      altura própria, .table-wrap nunca chega a rolar de verdade (quem rola é a
@@ -12695,7 +12694,6 @@ function htmlAndamentoPrazoPorDia(meta, deISO, ateISO) {
           <label>Até <input type="date" class="pzand-ate" value="${esc(ateISO)}"></label>
         </div>
       </div>
-      <div class="pzand-grafico" id="pzand-${tipo}-graf"></div>
       <div class="pzand-tabela"></div>
     </div>`;
   return `
@@ -12713,7 +12711,7 @@ function diasDoIntervaloISO(de, ate) {
   for (let dt = new Date(y, m - 1, d); isoLocalDe(dt) <= ate && out.length < 800; dt.setDate(dt.getDate() + 1)) out.push(isoLocalDe(dt));
   return out;
 }
-// Tabela + gráfico de um lado. `itens` = [{ data, dentro }].
+// Tabela de um lado. `itens` = [{ data, dentro }].
 function pintarAndamentoBloco(bloco, itens, meta) {
   const de = bloco.querySelector('.pzand-de').value;
   const comDado = itens.map(x => x.data).filter(Boolean).sort();
@@ -12722,20 +12720,6 @@ function pintarAndamentoBloco(bloco, itens, meta) {
   const tag = bloco.dataset.tipo === 'mes' ? 'MÊS' : 'DIA';
   bloco.querySelector('.pzand-tabela').innerHTML = tabelaAndamentoPrazo('', itens, meta, dias, tag);
   ativarFiltrosDeColuna(bloco.querySelector('.pzand-tabela'));
-  // gráfico: só dias COM O.S (dia vazio não é 0%)
-  const porDia = {};
-  itens.forEach(x => { const o = porDia[x.data] || (porDia[x.data] = { qtd: 0, dentro: 0 }); o.qtd++; if (x.dentro) o.dentro++; });
-  const diasComDado = Object.keys(porDia).sort();
-  const grafEl = bloco.querySelector('.pzand-grafico');
-  if (!diasComDado.length) { grafEl.innerHTML = ''; return; }
-  const pct = d => (porDia[d].dentro / porDia[d].qtd) * 100;
-  const rotulo = d => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
-  const menor = Math.min(...diasComDado.map(pct), meta);
-  const yMin = Math.max(0, Math.floor((menor - 5) / 10) * 10);
-  trendChart(grafEl.id, [
-    { name: 'Prazo (até 24h)', color: '#38bdf8', points: diasComDado.map(d => ({ label: rotulo(d), value: Number(pct(d).toFixed(1)), display: `${formatPct(pct(d), 1)} (${porDia[d].dentro} de ${porDia[d].qtd})` })) },
-    { name: `Meta ${formatPct(meta, 0)}`, color: '#f59e0b', tracejado: true, semArea: true, points: diasComDado.map(d => ({ label: rotulo(d), value: meta, display: formatPct(meta, 0) })) },
-  ], { yMin, yMax: 100, sufixoY: '%', legendaSemTotal: true, maxLabels: 16 });
 }
 function htmlForaDoPrazoDetalheMes(rows) {
   const comFaixa = rows.map(r => ({ r, faixa: classifyBucket(r.status_prazo) }))
