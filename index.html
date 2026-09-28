@@ -2090,6 +2090,25 @@
   .pzand-filtro label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
   .pzand-filtro input { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-page); color: var(--text-primary); font-size: 12.5px; }
   .pzand-grafico { margin: 0 0 12px; }
+  /* Tabela com rolagem PRÓPRIA (25/09/2026, pedido do cliente: "quero que o
+     título da tabela mantenha fixo enquanto vou abaixando a tela") — sem uma
+     altura própria, .table-wrap nunca chega a rolar de verdade (quem rola é a
+     PÁGINA), e como overflow-x:auto já faz .table-wrap virar container de
+     rolagem pro CSS (overflow-y calculado como "auto" por tabela), o cabeçalho
+     sticky (thead th, ver regra geral acima) fica "preso" num container que
+     nunca se move — na prática nunca gruda em nada. Com altura MÁXIMA aqui, a
+     caixa passa a rolar de verdade e o sticky do cabeçalho passa a funcionar.
+     A faixinha "DIA"/"MÊS" fica presa ACIMA do cabeçalho (pedido junto: "e
+     propria tabela mostra se é do mes ou dia") — assim dá pra saber qual é a
+     tabela mesmo depois de rolar bastante, sem precisar voltar ao topo. */
+  .pzand-caixa-rolavel { max-height: 420px; overflow-y: auto; }
+  .pzand-tag {
+    position: sticky; top: 0; z-index: 3; padding: 6px 12px; font-size: 11px; font-weight: 800;
+    letter-spacing: .08em; text-transform: uppercase; color: #fff; background: var(--accent);
+  }
+  .pzand-tag-mes { background: #8b5cf6; }
+  .pzand-caixa-rolavel table.data-table thead th { top: 27px; } /* logo abaixo da faixinha DIA/MÊS */
+
   /* ---- TOQUE (celular/tablet) — 24/09/2026 ----
      Auditoria no viewport de 375px: quase toda tela tinha campo com fonte < 16px
      (o iPhone dá zoom sozinho ao focar e a tela fica "pulando") e botões de
@@ -12619,7 +12638,7 @@ function htmlForaDoPrazoDetalhe(encerradas) {
 // diferença em pontos percentuais pro dia da linha de cima, com ▲/▼.
 // `itens` = [{ data, dentro }] (uma entrada por O.S). Não usa `.panel` de
 // propósito: `ativarBotoesImagem` daria um botão por painel além do do título.
-function tabelaAndamentoPrazo(rotulo, itens, meta, diasLista) {
+function tabelaAndamentoPrazo(rotulo, itens, meta, diasLista, tag) {
   const porDia = {};
   itens.forEach(x => {
     const d = x.data || '';
@@ -12652,7 +12671,9 @@ function tabelaAndamentoPrazo(rotulo, itens, meta, diasLista) {
   return `<div>
     ${rotulo ? `<div style="font-size:13px;font-weight:700;color:var(--text-secondary);margin:0 0 6px">${esc(rotulo)}</div>` : ''}
     ${!tot.qtd ? '<div class="empty">Sem O.S nesse recorte.</div>' : `
-    <div class="table-wrap"><table class="data-table"><thead><tr>
+    <div class="table-wrap pzand-caixa-rolavel">
+      ${tag ? `<div class="pzand-tag pzand-tag-${tag === 'MÊS' ? 'mes' : 'dia'}">${esc(tag)}</div>` : ''}
+      <table class="data-table"><thead><tr>
       <th>Data</th><th>Qtd. de O.S</th><th>Prazo (até 24h)</th><th>vs anterior</th>
     </tr></thead><tbody>
       ${linhas.join('')}
@@ -12698,7 +12719,8 @@ function pintarAndamentoBloco(bloco, itens, meta) {
   const comDado = itens.map(x => x.data).filter(Boolean).sort();
   const ultimo = comDado.length ? comDado[comDado.length - 1] : '';
   const dias = de && ultimo ? diasDoIntervaloISO(de, ultimo) : [];
-  bloco.querySelector('.pzand-tabela').innerHTML = tabelaAndamentoPrazo('', itens, meta, dias);
+  const tag = bloco.dataset.tipo === 'mes' ? 'MÊS' : 'DIA';
+  bloco.querySelector('.pzand-tabela').innerHTML = tabelaAndamentoPrazo('', itens, meta, dias, tag);
   ativarFiltrosDeColuna(bloco.querySelector('.pzand-tabela'));
   // gráfico: só dias COM O.S (dia vazio não é 0%)
   const porDia = {};
