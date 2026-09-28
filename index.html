@@ -4759,34 +4759,15 @@ function gerarRelatorioPDF(opts) {
   return gerarPDFMultiSecoes(titulo, [tabela, barras], { subtitulo, arquivo: (opts.arquivo || 'relatorio.pdf').replace(/\.pdf$/i, '') });
 }
 
-// Painel de checkboxes + botão, colocado no rodapé de cada página.
-// sections: [{id, label}] — o que aparece marcável.
-// getSecaoFns: { id: () => secaoTabela(...) } — como montar cada seção quando pedida.
-function renderPdfExportPanel(sections) {
-  return `
-    <div class="section-heading">Exportar PDF</div>
-    <div class="panel pdf-export-panel">
-      <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Marque o que quiser incluir — dá pra juntar várias tabelas num único arquivo.</p>
-      <div class="pdf-export-options">
-        ${sections.map(s => `<label class="pdf-export-item"><input type="checkbox" data-pdf-section="${s.id}" checked> ${s.label}</label>`).join('')}
-      </div>
-      <button class="btn" id="btn-export-pdf-combo" style="margin-top:14px">Gerar PDF</button>
-    </div>`;
-}
-function wirePdfExportPanel(titulo, getSecaoFns) {
-  const btn = document.getElementById('btn-export-pdf-combo');
-  if (!btn) return;
-  btn.addEventListener('click', () => {
-    const marcados = [...document.querySelectorAll('[data-pdf-section]:checked')].map(c => c.dataset.pdfSection);
-    if (!marcados.length) { toast('Selecione ao menos uma seção pra exportar.', 'aviso'); return; }
-    // .flat() deixa passar direto quem devolve UMA seção (o caso comum) e
-    // "abre" quem devolve um array de seções (ex.: um item do painel que vira
-    // duas tabelas no PDF, como "Período Ofensor" — manhã e tarde).
-    const secoes = marcados.map(id => getSecaoFns[id] && getSecaoFns[id]()).filter(Boolean).flat();
-    if (!secoes.length) { toast('Sem dados pra exportar nessa seleção.', 'aviso'); return; }
-    gerarPDFMultiSecoes(titulo, secoes);
-  });
-}
+// `renderPdfExportPanel`/`wirePdfExportPanel` (o painel "Exportar PDF" com
+// checkboxes no rodapé de cada página) SAÍRAM em 28/09/2026 — pedido do
+// cliente: "tire todos os exportar pdf das abas que tem no final". Eram
+// chamados no fim de ~21 `render*`; nenhuma tela usa mais. O motor por trás
+// (`gerarPDFMultiSecoes`/`secaoTabela`/`secaoGrafico`, §4 "PDF — módulo
+// único") continua de pé — Pedágio ainda gera PDF por bloco com ele
+// (`secoesPdfPedagio`/`gerarPDFMultiSecoes` em `renderToll`), e a tela
+// "Relatórios" (`renderRelatorios`/`REPORT_SECTIONS`) é o lugar que sobrou
+// pra montar um PDF configurável na mão.
 function formatDate(v) {
   if (!v) return '-';
   const [y, m, d] = String(v).slice(0, 10).split('-');
@@ -8600,7 +8581,6 @@ function renderDashboard() {
       ${renderDashboardTechCompare(fech, toPct)}
       <div class="section-heading sem-toggle">Relatório Geral completo</div>
       <div class="panel" style="margin-bottom:1.5rem">${renderRelatorioGeralCompleto(fech)}</div>
-      <div id="pdf-export-area"></div>
       <!-- Tudo que era a aba "Resumo Geral - Operação" (removida em
            02/09/2026) vive aqui embaixo, FECHADO. Este título é o único do
            Dashboard sem 'sem-toggle', de propósito: é ele que ganha o botão
@@ -8628,36 +8608,6 @@ function renderDashboard() {
     const tituloComplementar = document.getElementById('dash-complementar-titulo');
     const btnComplementar = tituloComplementar && tituloComplementar.querySelector('.secao-toggle');
     if (btnComplementar) btnComplementar.click();
-
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'resumo', label: 'Resumo financeiro (GIGA, despesas, lucro)' },
-      { id: 'producao', label: 'Produção do ciclo por tipo' },
-      { id: 'ranking', label: 'Ranking de técnicos (valor das ordens)' },
-      { id: 'completo', label: 'Relatório Geral completo (todos os técnicos)' }
-    ]);
-    wirePdfExportPanel('Relatório de Eficiência', {
-      resumo: () => secaoTabela('Resumo Financeiro', [
-        { l:'Total a Receber da GIGA', v: formatCurrency(valorPagoGiga) },
-        { l:'Despesas totais', v: formatCurrency(despesasTotal) },
-        { l:'Lucro', v: formatCurrency(lucroTotal) }
-      ], [ {header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v} ]),
-      producao: () => {
-        return secaoTabela('Produção do Ciclo — Valor pago pela GIGA', itensGiga, [
-          {header:'Tipo', get:r=>r.label}, {header:'Contagem', get:r=>r.qtd.toLocaleString('pt-BR')},
-          {header:'Valor GIGA', get:r=>r.valor!==null?formatCurrency(r.valor):'-'}
-        ], { totalRow: ['Total Geral', totalQtdGiga.toLocaleString('pt-BR'), formatCurrency(totalValorGiga)] });
-      },
-      ranking: () => secaoTabela('Ranking de Técnicos', topTechnicians, [
-        {header:'Técnico', get:r=>r.tecnico}, {header:'Ordens', get:r=>r.total_geral},
-        {header:'Valor Ordens', get:r=>formatCurrency(r.valor_ordens)}
-      ]),
-      completo: () => secaoTabela('Relatório Geral Completo', fech, [
-        {header:'Técnico', get:r=>r.tecnico}, {header:'Total Ordens', get:r=>r.total_geral},
-        {header:'Valor Ordens', get:r=>formatCurrency(r.valor_ordens)}, {header:'Gasolina', get:r=>formatCurrency(r.gasolina)},
-        {header:'Despesas', get:r=>formatCurrency(r.despesas)}, {header:'Lucro', get:r=>formatCurrency(r.lucros)},
-        {header:'Eficiência', get:r=>formatPct(toPct(r.eficiencia))}
-      ]),
-    });
   }
 }
 // Painel "Comparar Técnico A × Técnico B" do Relatório Geral — lê os dois
@@ -9586,7 +9536,7 @@ function renderProduction() {
         <div id="c-evolucao"></div>
       </div>
       ` : ''}
-      <div id="pdf-export-area"></div>`;
+    `;
 
     // ---- cards de Concluída/Não concluída/Cancelada SÓ da tabela "Ordens do
     // Período" logo abaixo — pedido do cliente: os cards do topo da página não
@@ -9681,36 +9631,6 @@ function renderProduction() {
       }
     }
 
-    // o PDF daqui exporta status/tipo/cidades/técnicos/bônus — tudo que o
-    // Escritório não vê nesta tela; sem esse if ele baixaria pelo PDF o que
-    // não aparece em tela.
-    if (!prodCompleta) return;
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'status', label: 'Ordens por status' },
-      { id: 'tipo', label: 'Ordens por tipo de atividade' },
-      { id: 'cidades', label: 'Ranking de cidades' },
-      { id: 'tecnicos', label: 'Ranking de técnicos' }
-    ]);
-    wirePdfExportPanel('Produção', {
-      status: () => secaoTabela('Ordens por Status', [
-        {l:'Concluídas', v:concluidos.length}, {l:'Não concluídas', v:naoConcluidos.length}, {l:'Canceladas', v:cancelados.length}
-      ], [{header:'Status', get:r=>r.l}, {header:'Quantidade', get:r=>r.v}], { totalRow:['Total', baseRows.length] }),
-      tipo: () => {
-        // vigência pelo FIM do período filtrado — não é por ordem porque byTipo
-        // já vem agregado por tipo (sem data individual disponível aqui).
-        const itens = byTipo.map(t => { const preco = precoGigaPorTipo(t.label, e); return { ...t, valor: preco!==null ? t.value*preco : null }; });
-        return secaoTabela('Ordens por Tipo de Atividade', itens, [
-          {header:'Tipo', get:r=>r.label}, {header:'Contagem', get:r=>r.value},
-          {header:'Valor GIGA', get:r=>r.valor!==null?formatCurrency(r.valor):'-'}
-        ]);
-      },
-      cidades: () => secaoTabela('Ranking de Cidades (concluídas)', cityList, [
-        {header:'Cidade', get:r=>r.label}, {header:'Ordens concluídas', get:r=>r.value}
-      ]),
-      tecnicos: () => secaoTabela('Ranking de Técnicos (concluídas)', techList, [
-        {header:'Técnico', get:r=>r.label}, {header:'Ordens concluídas', get:r=>r.value}
-      ]),
-    });
   }
 }
 function statusBadge(status) {
@@ -9850,7 +9770,6 @@ function renderAcomTec() {
         </tr></thead><tbody id="det-tbody"></tbody></table></div>
         <p id="det-rodape" style="font-size:12px;color:var(--text-muted);margin:8px 0 0"></p>
       </div>
-      <div id="pdf-export-area"></div>
     `;
     // ---- Detalhamento: uma linha por ordem, com busca e limite de linhas ----
     const detalhe = [...rows].sort((a,b) => (b.data||'').localeCompare(a.data||'') || String(a.os||'').localeCompare(String(b.os||'')));
@@ -9894,32 +9813,6 @@ function renderAcomTec() {
     donutChart('c-city', byCity.map((c,i)=>({label:c.label, value:c.value, color:corCategorica(i)})), { centroLabel: 'Serviços' });
     barsChart('c-servico', byServico.map((s,i)=>({label:s.label, value:s.value, color:corCategorica(i)})));
 
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'resumo', label: 'Resumo por tipo de serviço' },
-      { id: 'tecnico', label: 'Serviço por técnico' },
-      { id: 'cidade', label: 'Serviço por cidade' },
-      { id: 'detalhe', label: 'Detalhamento dos serviços (conforme o filtro da tela)' }
-    ]);
-    wirePdfExportPanel('Acompanhamento Técnico', {
-      resumo: () => secaoTabela('Resumo por Tipo de Serviço', [
-        {l:'Ativação', v:ativacao}, {l:'Mudança de Cômodo', v:mudancaComodo}, {l:'Mudança de Endereço', v:mudancaEndereco},
-        {l:'Reparo Corretivo', v:reparo}, {l:'Upgrade/Downgrade', v:upgrade}
-      ], [{header:'Tipo', get:r=>r.l}, {header:'Quantidade', get:r=>r.v}], { totalRow:['Total', total] }),
-      tecnico: () => secaoTabela('Serviço por Técnico', byTechnician, [{header:'Técnico', get:r=>r.label}, {header:'Serviços', get:r=>r.value}]),
-      cidade: () => secaoTabela('Serviço por Cidade', byCity, [{header:'Cidade', get:r=>r.label}, {header:'Serviços', get:r=>r.value}]),
-      // leva o MESMO recorte da tela: a busca (detalheFiltrado) e os filtros de
-      // coluna do funil, que só escondiam <tr> e não chegavam até aqui
-      detalhe: () => {
-        const tabela = document.getElementById('det-tbody') && document.getElementById('det-tbody').closest('table');
-        const linhas = filtrarPorColunasAtivas(tabela, detalheFiltrado, COLS_DETALHE);
-        return secaoTabela(`Detalhamento dos Serviços (${linhas.length} de ${detalhe.length} ordens)`, linhas, [
-          {header:'Data', get:COLS_DETALHE[0], align:'center'}, {header:'Cliente', get:COLS_DETALHE[1], align:'left'},
-          {header:'O.S', get:COLS_DETALHE[2], align:'center'}, {header:'Contrato', get:COLS_DETALHE[3], align:'center'},
-          {header:'Técnico', get:COLS_DETALHE[4], align:'left'}, {header:'Motivo da Baixa', get:COLS_DETALHE[5], align:'center'},
-          {header:'Tipo de Serviço', get:COLS_DETALHE[6], align:'center'}, {header:'Status', get:COLS_DETALHE[7], align:'center'}
-        ]);
-      },
-    });
   }
 }
 
@@ -10012,26 +9905,9 @@ function renderOfensor() {
       </tbody><tfoot><tr class="total-row"><td>Total Geral</td><td class="num">${qtdIfi}</td><td class="num">${formatPct(pctIfi,2)}</td>
         <td class="num">${qtdIrr}</td><td class="num">${formatPct(pctIrr,2)}</td><td class="num">${rows.length}</td></tr></tfoot>
       </table></div>
-      <div id="pdf-export-area"></div>
     `;
     donutChart('c-donut', [{label:'IRR', value:qtdIrr, color:'#4f7fff'}, {label:'IFI', value:qtdIfi, color:'#ef4444'}], { centroLabel: 'Retornos' });
     barsChartTopN('c-ofensor', byOfensor);
-
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'resumo', label: 'Resumo IFI/IRR' },
-      { id: 'ofensor', label: 'Ranking de ofensores' },
-      { id: 'cidade', label: 'IFI/IRR por cidade' }
-    ]);
-    wirePdfExportPanel('Ofensor — IFI / IRR', {
-      resumo: () => secaoTabela('Resumo IFI / IRR', [
-        {l:'Qtd. IFI', v:qtdIfi}, {l:'Qtd. IRR', v:qtdIrr}, {l:'% IFI', v:formatPct(pctIfi, 2)}, {l:'% IRR', v:formatPct(pctIrr, 2)}, {l:'Total de retornos', v:rows.length}
-      ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
-      ofensor: () => secaoTabela('Ranking de Ofensores', byOfensor, [{header:'Ofensor', get:r=>r.label}, {header:'Retornos', get:r=>r.value}]),
-      cidade: () => secaoTabela('IFI / IRR por Cidade', ifiIrrPorCidade, [
-        {header:'Cidade', get:r=>r.cidade}, {header:'Qtd. IFI', get:r=>r.ifi}, {header:'% IFI', get:r=>formatPct(r.pctIfi,2)},
-        {header:'Qtd. IRR', get:r=>r.irr}, {header:'% IRR', get:r=>formatPct(r.pctIrr,2)}, {header:'Total', get:r=>r.total}
-      ], { totalRow: ['Total Geral', qtdIfi, formatPct(pctIfi,2), qtdIrr, formatPct(pctIrr,2), rows.length] }),
-    });
   }
 }
 
@@ -10084,27 +9960,8 @@ function renderTable() {
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
       <th>Técnico</th><th>Nome Cliente</th><th>Cidade</th><th>Contrato</th><th>O.S</th><th>Repetida</th><th>Data ordem anterior</th><th>Data de baixa</th><th>Dias</th><th>Ofensor</th><th>IFI/IRR</th><th>Motivo</th></tr></thead><tbody>
       ${rows.slice(0,300).map(r=>`<tr><td>${esc(r.recurso)}</td><td>${esc(r.nome)||'-'}</td><td>${esc(r.cidade)||'-'}</td><td>${esc(r.contrato)}</td><td>${esc(r.os)||'-'}</td><td>${esc(r.repetida)}</td><td>${r.data_ordem_anterior?formatDate(r.data_ordem_anterior):'-'}</td><td>${r.data?formatDate(r.data):'-'}</td><td>${esc(r.dias)}</td><td>${esc(r.ofensor)}</td><td><span class="badge ${r.ifi_irr==='IFI'?'warn':'amber'}">${esc(r.ifi_irr)}</span></td><td>${esc(r.motivo || r.tipo_ordem) || '-'}</td></tr>`).join('')}
-      </tbody></table></div>
-      <div id="pdf-export-area"></div>`;
+      </tbody></table></div>`;
     barsChart('c-motivo', motivos);
-
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'resumo', label: 'Resumo de retornos' },
-      { id: 'motivos', label: 'Motivos mais frequentes' },
-      { id: 'detalhe', label: 'Detalhe completo dos retornos' }
-    ]);
-    wirePdfExportPanel('Detalhe de Retornos', {
-      resumo: () => secaoTabela('Resumo de Retornos', [
-        {l:'Total de retornos', v:rows.length}, {l:'Qtd. IFI', v:qtdIfi}, {l:'Qtd. IRR', v:qtdIrr}, {l:'Média de dias até retorno', v:mediaDias.toFixed(1)}
-      ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
-      motivos: () => secaoTabela('Motivos Mais Frequentes', motivos, [{header:'Motivo', get:r=>r.label}, {header:'Ocorrências', get:r=>r.value}]),
-      detalhe: () => secaoTabela('Detalhe dos Retornos', rows.slice(0,300), [
-        {header:'Técnico', get:r=>r.recurso}, {header:'Contrato', get:r=>r.contrato},
-        {header:'Data ordem anterior', get:r=>r.data_ordem_anterior?formatDate(r.data_ordem_anterior):'-'},
-        {header:'Data de baixa', get:r=>r.data?formatDate(r.data):'-'},
-        {header:'Ofensor', get:r=>r.ofensor}, {header:'IFI/IRR', get:r=>r.ifi_irr}, {header:'Motivo', get:r=>r.motivo||r.tipo_ordem||'-'}
-      ]),
-    });
   }
 }
 
@@ -12400,8 +12257,7 @@ function renderPCR() {
           <td>${h.quando ? fmtDT(new Date(h.quando)) : '-'}</td>
           <td>${h.quem || '-'}</td></tr>`).join('')}
       </tbody></table></div>
-
-      <div id="pdf-export-area"></div>`;
+    `;
 
     // clicar no dia do histórico troca o filtro pra ele
     document.querySelectorAll('.link-dia-pcr').forEach(a => a.addEventListener('click', ev => {
@@ -12480,26 +12336,6 @@ function renderPCR() {
       inp.addEventListener('input', recalc);
     });
 
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'ret', label: 'Retornos do dia (IFI/IRR)' },
-      { id: 'det', label: 'Prazos do dia — detalhado' },
-      ...(mapaOS.ordensAbertas.length ? [{ id: 'abertos', label: 'O.S do dia por bairro (mapa)' }] : [])
-    ]);
-    wirePdfExportPanel('PCR — ' + formatDate(dia), {
-      abertos: () => pdfMapaOS(mapaOS),
-      ret: () => secaoTabela('Retornos do Dia (IFI / IRR)', retornos, [
-        {header:'IFI/IRR',get:r=>r.ifi_irr},{header:'O.S',get:r=>r.os},{header:'Contrato',get:r=>r.contrato||'-'},
-        {header:'Cidade',get:r=>r.cidade||'-'},{header:'Status',get:r=>r.status||'-'},
-        {header:'Nome Cliente',get:r=>r.cliente||'-'},{header:'De quem é o retorno',get:r=>r.ofensor||'-'},{header:'Serviço anterior',get:r=>r.tipo_anterior||'-'},
-        {header:'Dias',get:r=>r.dias ?? '-'},{header:'Restam',get:r=>r.restam ?? '-'}
-      ]),
-      det: () => secaoTabela('Prazos do Dia — Detalhado', prazoUnificado, [
-        {header:'Falta',get:textoFalta},{header:'Cidade',get:r=>r.cidade||'-'},{header:'Técnico',get:r=>ehRecursoTecnico(r.recurso)?r.recurso:'-'},
-        {header:'O.S',get:r=>r.os||'-'},{header:'Cliente',get:r=>r.cliente||'-'},{header:'Status',get:r=>r.status||'-'},
-        {header:'Abertura',get:r=>fmtDT(r.abertura)},{header:'Vencimento',get:r=>fmtH(r.limite)},{header:'Limite',get:r=>fmtDT(r.limite)},
-        {header:'Período',get:r=>r.periodo||'-'},{header:'Período da Ordem',get:r=>r.periodo_sistema||'-'},{header:'Status Prazo',get:textoFaixaEfetiva}
-      ]),
-    });
   }
 }
 
@@ -13234,31 +13070,9 @@ function renderPrazoAtivacao() {
             <td><span class="badge ${(t.ate36/t.total)*100>=PRAZO_ATIVACAO_META?'ok':'warn'}">${formatPct(((t.ate36/t.total)*100), 2)}</span></td></tr>`).join('')}
         </tbody></table></div>
       </div>
-      <div id="pdf-export-area"></div>`;
+    `;
 
     barsChart('pa-bucket', distrib, { fill: true });
-
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'resumo', label: 'Resumo do prazo de ativação' },
-      { id: 'cidade', label: 'Prazo de ativação por cidade' },
-      { id: 'tecnico', label: 'Prazo de ativação por técnico' }
-    ]);
-    wirePdfExportPanel('Prazo de Ativação (36h)', {
-      resumo: () => secaoTabela('Resumo do Prazo de Ativação', [
-        { l:'Total de ordens', v:rows.length }, { l:'Até 36h', v:dentro36 },
-        { l:'Fora do prazo', v:rows.length - dentro36 }, { l:'% no prazo', v:formatPct(pct, 2) }
-      ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
-      cidade: () => secaoTabela('Prazo de Ativação por Cidade', lista, [
-        {header:'Cidade', get:r=>r.cidade}, {header:'Até 36hrs', get:r=>r.ate36}, {header:'Até 48hrs', get:r=>r.ate48},
-        {header:'Maior que 48hrs', get:r=>r.maior48}, {header:'Outliers', get:r=>r.outlier},
-        {header:'Total', get:r=>r.total}, {header:'% no Prazo', get:r=>formatPct(pctDe(r), 2)}
-      ], { totalRow:['TOTAL', tot.ate36, tot.ate48, tot.maior48, tot.outlier, tot.total, formatPct(pctDe(tot), 2)] }),
-      tecnico: () => secaoTabela('Prazo de Ativação por Técnico', listaTec, [
-        {header:'Técnico', get:r=>r.tecnico}, {header:'Até 36hrs', get:r=>r.ate36},
-        {header:'Fora do prazo', get:r=>r.fora}, {header:'Total', get:r=>r.total},
-        {header:'% no Prazo', get:r=>formatPct(((r.ate36/r.total)*100), 2)}
-      ]),
-    });
   }
 }
 
@@ -13692,8 +13506,7 @@ function renderParcialDoDia() {
           Marque um ou mais tipos — eles saem juntos na mesma imagem.
         </p>
       </div>
-
-      <div id="pdf-export-area"></div>`;
+    `;
 
     const tiposComRegra = TIPOS_REMANEJAMENTO.filter(t => t.re);
     const caixaTodos = document.getElementById('pd-img-todos');
@@ -13796,44 +13609,6 @@ function renderParcialDoDia() {
       avisoBotao(btnServicosImg, '🖼 baixado', '🖼 Gerar imagem');
     });
 
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'maodeobra', label: 'Mão de obra e produção do dia' },
-      { id: 'status', label: 'Status detalhado por tipo de serviço' },
-      { id: 'statuscidade', label: 'Status detalhado por cidade' },
-      { id: 'statustecnico', label: 'Status detalhado por técnico' },
-      ...(servicosDoDia.length ? [{ id: 'servicos', label: 'Serviços do dia (linha a linha)' }] : []),
-      ...(aExecutar.total ? [{ id: 'exec', label: 'A executar — por cidade e tipo de serviço' }] : [])
-    ]);
-    wirePdfExportPanel('Parcial do Dia — ' + formatDate(data), {
-      // linhasMO já vem na ordem fixa (+ "Outras Cidades" agregada quando
-      // sobra alguma) — os getters tratam TOTAL e o agregado do mesmo jeito
-      // (campos já somados), só a cidade de verdade chama moDaCidadeLinha/moDoDia.
-      maodeobra: () => secaoTabela('Mão de Obra e Produção do Dia (pendentes)', [...linhasMO, {cidade:'TOTAL', ...totais}], [
-        {header:'Cidade', get:r=>r.cidade},
-        {header:'Ativação', get:r=>r.cidade==='TOTAL'||r.agregado?r.ativacao:moDaCidadeLinha(r.cidade).ativacao},
-        {header:'Reparo', get:r=>r.cidade==='TOTAL'||r.agregado?r.reparo:moDaCidadeLinha(r.cidade).reparo},
-        {header:'M.E', get:r=>r.cidade==='TOTAL'||r.agregado?r.me:moDaCidadeLinha(r.cidade).me},
-        {header:'M.C', get:r=>r.cidade==='TOTAL'||r.agregado?r.mc:moDaCidadeLinha(r.cidade).mc},
-        {header:'Upgrade', get:r=>r.cidade==='TOTAL'||r.agregado?r.upgrade:moDaCidadeLinha(r.cidade).upgrade},
-        {header:'Total', get:r=>r.cidade==='TOTAL'||r.agregado?r.total:moDaCidadeLinha(r.cidade).total},
-        {header:'M.O', get:r=>r.cidade==='TOTAL'||r.agregado?r.mo:moDoDia(r)}
-      ]),
-      status: () => secaoTabela('Status Detalhado por Tipo de Serviço', statusTable, [
-        {header:'Serviço', get:r=>r.label}, ...bucketsTabela.map(b=>({header:bucketLabel[b], get:r=>r[b]})), {header:'Total', get:r=>r.total}
-      ]),
-      statuscidade: () => secaoTabela('Status Detalhado por Cidade', statusPorCidadeTable, [
-        {header:'Cidade', get:r=>r.label}, ...bucketsTabela.map(b=>({header:bucketLabel[b], get:r=>r[b]})), {header:'Total', get:r=>r.total}
-      ]),
-      statustecnico: () => secaoTabela('Status Detalhado por Técnico', statusPorTecnicoTable, [
-        {header:'Técnico', get:r=>r.label}, ...bucketsTabela.map(b=>({header:bucketLabel[b], get:r=>r[b]})), {header:'Total', get:r=>r.total}
-      ]),
-      exec: () => pdfAExecutar(aExecutar),
-      servicos: () => secaoTabela('Serviços do Dia', servicosDoDia, [
-        {header:'O.S', get:r=>r.os}, {header:'Cliente', get:r=>r.cliente}, {header:'Contrato', get:r=>r.contrato},
-        {header:'Técnico', get:r=>r.recurso}, {header:'Cidade', get:r=>r.cidade}, {header:'Tipo de Serviço', get:r=>r.tipo_atividade},
-        {header:'Status', get:r=>r.status}, {header:'Motivo', get:r=>r.motivo}, {header:'Abertura', get:r=>fmtDT(r.abertura)}, {header:'Limite', get:r=>fmtDT(r.limite)}
-      ]),
-    });
   }
 }
 
@@ -14868,7 +14643,6 @@ function renderPrazo() {
       ${htmlForaDoPrazoDetalheMes(rows)}
       ${dupHtml}
       ${htmlAndamentoPrazoPorDia(TARGET, s, e)}
-      <div id="pdf-export-area"></div>
     `;
     barsChart('c-bucket', buckets, { fill: true });
     ['dia', 'mes'].forEach(tp => {
@@ -14879,20 +14653,6 @@ function renderPrazo() {
     ativarTogglesDeSecao(body); // o Filtrar refaz o HTML e o global só roda no 1º render
     ativarBotoesImagem(body);
 
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'resumo', label: 'Resumo geral do prazo' },
-      { id: 'cidade', label: 'Acompanhamento por cidade' }
-    ]);
-    wirePdfExportPanel('Prazo', {
-      resumo: () => secaoTabela('Resumo Geral do Prazo', [
-        {l:'Total Concluído', v:rows.length}, {l:'Até 24h', v:within24}, {l:'Fora do prazo', v:rows.length-within24}, {l:'% no prazo', v:formatPct(pct, 2)}
-      ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
-      cidade: () => secaoTabela('Acompanhamento de Prazos por Cidade', byCity, [
-        {header:'Cidade', get:r=>r.cidade}, {header:'Até 24h', get:r=>r.ate24}, {header:'Até 48h', get:r=>r.ate48},
-        {header:'Maior que 48h', get:r=>r.maior48}, {header:'Outliers', get:r=>r.outlier}, {header:'Total', get:r=>r.total},
-        {header:'% no prazo', get:r=>formatPct(((r.ate24/r.total)*100), 2)}
-      ], { totalRow: ['TOTAL', totals.ate24, totals.ate48, totals.maior48, totals.outlier, totals.total, formatPct(((totals.ate24/totals.total)*100), 2)] }),
-    });
   }
 }
 
@@ -15173,7 +14933,6 @@ function renderOfensoresPrazo() {
         <tfoot><tr class="total-row"><td class="cat-cell">TOTAL</td><td>${totPeriodo.manha}</td><td>${totPeriodo.tarde}</td><td>${totPeriodo.total}</td></tr></tfoot>
         </table></div>
       </div>`}
-      <div id="pdf-export-area"></div>
     `;
     barsChartTopN('c-dentro', listDentro, {color:'#22c55e', defaultN:10});
     barsChartTopN('c-fora', listFora, {color:'#ef4444', defaultN:10});
@@ -15185,33 +14944,6 @@ function renderOfensoresPrazo() {
       document.getElementById('periodo-tec-tbody').innerHTML = tecPeriodoRowsHtml(periodoTecTopnSel.value);
     });
 
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'resumo', label: 'Resumo geral' },
-      { id: 'fora', label: 'Ranking de técnicos fora do prazo' },
-      { id: 'cidade', label: 'Ranking de cidades fora do prazo' },
-      { id: 'motivo', label: 'Principais motivos da baixa — reparo fora do prazo' },
-      { id: 'periodo', label: 'Ofensores por período (manhã/tarde) — por cidade' },
-      { id: 'periodotecnico', label: 'Ofensores por período (manhã/tarde) — por técnico' }
-    ]);
-    wirePdfExportPanel('Ofensores de Prazo', {
-      resumo: () => secaoTabela('Resumo Geral', [
-        {l:'Total Reparo', v:rows.length}, {l:'Fora do Prazo', v:foraPrazo.length}, {l:'Até 24h', v:dentro24.length}
-      ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
-      fora: () => secaoTabela('Técnicos Fora do Prazo', listFora, [{header:'Técnico', get:r=>r.label}, {header:'Fora do prazo', get:r=>r.value}]),
-      cidade: () => secaoTabela('Cidades Fora do Prazo', listCityFora, [{header:'Cidade', get:r=>r.label}, {header:'Fora do prazo', get:r=>r.value}]),
-      motivo: () => secaoTabela('Principais Motivos da Baixa — Reparo Fora do Prazo', motivosForaRank, [
-        {header:'Motivo', get:r=>r.motivo}, {header:'Ordens', get:r=>r.total},
-        {header:'% do total fora do prazo', get:r=>formatPct(((r.total/foraPrazo.length)*100), 1)}
-      ], { totalRow: ['TOTAL', foraPrazo.length, '100%'] }),
-      periodo: () => secaoTabela('Ofensores por Período — Manhã × Tarde — por Cidade', listaPeriodo, [
-        {header:'Cidade', get:r=>r.cidade}, {header:'Ofensores Manhã', get:r=>r.manha},
-        {header:'Ofensores Tarde', get:r=>r.tarde}, {header:'Total Atrasos', get:r=>r.total}
-      ], { totalRow: ['TOTAL', totPeriodo.manha, totPeriodo.tarde, totPeriodo.total] }),
-      periodotecnico: () => secaoTabela('Ofensores por Período — Manhã × Tarde — por Técnico', listaTecnicoPeriodo, [
-        {header:'Técnico', get:r=>r.tecnico}, {header:'Ofensores Manhã', get:r=>r.manha},
-        {header:'Ofensores Tarde', get:r=>r.tarde}, {header:'Total Atrasos', get:r=>r.total}
-      ], { totalRow: ['TOTAL', totPeriodo.manha, totPeriodo.tarde, totPeriodo.total] }),
-    });
   }
 }
 
@@ -15220,8 +14952,10 @@ function renderOfensoresPrazo() {
 // PowerPoint ou no sistema numa aba 'Reunião Tec Prazos e Retornos' — avalie a
 // melhor opção"). Virou ABA, não PPT: o PowerPoint nasce velho no dia seguinte,
 // aqui a conta é refeita na hora com o dado carregado na sessão de quem abrir.
-// Pra levar material estático pra reunião, o painel de PDF no fim da tela e o
-// "🖼 Gerar imagem" de cada seção resolvem.
+// Pra levar material estático pra reunião, o "Exportar PowerPoint" e o
+// "🖼 Gerar imagem" de cada seção resolvem (o painel "Exportar PDF" no fim da
+// tela saiu em 28/09/2026, pedido do cliente: "tire todos os exportar pdf das
+// abas que tem no final" — ver §4 "Removido em 28/09/2026").
 //
 // Tudo vem em PERCENTUAL e em RANKING — pedido explícito: "não quero números,
 // quero a porcentagem", e ranking em vez de gráfico de barra.
@@ -16035,8 +15769,6 @@ function renderReuniaoPrazos() {
           sub: p.igual ? '<span style="color:var(--danger)">mesmo motivo — problema não resolvido</span>' : 'motivo diferente',
         })), { rotuloNome: 'Motivo do serviço anterior ➜ motivo do retorno', rotuloValor: '% dos pares', rotuloSub: 'Leitura' })}
       </div>`}
-
-      <div id="pdf-export-area"></div>
     `;
     ativarTogglesDeSecao(body);
     ativarBotoesImagem(body);
@@ -16071,77 +15803,6 @@ function renderReuniaoPrazos() {
       paresRank: paresRank.map(p => ({ nome: p.nome, total: p.total, pct: paresIrr.length ? (p.total / paresIrr.length) * 100 : 0 })),
     }));
 
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'prazo', label: '1. Prazo do mês — resumo' },
-      { id: 'tecnicos', label: '2. Técnicos — % no prazo e % fora' },
-      { id: 'cidades', label: '3. Cidades ofensoras de prazo' },
-      { id: 'periodo', label: '4. Período ofensor (manhã × tarde)' },
-      { id: 'motivos', label: '5. Motivos da baixa — fora do prazo' },
-      { id: 'inicio', label: '6. Horário de início do dia' },
-      { id: 'retresumo', label: '7. Retornos — % de serviço que volta' },
-      { id: 'retcidade', label: '8. Retornos — cidades ofensoras' },
-      { id: 'retofensor', label: '9/10. Retornos — ofensores' },
-      { id: 'retmotivo', label: '11. Motivo da baixa dos retornos' },
-      { id: 'irrpar', label: '12. IRR — motivo anterior × retorno' },
-    ]);
-    wirePdfExportPanel('Reunião Técnica — Prazos e Retornos', {
-      prazo: () => secaoTabela(`Prazo do Mês — ${periodoTxt}`, [
-        { l: 'Reparos no período', v: rowsPrazo.length },
-        { l: '% no prazo (até 24h)', v: formatPct(pctNoPrazo, 1) },
-        { l: '% fora do prazo', v: formatPct(pctForaPrazo, 1) },
-        { l: 'Meta de prazo', v: formatPct(PRAZO_META, 0) },
-      ], [{ header: 'Indicador', get: r => r.l }, { header: 'Valor', get: r => r.v }]),
-      tecnicos: () => secaoTabela('Técnicos — Produção e Prazo', Object.values(porTecnico).sort((a, b) => b.total - a.total), [
-        { header: 'Técnico', get: t => t.nome }, { header: '% no prazo', get: t => formatPct(pctD(t), 1) },
-        { header: '% fora do prazo', get: t => formatPct(pctF(t), 1) }, { header: 'Reparos', get: t => t.total },
-      ]),
-      cidades: () => secaoTabela('Cidades — % Fora do Prazo', cidadesRank, [
-        { header: 'Cidade', get: c => c.nome }, { header: '% fora do prazo', get: c => formatPct(pctF(c), 1) },
-        { header: '% no prazo', get: c => formatPct(pctD(c), 1) }, { header: 'Reparos', get: c => c.total },
-      ]),
-      periodo: () => [
-        secaoTabela('Período Ofensor — Manhã', rankManha.map((o, i) => ({ ...o, pos: i + 1 })), [
-          { header: '#', get: o => o.pos }, { header: 'Técnico', get: o => o.nome },
-          { header: '% das perdas da manhã', get: o => formatPct(o.pct, 1) },
-        ]),
-        secaoTabela('Período Ofensor — Tarde', rankTarde.map((o, i) => ({ ...o, pos: i + 1 })), [
-          { header: '#', get: o => o.pos }, { header: 'Técnico', get: o => o.nome },
-          { header: '% das perdas da tarde', get: o => formatPct(o.pct, 1) },
-        ]),
-      ],
-      motivos: () => secaoTabela('Motivos da Baixa — Reparo Fora do Prazo', motivosFora, [
-        { header: 'Motivo', get: m => m.nome }, { header: 'Ordens', get: m => m.total },
-        { header: '% das perdas', get: m => formatPct(foraPrazo.length ? (m.total / foraPrazo.length) * 100 : 0, 1) },
-      ], { totalRow: ['TOTAL', foraPrazo.length, '100%'] }),
-      inicio: () => secaoTabela('Horário Médio de Início — por Cidade', cidadesInicio, [
-        { header: 'Cidade', get: c => c.nome }, { header: 'Início médio', get: c => horaDeDecimal(mediaHora(c)) },
-        { header: 'Amostra (dias)', get: c => c.dias },
-      ]),
-      retresumo: () => secaoTabela(`Retornos — ${periodoTxt}`, [
-        { l: '% IRR', v: formatPct(pctIrr, 2) }, { l: 'Qtd. IRR', v: qtdIrr },
-        { l: '% IFI', v: formatPct(pctIfi, 2) }, { l: 'Qtd. IFI', v: qtdIfi },
-        { l: 'Tempo médio até voltar (dias)', v: mediaDiasGeral === null ? '-' : mediaDiasGeral.toFixed(1).replace('.', ',') },
-      ], [{ header: 'Indicador', get: r => r.l }, { header: 'Valor', get: r => r.v }]),
-      retcidade: () => secaoTabela('Retornos — Cidades Ofensoras', cidadesRetRank, [
-        { header: 'Cidade', get: c => c.nome }, { header: '% de retorno', get: c => formatPct(pctRetCidade(c), 2) },
-        { header: '% IRR', get: c => formatPct(pctIndicador(c.irr, c.reparos), 2) },
-        { header: '% IFI', get: c => formatPct(pctIndicador(c.ifi, c.ativacoes), 2) },
-      ]),
-      retofensor: () => secaoTabela('Retornos — Principais Ofensores', ofensoresGeral, [
-        { header: 'Ofensor', get: o => o.nome },
-        { header: '% dos retornos', get: o => formatPct(retornos.length ? (o.total / retornos.length) * 100 : 0, 1) },
-        { header: 'IRR', get: o => o.irr }, { header: 'IFI', get: o => o.ifi },
-      ]),
-      retmotivo: () => secaoTabela('Motivo da Baixa dos Retornos', motivosRet, [
-        { header: 'Motivo', get: m => m.nome }, { header: 'Retornos', get: m => m.total },
-        { header: '% dos retornos', get: m => formatPct(retornos.length ? (m.total / retornos.length) * 100 : 0, 1) },
-      ]),
-      irrpar: () => secaoTabela('IRR — Motivo do Serviço Anterior × Motivo do Retorno', paresRank, [
-        { header: 'Combinação', get: p => p.nome }, { header: 'Pares', get: p => p.total },
-        { header: '% dos pares', get: p => formatPct(paresIrr.length ? (p.total / paresIrr.length) * 100 : 0, 1) },
-        { header: 'Mesmo motivo?', get: p => p.igual ? 'Sim' : 'Não' },
-      ]),
-    });
   }
 }
 
@@ -16256,8 +15917,7 @@ function renderFleet() {
       <div class="panels-grid" style="margin-bottom:1.5rem">
         <div class="panel"><h3>Veículos por Locadora</h3><div id="fleet-locadora"></div></div>
         <div class="panel"><h3>Veículos por Cidade</h3><div id="fleet-cidade"></div></div>
-      </div>
-      <div id="pdf-export-area"></div>`;
+      </div>`;
 
     const locadoraMap = {}; links.forEach(r => { const l=r.locadora||'Não informado'; locadoraMap[l]=(locadoraMap[l]||0)+1; });
     donutChart('fleet-locadora', Object.entries(locadoraMap).map(([label,value],i)=>({label,value,color:corCategorica(i)})), { centroLabel: 'Veículos' });
@@ -16306,39 +15966,6 @@ function renderFleet() {
       ${desvinc.map(r=>`<tr><td>${esc(r.condutor)}</td><td>${esc(r.placa)}</td><td>${formatDate(r.vinculacao)}</td><td>${formatDate(r.desvinculado)}</td><td>${esc(r.obs)}</td></tr>`).join('')}
       </tbody></table></div>`;
 
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'resumo', label: 'Resumo da frota' },
-      { id: 'links', label: 'Vínculos condutor/veículo' },
-      { id: 'revisao', label: 'Revisões programadas' },
-      { id: 'maint', label: 'Manutenção' },
-      { id: 'multas', label: 'Multas' },
-      { id: 'desvinc', label: 'Desvinculações' }
-    ]);
-    wirePdfExportPanel('Frota', {
-      resumo: () => secaoTabela('Resumo da Frota', [
-        {l:'Veículos vinculados', v:links.length}, {l:'Registros de manutenção', v:maint.length},
-        {l:'Total em multas', v:formatCurrency(totalMultas)}, {l:'Desvinculações', v:desvinc.length},
-        {l:'Revisões vencidas', v:revVencidas.length}, {l:'Revisões em até 15 dias', v:revProximas.length}
-      ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
-      links: () => secaoTabela('Vínculos Condutor/Veículo', linksAgrupados, [
-        {header:'Motorista', get:r=>r.motorista}, {header:'Placa', get:r=>r.placa}, {header:'Cidade', get:r=>r.cidade}, {header:'Locadora', get:r=>r.locadora},
-        {header:'Vinculação anterior', get:r=>r.anteriores.length ? r.anteriores.map(a=>`${a.placa} (${formatDate(a.vinculacao)})`).join('; ') : '-'}
-      ]),
-      revisao: () => secaoTabela('Revisões Programadas', revisoes, [
-        {header:'Condutor', get:r=>r.condutor}, {header:'Placa', get:r=>r.placa},
-        {header:'Data da revisão', get:r=>formatDate(r.data_revisao)},
-        {header:'Situação', get:r=>{ const d = diasAteRevisao(r); return d < 0 ? `venceu há ${-d} dia(s)` : d === 0 ? 'é hoje' : `faltam ${d} dia(s)`; }}
-      ]),
-      maint: () => secaoTabela('Manutenção', maint, [
-        {header:'Condutor', get:r=>r.condutor}, {header:'Placa', get:r=>r.placa}, {header:'Serviço', get:r=>r.servico}, {header:'Data', get:r=>formatDate(r.data)}
-      ]),
-      multas: () => secaoTabela('Multas', multas, [
-        {header:'Condutor', get:r=>r.condutor}, {header:'Placa', get:r=>r.placa}, {header:'Data', get:r=>formatDate(r.data_infracao)}, {header:'Valor', get:r=>formatCurrency(r.valor_multa)}
-      ], { totalRow: ['Total', '', '', formatCurrency(totalMultas)] }),
-      desvinc: () => secaoTabela('Desvinculações', desvinc, [
-        {header:'Condutor', get:r=>r.condutor}, {header:'Placa', get:r=>r.placa}, {header:'Desvinculado em', get:r=>formatDate(r.desvinculado)}
-      ]),
-    });
   }
 }
 
@@ -16495,7 +16122,6 @@ function renderToll() {
           <td style="font-weight:600">${formatCurrency(p.value)}</td></tr>`).join('')}
         <tr class="total-row"><td class="cat-cell">TOTAL GERAL</td><td>-</td><td>-</td><td>${formatCurrency(byPlaca.reduce((a,p)=>a+p.value,0))}</td></tr>
       </tbody></table></div>
-      <div id="pdf-export-area"></div>
     `;
     const selPed = document.getElementById('ped-limite');
     if (selPed) selPed.addEventListener('change', () => { limitePed = +selPed.value; load(); });
@@ -16575,11 +16201,9 @@ function renderToll() {
       if (tab) tab.addEventListener('filtro-aplicado', () => espelharFiltros(tab));
     });
 
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'resumo', label: 'Resumo de pedágio' },
-      { id: 'todas', label: 'Todas as passagens' },
-      { id: 'placa', label: 'Gasto por veículo (ofensores)' }
-    ]);
+    // secoesPdfPedagio segue viva: é usada pelo "📄 Gerar PDF" de CADA bloco
+    // (mk('📄 Gerar PDF', ...) abaixo). Só o painel "Exportar PDF" do fim da
+    // tela (renderPdfExportPanel/wirePdfExportPanel) saiu em 28/09/2026.
     const secoesPdfPedagio = {
       resumo: () => secaoTabela('Resumo de Pedágio', [
         {l:'Total de passagens', v:rows.length}, {l:'Valor total', v:formatCurrency(totalValue)},
@@ -16602,7 +16226,6 @@ function renderToll() {
         {header:'Valor Total', get:r=>formatCurrency(r.value)}
       ], { totalRow: ['TOTAL GERAL', '-', '-', formatCurrency(byPlaca.reduce((a,p)=>a+p.value,0))] }),
     };
-    wirePdfExportPanel('Pedágio', secoesPdfPedagio);
 
     // Mais dois botões em CADA bloco (25/09/2026, pedido do cliente): imagem no PADRÃO
     // AZUL do sistema (`baixarTabelaComoImagem`, o mesmo das outras telas) e PDF só
@@ -18064,8 +17687,7 @@ function renderFinance() {
         </div>
         <div id="fin-giga-body"><div class="empty">Envie a planilha da GIGA pra ver o detalhe.</div></div>
       </div>
-
-      <div id="pdf-export-area"></div>`;
+    `;
 
     const inputs = () => [...document.querySelectorAll('.fin-campo')];
     const lerValores = () => {
@@ -18297,34 +17919,6 @@ function renderFinance() {
       msg.innerHTML = `<span style="color:var(--success)">Salvo em ${esc(rotulo)}.</span>`;
       toast('Financeiro salvo.', 'ok', 2000);
     });
-
-    // ---- painel de PDF (o mesmo de antes) ----
-    // Os dois callbacks recalculam na hora do clique (não usam um valor
-    // fixado no load()): senão o PDF saía com os números de quando a tela
-    // abriu, ignorando o que a pessoa digitou ou trouxe do Comparativo
-    // depois, sem ter salvo ainda.
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'resumo', label: 'Resumo (Receita/Despesa/Lucro)' },
-      { id: 'categorias', label: 'Detalhamento por categoria' }
-    ]);
-    wirePdfExportPanel('Financeiro — ' + rotulo, {
-      resumo: () => {
-        const { despesa, lucro } = recalcular();
-        return secaoTabela('Resumo Financeiro — ' + rotulo, [
-          { l: 'Receita das ordens', v: formatCurrency(receita) },
-          { l: 'Total de Despesas', v: formatCurrency(despesa) },
-          { l: 'Lucro', v: formatCurrency(lucro) }
-        ], [{ header: 'Indicador', get: r => r.l }, { header: 'Valor', get: r => r.v }]);
-      },
-      categorias: () => {
-        const { despesa } = recalcular();
-        return secaoTabela('Despesas — ' + rotulo,
-          FIN_GRUPOS.reduce((a, g) => a.concat(g.itens.map(c => ({ grupo: g.grupo, cat: c, v: lerValores()[c] || 0 }))), []),
-          [{ header: 'Grupo', get: r => r.grupo }, { header: 'Categoria', get: r => r.cat },
-           { header: 'Valor', get: r => formatCurrency(r.v) }],
-          { totalRow: ['TOTAL DESPESAS', '', formatCurrency(despesa)] });
-      },
-    });
   }
 }
 
@@ -18548,24 +18142,7 @@ function renderCmpProducao() {
         {label:'Não concluídas', get:d=>d.naoConcluidos, raw:d=>d.naoConcluidos, invert:true},
         {label:'Canceladas', get:d=>d.cancelados, raw:d=>d.cancelados, invert:true}
       ])}
-      <div id="pdf-export-area"></div>`;
-
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'tipo', label: 'Por tipo de serviço' },
-      { id: 'resumo', label: 'Resumo geral' }
-    ]);
-    wirePdfExportPanel('Comparativo de Produção', {
-      tipo: () => secaoTabela(`Por Tipo de Serviço — ${labelA} × ${labelB}`, tipos.map(t=>({t, va:a.porTipo[t]||0, vb:b.porTipo[t]||0})), [
-        {header:'Serviço', get:r=>r.t}, {header:`Qtd. ${labelA}`, get:r=>r.va}, {header:`Qtd. ${labelB}`, get:r=>r.vb},
-        {header:'Variação', get:r=>stripTags(diffQty(r.va,r.vb))}, {header:'Variação %', get:r=>stripTags(diffBadge(r.va,r.vb))}
-      ]),
-      resumo: () => secaoTabela(`Resumo — ${labelA} × ${labelB}`, [
-        {l:'TOTAL O.S', va:a.total, vb:b.total}, {l:'Concluídas', va:a.concluidos, vb:b.concluidos},
-        {l:'Não concluídas', va:a.naoConcluidos, vb:b.naoConcluidos}, {l:'Canceladas', va:a.cancelados, vb:b.cancelados}
-      ], [
-        {header:'Indicador', get:r=>r.l}, {header:labelA, get:r=>r.va}, {header:labelB, get:r=>r.vb}, {header:'Variação %', get:r=>stripTags(diffBadge(r.va,r.vb))}
-      ]),
-    });
+    `;
   }
 }
 
@@ -18610,17 +18187,7 @@ function renderCmpIfiIrr() {
         {label:'% IFI', get:d=>formatPct(d.pctIfi, 2), raw:d=>d.pctIfi, invert:true},
         {label:'% IRR', get:d=>formatPct(d.pctIrr, 2), raw:d=>d.pctIrr, invert:true}
       ])}
-      <div id="pdf-export-area"></div>`;
-
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'detalhe', label: 'Detalhamento de retornos IFI/IRR' }
-    ]);
-    wirePdfExportPanel('Comparativo de IFI / IRR', {
-      detalhe: () => secaoTabela(`Detalhamento — ${labelA} × ${labelB}`, [
-        {l:'Qtd. IFI', va:a.qtdIfi, vb:b.qtdIfi}, {l:'Qtd. IRR', va:a.qtdIrr, vb:b.qtdIrr},
-        {l:'% IFI', va:formatPct(a.pctIfi, 2), vb:formatPct(b.pctIfi, 2)}, {l:'% IRR', va:formatPct(a.pctIrr, 2), vb:formatPct(b.pctIrr, 2)}
-      ], [{header:'Indicador', get:r=>r.l}, {header:labelA, get:r=>r.va}, {header:labelB, get:r=>r.vb}]),
-    });
+    `;
   }
 }
 
@@ -18679,24 +18246,7 @@ function renderCmpPrazo() {
         {label:'Até 24h', get:d=>d.dentro24, raw:d=>d.dentro24},
         {label:'% no prazo', get:d=>formatPct(d.pct, 2), raw:d=>d.pct}
       ])}
-      <div id="pdf-export-area"></div>`;
-
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'detalhe', label: '% no prazo' },
-      { id: 'faixa', label: 'Distribuição por faixa' }
-    ]);
-    wirePdfExportPanel('Comparativo de Prazo', {
-      detalhe: () => secaoTabela(`% no Prazo — ${labelA} × ${labelB}`, [
-        {l:'Total concluído', va:a.total, vb:b.total}, {l:'Até 24h', va:a.dentro24, vb:b.dentro24},
-        {l:'% no prazo', va:formatPct(a.pct, 2), vb:formatPct(b.pct, 2)}
-      ], [{header:'Indicador', get:r=>r.l}, {header:labelA, get:r=>r.va}, {header:labelB, get:r=>r.vb}]),
-      faixa: () => secaoTabela(`Distribuição por Faixa — ${labelA} × ${labelB}`, [
-        {l:'Até 24h', va:a.buckets.ate24, vb:b.buckets.ate24},
-        {l:'Até 48h', va:a.buckets.ate48, vb:b.buckets.ate48},
-        {l:'Maior que 48h', va:a.buckets.maior48, vb:b.buckets.maior48},
-        {l:'Outliers', va:a.buckets.outlier, vb:b.buckets.outlier}
-      ], [{header:'Faixa', get:r=>r.l}, {header:labelA, get:r=>r.va}, {header:labelB, get:r=>r.vb}]),
-    });
+    `;
   }
 }
 
@@ -19029,7 +18579,7 @@ function renderFolhaPagamento(modo) {
       </div>
       <div class="panel" style="margin-bottom:1.5rem"><h3>Descontos por tipo (equipe)</h3><div id="c-desc"></div></div>`;
 
-    body.innerHTML = soRelatorio ? blocoRelatorio + blocoRelatorioEscritorio + '<div id="pdf-export-area"></div>' : `
+    body.innerHTML = soRelatorio ? blocoRelatorio + blocoRelatorioEscritorio : `
       <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">Folha de Pagamento completa
         <button type="button" class="btn-export-xls" id="folha-export-xls">⤓ Excel da folha</button>
         <button type="button" class="btn-export-img" id="folha-export-img">🖼 Imagem da folha</button>
@@ -19087,7 +18637,7 @@ function renderFolhaPagamento(modo) {
         </p>` : ''}
       </div>
       <div id="hol-area"></div>
-      <div id="pdf-export-area"></div>`;
+    `;
     if (soRelatorio) {
       barsChartTopN('c-top', topGanham, {defaultN:8});
       barsChartTopN('c-bottom', bottomGanham, {defaultN:8});
@@ -19328,31 +18878,6 @@ function renderFolhaPagamento(modo) {
       load();
     });
     atualizarBarraSalvar();
-
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'resumo', label: 'Resumo financeiro e indicadores' },
-      { id: 'descontos', label: 'Descontos por tipo' },
-      { id: 'completa', label: 'Folha de pagamento completa (todos os técnicos)' },
-      ...(soRelatorio && linhasEsc.length ? [{ id: 'escritorio', label: `Folha do Escritório (${escPeriodo})` }] : []),
-    ]);
-    wirePdfExportPanel('Folha de Pagamento', {
-      resumo: () => secaoTabela('Resumo Financeiro e Indicadores', [
-        {l:'Total a receber (equipe)', v:formatCurrency(totalReceber)}, {l:'Total de descontos', v:formatCurrency(totalDescontos)},
-        {l:'Total de ordens', v:totalOrdens}, {l:'Técnicos aptos a bônus', v:aptos+' / '+rows.length},
-        {l:'Qtd. IFI (equipe)', v:totalQtdIfi}, {l:'Qtd. IRR (equipe)', v:totalQtdIrr}
-      ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
-      descontos: () => secaoTabela('Descontos por Tipo', descList, [{header:'Tipo', get:r=>r.label}, {header:'Valor', get:r=>formatCurrency(r.value)}]),
-      completa: () => secaoTabela('Folha de Pagamento Completa', ranking, [
-        {header:'Técnico', get:r=>r.tecnico}, {header:'Ordens', get:r=>r.total_ordens}, {header:'Valor Ordens', get:r=>formatCurrency(r.valor_total_ordens)},
-        {header:'% IFI', get:r=>formatPct(pct(r.ifi_pct, r), 2)}, {header:'% IRR', get:r=>formatPct(pct(r.irr_pct, r), 2)},
-        {header:'Total Descontos', get:r=>formatCurrency(r.total_descontos)}, {header:'Total a Receber', get:r=>formatCurrency(r.total_receber)}
-      ], { totalRow: ['TOTAL', totalOrdens, '', '', '', formatCurrency(totalDescontos), formatCurrency(totalReceber)] }),
-      escritorio: () => secaoTabela('Folha do Escritório — ' + escPeriodo, linhasEsc, [
-        {header:'Colaborador', get:r=>r.pessoa}, {header:'Cargo', get:r=>r.cargo||'-'}, {header:'Dias trab.', get:r=>Number(r.dias_trab)||0},
-        {header:'Proventos', get:r=>formatCurrency(r.proventos)}, {header:'Descontos', get:r=>formatCurrency(r.descontos)},
-        {header:'A Receber', get:r=>formatCurrency(r.total_receber)}
-      ], { totalRow: ['TOTAL', '', '', formatCurrency(totalProventosEsc), formatCurrency(totalDescontosEsc), formatCurrency(totalReceberEsc)] }),
-    });
   }
 }
 // Planilha da folha renderizada por inteiro — todas as colunas importadas.
@@ -20318,33 +19843,10 @@ function renderComparisonsFromPivot(pivotRecebido) {
         <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${giga.totalQtd}</td><td style="color:var(--accent)">${formatCurrency(giga.totalValor)}</td></tr>
       </tbody></table></div>
       ${narrativa}
-      <div id="pdf-export-area"></div>`;
+    `;
 
     document.getElementById('cmp1-esconder-total').addEventListener('change', e => {
       document.getElementById('cmp1-tabela-despesas').classList.toggle('esconder-col-total', e.target.checked);
-    });
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'detalhamento', label: 'Detalhamento de Despesas/Receitas (igual à planilha)' }
-    ]);
-    wirePdfExportPanel('Comparativo Financeiro', {
-      detalhamento: () => secaoTabela('Detalhamento de Despesas / Receitas', categorias.map(c => {
-        const row = { categoria: c };
-        selecionados.forEach(p => row[p] = pivot.porCategoria[c][p] ? formatCurrency(pivot.porCategoria[c][p]) : '-');
-        row.total = formatCurrency(totalCategoria(c));
-        row.variacao = penultimo ? stripTags(diffMoney(val(pivot.porCategoria[c],penultimo),val(pivot.porCategoria[c],ultimo),true)) : '-';
-        return row;
-      }), [
-        {header:'Despesas / Receitas', get:r=>r.categoria},
-        ...selecionados.map(p => ({ header: p, get: r => r[p] })),
-        {header:'Total', get:r=>r.total},
-        ...(penultimo ? [{header:'Variação', get:r=>r.variacao}] : [])
-      ], {
-        totalRows: [
-          ['TOTAL DESPESAS', ...selecionados.map(p=>formatCurrency(val(pivot.totalDespesas,p))), formatCurrency(totalLinha(pivot.totalDespesas)), ...(penultimo?[stripTags(diffMoney(val(pivot.totalDespesas,penultimo),val(pivot.totalDespesas,ultimo),true))]:[])],
-          ['RECEITA DAS ORDENS', ...selecionados.map(p=>formatCurrency(val(pivot.receitaOrdens,p))), formatCurrency(totalLinha(pivot.receitaOrdens)), ...(penultimo?[stripTags(diffMoney(val(pivot.receitaOrdens,penultimo),val(pivot.receitaOrdens,ultimo)))]:[])],
-          ['LUCRO', ...selecionados.map(p=>formatCurrency(val(pivot.lucro,p))), formatCurrency(totalLinha(pivot.lucro)), ...(penultimo?[stripTags(diffMoney(val(pivot.lucro,penultimo),val(pivot.lucro,ultimo)))]:[])]
-        ],
-      }),
     });
   }
 }
@@ -20449,33 +19951,10 @@ function renderComparisonsFromBase() {
         <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${giga.totalQtd}</td><td style="color:var(--accent)">${formatCurrency(giga.totalValor)}</td></tr>
       </tbody></table></div>
       ${narrativa}
-      <div id="pdf-export-area"></div>`;
+    `;
 
     document.getElementById('cmp2-esconder-total').addEventListener('change', e => {
       document.getElementById('cmp2-tabela-despesas').classList.toggle('esconder-col-total', e.target.checked);
-    });
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'detalhamento', label: 'Detalhamento de Despesas/Receitas' }
-    ]);
-    wirePdfExportPanel('Comparativo Financeiro', {
-      detalhamento: () => secaoTabela('Detalhamento de Despesas / Receitas', categorias.map(c => {
-        const row = { categoria: c };
-        dados.forEach(d => row[d.periodo] = d.porCategoria[c] ? formatCurrency(d.porCategoria[c]) : '-');
-        row.total = formatCurrency(totalCategoria(c));
-        row.variacao = penultimo ? stripTags(diffMoney(penultimo.porCategoria[c]||0,ultimo.porCategoria[c]||0,true)) : '-';
-        return row;
-      }), [
-        {header:'Despesas / Receitas', get:r=>r.categoria},
-        ...dados.map(d => ({ header: d.periodo, get: r => r[d.periodo] })),
-        {header:'Total', get:r=>r.total},
-        ...(penultimo ? [{header:'Variação', get:r=>r.variacao}] : [])
-      ], {
-        totalRows: [
-          ['TOTAL DESPESAS', ...dados.map(d=>formatCurrency(d.despesa)), formatCurrency(totalDespesa), ...(penultimo?[stripTags(diffMoney(penultimo.despesa,ultimo.despesa,true))]:[])],
-          ['RECEITA DAS ORDENS', ...dados.map(d=>formatCurrency(d.receita)), formatCurrency(totalReceita), ...(penultimo?[stripTags(diffMoney(penultimo.receita,ultimo.receita))]:[])],
-          ['LUCRO', ...dados.map(d=>formatCurrency(d.lucro)), formatCurrency(totalLucro), ...(penultimo?[stripTags(diffMoney(penultimo.lucro,ultimo.lucro))]:[])]
-        ],
-      }),
     });
   }
 }
@@ -20830,8 +20309,6 @@ function renderPainelBI(alvoId = 'content') {
       </tr></thead><tbody>
         ${rankingBairros.map((b, i) => `<tr><td style="color:var(--text-muted)">${i + 1}</td><td class="cat-cell">${esc(b.bairro)}</td><td>${esc(b.cidade)}</td><td style="color:var(--success)">${b.concluida}</td><td style="color:var(--danger)">${b.cancelada}</td><td style="color:var(--text-secondary)">${b.naoConcluida}</td><td style="font-weight:700">${b.total}</td></tr>`).join('')}
       </tbody></table></div>` : ''}
-
-      <div id="pdf-export-area"></div>
     `;
 
     barsChart('bi-tipo', [
@@ -20865,34 +20342,6 @@ function renderPainelBI(alvoId = 'content') {
       { name: `Canceladas (${cancelados.length})`, color: '#ef4444', points: evoCanceladas, semArea: true }
     ], { suave: true, maxLabels: 12, expandir: true });
     if (rankingBairros.length && !faltaImportarEndereco) renderMapaBairros('bi-mapa', rankingBairros);
-
-    document.getElementById('pdf-export-area').innerHTML = renderPdfExportPanel([
-      { id: 'status', label: 'Produção por status' },
-      { id: 'cidades', label: 'Cidades atendidas' },
-      { id: 'bairros', label: 'Bairros — ranking detalhado' }
-    ]);
-    wirePdfExportPanel('Resumo Geral — ' + formatDate(s) + ' a ' + formatDate(e), {
-      status: () => secaoTabela('Produção por Status', [
-        { label: 'Concluídas', value: concluidos.length },
-        { label: 'Não concluídas', value: naoConcluidos.length },
-        { label: 'Canceladas', value: cancelados.length },
-        { label: 'Ativação', value: qtdAtivacao }, { label: 'Reparo', value: qtdReparo },
-        { label: 'Mudança de Endereço', value: qtdME }, { label: 'Mudança de Cômodo', value: qtdMC },
-        { label: 'Upgrade/Downgrade', value: qtdUpgrade }
-      ], [{ header: 'Indicador', get: r => r.label }, { header: 'Valor', get: r => r.value }], {
-        totalRow: ['TOTAL', prod.length],
-      }),
-      cidades: () => secaoTabela('Cidades Atendidas', rankingCidadesStatus, [
-        { header: 'Cidade', get: r => r.cidade }, { header: 'Concluídas', get: r => r.concluida },
-        { header: 'Canceladas', get: r => r.cancelada }, { header: 'Não concluídas', get: r => r.naoConcluida },
-        { header: 'Total', get: r => r.total }
-      ], { totalRow: ['TOTAL', concluidos.length, cancelados.length, naoConcluidos.length, prod.length] }),
-      bairros: () => secaoTabela('Bairros — Ranking Detalhado', rankingBairros, [
-        { header: 'Bairro', get: r => r.bairro }, { header: 'Cidade', get: r => r.cidade },
-        { header: 'Concluídas', get: r => r.concluida }, { header: 'Canceladas', get: r => r.cancelada },
-        { header: 'Não concluídas', get: r => r.naoConcluida }, { header: 'Total', get: r => r.total }
-      ]),
-    });
   }
 }
 
