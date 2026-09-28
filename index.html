@@ -13296,6 +13296,14 @@ function renderParcialDoDia() {
     // baixo sem motivo. "Não concluído", pendente etc continuam no denominador
     // (são ordens que ainda dependiam de execução).
     const efetividade = l => { const base = l.total - (l.cancelado || 0); return base > 0 ? (l.concluido / base) * 100 : 0; };
+    // Cor da Efetividade (28/09/2026, pedido do cliente: "quero verde quando
+    // for maior igual a 60%") — >= 60% fica verde (var(--tab-sucesso)),
+    // abaixo fica vermelha (var(--tab-alerta)). Antes só existia o corte
+    // vermelho em 70% e só nas linhas de detalhe — a linha TOTAL nunca
+    // pintava (achado junto com o cliente: TOTAL em 45% aparecia em branco,
+    // sem nenhum sinal). Agora as duas cores valem em QUALQUER linha,
+    // inclusive TOTAL.
+    const corEfetividade = efet => `color:var(${efet >= 60 ? '--tab-sucesso' : '--tab-alerta'});`;
     // Só a EXIBIÇÃO some com o cancelado; Total O.S e Efetividade seguem a mesma conta
     const bucketsTabela = canceladosVisiveis ? buckets : buckets.filter(b => b !== 'cancelado');
     const thStatus = b => `<th>${bucketLabel[b]}</th>`;
@@ -13435,9 +13443,9 @@ function renderParcialDoDia() {
       </tr></thead><tbody>
         ${statusTable.map(l=>{
           const efet = efetividade(l);
-          return `<tr><td class="cat-cell">${l.label}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="${l.total && efet < 70 ? 'color:var(--tab-alerta);' : ''}font-weight:700">${formatPct(efet, 0)}</td></tr>`;
+          return `<tr><td class="cat-cell">${l.label}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="${l.total ? corEfetividade(efet) : ''}font-weight:700">${formatPct(efet, 0)}</td></tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="font-weight:700">${formatPct(efetividade(totalStatus), 0)}</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="${totalStatus.total ? corEfetividade(efetividade(totalStatus)) : ''}font-weight:700">${formatPct(efetividade(totalStatus), 0)}</td></tr>
       </tbody></table></div>
 
       <div class="section-heading">Status Detalhado por Cidade ${btnCancelados}<button type="button" class="btn-export-img" id="pd-status-cidade-img">🖼 Gerar imagem</button></div>
@@ -13446,9 +13454,9 @@ function renderParcialDoDia() {
       </tr></thead><tbody>
         ${statusPorCidadeTable.map(l=>{
           const efet = efetividade(l);
-          return `<tr><td class="cat-cell">${l.label}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="${l.total && efet < 70 ? 'color:var(--tab-alerta);' : ''}font-weight:700">${formatPct(efet, 0)}</td></tr>`;
+          return `<tr><td class="cat-cell">${l.label}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="${l.total ? corEfetividade(efet) : ''}font-weight:700">${formatPct(efet, 0)}</td></tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="font-weight:700">${formatPct(efetividade(totalStatus), 0)}</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalStatus.total}</td><td style="${totalStatus.total ? corEfetividade(efetividade(totalStatus)) : ''}font-weight:700">${formatPct(efetividade(totalStatus), 0)}</td></tr>
       </tbody></table></div>
 
       <div class="section-heading">Status Detalhado por Técnico ${btnCancelados}</div>
@@ -13462,9 +13470,9 @@ function renderParcialDoDia() {
       </tr></thead><tbody>
         ${statusPorTecnicoTable.map(l=>{
           const efet = efetividade(l);
-          return `<tr><td class="cat-cell">${esc(l.label)}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="${l.total && efet < 70 ? 'color:var(--tab-alerta);' : ''}font-weight:700">${formatPct(efet, 0)}</td></tr>`;
+          return `<tr><td class="cat-cell">${esc(l.label)}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${l.total}</td><td style="${l.total ? corEfetividade(efet) : ''}font-weight:700">${formatPct(efet, 0)}</td></tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatusTecnico[b])}">${totalStatusTecnico[b]}</td>`).join('')}<td>${totalStatusTecnico.total}</td><td style="font-weight:700">${formatPct(efetividade(totalStatusTecnico), 0)}</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatusTecnico[b])}">${totalStatusTecnico[b]}</td>`).join('')}<td>${totalStatusTecnico.total}</td><td style="${totalStatusTecnico.total ? corEfetividade(efetividade(totalStatusTecnico)) : ''}font-weight:700">${formatPct(efetividade(totalStatusTecnico), 0)}</td></tr>
       </tbody></table></div>
 
       ${!servicosDoDia.length ? '' : `
