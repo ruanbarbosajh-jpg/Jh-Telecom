@@ -16183,6 +16183,32 @@ function renderFleet() {
     const matchP = v => !placa || (v||'').toLowerCase().includes(placa);
 
     const links = DB.frotaLinks.filter(r => matchC(r.motorista) && matchP(r.placa));
+    // Agrupa por motorista pra tabela "Vínculos condutor / veículo" (28/09/2026,
+    // pedido do cliente, print mostrando "IGOR ARAUJO DOS SANTOS" em DUAS linhas
+    // com placas diferentes ao mesmo tempo): a chave do frota_links é só a PLACA
+    // (comentário acima de `case 'frotaLinks'` na importação) — cada linha é 1
+    // CARRO, com o motorista de quando esse carro foi importado por último. Se o
+    // motorista trocou de carro e a planilha nova só atualizou a linha do carro
+    // NOVO (a do carro velho não veio nesse import e fica órfã, sem ninguém
+    // apagando), as duas ficam com o nome dele ao mesmo tempo. "quando eu
+    // pesquisar deve aparecer a vinculação atual e antiga mostrar como
+    // vinculação anterior": só o vínculo com a "Vinculação" mais RECENTE do grupo
+    // é o atual; o(s) outro(s) saem da lista principal e viram uma nota dentro da
+    // MESMA linha, não outra linha solta. `vinculacao` é ISO (excelDateToISO),
+    // então dá pra comparar por texto direto.
+    const linksAgrupados = (() => {
+      const porMotorista = new Map();
+      links.forEach(r => {
+        const chave = normalizeHeader(r.motorista) || `__sem-nome__${r.placa}`;
+        if (!porMotorista.has(chave)) porMotorista.set(chave, []);
+        porMotorista.get(chave).push(r);
+      });
+      return [...porMotorista.values()].map(grupo => {
+        grupo.sort((a, b) => String(b.vinculacao || '').localeCompare(String(a.vinculacao || '')));
+        const [atual, ...anteriores] = grupo;
+        return { ...atual, anteriores };
+      });
+    })();
     const maint = DB.frotaManutencao.filter(r => matchC(r.condutor) && matchP(r.placa));
     const multas = DB.frotaMultas.filter(r => matchC(r.condutor) && matchP(r.placa));
     const desvinc = DB.frotaDesvinc.filter(r => matchC(r.condutor) && matchP(r.placa));
@@ -16241,7 +16267,7 @@ function renderFleet() {
     const linksEl = document.getElementById('fleet-links');
     if (!links.length) linksEl.innerHTML = '<div class="empty">Nenhum vínculo encontrado. Importe a aba "FROTA LITORAL".</div>';
     else linksEl.innerHTML = `<div class="table-wrap"><table class="data-table"><thead><tr><th>Motorista</th><th>Placa</th><th>Supervisor</th><th>Cidade</th><th>Locadora</th><th>Vinculação</th></tr></thead><tbody>
-      ${links.map(r=>`<tr><td>${esc(r.motorista)}</td><td>${esc(r.placa)}</td><td>${esc(r.supervisor)}</td><td>${esc(r.cidade)}</td><td>${esc(r.locadora)}</td><td>${formatDate(r.vinculacao)}</td></tr>`).join('')}
+      ${linksAgrupados.map(r=>`<tr><td>${esc(r.motorista)}</td><td>${esc(r.placa)}</td><td>${esc(r.supervisor)}</td><td>${esc(r.cidade)}</td><td>${esc(r.locadora)}</td><td>${formatDate(r.vinculacao)}${r.anteriores.length ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Vinculação anterior: ${r.anteriores.map(a=>`${esc(a.placa)} (${formatDate(a.vinculacao)})`).join('; ')}</div>` : ''}</td></tr>`).join('')}
       </tbody></table></div>`;
 
     const revEl = document.getElementById('fleet-revisao');
@@ -16294,8 +16320,9 @@ function renderFleet() {
         {l:'Total em multas', v:formatCurrency(totalMultas)}, {l:'Desvinculações', v:desvinc.length},
         {l:'Revisões vencidas', v:revVencidas.length}, {l:'Revisões em até 15 dias', v:revProximas.length}
       ], [{header:'Indicador', get:r=>r.l}, {header:'Valor', get:r=>r.v}]),
-      links: () => secaoTabela('Vínculos Condutor/Veículo', links, [
-        {header:'Motorista', get:r=>r.motorista}, {header:'Placa', get:r=>r.placa}, {header:'Cidade', get:r=>r.cidade}, {header:'Locadora', get:r=>r.locadora}
+      links: () => secaoTabela('Vínculos Condutor/Veículo', linksAgrupados, [
+        {header:'Motorista', get:r=>r.motorista}, {header:'Placa', get:r=>r.placa}, {header:'Cidade', get:r=>r.cidade}, {header:'Locadora', get:r=>r.locadora},
+        {header:'Vinculação anterior', get:r=>r.anteriores.length ? r.anteriores.map(a=>`${a.placa} (${formatDate(a.vinculacao)})`).join('; ') : '-'}
       ]),
       revisao: () => secaoTabela('Revisões Programadas', revisoes, [
         {header:'Condutor', get:r=>r.condutor}, {header:'Placa', get:r=>r.placa},
