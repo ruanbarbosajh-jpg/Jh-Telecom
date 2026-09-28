@@ -13486,7 +13486,26 @@ function renderParcialDoDia() {
     // azul-marinho do motor), pedido do cliente 23/09/2026: "concluido verde
     // claro leve, pendente laranja leve".
     const FUNDO_BALDE_IMG = { concluido: '#E2EFDA', pendente: '#FDEBD3' };
-    function imagemStatusPorBalde(titulo, rotuloPrimeira, linhas, totalLinha, nomeArquivo) {
+    // O usuário pode ORDENAR a tabela na tela (clique no título — ver
+    // ativarOrdenacaoDeColuna) ou filtrar pelo funil; sem isso a imagem saía
+    // sempre na ordem original de cálculo, ignorando os dois (achado
+    // 28/09/2026, pedido do cliente: "quando filtro do menor para o maior...
+    // a imagem não está saindo com o filtro" — ele queria destacar ofensores
+    // ordenando a coluna e gerando a imagem já naquela ordem).
+    function ordemVisivelDaTabela(tabelaId, chaveDe, itens) {
+      const tab = tabelaId && document.getElementById(tabelaId);
+      if (!tab) return itens;
+      const ordem = [...tab.querySelectorAll('tbody tr')]
+        .filter(tr => !tr.classList.contains('total-row') && tr.style.display !== 'none' && tr.querySelector('td'))
+        .map(tr => (tr.querySelector('td').textContent || '').trim());
+      const porChave = new Map(itens.map(it => [String(chaveDe(it)).trim(), it]));
+      const ordenados = ordem.map(k => porChave.get(k)).filter(Boolean);
+      // segurança: se a chave não bateu 1:1 (dado mudou entre o cálculo e o
+      // clique), cai pro array original em vez de mostrar uma imagem incompleta
+      return ordenados.length === ordem.length ? ordenados : itens;
+    }
+    function imagemStatusPorBalde(titulo, rotuloPrimeira, linhasTodas, totalLinha, nomeArquivo, tabelaId) {
+      const linhas = ordemVisivelDaTabela(tabelaId, l => l.label, linhasTodas);
       const colunas = [{ titulo: rotuloPrimeira }]
         .concat(bucketsTabela.map(b => ({ titulo: bucketLabel[b], fundo: FUNDO_BALDE_IMG[b] })))
         .concat([{ titulo: 'Total O.S' }, { titulo: 'Efetividade' }]);
@@ -13579,7 +13598,7 @@ function renderParcialDoDia() {
       </tbody></table></div>
 
       <div class="section-heading">Status Detalhado por Tipo de Serviço ${btnCancelados}<button type="button" class="btn-export-img" id="pd-status-tipo-img">🖼 Gerar imagem</button></div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="tab-status-tipo"><thead><tr>
         <th>Serviços</th>${bucketsTabela.map(thStatus).join('')}<th>Total O.S</th><th>Efetividade</th>
       </tr></thead><tbody>
         ${statusTable.map(l=>{
@@ -13590,7 +13609,7 @@ function renderParcialDoDia() {
       </tbody></table></div>
 
       <div class="section-heading">Status Detalhado por Cidade ${btnCancelados}<button type="button" class="btn-export-img" id="pd-status-cidade-img">🖼 Gerar imagem</button></div>
-      <div class="table-wrap"><table class="data-table"><thead><tr>
+      <div class="table-wrap"><table class="data-table" id="tab-status-cidade"><thead><tr>
         <th>Cidades</th>${bucketsTabela.map(thStatus).join('')}<th>Total O.S</th><th>Efetividade</th>
       </tr></thead><tbody>
         ${statusPorCidadeTable.map(l=>{
@@ -13618,7 +13637,7 @@ function renderParcialDoDia() {
 
       ${!servicosDoDia.length ? '' : `
       <div class="section-heading">Serviços do Dia <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(${servicosDoDia.length} O.S — do CSV importado na PCR)</span><button type="button" class="btn-export-img" id="pd-servicos-img">🖼 Gerar imagem</button></div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="tab-servicos-dia"><thead><tr>
         <th>O.S</th><th>Cliente</th><th>Contrato</th><th>Técnico</th><th>Cidade</th><th>Tipo de Serviço</th><th>Status</th><th>Motivo</th><th>Abertura</th><th>Limite</th>
       </tr></thead><tbody>
         ${servicosDoDia.map(r=>`<tr><td>${esc(r.os)||'-'}</td><td>${esc(r.cliente)||'-'}</td><td>${esc(r.contrato)||'-'}</td><td class="cat-cell">${esc(r.recurso)||'-'}</td><td>${esc(r.cidade)||'-'}</td><td>${esc(r.tipo_atividade)||'-'}</td><td>${badgeServicoDia(r.status)}</td><td>${esc(r.motivo)||'-'}</td><td>${fmtDT(r.abertura)}</td><td>${fmtDT(r.limite)}</td></tr>`).join('')}
@@ -13727,17 +13746,17 @@ function renderParcialDoDia() {
     const btnTecImg = document.getElementById('pd-tec-img');
     if (btnTecImg) btnTecImg.addEventListener('click', () => {
       const sufixoTipo = todosTiposTecMarcados ? '' : ' — ' + tiposTecMarcados.join(', ');
-      imagemStatusPorBalde('Status Detalhado por Técnico' + sufixoTipo, 'Técnico', statusPorTecnicoTable, totalStatusTecnico, 'status-por-tecnico-' + data);
+      imagemStatusPorBalde('Status Detalhado por Técnico' + sufixoTipo, 'Técnico', statusPorTecnicoTable, totalStatusTecnico, 'status-por-tecnico-' + data, 'tab-status-tecnico');
       avisoBotao(btnTecImg, '🖼 baixado', '🖼 Gerar imagem');
     });
     const btnStatusTipoImg = document.getElementById('pd-status-tipo-img');
     if (btnStatusTipoImg) btnStatusTipoImg.addEventListener('click', () => {
-      imagemStatusPorBalde('Status Detalhado por Tipo de Serviço', 'Serviços', statusTable, totalStatus, 'status-tipo-servico-' + data);
+      imagemStatusPorBalde('Status Detalhado por Tipo de Serviço', 'Serviços', statusTable, totalStatus, 'status-tipo-servico-' + data, 'tab-status-tipo');
       avisoBotao(btnStatusTipoImg, '🖼 baixado', '🖼 Gerar imagem');
     });
     const btnStatusCidadeImg = document.getElementById('pd-status-cidade-img');
     if (btnStatusCidadeImg) btnStatusCidadeImg.addEventListener('click', () => {
-      imagemStatusPorBalde('Status Detalhado por Cidade', 'Cidades', statusPorCidadeTable, totalStatus, 'status-por-cidade-' + data);
+      imagemStatusPorBalde('Status Detalhado por Cidade', 'Cidades', statusPorCidadeTable, totalStatus, 'status-por-cidade-' + data, 'tab-status-cidade');
       avisoBotao(btnStatusCidadeImg, '🖼 baixado', '🖼 Gerar imagem');
     });
     // "Serviços do Dia" é lista crua (uma linha por O.S, sem baldes/total) —
@@ -13746,7 +13765,9 @@ function renderParcialDoDia() {
     const btnServicosImg = document.getElementById('pd-servicos-img');
     if (btnServicosImg) btnServicosImg.addEventListener('click', () => {
       const colunas = ['O.S', 'Cliente', 'Contrato', 'Técnico', 'Cidade', 'Tipo de Serviço', 'Status', 'Motivo', 'Abertura', 'Limite'].map(titulo => ({ titulo }));
-      const linhas = servicosDoDia.map(r => ({ celulas: [r.os, r.cliente, r.contrato, r.recurso, r.cidade, r.tipo_atividade, r.status, r.motivo, fmtDT(r.abertura), fmtDT(r.limite)] }));
+      // mesma ordenação/filtro da tela (ver ordemVisivelDaTabela acima) — o.s é chave única
+      const servicosOrdenados = ordemVisivelDaTabela('tab-servicos-dia', r => r.os, servicosDoDia);
+      const linhas = servicosOrdenados.map(r => ({ celulas: [r.os, r.cliente, r.contrato, r.recurso, r.cidade, r.tipo_atividade, r.status, r.motivo, fmtDT(r.abertura), fmtDT(r.limite)] }));
       baixarTabelaComoImagem({ titulo: 'Serviços do Dia', subtitulo: formatDate(data), colunas, linhas, nomeArquivo: 'servicos-do-dia-' + data });
       avisoBotao(btnServicosImg, '🖼 baixado', '🖼 Gerar imagem');
     });
