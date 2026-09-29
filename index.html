@@ -16135,7 +16135,7 @@ function renderToll() {
       r => r.endereco, r => formatCurrency(r.valor),
     ];
     body.innerHTML = `
-      <div class="cards-grid">${metricCard('Total de passagens', rows.length)}${metricCard('Valor total', formatCurrency(totalValue))}${metricCard('Fora do horário', foraHorario, foraHorario>0)}${metricCard('Fora das cidades cobradas', foraCidade, foraCidade>0)}${metricCard('Condutor não encontrado', naoEncontrada, naoEncontrada>0)}</div>
+      <div class="cards-grid" id="ped-cards">${metricCard('Total de passagens', rows.length)}${metricCard('Valor total', formatCurrency(totalValue))}${metricCard('Fora do horário', foraHorario, foraHorario>0)}${metricCard('Fora das cidades cobradas', foraCidade, foraCidade>0)}${metricCard('Condutor não encontrado', naoEncontrada, naoEncontrada>0)}</div>
       ${divergent.length?`<div class="warning-box">${divergent.length} passagem(ns) com condutor atual diferente do cadastrado.</div>`:''}
       <div class="section-heading" data-ped="todas">Todas as Passagens</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 8px">Nome em <span style="color:var(--danger)">vermelho</span> = fora do horário. Endereço em <span style="color:var(--accent-dark)">azul escuro</span> = fora das cidades cobradas (Guarujá, Bertioga, Cubatão, Santos, São Vicente, Praia Grande).</p>
@@ -16158,10 +16158,16 @@ function renderToll() {
         // opção por passagem), o que não dá pra usar. Separadas, o funil da
         // Data lista dia e o do Horário lista hora — e o horário segue a mesma
         // cor do nome quando a passagem é fora do horário permitido.
-        return `<tr><td>${formatDate(r.data_transacao)}</td>
+        // data-* na linha (valor/fora/foracid/naoenc): os cards do topo recontam
+        // por cima do que o funil ▾ deixou visível (ver atualizarCardsPassagens
+        // abaixo) — ler os data-* é mais seguro que reprocessar texto/cor da
+        // célula, mesmo padrão já usado no total de "Gasto de Pedágio por
+        // Veículo" (tr.dataset.valor).
+        const naoEnc = r.condutor_atual === 'NÃO ENCONTRADA';
+        return `<tr data-valor="${r.valor}" data-fora="${fora?1:0}" data-foracid="${foraCid?1:0}" data-naoenc="${naoEnc?1:0}"><td>${formatDate(r.data_transacao)}</td>
         <td style="${fora?'color:var(--danger);font-weight:600':''}">${esc(r.hora)||'-'}</td><td>${esc(r.placa)}</td><td>${esc(r.marca)} ${esc(r.modelo)||''}</td>
         <td style="${fora?'color:var(--danger);font-weight:600':''}">${esc(r.cadastro)}</td>
-        <td>${r.condutor_atual==='NÃO ENCONTRADA'?`<span class="badge warn">Não encontrada</span>`:`<span style="color:${fora?'var(--danger)':'var(--text-primary)'}">${esc(r.condutor_atual)}</span>`}</td>
+        <td>${naoEnc?`<span class="badge warn">Não encontrada</span>`:`<span style="color:${fora?'var(--danger)':'var(--text-primary)'}">${esc(r.condutor_atual)}</span>`}</td>
         <td style="${foraCid?'color:var(--accent-dark);font-weight:600':''}">${esc(r.endereco)}</td><td>${formatCurrency(r.valor)}</td></tr>`;
       }).join('')}
       </tbody></table></div>
@@ -16190,6 +16196,37 @@ function renderToll() {
     ativarTogglesDeSecao(body); // o Filtrar refaz o HTML e o global só roda no 1º render
     ativarBotoesImagem(body);
 
+    // Cards do topo (Total de passagens/Valor total/Fora do horário/Fora das
+    // cidades/Condutor não encontrado) recontam por cima do que o funil ▾ de
+    // "Todas as Passagens" deixou visível (28/09/2026, pedido do cliente: "os
+    // cards devem ser atualizados de acordo com o que eu filtrar na tabela")
+    // — antes só seguiam os filtros da barra de cima (Filtrar), igual o
+    // padrão de outras telas (Produção); aqui o cliente pediu explicitamente
+    // que os cards acompanhassem o funil também. Lê os data-* da própria
+    // linha (não reprocessa texto/cor da célula), mesmo padrão do total de
+    // "Gasto de Pedágio por Veículo" logo abaixo.
+    const tabTodas = document.getElementById('ped-tab-todas');
+    if (tabTodas) {
+      const atualizarCardsPassagens = () => {
+        const visiveis = tabTodas.__linhasVisiveis
+          ? tabTodas.__linhasVisiveis()
+          : [...tabTodas.querySelectorAll('tbody tr')].filter(tr => tr.style.display !== 'none');
+        let valor = 0, fora = 0, foraCid = 0, naoEnc = 0;
+        visiveis.forEach(tr => {
+          valor += Number(tr.dataset.valor) || 0;
+          if (tr.dataset.fora === '1') fora++;
+          if (tr.dataset.foracid === '1') foraCid++;
+          if (tr.dataset.naoenc === '1') naoEnc++;
+        });
+        document.getElementById('ped-cards').innerHTML =
+          metricCard('Total de passagens', visiveis.length) +
+          metricCard('Valor total', formatCurrency(valor)) +
+          metricCard('Fora do horário', fora, fora>0) +
+          metricCard('Fora das cidades cobradas', foraCid, foraCid>0) +
+          metricCard('Condutor não encontrado', naoEnc, naoEnc>0);
+      };
+      tabTodas.addEventListener('filtro-aplicado', atualizarCardsPassagens);
+    }
     // ---- filtro por coluna (funil ▾) também muda o cálculo, não só esconde linha ----
     // "Gasto de Pedágio por Veículo" é 1 linha por PLACA (já soma) — não tem
     // grupo pra recalcular por dentro, só a linha TOTAL GERAL por cima do que
