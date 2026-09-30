@@ -2479,7 +2479,7 @@ const SUPABASE_TABLES = {
 // devolve os campos de data de uma linha do PCR ao formato Date
 function hidratarLinhaPCR(r) {
   const dt = v => (v === null || v === undefined || v === '') ? null : (v instanceof Date ? v : new Date(v));
-  return { ...r, abertura: dt(r.abertura), limite: dt(r.limite), encerramento: dt(r.encerramento), inicio: dt(r.inicio) };
+  return { ...r, abertura: dt(r.abertura), limite: dt(r.limite), encerramento: dt(r.encerramento), inicio: dt(r.inicio), fim_real: dt(r.fim_real) };
 }
 // A maioria das planilhas de Folha de Pagamento não traz coluna de período,
 // mas o cliente nomeia a PRÓPRIA ABA com o ciclo (ex.: "FOLHA 21.07 a 20.08")
@@ -11159,6 +11159,15 @@ function importarCsvPCR(texto) {
     // não concluído com Fim preenchido) ganhavam um AGING/faixa indevido.
     const hFim = (iFim >= 0 && isConcluido(statusRow)) ? pcrParseHora(l[iFim]) : null;
     const encerramento = hFim ? new Date(dataDia.getFullYear(), dataDia.getMonth(), dataDia.getDate(), hFim.h, hFim.m) : null;
+    // FIM REAL: a mesma hora da coluna "Fim", mas SEM o filtro de CONCLUÍDO —
+    // criado em 30/09/2026 (pedido do cliente: técnico com muitas ordens "Não
+    // Concluído" terminadas depois das 18h não aparecia em nenhum painel de
+    // "termina tarde", porque `encerramento` acima é null de propósito pra
+    // quem não concluiu — regra correta pra prazo, mas errada pra "a que
+    // horas o técnico parou de mexer na ordem"). Só usar em painéis que NÃO
+    // são de cumprimento de prazo (aging/faixa continuam só com `encerramento`).
+    const hFimReal = iFim >= 0 ? pcrParseHora(l[iFim]) : null;
+    const fimReal = hFimReal ? new Date(dataDia.getFullYear(), dataDia.getMonth(), dataDia.getDate(), hFimReal.h, hFimReal.m) : null;
     // O prazo contratado muda com o tipo de serviço: REPARO tem 24h, ATIVAÇÃO e
     // MUDANÇA DE ENDEREÇO têm 36h. Antes o sistema somava 24h em tudo, então o
     // limite de uma ativação aparecia 12h mais cedo do que o real.
@@ -11178,7 +11187,7 @@ function importarCsvPCR(texto) {
     const hInicio = iInicio >= 0 ? pcrParseHora(l[iInicio]) : null;
     const inicio = hInicio ? new Date(dataDia.getFullYear(), dataDia.getMonth(), dataDia.getDate(), hInicio.h, hInicio.m) : null;
     out.push({
-      data: isoLocalDe(dataDia), abertura, limite, encerramento, inicio,
+      data: isoLocalDe(dataDia), abertura, limite, encerramento, inicio, fim_real: fimReal,
       aging, horas_prazo: horasPrazo,
       // faixa na régua do próprio serviço: 24/48/>48 no reparo, 36/48/>48 na ativação
       faixa: faixaPorAging(aging, horasPrazo),
@@ -11211,7 +11220,7 @@ function importarCsvPCR(texto) {
   const anteriores = new Map(DB.pcr.map(r => [r.chave, r]));
   const tm = d => d ? +new Date(d) : 0;
   const assinatura = r => [r.status, r.recurso, r.cidade, r.tipo_atividade, r.motivo, r.cliente, r.contrato, r.endereco,
-    r.periodo, r.periodo_sistema, r.horas_prazo, r.faixa, r.aging, tm(r.abertura), tm(r.limite), tm(r.encerramento), tm(r.inicio)].join('¦');
+    r.periodo, r.periodo_sistema, r.horas_prazo, r.faixa, r.aging, tm(r.abertura), tm(r.limite), tm(r.encerramento), tm(r.inicio), tm(r.fim_real)].join('¦');
   const diaJaMarcado = new Set();
   out.forEach(r => {
     const base = `${r.data}|${r.os || 'sem-os'}`;
@@ -15447,14 +15456,15 @@ function renderReuniaoPrazos() {
   // de ver o resto. Mesmo padrão de `limitePed`/`limiteProd`: variável fora
   // do load(), o select troca e chama load() de novo.
   let mostrarTecnicosTarde = 10;
-  // Mesma ideia, pra "Técnicos que mais terminam a ordem tarde" (30/09/2026).
-  let mostrarTecnicosFimTarde = 10;
-  // "dos tecnicos que terminam tarde quero os que sao de 18h pra mais"
-  // (30/09/2026, pedido do cliente) — corte por HORÁRIO (não por quantidade,
-  // que já é o que o select de cima faz), ativo por padrão porque foi assim
-  // que ele pediu.
-  let filtroFimTarde18h = true;
-  // "Mostrar N" do painel de CONTAGEM de ordens concluídas após as 18h (30/09/2026).
+  // "Mostrar N" do painel de CONTAGEM de ordens concluídas após as 18h
+  // (30/09/2026). O painel de TÉRMINO por técnico era por MÉDIA de horário
+  // até 30/09/2026 — o cliente pediu pra tirar: "nao quero a média, por que
+  // sempre vai dar total baixo / quero o total, quantas vezes teve ordem
+  // finalizadas após as 18h". Um técnico com muitas conclusões tarde mas
+  // também muitas cedo tinha a média "diluída" e sumia do topo do ranking;
+  // contagem total não dilui. Ficou só a CONTAGEM (por técnico e por
+  // cidade) — o painel de MÉDIA de término foi removido (o de início do dia,
+  // seção separada, não foi mexido: só o de término é que virou contagem).
   let mostrarTecnicosApos18h = 10;
   const { start, end } = defaultMonthPeriod();
   document.getElementById('content').innerHTML = `${periodToolbar(start, end, `
@@ -15574,7 +15584,7 @@ function renderReuniaoPrazos() {
     // bloco abaixo mostra a cobertura em vez de fingir que é o mês inteiro.
     const dt = v => (v === null || v === undefined || v === '') ? null : (v instanceof Date ? v : new Date(v));
     const pcrTodos = DB.pcr.filter(r => inRange(r.data, s, e) && cidadeOk(r.cidade))
-      .map(r => ({ ...r, inicio: dt(r.inicio), limite: dt(r.limite), encerramento: dt(r.encerramento) }));
+      .map(r => ({ ...r, inicio: dt(r.inicio), limite: dt(r.limite), encerramento: dt(r.encerramento), fim_real: dt(r.fim_real) }));
     const diasPcr = new Set(pcrTodos.map(r => r.data)).size;
     const pcrReparo = pcrTodos.filter(r => ehServicoReparo(r.tipo_atividade));
 
@@ -15611,66 +15621,58 @@ function renderReuniaoPrazos() {
       .sort((a, b) => mediaHora(b) - mediaHora(a));
     const tecnicosTarde = mostrarTecnicosTarde === 'todos' ? tecnicosTardeTodos : tecnicosTardeTodos.slice(0, mostrarTecnicosTarde);
 
-    // horário em que cada técnico TERMINA o dia (maior encerramento do dia
-    // dele) — 30/09/2026, pedido do cliente: "quero que tambem tenha os
-    // tecnicos que mais terminam a ordem tarde e por cidade tambem". Mesma
-    // ideia do "início do dia" acima, espelhada: `primeiroDoDia` pegava o
-    // MENOR `inicio`; aqui pega o MAIOR `encerramento`. `encerramento` só
-    // existe em ordem CONCLUÍDA (regra confirmada — ver §3 do repasse), por
-    // isso o filtro é `isConcluido`, não o `comecouDeVerdade` do início (que
-    // cobre também quem começou mas não terminou).
-    const ultimoDoDia = {};
-    pcrTodos.forEach(r => {
-      if (!r.encerramento || !r.recurso || !isConcluido(r.status)) return;
-      const k = `${r.recurso}|${r.data}`;
-      if (!ultimoDoDia[k] || r.encerramento > ultimoDoDia[k].encerramento) ultimoDoDia[k] = r;
-    });
-    const fins = Object.values(ultimoDoDia).map(r => ({ ...r, hora: r.encerramento.getHours() + r.encerramento.getMinutes() / 60 }));
-    const fimPorCidade = {}, fimPorTecnico = {};
-    fins.forEach(r => {
-      acumula(fimPorCidade, r.cidade || 'Não informado', r.hora);
-      acumula(fimPorTecnico, r.recurso, r.hora);
-    });
-    const cidadesFim = Object.values(fimPorCidade).sort((a, b) => mediaHora(b) - mediaHora(a));
-    // "Todos"/Top N do select conta em cima do que sobrou DEPOIS do corte de
-    // horário — os dois filtros (horário e quantidade) se combinam, não se
-    // substituem.
-    const tecnicosFimTardeAntesDoCorte = Object.values(fimPorTecnico).filter(t => t.dias >= 3)
-      .sort((a, b) => mediaHora(b) - mediaHora(a));
-    const tecnicosFimTardeTodos = filtroFimTarde18h ? tecnicosFimTardeAntesDoCorte.filter(t => mediaHora(t) >= 18) : tecnicosFimTardeAntesDoCorte;
-    const tecnicosFimTarde = mostrarTecnicosFimTarde === 'todos' ? tecnicosFimTardeTodos : tecnicosFimTardeTodos.slice(0, mostrarTecnicosFimTarde);
-
-    // ---------- Quantas ORDENS terminam após as 18h, por técnico (30/09/2026,
-    // pedido do cliente: "verifique de acordo com o periodo filtrado quantas
-    // vezes estao terminando apos as 18h... quais tecnicos... tem mais ordens
-    // que foram concluidas apos as 18h") — é uma CONTAGEM, diferente do painel
-    // "Técnicos que mais terminam tarde" acima (que é a MÉDIA do horário de
-    // término, só a última ordem de cada dia). Aqui conta TODAS as conclusões
-    // tardias do período: um técnico que concluiu 3 ordens às 18h/19h/20h no
-    // MESMO dia soma 3 aqui, mas só entraria 1 vez (a mais tardia) na média
-    // acima. Uma linha por O.S+DIA (não por técnico+dia) — se o CSV trouxe mais
-    // de uma ocorrência da mesma ordem no mesmo dia (ex.: "iniciado" e depois
-    // "concluído"), fica só a de encerramento mais tarde, pra não contar a
-    // MESMA conclusão duas vezes.
+    // ---------- Quantas ORDENS terminam após as 18h, por técnico e por
+    // cidade (30/09/2026, pedido do cliente: "verifique de acordo com o
+    // periodo filtrado quantas vezes estao terminando apos as 18h... quais
+    // tecnicos... tem mais ordens que foram concluidas apos as 18h"). É uma
+    // CONTAGEM, não uma média: um técnico que concluiu 3 ordens às
+    // 18h/19h/20h no MESMO dia soma 3 aqui. Existiu uma versão por MÉDIA de
+    // horário de término (só a última ordem do dia) até 30/09/2026 — o
+    // cliente pediu pra tirar ("nao quero a média, por que sempre vai dar
+    // total baixo / quero o total, quantas vezes teve ordem finalizadas após
+    // as 18h"): um técnico com muitas conclusões tarde mas também muitas
+    // cedo tinha a média "diluída" pra baixo e sumia do topo (foi o caso
+    // relatado do técnico Vinicius). Ficou só a contagem.
+    //
+    // Usa `fim_real` (hora de "Fim" do CSV SEM filtro de status), não
+    // `encerramento` (que é sempre null pra quem não concluiu, de propósito
+    // — regra de prazo, ver `importarCsvPCR`) — "seja concluido ou nao
+    // concluida" (pedido do cliente): conta CONCLUÍDO e NÃO CONCLUÍDO, já
+    // que os dois têm hora de Fim real batida pelo técnico; só pendente/em
+    // rota/iniciado (ordem ainda não fechada) fica de fora. Uma linha por
+    // O.S+DIA (não por técnico+dia) — se o CSV trouxe mais de uma ocorrência
+    // da mesma ordem no mesmo dia (ex.: "iniciado" e depois "concluído"),
+    // fica só a de Fim mais tarde, pra não contar a MESMA conclusão duas vezes.
     const CORTE_APOS_18H = 18;
+    const statusContaComoFechado = st => ['concluido', 'nao_concluido'].includes(classifyStatusGranular(st));
     const concluidasPorOSDia = new Map();
     pcrTodos.forEach(r => {
-      if (!r.encerramento || !r.recurso || !isConcluido(r.status)) return;
+      if (!r.fim_real || !r.recurso || !statusContaComoFechado(r.status)) return;
       const chave = `${r.os || 'sem-os'}|${r.data}`;
       const atual = concluidasPorOSDia.get(chave);
-      if (!atual || r.encerramento > atual.encerramento) concluidasPorOSDia.set(chave, r);
+      if (!atual || r.fim_real > atual.fim_real) concluidasPorOSDia.set(chave, r);
     });
     const conclusoesDoDia = [...concluidasPorOSDia.values()];
     const qtdApos18hPorTecnico = {}, qtdTotalPorTecnico = {};
+    const qtdApos18hPorCidade = {}, qtdTotalPorCidade = {};
     conclusoesDoDia.forEach(r => {
+      const hora = r.fim_real.getHours() + r.fim_real.getMinutes() / 60;
+      const apos18h = hora >= CORTE_APOS_18H;
+      const cidade = r.cidade || 'Não informado';
       qtdTotalPorTecnico[r.recurso] = (qtdTotalPorTecnico[r.recurso] || 0) + 1;
-      const hora = r.encerramento.getHours() + r.encerramento.getMinutes() / 60;
-      if (hora >= CORTE_APOS_18H) qtdApos18hPorTecnico[r.recurso] = (qtdApos18hPorTecnico[r.recurso] || 0) + 1;
+      qtdTotalPorCidade[cidade] = (qtdTotalPorCidade[cidade] || 0) + 1;
+      if (apos18h) {
+        qtdApos18hPorTecnico[r.recurso] = (qtdApos18hPorTecnico[r.recurso] || 0) + 1;
+        qtdApos18hPorCidade[cidade] = (qtdApos18hPorCidade[cidade] || 0) + 1;
+      }
     });
     const tecnicosOrdensApos18hTodos = Object.entries(qtdApos18hPorTecnico)
       .map(([nome, qtd]) => ({ nome, qtd, totalDia: qtdTotalPorTecnico[nome] || qtd }))
       .sort((a, b) => b.qtd - a.qtd || a.nome.localeCompare(b.nome, 'pt-BR'));
     const tecnicosOrdensApos18h = mostrarTecnicosApos18h === 'todos' ? tecnicosOrdensApos18hTodos : tecnicosOrdensApos18hTodos.slice(0, mostrarTecnicosApos18h);
+    const cidadesOrdensApos18h = Object.entries(qtdApos18hPorCidade)
+      .map(([nome, qtd]) => ({ nome, qtd, totalDia: qtdTotalPorCidade[nome] || qtd }))
+      .sort((a, b) => b.qtd - a.qtd || a.nome.localeCompare(b.nome, 'pt-BR'));
 
     // ---------- BASE 3: RETORNOS (DB.producao — IFI/IRR) ----------
     const prodPeriodo = DB.producao.filter(p => inRange(p.data, s, e) && cidadeOk(p.cidade));
@@ -15841,7 +15843,7 @@ function renderReuniaoPrazos() {
       </div>
 
       <div class="section-heading">6. Horário de início e término do dia</div>
-      ${nota('Hora média do primeiro início e do último encerramento do dia de cada técnico.')}
+      ${nota('Início: hora média do primeiro atendimento do dia de cada técnico. Término: CONTAGEM de ordens fechadas às 18h ou depois (não é média — ver nota abaixo).')}
       ${!inicios.length ? '<div class="panel"><div class="empty">Sem hora de início registrada no PCR desse período.</div></div>' : `
       <div class="panel" style="margin-bottom:1.5rem">
         <h3>Por cidade — do mais tarde pro mais cedo</h3>
@@ -15863,29 +15865,13 @@ function renderReuniaoPrazos() {
           nome: t.nome, valor: horaDeDecimal(mediaHora(t)), sub: `${t.dias} dia(s) medidos`,
         })), { rotuloNome: 'Técnico', rotuloValor: 'Início médio', rotuloSub: 'Amostra', vazio: 'Nenhum técnico com 3+ dias medidos nesse período.' })}
       </div>
-      ${!fins.length ? '' : `
+      ${!conclusoesDoDia.length ? '' : `
       <div class="panel" style="margin-bottom:1.5rem">
-        <h3>Por cidade — quem mais atrasa a conclusão</h3>
-        ${tabelaRankingReuniao(cidadesFim.map(c => ({
-          nome: c.nome, valor: horaDeDecimal(mediaHora(c)),
-        })), { rotuloNome: 'Cidade', rotuloValor: 'Término médio' })}
-      </div>
-      <div class="panel" style="margin-bottom:1.5rem">
-        <h3 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Técnicos que mais terminam tarde
-          <select class="topn-select" id="reu-tec-fim-tarde-mostrar">
-            <option value="10"${mostrarTecnicosFimTarde===10?' selected':''}>Top 10</option>
-            <option value="20"${mostrarTecnicosFimTarde===20?' selected':''}>Top 20</option>
-            <option value="50"${mostrarTecnicosFimTarde===50?' selected':''}>Top 50</option>
-            <option value="todos"${mostrarTecnicosFimTarde==='todos'?' selected':''}>Todos (${tecnicosFimTardeTodos.length})</option>
-          </select>
-          <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;font-weight:400;color:var(--text-secondary);cursor:pointer">
-            <input type="checkbox" id="reu-tec-fim-18h"${filtroFimTarde18h?' checked':''}>Só a partir das 18h
-          </label>
-        </h3>
-        ${nota('Só técnicos com 3 ou mais dias medidos no período. Encerramento só existe em ordem CONCLUÍDA.')}
-        ${tabelaRankingReuniao(tecnicosFimTarde.map(t => ({
-          nome: t.nome, valor: horaDeDecimal(mediaHora(t)), sub: `${t.dias} dia(s) medidos`,
-        })), { rotuloNome: 'Técnico', rotuloValor: 'Término médio', rotuloSub: 'Amostra', vazio: 'Nenhum técnico com 3+ dias medidos nesse período.' })}
+        <h3>Por cidade — mais ordens concluídas após as 18h</h3>
+        ${nota('Concluído e Não Concluído contam — o que importa é que o técnico fechou a ordem depois das 18h, não se deu certo.')}
+        ${tabelaRankingReuniao(cidadesOrdensApos18h.map(c => ({
+          nome: c.nome, valor: `${c.qtd} ordem(ns)`, sub: `${c.totalDia} fechada(s) no total no período`,
+        })), { rotuloNome: 'Cidade', rotuloValor: 'Ordens após 18h', rotuloSub: 'Total de conclusões no período', vazio: 'Nenhuma ordem fechada às 18h ou depois nesse período.' })}
       </div>
       <div class="panel" style="margin-bottom:1.5rem">
         <h3 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Técnicos com mais ordens concluídas após as 18h
@@ -15896,10 +15882,10 @@ function renderReuniaoPrazos() {
             <option value="todos"${mostrarTecnicosApos18h==='todos'?' selected':''}>Todos (${tecnicosOrdensApos18hTodos.length})</option>
           </select>
         </h3>
-        ${nota('Contagem de ORDENS (não a média de horário do painel acima) — cada conclusão às 18h ou depois conta uma vez, mesmo várias no mesmo dia.')}
+        ${nota('Contagem de ORDENS, não média de horário — cada conclusão às 18h ou depois conta uma vez, mesmo várias no mesmo dia. Concluído e Não Concluído contam.')}
         ${tabelaRankingReuniao(tecnicosOrdensApos18h.map(t => ({
-          nome: t.nome, valor: `${t.qtd} ordem(ns)`, sub: `${t.totalDia} concluída(s) no total no período`,
-        })), { rotuloNome: 'Técnico', rotuloValor: 'Ordens após 18h', rotuloSub: 'Total de conclusões no período', vazio: 'Nenhuma ordem concluída às 18h ou depois nesse período.' })}
+          nome: t.nome, valor: `${t.qtd} ordem(ns)`, sub: `${t.totalDia} fechada(s) no total no período`,
+        })), { rotuloNome: 'Técnico', rotuloValor: 'Ordens após 18h', rotuloSub: 'Total de conclusões no período', vazio: 'Nenhuma ordem fechada às 18h ou depois nesse período.' })}
       </div>`}`}
 
       <div class="section-heading">7. Retornos — % de serviço que volta</div>
@@ -15976,16 +15962,6 @@ function renderReuniaoPrazos() {
     const selTecTarde = document.getElementById('reu-tec-tarde-mostrar');
     if (selTecTarde) selTecTarde.addEventListener('change', () => {
       mostrarTecnicosTarde = selTecTarde.value === 'todos' ? 'todos' : parseInt(selTecTarde.value, 10);
-      load();
-    });
-    const selTecFimTarde = document.getElementById('reu-tec-fim-tarde-mostrar');
-    if (selTecFimTarde) selTecFimTarde.addEventListener('change', () => {
-      mostrarTecnicosFimTarde = selTecFimTarde.value === 'todos' ? 'todos' : parseInt(selTecFimTarde.value, 10);
-      load();
-    });
-    const chkFimTarde18h = document.getElementById('reu-tec-fim-18h');
-    if (chkFimTarde18h) chkFimTarde18h.addEventListener('change', () => {
-      filtroFimTarde18h = chkFimTarde18h.checked;
       load();
     });
     const selApos18h = document.getElementById('reu-tec-apos18h-mostrar');
