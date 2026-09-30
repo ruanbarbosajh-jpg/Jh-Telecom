@@ -15454,6 +15454,8 @@ function renderReuniaoPrazos() {
   // que já é o que o select de cima faz), ativo por padrão porque foi assim
   // que ele pediu.
   let filtroFimTarde18h = true;
+  // "Mostrar N" do painel de CONTAGEM de ordens concluídas após as 18h (30/09/2026).
+  let mostrarTecnicosApos18h = 10;
   const { start, end } = defaultMonthPeriod();
   document.getElementById('content').innerHTML = `${periodToolbar(start, end, `
     ${multiCityField('reu-cidades', 'Cidades', { preset: CIDADES_COBRADAS_PRAZO })}
@@ -15637,6 +15639,38 @@ function renderReuniaoPrazos() {
       .sort((a, b) => mediaHora(b) - mediaHora(a));
     const tecnicosFimTardeTodos = filtroFimTarde18h ? tecnicosFimTardeAntesDoCorte.filter(t => mediaHora(t) >= 18) : tecnicosFimTardeAntesDoCorte;
     const tecnicosFimTarde = mostrarTecnicosFimTarde === 'todos' ? tecnicosFimTardeTodos : tecnicosFimTardeTodos.slice(0, mostrarTecnicosFimTarde);
+
+    // ---------- Quantas ORDENS terminam após as 18h, por técnico (30/09/2026,
+    // pedido do cliente: "verifique de acordo com o periodo filtrado quantas
+    // vezes estao terminando apos as 18h... quais tecnicos... tem mais ordens
+    // que foram concluidas apos as 18h") — é uma CONTAGEM, diferente do painel
+    // "Técnicos que mais terminam tarde" acima (que é a MÉDIA do horário de
+    // término, só a última ordem de cada dia). Aqui conta TODAS as conclusões
+    // tardias do período: um técnico que concluiu 3 ordens às 18h/19h/20h no
+    // MESMO dia soma 3 aqui, mas só entraria 1 vez (a mais tardia) na média
+    // acima. Uma linha por O.S+DIA (não por técnico+dia) — se o CSV trouxe mais
+    // de uma ocorrência da mesma ordem no mesmo dia (ex.: "iniciado" e depois
+    // "concluído"), fica só a de encerramento mais tarde, pra não contar a
+    // MESMA conclusão duas vezes.
+    const CORTE_APOS_18H = 18;
+    const concluidasPorOSDia = new Map();
+    pcrTodos.forEach(r => {
+      if (!r.encerramento || !r.recurso || !isConcluido(r.status)) return;
+      const chave = `${r.os || 'sem-os'}|${r.data}`;
+      const atual = concluidasPorOSDia.get(chave);
+      if (!atual || r.encerramento > atual.encerramento) concluidasPorOSDia.set(chave, r);
+    });
+    const conclusoesDoDia = [...concluidasPorOSDia.values()];
+    const qtdApos18hPorTecnico = {}, qtdTotalPorTecnico = {};
+    conclusoesDoDia.forEach(r => {
+      qtdTotalPorTecnico[r.recurso] = (qtdTotalPorTecnico[r.recurso] || 0) + 1;
+      const hora = r.encerramento.getHours() + r.encerramento.getMinutes() / 60;
+      if (hora >= CORTE_APOS_18H) qtdApos18hPorTecnico[r.recurso] = (qtdApos18hPorTecnico[r.recurso] || 0) + 1;
+    });
+    const tecnicosOrdensApos18hTodos = Object.entries(qtdApos18hPorTecnico)
+      .map(([nome, qtd]) => ({ nome, qtd, totalDia: qtdTotalPorTecnico[nome] || qtd }))
+      .sort((a, b) => b.qtd - a.qtd || a.nome.localeCompare(b.nome, 'pt-BR'));
+    const tecnicosOrdensApos18h = mostrarTecnicosApos18h === 'todos' ? tecnicosOrdensApos18hTodos : tecnicosOrdensApos18hTodos.slice(0, mostrarTecnicosApos18h);
 
     // ---------- BASE 3: RETORNOS (DB.producao — IFI/IRR) ----------
     const prodPeriodo = DB.producao.filter(p => inRange(p.data, s, e) && cidadeOk(p.cidade));
@@ -15852,6 +15886,20 @@ function renderReuniaoPrazos() {
         ${tabelaRankingReuniao(tecnicosFimTarde.map(t => ({
           nome: t.nome, valor: horaDeDecimal(mediaHora(t)), sub: `${t.dias} dia(s) medidos`,
         })), { rotuloNome: 'Técnico', rotuloValor: 'Término médio', rotuloSub: 'Amostra', vazio: 'Nenhum técnico com 3+ dias medidos nesse período.' })}
+      </div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Técnicos com mais ordens concluídas após as 18h
+          <select class="topn-select" id="reu-tec-apos18h-mostrar">
+            <option value="10"${mostrarTecnicosApos18h===10?' selected':''}>Top 10</option>
+            <option value="20"${mostrarTecnicosApos18h===20?' selected':''}>Top 20</option>
+            <option value="50"${mostrarTecnicosApos18h===50?' selected':''}>Top 50</option>
+            <option value="todos"${mostrarTecnicosApos18h==='todos'?' selected':''}>Todos (${tecnicosOrdensApos18hTodos.length})</option>
+          </select>
+        </h3>
+        ${nota('Contagem de ORDENS (não a média de horário do painel acima) — cada conclusão às 18h ou depois conta uma vez, mesmo várias no mesmo dia.')}
+        ${tabelaRankingReuniao(tecnicosOrdensApos18h.map(t => ({
+          nome: t.nome, valor: `${t.qtd} ordem(ns)`, sub: `${t.totalDia} concluída(s) no total no período`,
+        })), { rotuloNome: 'Técnico', rotuloValor: 'Ordens após 18h', rotuloSub: 'Total de conclusões no período', vazio: 'Nenhuma ordem concluída às 18h ou depois nesse período.' })}
       </div>`}`}
 
       <div class="section-heading">7. Retornos — % de serviço que volta</div>
@@ -15938,6 +15986,11 @@ function renderReuniaoPrazos() {
     const chkFimTarde18h = document.getElementById('reu-tec-fim-18h');
     if (chkFimTarde18h) chkFimTarde18h.addEventListener('change', () => {
       filtroFimTarde18h = chkFimTarde18h.checked;
+      load();
+    });
+    const selApos18h = document.getElementById('reu-tec-apos18h-mostrar');
+    if (selApos18h) selApos18h.addEventListener('change', () => {
+      mostrarTecnicosApos18h = selApos18h.value === 'todos' ? 'todos' : parseInt(selApos18h.value, 10);
       load();
     });
     // Filtro leve manhã/tarde/ambos da seção 4 (30/09/2026, pedido do
