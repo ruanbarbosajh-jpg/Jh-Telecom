@@ -13372,8 +13372,6 @@ function renderParcialDoDia() {
     // denominador) — diferente da Efetividade antiga, que somava Cancelado
     // no total bruto e só tirava dele no denominador. Não são afetadas por
     // "Mostrar cancelados" (`totalVisivel`): usam sempre os buckets crus.
-    // Nenhuma cor por meta nas duas (a Efetividade tinha corte verde/vermelho
-    // em 60% — não foi pedido pras novas, ficam em texto neutro).
     const conclusao = l => {
       const base = (l.concluido || 0) + (l.nao_concluido || 0);
       return base > 0 ? (l.concluido / base) * 100 : 0;
@@ -13383,6 +13381,21 @@ function renderParcialDoDia() {
       const carteira = movimentado + (l.pendente || 0);
       return carteira > 0 ? (movimentado / carteira) * 100 : 0;
     };
+    // Cor por meta das duas (30/09/2026, pedido do cliente, corte próprio pra
+    // cada indicador — NÃO é a mesma régua da Efetividade antiga): Taxa de
+    // Conclusão abaixo de 55% vermelho, acima de 80% verde, entre os dois
+    // laranja; Execução da Caixa abaixo de 60% vermelho, acima de 80% verde,
+    // entre os dois laranja. Mesmo corte pra QUALQUER linha (cidade, técnico,
+    // tipo de serviço e a linha TOTAL) — não é ajustado pelo tamanho da
+    // caixa/quantidade de ordens de cada um (o cliente não pediu essa
+    // variação quando perguntei, só mandou os dois números fixos). `#f59e0b`
+    // é o mesmo laranja já usado noutro lugar do sistema pra alerta em texto
+    // de tabela (IRR em Retornos, ver §7 "pcr"); linha sem base (nenhuma
+    // ordem concluída/improdutiva, ou nenhuma da carteira) não pinta —
+    // 0,0% de "não tem dado" não é a mesma coisa que 0,0% de "foi mal".
+    const corMeta3 = (pct, ruim, bom) => pct < ruim ? 'color:var(--tab-alerta);font-weight:700' : pct > bom ? 'color:var(--tab-sucesso);font-weight:700' : 'color:#f59e0b;font-weight:700';
+    const corConclusao = l => ((l.concluido || 0) + (l.nao_concluido || 0)) > 0 ? corMeta3(conclusao(l), 55, 80) : '';
+    const corExecucaoCaixa = l => (((l.concluido || 0) + (l.nao_concluido || 0) + (l.em_rota || 0) + (l.iniciado || 0) + (l.pendente || 0))) > 0 ? corMeta3(execucaoCaixa(l), 60, 80) : '';
     // Total O.S só soma cancelado quando "Mostrar cancelados" está ligado
     // (30/09/2026, pedido do cliente: "tire as canceladas do total de o.s
     // nas tabelas, deve somar somente se eu clicar em Mostrar cancelados" —
@@ -13575,9 +13588,9 @@ function renderParcialDoDia() {
         <th>Serviços</th>${bucketsTabela.map(thStatus).join('')}<th>Total O.S</th><th style="text-align:center">Taxa de Conclusão</th><th style="text-align:center">Execução da Caixa</th>
       </tr></thead><tbody>
         ${statusTable.map(l=>{
-          return `<tr><td class="cat-cell">${l.label}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${totalVisivel(l)}</td><td style="text-align:center">${formatPct(conclusao(l), 1)}</td><td style="text-align:center">${formatPct(execucaoCaixa(l), 1)}</td></tr>`;
+          return `<tr><td class="cat-cell">${l.label}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${totalVisivel(l)}</td><td style="text-align:center;${corConclusao(l)}">${formatPct(conclusao(l), 1)}</td><td style="text-align:center;${corExecucaoCaixa(l)}">${formatPct(execucaoCaixa(l), 1)}</td></tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalVisivel(totalStatus)}</td><td style="text-align:center">${formatPct(conclusao(totalStatus), 1)}</td><td style="text-align:center">${formatPct(execucaoCaixa(totalStatus), 1)}</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalVisivel(totalStatus)}</td><td style="text-align:center;${corConclusao(totalStatus)}">${formatPct(conclusao(totalStatus), 1)}</td><td style="text-align:center;${corExecucaoCaixa(totalStatus)}">${formatPct(execucaoCaixa(totalStatus), 1)}</td></tr>
       </tbody></table></div>
 
       <div class="section-heading">Status Detalhado por Cidade ${btnCancelados}<button type="button" class="btn-export-img" id="pd-status-cidade-img">🖼 Gerar imagem</button></div>
@@ -13585,9 +13598,9 @@ function renderParcialDoDia() {
         <th>Cidades</th>${bucketsTabela.map(thStatus).join('')}<th>Total O.S</th><th style="text-align:center">Taxa de Conclusão</th><th style="text-align:center">Execução da Caixa</th>
       </tr></thead><tbody>
         ${statusPorCidadeTable.map(l=>{
-          return `<tr><td class="cat-cell">${l.label}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${totalVisivel(l)}</td><td style="text-align:center">${formatPct(conclusao(l), 1)}</td><td style="text-align:center">${formatPct(execucaoCaixa(l), 1)}</td></tr>`;
+          return `<tr><td class="cat-cell">${l.label}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${totalVisivel(l)}</td><td style="text-align:center;${corConclusao(l)}">${formatPct(conclusao(l), 1)}</td><td style="text-align:center;${corExecucaoCaixa(l)}">${formatPct(execucaoCaixa(l), 1)}</td></tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalVisivel(totalStatus)}</td><td style="text-align:center">${formatPct(conclusao(totalStatus), 1)}</td><td style="text-align:center">${formatPct(execucaoCaixa(totalStatus), 1)}</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalVisivel(totalStatus)}</td><td style="text-align:center;${corConclusao(totalStatus)}">${formatPct(conclusao(totalStatus), 1)}</td><td style="text-align:center;${corExecucaoCaixa(totalStatus)}">${formatPct(execucaoCaixa(totalStatus), 1)}</td></tr>
       </tbody></table></div>
 
       <div class="section-heading">Status Detalhado por Técnico ${btnCancelados}</div>
@@ -13600,9 +13613,9 @@ function renderParcialDoDia() {
         <th>Técnico</th>${bucketsTabela.map(thStatus).join('')}<th>Total O.S</th><th style="text-align:center">Taxa de Conclusão</th><th style="text-align:center">Execução da Caixa</th>
       </tr></thead><tbody>
         ${statusPorTecnicoTable.map(l=>{
-          return `<tr><td class="cat-cell">${esc(l.label)}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${totalVisivel(l)}</td><td style="text-align:center">${formatPct(conclusao(l), 1)}</td><td style="text-align:center">${formatPct(execucaoCaixa(l), 1)}</td></tr>`;
+          return `<tr><td class="cat-cell">${esc(l.label)}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${totalVisivel(l)}</td><td style="text-align:center;${corConclusao(l)}">${formatPct(conclusao(l), 1)}</td><td style="text-align:center;${corExecucaoCaixa(l)}">${formatPct(execucaoCaixa(l), 1)}</td></tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatusTecnico[b])}">${totalStatusTecnico[b]}</td>`).join('')}<td>${totalVisivel(totalStatusTecnico)}</td><td style="text-align:center">${formatPct(conclusao(totalStatusTecnico), 1)}</td><td style="text-align:center">${formatPct(execucaoCaixa(totalStatusTecnico), 1)}</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatusTecnico[b])}">${totalStatusTecnico[b]}</td>`).join('')}<td>${totalVisivel(totalStatusTecnico)}</td><td style="text-align:center;${corConclusao(totalStatusTecnico)}">${formatPct(conclusao(totalStatusTecnico), 1)}</td><td style="text-align:center;${corExecucaoCaixa(totalStatusTecnico)}">${formatPct(execucaoCaixa(totalStatusTecnico), 1)}</td></tr>
       </tbody></table></div>
 
       ${!servicosDoDia.length ? '' : `
