@@ -3334,7 +3334,7 @@ function podeEditarPresencaEscritorio() { return !!currentUser && (currentUser.r
 const ROTAS_SO_PERMITIDAS = {
   gestao: ['inicio', 'reuniaoprazos', 'dashboard', 'fleet', 'toll', 'prazo', 'parcialdia'],
   escritorio: ['inicio', 'cleanup', 'table', 'prazo', 'prazoativacao', 'parcialdia',
-               'pcr', 'chamadosgiga', 'ofensoresprazo'],
+               'pcr', 'chamadosgiga', 'ofensoresprazo', 'certificacoes'],
 };
 function podeAcessar(role, route) {
   // Presença (Técnicos + Escritório): oculta pra TODO MUNDO, sem exceção,
@@ -14954,6 +14954,20 @@ function renderCertificacoes() {
     }
     if (!document.body.contains(body)) return; // mesma guarda pro caminho de sucesso
     document.getElementById('cert-atualizado').textContent = 'Atualizado às ' + new Date().toLocaleTimeString('pt-BR');
+    // A planilha de Certificações NÃO tem coluna de Cidade — cruza a O.S com
+    // DB.producao (planilha, mais estável) e, se não achar, com DB.pcr (CSV
+    // do dia, ver `cidadePorOSPcr`) pra descobrir de onde é aquela ordem.
+    // Sem nenhuma das duas importadas, cai em "Não informado" — não trava,
+    // só não sabe agrupar (30/09/2026, pedido do cliente: "mostre por
+    // cidade tambem a % e total").
+    const cidadePorOSPcr = new Map();
+    DB.pcr.forEach(r => { if (r.os && r.cidade) cidadePorOSPcr.set(r.os, r.cidade); });
+    const cidadeDeOS = os => {
+      const idxProd = os ? DB_INDEX.producao.get(os) : undefined;
+      const cidProd = idxProd !== undefined ? DB.producao[idxProd].cidade : '';
+      return cidProd || cidadePorOSPcr.get(os) || 'Não informado';
+    };
+    linhas.forEach(l => { l.cidade = cidadeDeOS(l.os); });
     const certificadas = linhas.filter(l => l.certificada);
     const naoCertificadas = linhas.filter(l => !l.certificada);
     const pct = linhas.length ? (certificadas.length / linhas.length) * 100 : 0;
@@ -14961,13 +14975,30 @@ function renderCertificacoes() {
     naoCertificadas.forEach(l => { const t = l.tecnico || 'Não informado'; porTecnico[t] = (porTecnico[t] || 0) + 1; });
     const rankingTecnico = Object.entries(porTecnico).map(([nome, qtd]) => ({ nome, qtd }))
       .sort((a, b) => b.qtd - a.qtd || a.nome.localeCompare(b.nome, 'pt-BR'));
+    const porCidade = {};
+    linhas.forEach(l => {
+      const c = l.cidade;
+      if (!porCidade[c]) porCidade[c] = { nome: c, total: 0, certificadas: 0 };
+      porCidade[c].total++;
+      if (l.certificada) porCidade[c].certificadas++;
+    });
+    const rankingCidade = Object.values(porCidade)
+      .map(c => ({ ...c, pct: c.total ? (c.certificadas / c.total) * 100 : 0 }))
+      .sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome, 'pt-BR'));
     body.innerHTML = `
       <div class="cards-grid">
         ${metricCard('Certificadas', certificadas.length)}
         ${metricCard('Não certificadas', naoCertificadas.length, naoCertificadas.length > 0)}
-        ${metricCard('% certificado', formatPct(pct, 1))}
-        ${metricCard('Total de O.S', linhas.length)}
+        ${metricCard('% certificado', formatPct(pct, 1), false, { icon: '📊' })}
+        ${metricCard('Total de O.S', linhas.length, false, { icon: '📁' })}
       </div>
+      <div class="section-heading">Por Cidade</div>
+      ${cidadePorOSPcr.size === 0 && !DB.producao.length ? '<p style="font-size:12px;color:var(--text-muted);margin:-4px 0 12px;line-height:1.5">Sem DB.producao nem CSV da PCR do dia importado — a cidade de cada O.S não foi encontrada, por isso tudo cai em "Não informado". Importe a Produção ou o CSV de atividades pra esse agrupamento funcionar.</p>' : ''}
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+        <th>Cidade</th><th>Certificadas</th><th>Não certificadas</th><th>Total</th><th>% certificado</th>
+      </tr></thead><tbody>
+        ${rankingCidade.map(c => `<tr><td class="cat-cell">${esc(c.nome)}</td><td>${c.certificadas}</td><td>${c.total - c.certificadas}</td><td style="font-weight:700">${c.total}</td><td>${formatPct(c.pct, 1)}</td></tr>`).join('')}
+      </tbody></table></div>
       ${!rankingTecnico.length ? '' : `
       <div class="section-heading">Técnicos com mais O.S não certificadas</div>
       <div class="panel" style="margin-bottom:1.5rem">
@@ -14975,9 +15006,9 @@ function renderCertificacoes() {
       </div>`}
       <div class="section-heading">Detalhe</div>
       <div class="table-wrap"><table class="data-table"><thead><tr>
-        <th>O.S</th><th>Contrato</th><th>Técnico</th><th>Cliente</th><th>Período</th><th>Status</th><th>Atendente</th><th>Horário Concluída</th><th>Horário Certificada</th><th>Tempo</th>
+        <th>O.S</th><th>Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th>Período</th><th>Status</th><th>Atendente</th><th>Horário Concluída</th><th>Horário Certificada</th><th>Tempo</th>
       </tr></thead><tbody>
-        ${linhas.map(l => `<tr><td>${esc(l.os)||'-'}</td><td>${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td>${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td>${esc(l.atendente)||'-'}</td><td>${esc(l.horarioConcluida)||'-'}</td><td>${esc(l.horarioCertificada)||'-'}</td><td>${esc(l.tempo)||'-'}</td></tr>`).join('')}
+        ${linhas.map(l => `<tr><td>${esc(l.os)||'-'}</td><td>${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td>${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td>${esc(l.atendente)||'-'}</td><td>${esc(l.horarioConcluida)||'-'}</td><td>${esc(l.horarioCertificada)||'-'}</td><td>${esc(l.tempo)||'-'}</td></tr>`).join('')}
       </tbody></table></div>`;
   }
 }
