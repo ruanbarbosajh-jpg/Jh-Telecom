@@ -14927,93 +14927,142 @@ function motivoDoPrazo(r) {
 }
 // ---------------------------------------------------------------------
 // CERTIFICAÇÕES (30/09/2026, pedido do cliente: "veja a possibilidade de
-// voce ler o google sheets e puxar os dados") — a ÚNICA tela do sistema que
-// lê um dado de FORA do Supabase, ao vivo, sem passar por "Importar Excel".
-// A planilha (Google Sheets, aba "CERTIFICAÇÕES") já está compartilhada
-// como "qualquer pessoa com o link" — por isso dá pra baixar o CSV público
-// dela direto do navegador (`/export?format=csv&gid=...`), sem login e sem
-// chave de API (testado: `fetch(..., {credentials:'omit'})` funciona igual
-// pra qualquer visitante, mesmo sem estar logado numa conta Google). Mesmo
-// padrão de fetch externo que `geocodificarCleanUp` já usa pro Nominatim:
-// tenta, se falhar (sem internet, CORS, a planilha ficar privada, mudar de
-// endereço) explica na tela em vez de travar — nunca finge um número.
+// voce ler o google sheets e puxar os dados"; **corrigido no mesmo dia**,
+// pedido do cliente: "a certificacao precisa ser puxado da base
+// certificacoes... entao puxe de base certificacoes, e os dados dos
+// servicos puxe do csv importado") — a ÚNICA tela do sistema que lê um
+// dado de FORA do Supabase, ao vivo, sem passar por "Importar Excel". A
+// planilha está compartilhada como "qualquer pessoa com o link" — dá pra
+// baixar o CSV público dela direto do navegador (`/export?format=csv&gid=
+// ...`), sem login e sem chave de API. Mesmo padrão de fetch externo que
+// `geocodificarCleanUp` já usa pro Nominatim: tenta, se falhar (sem
+// internet, CORS, a planilha ficar privada) explica na tela em vez de
+// travar — nunca finge um número.
 //
-// Não fica em DB.*/Supabase de propósito: essa planilha já É a fonte viva,
-// atualizada o dia inteiro por quem certifica — guardar uma cópia no banco
-// só criaria uma segunda verdade que ficaria desatualizada até a próxima
-// importação manual. Cada abertura da tela busca o dado de novo (tem botão
-// "🔄 Atualizar" pra pedir de novo sem sair da tela).
+// **Por que NÃO lê mais da aba "CERTIFICAÇÕES"**: aquela aba tem uma
+// coluna calculada por FÓRMULA (o cliente mandou a fórmula de verdade:
+// `=SE(B25="";"";PROCX(B25;'BASE CERTIFICAÇÕES'!G:G;'BASE CERTIFICAÇÕES'!
+// U:U;"NÃO CERTIFICADA"))`), e fórmula do Google Sheets só recalcula
+// quando a planilha está ABERTA/em uso — o CSV exportado pode vir com o
+// valor de uma hora atrás. A "BASE CERTIFICAÇÕES" é a fonte BRUTA (uma
+// linha por certificação de verdade, sem fórmula por cima), então é dela
+// que saímos a ler. E os dados do SERVIÇO (O.S, técnico, cliente, cidade)
+// agora vêm do `DB.pcr` (o CSV diário já importado no sistema), não mais
+// da planilha externa — só o STATUS de certificação continua vindo de
+// fora.
 //
-// LEITURA POR POSIÇÃO DE COLUNA, não por nome do cabeçalho (diferente do
-// resto do sistema, que usa `col('nome da coluna')`): a planilha tem DUAS
-// colunas chamadas "Periodo" (a 2ª, na prática, é o status Certificada/Não
-// certificada — erro de rótulo de quem montou a planilha, não é coisa
-// nossa). Como duas colunas têm o MESMO nome, não dá pra achar a certa por
-// texto — por isso aqui a leitura é pela ORDEM das colunas (conferida
-// contra o CSV real em 30/09/2026: Ordem, Contrato, Técnico, Cliente,
-// Contato, Periodo, Status, Atendente, Certificada por, Horário concluída,
-// Horário Certificada, Tempo), a partir da linha que tem "Ordem" na coluna
-// B. **Se um dia reordenarem as colunas dessa planilha, só ESTA tela para
-// de bater** — o resto do sistema (importação por Excel) usa nome de
-// coluna e não é afetado.
-const CERTIFICACOES_CSV_URL = 'https://docs.google.com/spreadsheets/d/1-sGUvyI78cQnLnSJnHTrcpOs4TqOlr-WmXg4wuMC7aY/export?format=csv&gid=352045229';
-async function buscarCertificacoes() {
-  const res = await fetch(CERTIFICACOES_CSV_URL, { credentials: 'omit' });
+// Coluna G da Base Certificações = O.S (o rótulo da coluna está errado na
+// planilha do cliente — diz "NOME DO TÉCNICO", mas o dado é número de
+// O.S — confirmado contra a fórmula acima, que usa essa MESMA coluna como
+// chave de busca); coluna U = STATUS. Igual ao PROCX (sem modo de busca
+// configurado = pega a PRIMEIRA ocorrência de cima pra baixo), por isso
+// `buscarBaseCertificacoes` mantém só a primeira linha de cada O.S., não a
+// última. Gid descoberto na metadata pública da planilha
+// (`/htmlview`, campo "name") — não veio de adivinhação.
+const BASE_CERTIFICACOES_CSV_URL = 'https://docs.google.com/spreadsheets/d/1-sGUvyI78cQnLnSJnHTrcpOs4TqOlr-WmXg4wuMC7aY/export?format=csv&gid=147430900';
+async function buscarBaseCertificacoes() {
+  const res = await fetch(BASE_CERTIFICACOES_CSV_URL, { credentials: 'omit' });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const texto = await res.text();
   const linhas = parseCSV(texto);
-  const iHeader = linhas.findIndex(l => normalizeHeader(l[1]) === 'ordem');
-  if (iHeader < 0) throw new Error('não encontrei a linha "Ordem" nesse CSV — a planilha pode ter mudado de formato');
-  return linhas.slice(iHeader + 1).filter(l => (l[1] || '').trim() !== '').map(l => ({
-    os: (l[1] || '').trim(), contrato: (l[2] || '').trim(), tecnico: (l[3] || '').trim(),
-    cliente: (l[4] || '').trim(), contato: (l[5] || '').trim(), periodo: (l[6] || '').trim(),
-    certificada: /^certificada$/i.test((l[7] || '').trim()), statusTexto: (l[7] || '').trim(),
-    atendente: (l[8] || '').trim(), certificadaPor: (l[9] || '').trim(),
-    horarioConcluida: (l[10] || '').trim(), horarioCertificada: (l[11] || '').trim(), tempo: (l[12] || '').trim(),
-  }));
+  const iHeader = linhas.findIndex(l => l.some(c => normalizeHeader(c) === 'status'));
+  if (iHeader < 0) throw new Error('não encontrei a coluna "STATUS" na Base Certificações — a planilha pode ter mudado de formato');
+  const porOS = new Map();
+  for (let i = iHeader + 1; i < linhas.length; i++) {
+    const l = linhas[i];
+    const os = (l[6] || '').trim(); // coluna G
+    if (!os || porOS.has(os)) continue; // PROCX pega a 1ª ocorrência
+    porOS.set(os, {
+      status: (l[20] || '').trim(),          // coluna U
+      atendente: (l[4] || '').trim(),        // coluna E
+      certificadaPor: (l[17] || '').trim(),  // coluna R
+      dataHoraTexto: (l[1] || '').trim(),    // coluna B ("DD/MM/AAAA HH:MM:SS")
+    });
+  }
+  return porOS;
+}
+// "30/09/2026 09:44:14" -> Date. Formato fixo da coluna B da Base
+// Certificações, diferente do "DD/MM HH:MM" sem ano que `pcrParseAbertura`
+// já lê — por isso um parser próprio em vez de reaproveitar aquele.
+function parseDataHoraCertificacao(s) {
+  const m = String(s || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) return null;
+  return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0));
 }
 function renderCertificacoes() {
+  const diasComPcr = [...new Set(DB.pcr.map(r => r.data))].sort().reverse();
+  const dataPadrao = diasComPcr[0] || hojeISOLocal();
   document.getElementById('content').innerHTML = `
     <div class="toolbar">
-      <button class="btn" id="cert-atualizar">🔄 Atualizar</button>
+      <div class="field"><label>Data</label><input type="date" id="cert-data" value="${dataPadrao}"></div>
+      <button class="btn" id="f-apply">Filtrar</button>
+      <button class="btn secondary" id="cert-atualizar">🔄 Atualizar Base Certificações</button>
       <span id="cert-atualizado" style="font-size:12px;color:var(--text-muted)"></span>
     </div>
     <p style="font-size:12px;color:var(--text-secondary);margin:-0.5rem 0 1rem">
-      Dado ao vivo da planilha "PCR — Certificações" (Google Sheets) — não passa pelo "Importar Excel" nem fica salvo no sistema, é buscado de novo toda vez que essa tela abre ou você clica em Atualizar.
+      Status de certificação ao vivo da planilha "BASE CERTIFICAÇÕES" (Google Sheets, fonte bruta — não a aba "CERTIFICAÇÕES", que tem fórmula e pode atrasar); O.S, técnico, cliente e cidade vêm do CSV de atividades já importado na PCR. Não passa pelo "Importar Excel" nem fica salvo no sistema — é buscado de novo a cada "🔄 Atualizar".
+      <b>Tarefa do Escritório: exportar essa tabela pra Excel todo dia</b> (qualquer perfil com acesso também consegue, se precisar).
     </p>
     <div id="cert-body"><div class="panel"><div class="empty">Carregando…</div></div></div>`;
-  document.getElementById('cert-atualizar').addEventListener('click', load);
-  load();
-  async function load() {
+  let baseCert = null; // cache do Map já buscado — filtrar Data não pede a planilha de novo
+  document.getElementById('f-apply').addEventListener('click', render);
+  document.getElementById('cert-atualizar').addEventListener('click', () => load(true));
+  load(false);
+  async function load(forcarBusca) {
     const body = document.getElementById('cert-body');
-    body.innerHTML = '<div class="panel"><div class="empty">Carregando…</div></div>';
-    let linhas;
-    try {
-      linhas = await buscarCertificacoes();
-    } catch (e) {
-      // pode ter navegado pra outra tela enquanto a busca ainda estava no ar
-      // — sem essa checagem, a resposta tardia tentava escrever num #cert-body
-      // que já não existe mais no DOM ("Cannot set properties of null").
+    if (!baseCert || forcarBusca) {
+      body.innerHTML = '<div class="panel"><div class="empty">Carregando…</div></div>';
+      try {
+        baseCert = await buscarBaseCertificacoes();
+      } catch (e) {
+        // pode ter navegado pra outra tela enquanto a busca ainda estava no
+        // ar — sem essa checagem, a resposta tardia tentava escrever num
+        // #cert-body que já não existe mais no DOM.
+        if (!document.body.contains(body)) return;
+        body.innerHTML = `<div class="panel"><div class="empty">Não consegui buscar a Base Certificações agora (${esc(e.message)}). Confira sua internet e se a planilha continua compartilhada como "qualquer pessoa com o link pode ver", depois clique em "🔄 Atualizar".</div></div>`;
+        return;
+      }
       if (!document.body.contains(body)) return;
-      body.innerHTML = `<div class="panel"><div class="empty">Não consegui buscar a planilha agora (${esc(e.message)}). Confira sua internet e se a planilha continua compartilhada como "qualquer pessoa com o link pode ver", depois clique em "🔄 Atualizar".</div></div>`;
+      document.getElementById('cert-atualizado').textContent = 'Base Certificações atualizada às ' + new Date().toLocaleTimeString('pt-BR') + ` (${baseCert.size.toLocaleString('pt-BR')} O.S no histórico)`;
+    }
+    render();
+  }
+  function render() {
+    const body = document.getElementById('cert-body');
+    if (!baseCert) return;
+    const data = document.getElementById('cert-data').value || dataPadrao;
+    // Universo de serviços: O.S CONCLUÍDA do CSV da PCR nesse dia — só ordem
+    // finalizada entra no fluxo de certificação (a Base Certificações é um
+    // log de pós-atendimento, não faria sentido cobrar certificação de
+    // ordem ainda pendente/em rota).
+    const rowsDoDia = DB.pcr.filter(r => r.data === data && isConcluido(r.status));
+    if (!rowsDoDia.length) {
+      body.innerHTML = `<div class="panel"><div class="empty">Nenhuma O.S concluída em ${formatDate(data)} no CSV da PCR. Importe o CSV de atividades desse dia na tela PCR pra essa tela ter o que cruzar com a Base Certificações.</div></div>`;
       return;
     }
-    if (!document.body.contains(body)) return; // mesma guarda pro caminho de sucesso
-    document.getElementById('cert-atualizado').textContent = 'Atualizado às ' + new Date().toLocaleTimeString('pt-BR');
-    // A planilha de Certificações NÃO tem coluna de Cidade — cruza a O.S com
-    // DB.producao (planilha, mais estável) e, se não achar, com DB.pcr (CSV
-    // do dia, ver `cidadePorOSPcr`) pra descobrir de onde é aquela ordem.
-    // Sem nenhuma das duas importadas, cai em "Não informado" — não trava,
-    // só não sabe agrupar (30/09/2026, pedido do cliente: "mostre por
-    // cidade tambem a % e total").
-    const cidadePorOSPcr = new Map();
-    DB.pcr.forEach(r => { if (r.os && r.cidade) cidadePorOSPcr.set(r.os, r.cidade); });
-    const cidadeDeOS = os => {
-      const idxProd = os ? DB_INDEX.producao.get(os) : undefined;
-      const cidProd = idxProd !== undefined ? DB.producao[idxProd].cidade : '';
-      return cidProd || cidadePorOSPcr.get(os) || 'Não informado';
+    const agora = new Date();
+    const tempoEntre = (de, ate) => {
+      if (!de || !ate) return '-';
+      const min = Math.round((ate - de) / 60000);
+      if (min < 0) return '-';
+      return min < 60 ? `${min}min` : `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}min`;
     };
-    linhas.forEach(l => { l.cidade = cidadeDeOS(l.os); });
+    const fmtHora = d => d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '-';
+    const linhas = rowsDoDia.map(r => {
+      const m = r.os ? baseCert.get(r.os) : undefined;
+      const statusTexto = m ? m.status : 'NÃO CERTIFICADA'; // mesmo padrão do 4º argumento do PROCX
+      const certificada = /^certificada$/i.test(statusTexto);
+      const dataHoraCert = m ? parseDataHoraCertificacao(m.dataHoraTexto) : null;
+      return {
+        os: r.os, contrato: r.contrato, tecnico: r.recurso, cliente: r.cliente,
+        cidade: r.cidade || 'Não informado', periodo: r.periodo || '-',
+        certificada, statusTexto,
+        atendente: m ? m.atendente : '', certificadaPor: m ? m.certificadaPor : '',
+        horarioConcluida: fmtHora(r.encerramento),
+        horarioCertificada: dataHoraCert ? fmtHora(dataHoraCert) : '-',
+        tempo: certificada ? tempoEntre(r.encerramento, dataHoraCert) : tempoEntre(r.encerramento, agora),
+      };
+    });
     const certificadas = linhas.filter(l => l.certificada);
     const naoCertificadas = linhas.filter(l => !l.certificada);
     const pct = linhas.length ? (certificadas.length / linhas.length) * 100 : 0;
@@ -15066,7 +15115,6 @@ function renderCertificacoes() {
         </div>
       </div>
       <div class="section-heading">Por Cidade</div>
-      ${cidadePorOSPcr.size === 0 && !DB.producao.length ? '<p style="font-size:12px;color:var(--text-muted);margin:-4px 0 12px;line-height:1.5">Sem DB.producao nem CSV da PCR do dia importado — a cidade de cada O.S não foi encontrada, por isso tudo cai em "Não informado". Importe a Produção ou o CSV de atividades pra esse agrupamento funcionar.</p>' : ''}
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
         <th>Cidade</th><th>Certificadas</th><th>Não certificadas</th><th>Total</th><th>% certificado</th>
       </tr></thead><tbody>
@@ -15077,15 +15125,23 @@ function renderCertificacoes() {
       <div class="panel" style="margin-bottom:1.5rem">
         ${tabelaRankingReuniao(rankingTecnico.map(t => ({ nome: t.nome, valor: `${t.qtd} O.S` })), { rotuloNome: 'Técnico', rotuloValor: 'Não certificadas', vazio: 'Nenhuma.' })}
       </div>`}
-      <div class="section-heading" id="cert-detalhe-heading">Detalhe</div>
-      <div class="table-wrap"><table class="data-table"><thead><tr>
-        <th>O.S</th><th>Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th>Período</th><th>Status</th><th>Atendente</th><th>Horário Concluída</th><th>Horário Certificada</th><th>Tempo</th>
+      <div class="section-heading" id="cert-detalhe-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span>Detalhe</span>
+        <button type="button" class="btn-export-xls" id="cert-export">⤓ Excel</button>
+      </div>
+      <div class="table-wrap"><table class="data-table" id="tab-certificacoes-detalhe"><thead><tr>
+        <th>O.S</th><th>Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th>Período</th><th>Status</th><th>Atendente</th><th>Certificada por</th><th>Horário Concluída</th><th>Horário Certificada</th><th>Tempo</th>
       </tr></thead><tbody>
-        ${linhas.map(l => `<tr><td>${esc(l.os)||'-'}</td><td>${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td>${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td>${esc(l.atendente)||'-'}</td><td>${esc(l.horarioConcluida)||'-'}</td><td>${esc(l.horarioCertificada)||'-'}</td><td>${esc(l.tempo)||'-'}</td></tr>`).join('')}
+        ${linhas.map(l => `<tr><td>${esc(l.os)||'-'}</td><td>${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td>${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td>${esc(l.atendente)||'-'}</td><td>${esc(l.certificadaPor)||'-'}</td><td>${esc(l.horarioConcluida)}</td><td>${esc(l.horarioCertificada)}</td><td>${esc(l.tempo)}</td></tr>`).join('')}
       </tbody></table></div>`;
     const verLista = document.getElementById('cert-ver-lista');
     if (verLista) verLista.addEventListener('click', () => {
       document.getElementById('cert-detalhe-heading').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    const btnExport = document.getElementById('cert-export');
+    if (btnExport) btnExport.addEventListener('click', () => {
+      const r = exportarTabelaVisivel(document.getElementById('tab-certificacoes-detalhe'), 'certificacoes-' + data);
+      if (r) avisoBotao(btnExport, `⤓ ${r.linhas} linha(s)`, '⤓ Excel');
     });
     ativarBotoesImagem(body);
   }
