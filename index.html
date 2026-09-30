@@ -1067,6 +1067,10 @@
 
   .panels-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 1.5rem; }
   .panels-grid.thirds { grid-template-columns: 1fr 1fr 1fr; }
+  /* Filtro manhã/tarde/ambos da Reunião Técnica (seção 4, 30/09/2026) — com só
+     um painel visível (display:none no outro), 1 coluna só evita sobrar metade
+     da grade vazia. */
+  .panels-grid.periodo-um-so { grid-template-columns: 1fr; }
   @media (max-width: 1000px) { .panels-grid, .panels-grid.thirds { grid-template-columns: 1fr; } }
   .panel { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; min-width: 0; }
   /* #fff fixo sumia no tema claro (título branco em painel branco) */
@@ -15412,6 +15416,12 @@ function horaDeDecimal(dec) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 function renderReuniaoPrazos() {
+  // "Mostrar N" da tabela "Técnicos que mais começam tarde" (30/09/2026,
+  // pedido do cliente: "quero que tenha a opção para ver todos os
+  // técnicos") — antes vinha sempre cortada em 10 (`.slice(0,10)`) sem jeito
+  // de ver o resto. Mesmo padrão de `limitePed`/`limiteProd`: variável fora
+  // do load(), o select troca e chama load() de novo.
+  let mostrarTecnicosTarde = 10;
   const { start, end } = defaultMonthPeriod();
   document.getElementById('content').innerHTML = `${periodToolbar(start, end, `
     ${multiCityField('reu-cidades', 'Cidades', { preset: CIDADES_COBRADAS_PRAZO })}
@@ -15563,8 +15573,9 @@ function renderReuniaoPrazos() {
     });
     const mediaHora = o => o.soma / o.dias;
     const cidadesInicio = Object.values(inicioPorCidade).sort((a, b) => mediaHora(b) - mediaHora(a));
-    const tecnicosTarde = Object.values(inicioPorTecnico).filter(t => t.dias >= 3)
-      .sort((a, b) => mediaHora(b) - mediaHora(a)).slice(0, 10);
+    const tecnicosTardeTodos = Object.values(inicioPorTecnico).filter(t => t.dias >= 3)
+      .sort((a, b) => mediaHora(b) - mediaHora(a));
+    const tecnicosTarde = mostrarTecnicosTarde === 'todos' ? tecnicosTardeTodos : tecnicosTardeTodos.slice(0, mostrarTecnicosTarde);
 
     // ---------- BASE 3: RETORNOS (DB.producao — IFI/IRR) ----------
     const prodPeriodo = DB.producao.filter(p => inRange(p.data, s, e) && cidadeOk(p.cidade));
@@ -15700,19 +15711,25 @@ function renderReuniaoPrazos() {
         })), { rotuloNome: 'Cidade', rotuloValor: '% fora do prazo', rotuloSub: '% no prazo' })}
       </div>
 
-      <div class="section-heading">4. Período ofensor de prazo</div>
+      <div class="section-heading" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">4. Período ofensor de prazo
+        <select class="topn-select" id="reu-periodo-filtro">
+          <option value="ambos">Manhã e tarde</option>
+          <option value="manha">Só manhã</option>
+          <option value="tarde">Só tarde</option>
+        </select>
+      </div>
       ${nota('Período definido pela hora do TEMPO LIMITE da ordem — antes das 12h conta como manhã, a partir das 12h como tarde.')}
       <div class="cards-grid">
         ${metricCard('Perdas de prazo ocorridas na manhã', totalPeriodo ? formatPct((contaPeriodo.manha / totalPeriodo) * 100, 1) : '-', periodoPior === 'manha', { big: true })}
         ${metricCard('Perdas de prazo ocorridas na tarde', totalPeriodo ? formatPct((contaPeriodo.tarde / totalPeriodo) * 100, 1) : '-', periodoPior === 'tarde', { big: true })}
         ${metricCard('Período que mais perde prazo', totalPeriodo ? rotuloPeriodo(periodoPior) : '-', true, { big: true, nivel: 'heroi' })}
       </div>
-      <div class="panels-grid" style="margin-bottom:1.5rem">
-        <div class="panel">
+      <div class="panels-grid" style="margin-bottom:1.5rem" id="reu-periodo-panels">
+        <div class="panel" data-periodo="manha">
           <h3>Técnicos ofensores da manhã${periodoPior === 'manha' ? ' <span class="badge warn" style="font-size:10px;vertical-align:middle">pior período</span>' : ''}</h3>
           ${tabelaRankingReuniao(rankManha.map(itemOfensorPeriodo), { rotuloNome: 'Técnico', rotuloValor: '% das perdas da manhã', vazio: 'Sem ordens fora do prazo pela manhã.' })}
         </div>
-        <div class="panel">
+        <div class="panel" data-periodo="tarde">
           <h3>Técnicos ofensores da tarde${periodoPior === 'tarde' ? ' <span class="badge warn" style="font-size:10px;vertical-align:middle">pior período</span>' : ''}</h3>
           ${tabelaRankingReuniao(rankTarde.map(itemOfensorPeriodo), { rotuloNome: 'Técnico', rotuloValor: '% das perdas da tarde', vazio: 'Sem ordens fora do prazo à tarde.' })}
         </div>
@@ -15738,7 +15755,14 @@ function renderReuniaoPrazos() {
         })), { rotuloNome: 'Cidade', rotuloValor: 'Início médio' })}
       </div>
       <div class="panel" style="margin-bottom:1.5rem">
-        <h3>Técnicos que mais começam tarde</h3>
+        <h3 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Técnicos que mais começam tarde
+          <select class="topn-select" id="reu-tec-tarde-mostrar">
+            <option value="10"${mostrarTecnicosTarde===10?' selected':''}>Top 10</option>
+            <option value="20"${mostrarTecnicosTarde===20?' selected':''}>Top 20</option>
+            <option value="50"${mostrarTecnicosTarde===50?' selected':''}>Top 50</option>
+            <option value="todos"${mostrarTecnicosTarde==='todos'?' selected':''}>Todos (${tecnicosTardeTodos.length})</option>
+          </select>
+        </h3>
         ${nota('Só técnicos com 3 ou mais dias medidos no período.')}
         ${tabelaRankingReuniao(tecnicosTarde.map(t => ({
           nome: t.nome, valor: horaDeDecimal(mediaHora(t)), sub: `${t.dias} dia(s) medidos`,
@@ -15816,6 +15840,31 @@ function renderReuniaoPrazos() {
     `;
     ativarTogglesDeSecao(body);
     ativarBotoesImagem(body);
+    const selTecTarde = document.getElementById('reu-tec-tarde-mostrar');
+    if (selTecTarde) selTecTarde.addEventListener('change', () => {
+      mostrarTecnicosTarde = selTecTarde.value === 'todos' ? 'todos' : parseInt(selTecTarde.value, 10);
+      load();
+    });
+    // Filtro leve manhã/tarde/ambos da seção 4 (30/09/2026, pedido do
+    // cliente: "quero que tenha um leve filtro para manha ou tarde ou os
+    // dois") — só esconde/mostra os painéis já calculados (rankManha/
+    // rankTarde ficam os dois prontos o tempo todo), não refaz `load()`: é
+    // mais leve e o valor do `<select>` sobrevive ao `restaurarFiltros`
+    // igual qualquer outro filtro simples da tela (input[id]/select[id]).
+    const selPeriodoOfensor = document.getElementById('reu-periodo-filtro');
+    if (selPeriodoOfensor) {
+      const aplicarFiltroPeriodoOfensor = () => {
+        const v = selPeriodoOfensor.value;
+        const grid = document.getElementById('reu-periodo-panels');
+        if (!grid) return;
+        grid.classList.toggle('periodo-um-so', v !== 'ambos');
+        grid.querySelectorAll('[data-periodo]').forEach(p => {
+          p.style.display = (v === 'ambos' || p.dataset.periodo === v) ? '' : 'none';
+        });
+      };
+      selPeriodoOfensor.addEventListener('change', aplicarFiltroPeriodoOfensor);
+      aplicarFiltroPeriodoOfensor();
+    }
 
     // O .pptx recebe os números JÁ CALCULADOS aqui — nunca recalcula por conta
     // própria, senão o slide e a tela poderiam divergir.
