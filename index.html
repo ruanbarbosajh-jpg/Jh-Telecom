@@ -15673,6 +15673,13 @@ function renderReuniaoPrazos() {
     const cidadesOrdensApos18h = Object.entries(qtdApos18hPorCidade)
       .map(([nome, qtd]) => ({ nome, qtd, totalDia: qtdTotalPorCidade[nome] || qtd }))
       .sort((a, b) => b.qtd - a.qtd || a.nome.localeCompare(b.nome, 'pt-BR'));
+    // `fim_real` é campo NOVO (30/09/2026) — dia importado ANTES dessa
+    // mudança não tem esse valor gravado, e sem o PASSO-29 rodado no
+    // Supabase ele nem persiste no banco pra quem importou depois. Sem essa
+    // checagem, o bloco inteiro de "após 18h" some silenciosamente quando
+    // ninguém reimportou ainda (achado testando com dado real do cliente:
+    // os painéis simplesmente não apareciam, sem explicar o motivo).
+    const temFimReal = pcrTodos.some(r => r.fim_real);
 
     // ---------- BASE 3: RETORNOS (DB.producao — IFI/IRR) ----------
     const prodPeriodo = DB.producao.filter(p => inRange(p.data, s, e) && cidadeOk(p.cidade));
@@ -15865,7 +15872,10 @@ function renderReuniaoPrazos() {
           nome: t.nome, valor: horaDeDecimal(mediaHora(t)), sub: `${t.dias} dia(s) medidos`,
         })), { rotuloNome: 'Técnico', rotuloValor: 'Início médio', rotuloSub: 'Amostra', vazio: 'Nenhum técnico com 3+ dias medidos nesse período.' })}
       </div>
-      ${!conclusoesDoDia.length ? '' : `
+      ${!temFimReal ? `
+      <div class="panel" style="margin-bottom:1.5rem">
+        <div class="empty">Nenhuma ordem desse período tem a hora de "Fim" no formato novo (<code>fim_real</code>) — os painéis de "após as 18h" precisam que o CSV de atividades seja <strong>reimportado</strong> na tela PCR (o campo só existe em dado reimportado a partir de 30/09/2026). Se o Supabase ainda não rodou o <code>PASSO-29-pcr-fim-real.sql</code>, reimportar também não vai persistir esse campo pros outros usuários — só pra quem importou, na própria sessão.</div>
+      </div>` : `
       <div class="panel" style="margin-bottom:1.5rem">
         <h3>Por cidade — mais ordens concluídas após as 18h</h3>
         ${nota('Concluído e Não Concluído contam — o que importa é que o técnico fechou a ordem depois das 18h, não se deu certo.')}
