@@ -7229,6 +7229,14 @@ function guardarFiltros(rota) {
     if (el.type === 'file' || el.type === 'button') return;
     // campo de M.O da PCR e afins não são filtro — só guarda o que está na barra
     if (el.classList.contains('mo-edit')) return;
+    // "Já visitada, dada improdutiva" do Mapa por Bairro (30/09/2026, pedido do
+    // cliente: "nao quero que tenha essa seleção... quero que ela fique ativa
+    // por padrao") — sem essa exclusão, desmarcar uma vez ficava "lembrado"
+    // (mesma memória genérica de filtro) e a próxima vez que a pessoa abrisse a
+    // PCR/Parcial do Dia o mapa nascia SEM destacar quem já foi visitado, sem
+    // ela ter mexido em nada naquela sessão. Agora sempre nasce marcado (o
+    // `checked` fixo no HTML), do jeito que o cliente quer.
+    if (el.id === 'pd-mapa-revisita-check') return;
     memoria[el.id] = el.type === 'checkbox' || el.type === 'radio' ? el.checked : el.value;
   });
   // seleção de cidades (caixas dentro do painel, sem id próprio)
@@ -11732,6 +11740,14 @@ function abrirPainelTecnico(tecnico, rows, retornos, dia) {
 function renderPCR() {
   if (PCR_LIVE_TIMER) { clearInterval(PCR_LIVE_TIMER); PCR_LIVE_TIMER = null; }
   const dias = [...new Set(DB.pcr.map(r => r.data))].sort().reverse();
+  // Card "Última importação" ao lado do filtro (30/09/2026, pedido do
+  // cliente: "no topo da pcr ao lado dos filtro deixe um card mostrando
+  // quando foi a ultima importação") — é o carimbo mais recente de TODO o
+  // PCR (`ultimaAtualizacaoPCR()` sem dia = sem filtrar), não só do dia
+  // selecionado no filtro; a linha de texto `#pcr-atualizado` logo abaixo da
+  // barra já existia, mas só mostra a atualização do DIA escolhido — esse
+  // card dá o resumo geral sem precisar escolher um dia primeiro.
+  const ultimaGeral = ultimaAtualizacaoPCR();
   document.getElementById('content').innerHTML = `
     <div class="toolbar">
       <div class="field"><label>Arquivo CSV de atividades</label><input type="file" id="pcr-file" accept=".csv,text/csv"></div>
@@ -11740,6 +11756,7 @@ function renderPCR() {
         <option value="">Manhã e tarde</option><option value="MANHÃ">Só manhã</option><option value="TARDE">Só tarde</option>
       </select></div>` : ''}
       ${dias.length ? '<button class="btn" id="pcr-apply">Filtrar</button>' : ''}
+      ${ultimaGeral ? metricCard('Última importação (geral)', fmtDataHoraCompleta(ultimaGeral.quando), false, { nivel: 'compacto', sub: tempoDesde(ultimaGeral.quando) + (ultimaGeral.quem ? ' · ' + ultimaGeral.quem : ''), }) : ''}
     </div>
     <p id="pcr-msg" style="font-size:13px;color:var(--text-secondary);margin:0 0 6px"></p>
     <p id="pcr-atualizado" style="font-size:13px;margin:0 0 1rem"></p>
@@ -12250,7 +12267,7 @@ function renderPCR() {
 
       ${htmlMapaOS(mapaOS)}
 
-      <div class="section-heading">Histórico de Importações do CSV</div>
+      <div class="section-heading" id="pcr-hist-titulo">Histórico de Importações do CSV</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
         Um registro por dia importado. Clique no dia para abrir a PCR dele. Reimportar o mesmo dia atualiza a linha em vez de criar outra.
       </p>
@@ -12275,6 +12292,14 @@ function renderPCR() {
     // ---- ocultar/reexibir cada tabela da página ----
     ativarTogglesDeSecao(document.getElementById('pcr-body'));
     ativarBotoesImagem(document.getElementById('pcr-body'));
+    // "Histórico de Importações do CSV" nasce OCULTO (30/09/2026, pedido do
+    // cliente: "mantem oculto") — mesmo truque do "Informações complementares"
+    // do Dashboard: clica programaticamente no próprio botão "▾ ocultar" que
+    // `ativarTogglesDeSecao` acabou de criar, então continua sendo o MESMO
+    // botão que o usuário usa pra reabrir (não é um `display:none` à parte).
+    const tituloHistPcr = document.getElementById('pcr-hist-titulo');
+    const btnHistPcr = tituloHistPcr && tituloHistPcr.querySelector('.secao-toggle');
+    if (btnHistPcr) btnHistPcr.click();
 
     // ---- exportações (sempre respeitando o que o filtro deixou na tela) ----
     const aviso = (btn, txt, original) => { btn.textContent = txt; setTimeout(() => { btn.textContent = original; }, 2500); };
@@ -15422,6 +15447,8 @@ function renderReuniaoPrazos() {
   // de ver o resto. Mesmo padrão de `limitePed`/`limiteProd`: variável fora
   // do load(), o select troca e chama load() de novo.
   let mostrarTecnicosTarde = 10;
+  // Mesma ideia, pra "Técnicos que mais terminam a ordem tarde" (30/09/2026).
+  let mostrarTecnicosFimTarde = 10;
   const { start, end } = defaultMonthPeriod();
   document.getElementById('content').innerHTML = `${periodToolbar(start, end, `
     ${multiCityField('reu-cidades', 'Cidades', { preset: CIDADES_COBRADAS_PRAZO })}
@@ -15576,6 +15603,31 @@ function renderReuniaoPrazos() {
     const tecnicosTardeTodos = Object.values(inicioPorTecnico).filter(t => t.dias >= 3)
       .sort((a, b) => mediaHora(b) - mediaHora(a));
     const tecnicosTarde = mostrarTecnicosTarde === 'todos' ? tecnicosTardeTodos : tecnicosTardeTodos.slice(0, mostrarTecnicosTarde);
+
+    // horário em que cada técnico TERMINA o dia (maior encerramento do dia
+    // dele) — 30/09/2026, pedido do cliente: "quero que tambem tenha os
+    // tecnicos que mais terminam a ordem tarde e por cidade tambem". Mesma
+    // ideia do "início do dia" acima, espelhada: `primeiroDoDia` pegava o
+    // MENOR `inicio`; aqui pega o MAIOR `encerramento`. `encerramento` só
+    // existe em ordem CONCLUÍDA (regra confirmada — ver §3 do repasse), por
+    // isso o filtro é `isConcluido`, não o `comecouDeVerdade` do início (que
+    // cobre também quem começou mas não terminou).
+    const ultimoDoDia = {};
+    pcrTodos.forEach(r => {
+      if (!r.encerramento || !r.recurso || !isConcluido(r.status)) return;
+      const k = `${r.recurso}|${r.data}`;
+      if (!ultimoDoDia[k] || r.encerramento > ultimoDoDia[k].encerramento) ultimoDoDia[k] = r;
+    });
+    const fins = Object.values(ultimoDoDia).map(r => ({ ...r, hora: r.encerramento.getHours() + r.encerramento.getMinutes() / 60 }));
+    const fimPorCidade = {}, fimPorTecnico = {};
+    fins.forEach(r => {
+      acumula(fimPorCidade, r.cidade || 'Não informado', r.hora);
+      acumula(fimPorTecnico, r.recurso, r.hora);
+    });
+    const cidadesFim = Object.values(fimPorCidade).sort((a, b) => mediaHora(b) - mediaHora(a));
+    const tecnicosFimTardeTodos = Object.values(fimPorTecnico).filter(t => t.dias >= 3)
+      .sort((a, b) => mediaHora(b) - mediaHora(a));
+    const tecnicosFimTarde = mostrarTecnicosFimTarde === 'todos' ? tecnicosFimTardeTodos : tecnicosFimTardeTodos.slice(0, mostrarTecnicosFimTarde);
 
     // ---------- BASE 3: RETORNOS (DB.producao — IFI/IRR) ----------
     const prodPeriodo = DB.producao.filter(p => inRange(p.data, s, e) && cidadeOk(p.cidade));
@@ -15745,8 +15797,8 @@ function renderReuniaoPrazos() {
         })), { rotuloNome: 'Motivo da baixa', rotuloValor: '% das perdas', rotuloSub: 'Principais técnicos envolvidos (top 3)', vazio: 'Nenhum motivo encontrado — confira se a BASE PRODUÇÃO foi importada.' })}
       </div>
 
-      <div class="section-heading">6. Horário de início do dia</div>
-      ${nota('Hora média do primeiro início do dia de cada técnico.')}
+      <div class="section-heading">6. Horário de início e término do dia</div>
+      ${nota('Hora média do primeiro início e do último encerramento do dia de cada técnico.')}
       ${!inicios.length ? '<div class="panel"><div class="empty">Sem hora de início registrada no PCR desse período.</div></div>' : `
       <div class="panel" style="margin-bottom:1.5rem">
         <h3>Por cidade — do mais tarde pro mais cedo</h3>
@@ -15767,7 +15819,28 @@ function renderReuniaoPrazos() {
         ${tabelaRankingReuniao(tecnicosTarde.map(t => ({
           nome: t.nome, valor: horaDeDecimal(mediaHora(t)), sub: `${t.dias} dia(s) medidos`,
         })), { rotuloNome: 'Técnico', rotuloValor: 'Início médio', rotuloSub: 'Amostra', vazio: 'Nenhum técnico com 3+ dias medidos nesse período.' })}
-      </div>`}
+      </div>
+      ${!fins.length ? '' : `
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3>Por cidade — quem mais atrasa a conclusão</h3>
+        ${tabelaRankingReuniao(cidadesFim.map(c => ({
+          nome: c.nome, valor: horaDeDecimal(mediaHora(c)),
+        })), { rotuloNome: 'Cidade', rotuloValor: 'Término médio' })}
+      </div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Técnicos que mais terminam tarde
+          <select class="topn-select" id="reu-tec-fim-tarde-mostrar">
+            <option value="10"${mostrarTecnicosFimTarde===10?' selected':''}>Top 10</option>
+            <option value="20"${mostrarTecnicosFimTarde===20?' selected':''}>Top 20</option>
+            <option value="50"${mostrarTecnicosFimTarde===50?' selected':''}>Top 50</option>
+            <option value="todos"${mostrarTecnicosFimTarde==='todos'?' selected':''}>Todos (${tecnicosFimTardeTodos.length})</option>
+          </select>
+        </h3>
+        ${nota('Só técnicos com 3 ou mais dias medidos no período. Encerramento só existe em ordem CONCLUÍDA.')}
+        ${tabelaRankingReuniao(tecnicosFimTarde.map(t => ({
+          nome: t.nome, valor: horaDeDecimal(mediaHora(t)), sub: `${t.dias} dia(s) medidos`,
+        })), { rotuloNome: 'Técnico', rotuloValor: 'Término médio', rotuloSub: 'Amostra', vazio: 'Nenhum técnico com 3+ dias medidos nesse período.' })}
+      </div>`}`}
 
       <div class="section-heading">7. Retornos — % de serviço que volta</div>
       ${nota('IFI ÷ ativações + M.E · IRR ÷ reparos · retorno lançado no ofensor.')}
@@ -15843,6 +15916,11 @@ function renderReuniaoPrazos() {
     const selTecTarde = document.getElementById('reu-tec-tarde-mostrar');
     if (selTecTarde) selTecTarde.addEventListener('change', () => {
       mostrarTecnicosTarde = selTecTarde.value === 'todos' ? 'todos' : parseInt(selTecTarde.value, 10);
+      load();
+    });
+    const selTecFimTarde = document.getElementById('reu-tec-fim-tarde-mostrar');
+    if (selTecFimTarde) selTecFimTarde.addEventListener('change', () => {
+      mostrarTecnicosFimTarde = selTecFimTarde.value === 'todos' ? 'todos' : parseInt(selTecFimTarde.value, 10);
       load();
     });
     // Filtro leve manhã/tarde/ambos da seção 4 (30/09/2026, pedido do
