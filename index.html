@@ -15449,6 +15449,11 @@ function renderReuniaoPrazos() {
   let mostrarTecnicosTarde = 10;
   // Mesma ideia, pra "Técnicos que mais terminam a ordem tarde" (30/09/2026).
   let mostrarTecnicosFimTarde = 10;
+  // "dos tecnicos que terminam tarde quero os que sao de 18h pra mais"
+  // (30/09/2026, pedido do cliente) — corte por HORÁRIO (não por quantidade,
+  // que já é o que o select de cima faz), ativo por padrão porque foi assim
+  // que ele pediu.
+  let filtroFimTarde18h = true;
   const { start, end } = defaultMonthPeriod();
   document.getElementById('content').innerHTML = `${periodToolbar(start, end, `
     ${multiCityField('reu-cidades', 'Cidades', { preset: CIDADES_COBRADAS_PRAZO })}
@@ -15625,8 +15630,12 @@ function renderReuniaoPrazos() {
       acumula(fimPorTecnico, r.recurso, r.hora);
     });
     const cidadesFim = Object.values(fimPorCidade).sort((a, b) => mediaHora(b) - mediaHora(a));
-    const tecnicosFimTardeTodos = Object.values(fimPorTecnico).filter(t => t.dias >= 3)
+    // "Todos"/Top N do select conta em cima do que sobrou DEPOIS do corte de
+    // horário — os dois filtros (horário e quantidade) se combinam, não se
+    // substituem.
+    const tecnicosFimTardeAntesDoCorte = Object.values(fimPorTecnico).filter(t => t.dias >= 3)
       .sort((a, b) => mediaHora(b) - mediaHora(a));
+    const tecnicosFimTardeTodos = filtroFimTarde18h ? tecnicosFimTardeAntesDoCorte.filter(t => mediaHora(t) >= 18) : tecnicosFimTardeAntesDoCorte;
     const tecnicosFimTarde = mostrarTecnicosFimTarde === 'todos' ? tecnicosFimTardeTodos : tecnicosFimTardeTodos.slice(0, mostrarTecnicosFimTarde);
 
     // ---------- BASE 3: RETORNOS (DB.producao — IFI/IRR) ----------
@@ -15835,6 +15844,9 @@ function renderReuniaoPrazos() {
             <option value="50"${mostrarTecnicosFimTarde===50?' selected':''}>Top 50</option>
             <option value="todos"${mostrarTecnicosFimTarde==='todos'?' selected':''}>Todos (${tecnicosFimTardeTodos.length})</option>
           </select>
+          <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;font-weight:400;color:var(--text-secondary);cursor:pointer">
+            <input type="checkbox" id="reu-tec-fim-18h"${filtroFimTarde18h?' checked':''}>Só a partir das 18h
+          </label>
         </h3>
         ${nota('Só técnicos com 3 ou mais dias medidos no período. Encerramento só existe em ordem CONCLUÍDA.')}
         ${tabelaRankingReuniao(tecnicosFimTarde.map(t => ({
@@ -15921,6 +15933,11 @@ function renderReuniaoPrazos() {
     const selTecFimTarde = document.getElementById('reu-tec-fim-tarde-mostrar');
     if (selTecFimTarde) selTecFimTarde.addEventListener('change', () => {
       mostrarTecnicosFimTarde = selTecFimTarde.value === 'todos' ? 'todos' : parseInt(selTecFimTarde.value, 10);
+      load();
+    });
+    const chkFimTarde18h = document.getElementById('reu-tec-fim-18h');
+    if (chkFimTarde18h) chkFimTarde18h.addEventListener('change', () => {
+      filtroFimTarde18h = chkFimTarde18h.checked;
       load();
     });
     // Filtro leve manhã/tarde/ambos da seção 4 (30/09/2026, pedido do
