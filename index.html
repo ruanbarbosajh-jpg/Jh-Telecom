@@ -10385,6 +10385,11 @@ function capturarElementoComoImagem(elemento, nomeArquivo, aoTerminar) {
       // visível na tela no momento do clique.
       clone.querySelectorAll('.pzand-topo').forEach(el => el.remove());
       clone.querySelectorAll('.pzand-caixa-rolavel').forEach(el => { el.style.maxHeight = 'none'; el.style.overflowY = 'visible'; });
+      // Genéricos (01/10/2026): `.fora-da-imagem` = controle de tela que não
+      // entra na imagem (ex.: "Importar CSV"/"Exportar Excel" do Pedágio do Dia);
+      // `.rolagem-inteira-na-imagem` = caixa com rolagem própria que sai inteira.
+      clone.querySelectorAll('.fora-da-imagem').forEach(el => el.remove());
+      clone.querySelectorAll('.rolagem-inteira-na-imagem').forEach(el => { el.style.maxHeight = 'none'; el.style.overflowY = 'visible'; });
     },
   }).then(cv => {
     limpar();
@@ -16647,14 +16652,21 @@ function htmlPedagioDoDia() {
         <div class="stat-sub">${qtdMes} passagem(ns) em ${doMes.length} dia(s)</div>
       </div>
     </div>` : '<div class="empty">Nenhuma passagem importada ainda — importe o CSV "Detalhamento de Passagens" da Edenred.</div>'}
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0 0">
+    <div class="fora-da-imagem" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0 0">
       <label class="btn" for="ped-csv-file" style="cursor:pointer">📥 Importar CSV (Edenred)</label>
       <input type="file" id="ped-csv-file" accept=".csv,text/csv" multiple hidden>
       <button type="button" class="btn-export-xls" id="ped-exportar-planilha">⤓ Exportar planilha (Excel)</button>
       <span id="ped-csv-status" style="font-size:12px;color:var(--text-muted)">Importe o CSV do dia; pode mandar vários de uma vez (repetido não duplica).</span>
     </div>
     <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0">O CSV da Edenred não traz o saldo da conta nem as recargas — só as passagens. Por isso o card mostra quanto foi GASTO no dia.</p>
-    ${linhasHist ? `<div class="table-wrap" style="margin-top:14px;max-height:360px;overflow-y:auto"><table class="data-table" id="ped-hist-dia"><thead><tr><th>Data</th><th>Passagens</th><th>Gasto do dia</th><th>vs dia anterior</th></tr></thead><tbody>${linhasHist}</tbody></table></div>` : ''}
+    ${linhasHist ? `<div id="ped-hist-topo" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:16px 0 8px">
+      <span style="font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)">Gasto por dia</span>
+      <!-- classe própria, NÃO .secao-toggle/.gerar-imagem-btn: com essas o
+           ativarTogglesDeSecao/ativarBotoesImagem achariam que o painel inteiro
+           já tem botão e não criariam o "ocultar"/"Gerar imagem" do card -->
+      <button type="button" class="fora-da-imagem" id="ped-hist-img" style="font-size:12px;font-weight:600;cursor:pointer;padding:4px 10px;min-height:28px;border-radius:6px;background:var(--card-bg);border:1px solid var(--border);color:var(--text-secondary)">🖼 Gerar imagem</button>
+    </div>
+    <div class="table-wrap rolagem-inteira-na-imagem" style="max-height:360px;overflow-y:auto"><table class="data-table" id="ped-hist-dia"><thead><tr><th>Data</th><th>Passagens</th><th>Gasto do dia</th><th>vs dia anterior</th></tr></thead><tbody>${linhasHist}</tbody></table></div>` : ''}
   </div>`;
 }
 function wirePedagioDoDia() {
@@ -16667,6 +16679,21 @@ function wirePedagioDoDia() {
   const conteudo = document.getElementById('content');
   ativarTogglesDeSecao(conteudo);
   ativarBotoesImagem(conteudo);
+  // Imagem só da tabela "Gasto por dia" (pedido do cliente: "coloque um gerar
+  // imagem para tabela tambem"): título + tabela INTEIRA, clonados do DOM — sai
+  // na ordem e com o funil que estiverem na tela.
+  const btnHist = document.getElementById('ped-hist-img');
+  if (btnHist) btnHist.addEventListener('click', () => {
+    const topo = document.getElementById('ped-hist-topo'), tab = document.getElementById('ped-hist-dia');
+    if (!topo || !tab) return;
+    const largura = (tab.closest('.table-wrap') || tab).clientWidth || 900;
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = `position:fixed;top:0;left:-${largura + 200}px;width:${largura}px;background:var(--bg-page);padding:16px;`;
+    wrapper.appendChild(topo.cloneNode(true));
+    wrapper.appendChild(tab.cloneNode(true));
+    document.body.appendChild(wrapper);
+    capturarElementoComoImagem(wrapper, 'pedagio-gasto-por-dia-' + hojeISOLocal(), () => wrapper.remove());
+  });
   if (!input) return;
   input.addEventListener('change', async () => {
     const arquivos = [...input.files];
