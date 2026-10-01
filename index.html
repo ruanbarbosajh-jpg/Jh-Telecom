@@ -1014,6 +1014,11 @@
   .stat-card .stat-value, .stat-card .stat-sub { overflow-wrap: anywhere; }
   .stat-card .stat-ic .stat-emoji { font-size: 20px; line-height: 1; }
   .stat-card .mc-var { margin-top: 10px; }
+  /* 6 cards de status em UMA linha (sem "Canceladas" sozinho embaixo); 3 por linha
+     em tela média e 2 no celular */
+  .stat-cards.stat-cards--6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  @media (max-width: 1280px) { .stat-cards.stat-cards--6 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (max-width: 640px) { .stat-cards.stat-cards--6 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .stat-card--heroi { grid-column: span 2; padding: 20px 24px; }
   .stat-card--heroi .stat-value { font-size: 32px; }
   /* compacto: o cartão pequeno que vive dentro de barra de filtro */
@@ -1153,6 +1158,20 @@
     border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 1.5rem; }
   .toolbar .field { display: flex; flex-direction: column; gap: 4px; }
   .toolbar label { font-size: 12px; color: var(--text-secondary); }
+  /* "Escolher arquivo" estava no cinza padrão do navegador (um retângulo claro
+     no meio da barra escura). Mesmo azul dos outros botões (01/10/2026). */
+  .toolbar input[type="file"] { padding: 5px 10px; color: var(--text-secondary); max-width: 320px; }
+  .toolbar input[type="file"]::file-selector-button { margin-right: 10px; padding: 6px 12px; border: none; border-radius: var(--r-sm); background: var(--accent-solid); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .toolbar input[type="file"]::file-selector-button:hover { background: var(--accent-dark); }
+  /* card pequeno (ex.: "Última importação") vai pro canto DIREITO da barra */
+  .toolbar > .stat-card--compacto { margin-left: auto; }
+  /* "🔄 Atualizar" fica na barra do topo (PCR, Parcial do Dia, Chamados GIGA) */
+  #topo-atualizar { display: flex; align-items: center; gap: 8px; }
+  #topo-atualizar #atualizar-status { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+  #btn-atualizar-dados { font-weight: 600; border-color: var(--accent); color: var(--accent); }
+  #btn-atualizar-dados:hover:not(:disabled) { background: var(--accent-solid); color: #fff; }
+  #btn-atualizar-dados:disabled { opacity: .7; cursor: progress; }
+  @media (max-width: 760px) { #topo-atualizar #atualizar-status, #btn-atualizar-dados .atualizar-rot { display: none; } }
   .toolbar input, .toolbar select { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 13px; background-color: var(--bg-page); color: var(--text-primary); }
   .btn { padding: 9px 16px; border: none; border-radius: var(--r-sm); background: var(--accent-solid); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background var(--transicao), transform .1s ease; }
   .btn:hover { background: var(--accent-dark); }
@@ -11618,15 +11637,25 @@ let DADOS_LIDOS_EM = null;          // quando este navegador leu o banco pela ú
 let ATUALIZANDO_PELO_BOTAO = false;
 function horaCurtaPtBr(ms) { return new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); }
 function textoDadosLidosEm() { return DADOS_LIDOS_EM ? `Dados de ${horaCurtaPtBr(DADOS_LIDOS_EM)}` : ''; }
+function rotuloBotaoAtualizar(btn, ocupado) {
+  if (!btn) return;
+  btn.disabled = !!ocupado;
+  btn.innerHTML = ocupado ? '⏳ <span class="atualizar-rot">Atualizando...</span>' : '🔄 <span class="atualizar-rot">Atualizar</span>';
+}
+// Fica na BARRA DO TOPO (ao lado de tema/usuário), não na barra de filtros: lá
+// disputava espaço com o arquivo CSV, os filtros e o card "Última importação"
+// (cliente, 01/10/2026: "esta muito bagunçado ... o botao de atualizar no topo").
+// Sai sozinho nas telas que não são essas três.
 function adicionarBotaoAtualizar(route) {
+  const antigo = document.getElementById('topo-atualizar');
+  if (antigo) antigo.remove();
   if (!ROTAS_COM_BOTAO_ATUALIZAR.has(route) || !supa) return;
-  const content = document.getElementById('content');
-  if (!content || content.querySelector('#btn-atualizar-dados')) return;
+  const acoes = document.querySelector('.topbar-actions');
+  if (!acoes) return;
   const caixa = document.createElement('div');
-  caixa.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap';
-  caixa.innerHTML = `<button type="button" class="btn" id="btn-atualizar-dados" title="Busca no banco só o que mudou desde a última vez (bem mais leve que F5)">🔄 Atualizar</button><span id="atualizar-status" style="font-size:12px;color:var(--text-muted)">${textoDadosLidosEm()}</span>`;
-  const barra = content.querySelector('.toolbar');
-  if (barra) barra.appendChild(caixa); else content.prepend(caixa);
+  caixa.id = 'topo-atualizar';
+  caixa.innerHTML = `<span id="atualizar-status">${textoDadosLidosEm()}</span><button type="button" class="icon-btn" id="btn-atualizar-dados" title="Busca no banco só o que mudou desde a última vez (bem mais leve que F5)" aria-label="Atualizar dados">🔄 <span class="atualizar-rot">Atualizar</span></button>`;
+  acoes.prepend(caixa);
   caixa.querySelector('button').addEventListener('click', atualizarPeloBotao);
 }
 async function atualizarPeloBotao() {
@@ -11636,7 +11665,7 @@ async function atualizarPeloBotao() {
   if (PCR_SINCRONIZANDO > 0 || SYNC_EM_ANDAMENTO > 0) { toast('Tem uma importação em andamento. Espere terminar e atualize de novo.', 'aviso'); return; }
   const btn = document.getElementById('btn-atualizar-dados');
   ATUALIZANDO_PELO_BOTAO = true;
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Atualizando...'; }
+  rotuloBotaoAtualizar(btn, true);
   let mudou = false, por = '', falhou = false;
   try {
     const r = await pcrAtualizarDoBanco();
@@ -11664,13 +11693,13 @@ async function atualizarPeloBotao() {
   if (ROTA_ATUAL.nome !== rota) return;   // a pessoa mudou de tela enquanto buscava
   if (falhou) {
     toast('Não consegui atualizar agora — tente de novo em instantes.', 'aviso');
-    if (btn) { btn.disabled = false; btn.textContent = '🔄 Atualizar'; }
+    rotuloBotaoAtualizar(btn, false);
     return;
   }
   DADOS_LIDOS_EM = Date.now();
   if (!mudou) {
     toast('Já está atualizado — nenhuma importação nova.', 'ok', 3000);
-    if (btn) { btn.disabled = false; btn.textContent = '🔄 Atualizar'; }
+    rotuloBotaoAtualizar(btn, false);
     const st = document.getElementById('atualizar-status'); if (st) st.textContent = textoDadosLidosEm();
     return;
   }
@@ -12350,7 +12379,7 @@ function renderPCR() {
 
     body.innerHTML = `
       <div class="section-heading">Status das Ordens</div>
-      <div class="stat-cards">
+      <div class="stat-cards stat-cards--6">
         ${statCard('green', icOk, 'Concluídas', statusDasOrdens.concluido)}
         ${statCard('blue', icPlay, 'Iniciadas', statusDasOrdens.iniciado)}
         ${statCard('orange', icRota, 'Em Rota', statusDasOrdens.em_rota)}
@@ -13712,7 +13741,7 @@ function renderParcialDoDia() {
 
     body.innerHTML = `
       <div class="section-heading">Status das Ordens</div>
-      <div class="stat-cards">
+      <div class="stat-cards stat-cards--6">
         ${statCard('green', icOk, 'Concluídas', statusDasOrdens.concluido)}
         ${statCard('blue', icPlay, 'Iniciadas', statusDasOrdens.iniciado)}
         ${statCard('orange', icRota, 'Em Rota', statusDasOrdens.em_rota)}
