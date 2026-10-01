@@ -3074,6 +3074,7 @@ async function loadAllFromSupabase(onProgresso) {
     } catch (e) {} })()
   ]));
   await carregarMoManual();
+  DADOS_LIDOS_EM = Date.now();
   // só é "não consegui carregar" quando NENHUMA tabela veio (rede fora, chave
   // errada). Tabela que ainda não existe entra na lista de faltantes.
   if (SUPABASE_TABELAS_FALTANDO.length) {
@@ -7385,6 +7386,7 @@ function navigate(route) {
   wireGerarImagemCartaoPrazo();
   agendarConferenciaPCR(route);
   agendarAtualizacaoAoVivo(route);
+  adicionarBotaoAtualizar(route);
 }
 // ---------- Filtro por coluna estilo Excel, em TODAS as tabelas ----------
 // Cada cabeçalho ganha um funil. Clicando, abre a lista de valores únicos
@@ -11597,6 +11599,85 @@ async function pcrConferirEAtualizarTela() {
   }
   toast(`PCR atualizada${quem}.`, 'ok', 3000);
   navigate(ROTA_ATUAL.nome);
+}
+// ---------- Botão "🔄 Atualizar" (PCR, Parcial do Dia, Chamados GIGA) ----------
+// Pedido do cliente (01/10/2026): "coloque o botao". Com ~7 pessoas ativas
+// importando o CSV a cada 30–60 min, quem não importou dava F5 pra ver o dado
+// novo, e cada F5 baixa a janela de PCR + Chamados GIGA + Clean Up (~1,7 MB) —
+// 15 pessoas × vários F5/dia empurravam o egress do plano gratuito (5 GB/mês)
+// pro limite. Este botão faz a MESMA coisa que a atualização automática (que
+// segue desligada desde 22/09/2026 — a tela "subia sozinha" sozinha), mas só
+// quando a pessoa clica, e pelo caminho barato: `pcrAtualizarDoBanco` pergunta
+// ao banco duas coisas minúsculas (contagem + carimbo mais novo) e, se mudou,
+// baixa SÓ as linhas alteradas. Sem mudança = poucas centenas de bytes.
+// Diferente do botão antigo (tirado em 21/09): fica só nas 3 telas onde a
+// importação acontece, e a tela volta pra MESMA posição de rolagem (o navigate()
+// dá scrollTo(0,0)).
+const ROTAS_COM_BOTAO_ATUALIZAR = new Set(['pcr', 'parcialdia', 'chamadosgiga']);
+let DADOS_LIDOS_EM = null;          // quando este navegador leu o banco pela última vez
+let ATUALIZANDO_PELO_BOTAO = false;
+function horaCurtaPtBr(ms) { return new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); }
+function textoDadosLidosEm() { return DADOS_LIDOS_EM ? `Dados de ${horaCurtaPtBr(DADOS_LIDOS_EM)}` : ''; }
+function adicionarBotaoAtualizar(route) {
+  if (!ROTAS_COM_BOTAO_ATUALIZAR.has(route) || !supa) return;
+  const content = document.getElementById('content');
+  if (!content || content.querySelector('#btn-atualizar-dados')) return;
+  const caixa = document.createElement('div');
+  caixa.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap';
+  caixa.innerHTML = `<button type="button" class="btn" id="btn-atualizar-dados" title="Busca no banco só o que mudou desde a última vez (bem mais leve que F5)">🔄 Atualizar</button><span id="atualizar-status" style="font-size:12px;color:var(--text-muted)">${textoDadosLidosEm()}</span>`;
+  const barra = content.querySelector('.toolbar');
+  if (barra) barra.appendChild(caixa); else content.prepend(caixa);
+  caixa.querySelector('button').addEventListener('click', atualizarPeloBotao);
+}
+async function atualizarPeloBotao() {
+  const rota = ROTA_ATUAL.nome;
+  if (ATUALIZANDO_PELO_BOTAO) return;
+  if (!supa || !currentUser) { toast('Sem conexão com o banco — nada pra atualizar.', 'aviso'); return; }
+  if (PCR_SINCRONIZANDO > 0 || SYNC_EM_ANDAMENTO > 0) { toast('Tem uma importação em andamento. Espere terminar e atualize de novo.', 'aviso'); return; }
+  const btn = document.getElementById('btn-atualizar-dados');
+  ATUALIZANDO_PELO_BOTAO = true;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Atualizando...'; }
+  let mudou = false, por = '', falhou = false;
+  try {
+    const r = await pcrAtualizarDoBanco();
+    mudou = !!r.mudou; por = r.por || '';
+    if (rota === 'parcialdia') {
+      // a M.O corrigida por outra pessoa também mora no banco (tabela minúscula)
+      const antes = JSON.stringify(MO_MANUAL);
+      await carregarMoManual();
+      if (JSON.stringify(MO_MANUAL) !== antes) mudou = true;
+    }
+    if (rota === 'chamadosgiga') {
+      // Chamados GIGA não tem carimbo de alteração (a importação apaga o que
+      // sumiu do CSV), então aqui relê a tabela inteira — só nesta tela e só
+      // quando a pessoa pede.
+      const cfg = SUPABASE_TABLES.chamadosGiga;
+      const brutas = await fetchAllRows(cfg.table);
+      aplicarTabelaCarregada('chamadosGiga', cfg, brutas);
+      mudou = true;
+    }
+  } catch (e) {
+    falhou = true;
+    console.error('[atualizar] falhou:', e);
+  }
+  ATUALIZANDO_PELO_BOTAO = false;
+  if (ROTA_ATUAL.nome !== rota) return;   // a pessoa mudou de tela enquanto buscava
+  if (falhou) {
+    toast('Não consegui atualizar agora — tente de novo em instantes.', 'aviso');
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Atualizar'; }
+    return;
+  }
+  DADOS_LIDOS_EM = Date.now();
+  if (!mudou) {
+    toast('Já está atualizado — nenhuma importação nova.', 'ok', 3000);
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Atualizar'; }
+    const st = document.getElementById('atualizar-status'); if (st) st.textContent = textoDadosLidosEm();
+    return;
+  }
+  const y = window.scrollY;
+  navigate(rota);                          // filtros voltam sozinhos (restaurarFiltros)
+  window.scrollTo(0, y);
+  toast(`Dados atualizados${por ? ` (importação de ${por})` : ''}.`, 'ok', 3000);
 }
 // ===================== CHAMADOS GIGA (export_chamados.csv) =====================
 // "11/09/2026" -> "2026-09-11". Devolve null pra "-" ou vazio (muita coluna
