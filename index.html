@@ -676,8 +676,12 @@
     #hol-area .hol-nome { margin: 5px 0; padding: 2px 0 2px 7px; }
     #hol-area .hol-nome span { margin-top: 0; }
     /* assinatura maior (pedido original) dentro do orçamento calibrado */
-    #hol-area .hol-rodape { margin-top: 6.5px; min-height: 30px; }
-    #hol-area .hol-assina span { width: 135px; margin: 0 0 2px; }
+    /* ASSINATURA MAIOR (01/10/2026, pedido do cliente: "aumente o campo de
+       assinatura"): linha de 135px→200px e espaço pra assinar de 30px→46px; o
+       holerite do técnico fica em ~190,5mm dos 194mm úteis (medido em 137,5mm
+       de largura — ver nota de calibragem acima). */
+    #hol-area .hol-rodape { margin-top: 6.5px; min-height: 46px; }
+    #hol-area .hol-assina span { width: 200px; margin: 0 0 2px; }
     /* campo editável tem que sair como TEXTO no papel, não como caixa de
        formulário — no print anterior a borda do input aparecia em volta de
        cada número */
@@ -685,6 +689,27 @@
       border: none !important; background: transparent !important;
       color: #101828 !important; padding: 0 !important; width: auto !important;
     }
+    /* HOLERITE DO ESCRITÓRIO MAIS COMPRIDO (01/10/2026, pedido do cliente:
+       "aumente o comprimento da folha do escritorio"). Ele herda o CSS acima, que
+       foi calibrado pro holerite do TÉCNICO (mais linhas: indicadores + proventos
+       + descontos + parcelas) — o do escritório tem ~21 linhas e só chegava a
+       ~120mm dos ~194mm úteis da folha A4 deitada. Aqui a caixa tem altura
+       mínima de meia folha (187mm), fonte e respiro maiores, e a assinatura
+       desce pro pé da caixa (coluna flex + margin-top:auto). Largura continua a
+       mesma (~137,5mm: dois por folha). */
+    #hol-area .holerite.holerite-esc { min-height: 187mm; display: flex; flex-direction: column; }
+    #hol-area .holerite.holerite-esc, #hol-area .holerite.holerite-esc * { font-size: 12px !important; line-height: 1.3 !important; }
+    #hol-area .holerite-esc .hol-tit { font-size: 12.5px !important; }
+    #hol-area .holerite-esc .hol-marca { font-size: 15.5px !important; }
+    #hol-area .holerite-esc th, #hol-area .holerite-esc td { padding: 3.9px 7px; }
+    #hol-area .holerite-esc .hol-topo { padding-bottom: 9px; }
+    #hol-area .holerite-esc .hol-nome { margin: 11px 0 6px; padding: 3px 0 3px 8px; }
+    #hol-area .holerite-esc .hol-faixa { margin: 12px 0 0; padding: 5px 8px; }
+    #hol-area .holerite-esc .hol-fecho { align-self: flex-end; width: 45%; max-width: none; margin: 14px 0 0; }
+    #hol-area .holerite-esc .hol-fecho td { padding: 4px 6px; }
+    #hol-area .holerite-esc .hol-fecho tr.hol-total td { font-size: 14px !important; }
+    #hol-area .holerite-esc .hol-rodape { margin-top: auto; padding-top: 16px; min-height: 70px; }
+    #hol-area .holerite-esc .hol-assina span { width: 240px; margin: 0 0 4px; }
     /* Calibrado medindo o holerite renderizado: com 8px e padding de 1,5px ele
        fica em 182mm, e meia folha A4 DEITADA tem 194mm de altura útil. Antes,
        com 10,5px, dava 271mm — nao cabia de jeito nenhum, e por isso ele
@@ -8881,6 +8906,38 @@ const BONUS_IFI_MAX = 2.50, BONUS_IRR_MAX = 4.50, BONUS_DIAS_MIN = 26;
 // Antes era um filtro só, e não dava pra isolar as duas contas.
 const FOLHA_RET_DESC_PERIODO = { inicio: '', fim: '' };
 const FOLHA_RET_BONUS_PERIODO = { inicio: '', fim: '' };
+// Regras da Folha (pedido do cliente 01/10/2026): SERVIÇOS do ciclo (21 a 20),
+// BÔNUS no mês calendário (1 a 30/31) e DESCONTO de IFI/IRR pela planilha da
+// GIGA — e enquanto a GIGA não é importada, o sistema calcula tudo de si.
+// O "mês do bônus" é o mês em que o ciclo TERMINA (o ciclo 21/08–20/09 é o
+// fechamento "de setembro" pro cliente → bônus de 01/09 a 30/09).
+function mesCalendarioDoFimDoCiclo(janela) {
+  const fim = (janela && janela.fim) || '';
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(fim);
+  if (!m) return { inicio: '', fim: '' };
+  const ultimo = new Date(+m[1], +m[2], 0).getDate();
+  return { inicio: `${m[1]}-${m[2]}-01`, fim: `${m[1]}-${m[2]}-${String(ultimo).padStart(2, '0')}` };
+}
+// Ativações(+M.E) e reparos concluídos do técnico numa janela, direto da
+// PRODUÇÃO — denominadores do % IFI e do % IRR do bônus. Não usa o fechamento:
+// ele é por CICLO e uma janela de mês atravessa dois ciclos.
+function baseProducaoDoTecnico(tecnico, ini, fim, ordensDoTecnico) {
+  const lista = ordensDoTecnico || DB.producao.filter(p => normalizeHeader(p.recurso) === normalizeHeader(tecnico));
+  let ativacao = 0, reparos = 0;
+  lista.forEach(p => {
+    if (!isConcluido(p.status) || !inRange(p.data, ini, fim)) return;
+    if (ehBaseDoIfi(p.tipo_atividade)) ativacao++;
+    else if (ehServicoReparo(p.tipo_atividade)) reparos++;
+  });
+  return { ativacao, reparos };
+}
+// APTO = IFI ≤ 2,50% E IRR ≤ 4,50% E dias trabalhados ≥ 26 (mesma regra da
+// Tabela de Bônus / gerarPeriodoFolha).
+function bonusAptoPorIndicadores(ifi, irr, base, dias) {
+  const ifiPct = base.ativacao ? (ifi / base.ativacao) * 100 : 0;
+  const irrPct = base.reparos ? (irr / base.reparos) * 100 : 0;
+  return ifiPct <= BONUS_IFI_MAX && irrPct <= BONUS_IRR_MAX && (Number(dias) || 0) >= BONUS_DIAS_MIN;
+}
 // "21/07/2026 a 20/08/2026" -> { inicio:'2026-07-21', fim:'2026-08-20' }
 function datasDoPeriodoFolha(periodo) {
   const achadas = String(periodo || '').match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/g) || [];
@@ -9030,9 +9087,24 @@ function extrairRetornosGigaDetalhe(rows, inicio, fim) {
 // Joga a contagem da planilha da GIGA nas linhas da folha daquele período.
 // Só mexe em Qtd. IFI / Qtd. IRR (e no desconto que sai deles) — desconto de
 // material, parcela, frota e bônus ficam exatamente como estavam.
-async function aplicarRetornosGigaNaFolha(periodo, porTecnico) {
+async function aplicarRetornosGigaNaFolha(periodo, porTecnico, bonusPorTecnico) {
   const janela = datasDoPeriodoFolha(periodo);
   const alteradas = [], semLinha = [];
+  // `bonusPorTecnico` (opcional): { nomeNormalizado: 'APTO'|'INAPTO' } — o bônus do
+  // MÊS (1 a 30) decidido com os retornos da MESMA planilha da GIGA. Muda também o
+  // valor das ordens (faixa de 26 dias) e o preço de cada desconto, então entra
+  // ANTES de aplicarDescontoRetorno.
+  const comBonus = linha => {
+    const novo = bonusPorTecnico && bonusPorTecnico[normalizeHeader(linha.tecnico)];
+    if (!novo) return false;
+    const mudou = String(linha.bonus || '').toUpperCase() !== novo;
+    linha.bonus = novo;
+    const apto = novo === 'APTO';
+    const q = quebraPorTipoDaLinha(linha, apto);
+    const valor = TIPOS_FOLHA.reduce((a, t) => a + (q['v_' + t.chave] || 0), 0);
+    if (valor > 0) linha.valor_total_ordens = valor;
+    return mudou;
+  };
   Object.values(porTecnico).forEach(r => {
     const idx = DB_INDEX.folhaPagamento.get(`${r.nome}|${periodo}`);
     let alvo = idx;
@@ -9046,6 +9118,7 @@ async function aplicarRetornosGigaNaFolha(periodo, porTecnico) {
     // pela base de IFI/IRR — a contagem da GIGA é a que vale (ver autoRetorno
     // em renderFolhaPagamento).
     const linha = { ...DB.folhaPagamento[alvo], qtd_ifi: r.ifi, qtd_irr: r.irr, retorno_origem: 'giga' };
+    comBonus(linha);
     aplicarDescontoRetorno(linha, janela);
     DB.folhaPagamento[alvo] = linha;
     alteradas.push(linha);
@@ -9060,8 +9133,9 @@ async function aplicarRetornosGigaNaFolha(periodo, porTecnico) {
   DB.folhaPagamento.forEach((l, i) => {
     if (l.periodo !== periodo) return;
     if (nomesNaPlanilha.has(normalizeHeader(l.tecnico))) return;
-    if (!l.qtd_ifi && !l.qtd_irr && l.retorno_origem === 'giga') return;
     const linha = { ...l, qtd_ifi: 0, qtd_irr: 0, retorno_origem: 'giga' };
+    const bonusMudou = comBonus(linha);
+    if (!l.qtd_ifi && !l.qtd_irr && l.retorno_origem === 'giga' && !bonusMudou) return;
     aplicarDescontoRetorno(linha, janela);
     DB.folhaPagamento[i] = linha;
     alteradas.push(linha);
@@ -9096,28 +9170,55 @@ function diariaDoAluguel(frota) {
   const l = DIARIA_ALUGUEL.find(x => x.re.test(f));
   return l ? l.valor : 0;
 }
-// De que tipo é a frota do técnico: primeiro o que o fechamento daquele ciclo
-// já diz (é o número oficial), depois o cadastro da Frota.
+// Casamento de NOME entre a tabela de Frota e a folha (01/10/2026). Comparar o
+// texto inteiro falhava por grafia: a Frota tem "Bruno Quirino" e a folha
+// "Bruno de Souza Carvalho Quirino"; "Pachoal" × "Paschoal". Regra: ignora
+// de/da/do/dos/das/e; o nome mais CURTO (mínimo 2 palavras) precisa ter todas as
+// palavras dentro do mais longo, aceitando 1 letra de diferença em palavra com 6+
+// letras (typo). Nome de 1 palavra só casa se for IGUAL ao outro por inteiro.
+const NOME_PALAVRAS_SOLTAS = new Set(['de', 'da', 'do', 'dos', 'das', 'e']);
+function palavrasDoNome(s) { return normalizeHeader(s).split(' ').filter(t => t && !NOME_PALAVRAS_SOLTAS.has(t)); }
+function umaLetraDeDiferenca(a, b) {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  if (a.length === b.length) { let d = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i] && ++d > 1) return false; return true; }
+  const [c, l] = a.length < b.length ? [a, b] : [b, a];
+  for (let i = 0; i < l.length; i++) if (l.slice(0, i) + l.slice(i + 1) === c) return true;
+  return false;
+}
+function palavraParecida(a, b) { return a === b || (a.length >= 6 && b.length >= 6 && umaLetraDeDiferenca(a, b)); }
+function mesmaPessoa(a, b) {
+  const na = normalizeHeader(a), nb = normalizeHeader(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const pa = palavrasDoNome(a), pb = palavrasDoNome(b);
+  const [curto, longo] = pa.length <= pb.length ? [pa, pb] : [pb, pa];
+  if (curto.length < 2) return false;
+  return curto.every(t => longo.some(u => palavraParecida(t, u)));
+}
+// Carro da FROTA da empresa (pedido do cliente 01/10/2026: "bata na tabela de
+// frota ... o que não tiver na tabela é próprio, são poucos"): TODO carro da
+// planilha FROTA LITORAL é da empresa (JH, MOVIDA ou LOCALIZA — a JH paga a
+// locadora, o técnico não recebe aluguel), então quem está nela é frota "JH" e
+// quem não está é "PRÓPRIO" (o fechamento ainda decide entre PRÓPRIO e PRÓPRIO
+// NOVO). Antes só a locadora "JH" valia como JH (2 de 28 carros) e o resto virava
+// PRÓPRIO — daí a folha dizer PRÓPRIO pra quem roda de carro da frota.
+// Sem tabela de Frota importada não dá pra concluir "não está nela": cai no que
+// o fechamento do ciclo diz.
+function linkDaFrotaDoTecnico(tecnico) {
+  return (DB.frotaLinks || []).find(x => mesmaPessoa(x.motorista, tecnico)) || null;
+}
 function frotaDoTecnico(tecnico, inicio, fim) {
   const f = (DB.fechamento || []).find(x => normalizeHeader(x.tecnico) === normalizeHeader(tecnico)
     && overlaps(x.inicio, x.ate_o_dia, inicio, fim));
-  if (f && f.frota) return f.frota;
-  const link = (DB.frotaLinks || []).find(x => normalizeHeader(x.motorista) === normalizeHeader(tecnico));
-  if (!link) return '';
-  return /jh/i.test(normalizeHeader(link.locadora)) ? 'JH' : 'PRÓPRIO';
+  if (!(DB.frotaLinks || []).length) return (f && f.frota) || '';
+  if (linkDaFrotaDoTecnico(tecnico)) return 'JH';
+  return f && /propri.*nov/.test(normalizeHeader(f.frota || '')) ? f.frota : 'PRÓPRIO';
 }
-// "Tem carro da frota da JH?" — só pra DESTACAR o nome nos rankings. Não é o
-// frotaDoTecnico: aquele devolve 'JH' só quando a coluna LOCADORA da planilha
-// diz "JH" (2 de 29 carros) e serve pra calcular o aluguel da folha. A planilha
-// FROTA LITORAL inteira é a frota da empresa (MOVIDA, LOCALIZA e JH), então
-// quem está nela tem carro da frota — o nome ficava azul pra todo mundo
-// (achado do cliente 21/09/2026). O fechamento do ciclo, quando existe, manda:
-// se ele diz PRÓPRIO, o carro é do técnico e não destaca.
+// "Tem carro da frota da empresa?" — destaca o nome nos rankings. Mesma conta
+// do frotaDoTecnico acima.
 function temCarroDaFrotaJH(tecnico, inicio, fim) {
-  const f = (DB.fechamento || []).find(x => normalizeHeader(x.tecnico) === normalizeHeader(tecnico)
-    && overlaps(x.inicio, x.ate_o_dia, inicio, fim));
-  if (f && f.frota) return !/propri/i.test(normalizeHeader(f.frota));
-  return (DB.frotaLinks || []).some(x => normalizeHeader(x.motorista) === normalizeHeader(tecnico));
+  return /jh/.test(normalizeHeader(frotaDoTecnico(tecnico, inicio, fim)));
 }
 // Quanto CUSTA um retorno pro técnico. Regra confirmada pelo cliente em
 // 03/09/2026: o desconto acompanha a FAIXA do próprio técnico, a mesma do
@@ -19273,44 +19374,32 @@ function renderFolhaPagamento(modo) {
       ${periodosEsc.lista.map(p=>`<option value="${esc(p)}"${p === periodosEsc.atual ? ' selected' : ''}>${esc(p)}</option>`).join('')}
     </select></div>` : ''}
     <button class="btn" id="f-apply">Filtrar</button>
-    <button class="btn-secundario" id="fol-ret-reset" style="padding:8px 14px;align-self:flex-end">Usar os números da planilha</button>
   </div>
-  ${podeEditarFolhaPagamento() && !soRelatorio ? `
+  ${ehAnalista() && !soRelatorio ? `
   <div class="panel" style="margin-bottom:1.5rem">
     <h3 style="margin:0 0 8px">Retornos da GIGA (IFI / IRR)</h3>
     <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
-      Envie a planilha de retornos que a GIGA manda todo mês ("IFI e IRR ….xlsx"). O sistema conta
-      IFI e IRR por técnico e atualiza a folha do período escolhido. O retorno é lançado no
-      <b>ofensor</b> (coluna "Executor" da planilha — quem fez a ordem anterior), não em quem foi
-      refazer. O desconto de IFI/IRR é recalculado sozinho; desconto de material, parcela e bônus não são tocados.
+      Envie a planilha de retornos que a GIGA manda todo mês ("IFI e IRR ….xlsx"). Vale sempre para a
+      <b>folha atual${periodoPadraoFolha ? ` (${esc(periodoPadraoFolha)})` : ''}</b>: a quantidade e o desconto de IFI/IRR
+      saem dos retornos do ciclo (21 a 20) e o <b>bônus</b> sai dos retornos do mês (1 a 30/31). O retorno
+      é lançado no <b>ofensor</b> (coluna "Executor"), não em quem foi refazer. Enquanto a planilha não é
+      enviada, o sistema calcula tudo com os dados dele.
     </p>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
-      <div class="field" style="margin:0"><label>Período da folha</label><select id="fol-giga-periodo">
-        ${periodosNomeados.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}
-      </select></div>
       <div class="field" style="margin:0"><label>Planilha da GIGA</label><input type="file" id="fol-giga-file" accept=".xlsx,.xls"></div>
       <span id="fol-giga-msg" style="font-size:13px"></span>
     </div>
   </div>` : ''}
   <div id="folha-body"></div>`;
   document.getElementById('f-apply').addEventListener('click', load);
-  document.getElementById('fol-ret-reset').addEventListener('click', () => {
-    document.getElementById('fol-ret-desc-de').value = '';
-    document.getElementById('fol-ret-desc-ate').value = '';
-    document.getElementById('fol-ret-bonus-de').value = '';
-    document.getElementById('fol-ret-bonus-ate').value = '';
-    FOLHA_RET_DESC_PERIODO.inicio = ''; FOLHA_RET_DESC_PERIODO.fim = '';
-    FOLHA_RET_BONUS_PERIODO.inicio = ''; FOLHA_RET_BONUS_PERIODO.fim = '';
-    load();
-  });
   // ---- planilha de retornos da GIGA ----
   const inputGiga = document.getElementById('fol-giga-file');
   if (inputGiga) inputGiga.addEventListener('change', () => {
     const arquivo = inputGiga.files && inputGiga.files[0];
     const msg = document.getElementById('fol-giga-msg');
     if (!arquivo) return;
-    const periodo = document.getElementById('fol-giga-periodo').value;
-    if (!periodo) { msg.innerHTML = '<span style="color:var(--danger)">Escolha o período da folha primeiro.</span>'; inputGiga.value = ''; return; }
+    const periodo = periodoPadraoFolha;   // sempre a folha ATUAL (o fechamento mais recente)
+    if (!periodo) { msg.innerHTML = '<span style="color:var(--danger)">Não há folha importada ainda — importe a folha primeiro.</span>'; inputGiga.value = ''; return; }
     if (typeof XLSX === 'undefined') { msg.innerHTML = '<span style="color:var(--danger)">A biblioteca de planilha não carregou (sem internet?).</span>'; inputGiga.value = ''; return; }
     const janela = datasDoPeriodoFolha(periodo);
     msg.innerHTML = '<span style="color:var(--text-muted)">Lendo a planilha…</span>';
@@ -19320,11 +19409,11 @@ function renderFolhaPagamento(modo) {
         const wb = XLSX.read(ev.target.result, { type: 'array', cellDates: true });
         // a aba costuma se chamar "IFI e IRR", mas usa a primeira que tiver as
         // colunas certas — o nome da aba muda de mês pra mês
-        let conta = null;
+        let conta = null, linhasDaGiga = null;
         for (const nome of wb.SheetNames) {
           const linhas = XLSX.utils.sheet_to_json(wb.Sheets[nome], { header: 1, raw: true, defval: null });
           const tentativa = contarRetornosGiga(linhas, janela.inicio, janela.fim);
-          if (!tentativa.erro) { conta = tentativa; break; }
+          if (!tentativa.erro) { conta = tentativa; linhasDaGiga = linhas; break; }
         }
         if (!conta) {
           msg.innerHTML = '<span style="color:var(--danger)">Não encontrei as colunas "Data", "IND" e "Executor" em nenhuma aba desse arquivo.</span>';
@@ -19334,8 +19423,27 @@ function renderFolhaPagamento(modo) {
           msg.innerHTML = `<span style="color:var(--warn-text)">A planilha tem retorno, mas nenhum dentro de "${esc(periodo)}" (${conta.fora} fora do período). Confira se escolheu o ciclo certo.</span>`;
           return;
         }
-        const r = await aplicarRetornosGigaNaFolha(periodo, conta.porTecnico);
+        // BÔNUS do mês (1 a 30/31): retornos da MESMA planilha no mês em que o ciclo
+        // termina ÷ ativações/reparos do técnico nesse mês (Produção). Técnico sem
+        // Produção no mês fica com o bônus que já tinha.
+        const mes = mesCalendarioDoFimDoCiclo(janela);
+        const contaMes = contarRetornosGiga(linhasDaGiga, mes.inicio, mes.fim);
+        const bonusMes = {};
+        let avisoBonus = '';
+        if (!contaMes.erro && contaMes.noPeriodo) {
+          DB.folhaPagamento.filter(l => l.periodo === periodo).forEach(l => {
+            const base = baseProducaoDoTecnico(l.tecnico, mes.inicio, mes.fim);
+            if (!base.ativacao && !base.reparos) return;
+            const m = contaMes.porTecnico[normalizeHeader(l.tecnico)] || { ifi: 0, irr: 0 };
+            bonusMes[normalizeHeader(l.tecnico)] = bonusAptoPorIndicadores(m.ifi, m.irr, base, l.dias_trab) ? 'APTO' : 'INAPTO';
+          });
+        } else {
+          avisoBonus = `a planilha não tem retornos em ${formatDate(mes.inicio)} a ${formatDate(mes.fim)} — o bônus ficou como estava`;
+        }
+        const r = await aplicarRetornosGigaNaFolha(periodo, conta.porTecnico, bonusMes);
         const partes = [`<span style="color:var(--success)">${conta.noPeriodo} retorno(s) lançado(s) em ${r.alteradas} linha(s) de "${esc(periodo)}"</span>`];
+        if (Object.keys(bonusMes).length) partes.push(`<span style="color:var(--success)">bônus de ${formatDate(mes.inicio)} a ${formatDate(mes.fim)} recalculado</span>`);
+        if (avisoBonus) partes.push(`<span style="color:var(--warn-text)">${esc(avisoBonus)}</span>`);
         if (conta.fora) partes.push(`<span style="color:var(--text-muted)">${conta.fora} fora do período (ignorados)</span>`);
         if (r.semLinha.length) partes.push(`<span style="color:var(--warn-text)">sem linha na folha: ${esc(r.semLinha.slice(0, 4).join(', '))}${r.semLinha.length > 4 ? ` e mais ${r.semLinha.length - 4}` : ''}</span>`);
         if (supa) partes.push(r.sync && r.sync.ok !== false
@@ -19395,7 +19503,29 @@ function renderFolhaPagamento(modo) {
     // (apto/inapto, ver precoRetornoDoTecnico), então o bônus precisa estar
     // decidido ANTES do desconto rodar. Sem janela própria, o bônus segue
     // como veio da planilha (a linha de desconto, abaixo, não mexe nele).
-    const linhasComBonus = !recalculaBonus ? brutas : brutas.map(r => {
+    // Sem janela digitada, o bônus é calculado SOZINHO pelo mês (1 a 30/31) em que o
+    // ciclo termina, com os retornos e a Produção do próprio sistema — só nas
+    // linhas que ainda NÃO receberam a planilha da GIGA (nessas vale o que o
+    // lançamento da GIGA decidiu, que o RH ainda pode ajustar). Técnico sem
+    // Produção no mês fica com o bônus gravado.
+    const ordensPorTecnicoFolha = {};
+    DB.producao.forEach(p => { const t = normalizeHeader(p.recurso); (ordensPorTecnicoFolha[t] = ordensPorTecnicoFolha[t] || []).push(p); });
+    const retornosDoMes = {};
+    const bonusAutomatico = r => {
+      if (r.retorno_origem === 'giga') return r;
+      // menos de 26 dias trabalhados = INAPTO, não depende de Produção nem de retorno
+      if ((Number(r.dias_trab) || 0) < BONUS_DIAS_MIN) return { ...r, bonus: 'INAPTO', _bonusRecalculado: true };
+      const j = datasDoPeriodoFolha(r.periodo);
+      const mes = mesCalendarioDoFimDoCiclo(j);
+      if (!mes.inicio) return r;
+      const ordens = ordensPorTecnicoFolha[normalizeHeader(r.tecnico)] || [];
+      const base = baseProducaoDoTecnico(r.tecnico, mes.inicio, mes.fim, ordens);
+      if (!base.ativacao && !base.reparos) return r;
+      const cont = retornosDoMes[mes.inicio] || (retornosDoMes[mes.inicio] = contarRetornosPorOfensor(mes.inicio, mes.fim));
+      const c = cont[r.tecnico] || cont[Object.keys(cont).find(k => normalizeHeader(k) === normalizeHeader(r.tecnico)) || ''] || { ifi: 0, irr: 0 };
+      return { ...r, bonus: bonusAptoPorIndicadores(c.ifi, c.irr, base, r.dias_trab) ? 'APTO' : 'INAPTO', _bonusRecalculado: true };
+    };
+    const linhasComBonus = !recalculaBonus ? brutas.map(bonusAutomatico) : brutas.map(r => {
       const c = contagemRetBonus[r.tecnico] || { ifi: 0, irr: 0 };
       const base = baseDoTecnico(r.tecnico, bonusIni, bonusFim);
       const ifiPctBonus = base.ativacao ? (c.ifi / base.ativacao) * 100 : 0;
@@ -19437,6 +19567,28 @@ function renderFolhaPagamento(modo) {
       return linha;
     });
 
+    // ---- lente final (não grava nada): FROTA da tabela de Frota e SERVIÇOS do
+    // ciclo (total, valor e quebra por tipo vêm da mesma conta — ver
+    // quebraPorTipoDaLinha). Sem ordem nenhuma na fonte (período sem Produção nem
+    // fechamento), fica o que a planilha trouxe.
+    rows.forEach((r, i) => {
+      const j = datasDoPeriodoFolha(r.periodo);
+      const linha = { ...r };
+      const frotaReal = j.inicio ? frotaDoTecnico(r.tecnico, j.inicio, j.fim) : '';
+      if (frotaReal) linha.frota = frotaReal;
+      const apto = /apto/i.test(linha.bonus || '') && !/inapto/i.test(linha.bonus || '');
+      if (j.inicio) {
+        const q = quebraPorTipoDaLinha(linha, apto, ordensPorTecnicoFolha[normalizeHeader(r.tecnico)] || []);
+        const total = TIPOS_FOLHA.reduce((a, t) => a + (q[t.chave] || 0), 0);
+        const valor = TIPOS_FOLHA.reduce((a, t) => a + (q['v_' + t.chave] || 0), 0);
+        if (total > 0) {
+          linha.total_ordens = total;
+          linha.valor_total_ordens = valor;
+          linha.total_receber = totalReceberFolha(linha);
+        }
+      }
+      rows[i] = linha;
+    });
     const totalReceber = rows.reduce((a,r)=>a+r.total_receber,0);
     const totalDescontos = rows.reduce((a,r)=>a+r.total_descontos,0);
     const totalOrdens = rows.reduce((a,r)=>a+r.total_ordens,0);
@@ -19553,32 +19705,6 @@ function renderFolhaPagamento(modo) {
         <button type="button" class="btn-export-img" id="folha-export-img">🖼 Imagem da folha</button>
       </div>
       <div id="folha-export-aviso"></div>
-      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
-        ${recalculaDesc
-          ? `Qtd., % e <b>desconto</b> de IFI/IRR foram recalculados com os retornos baixados de <b>${formatDate(descIni)}</b> a <b>${formatDate(descFim)}</b>,
-             atribuídos ao técnico ofensor. Denominadores (ativações e reparos) são os do ciclo
-             ${janelaBase.inicio ? formatDate(janelaBase.inicio) + ' a ' + formatDate(janelaBase.fim) : 'do próprio intervalo'}.`
-          : quantosAuto
-            ? `Qtd. e desconto de IFI/IRR de <b>${quantosAuto} técnico(s)</b> estão sendo contados agora pela base de <b>IFI/IRR já importada</b>,
-               atribuídos ao ofensor — é o que vale enquanto a planilha da GIGA daquele ciclo não é enviada.
-               Assim que você enviar a planilha da GIGA no painel acima, a contagem dela passa a valer e estes números param de ser recalculados.`
-            : 'Qtd. e desconto de IFI/IRR como vieram na planilha da folha. Preencha "Retornos (desconto)" na barra de cima para recontar pelos retornos baixados num intervalo.'}
-        ${recalculaBonus
-          ? ` O <b>bônus</b> (Apto/Inapto) foi recalculado à parte, com os retornos de <b>${formatDate(bonusIni)}</b> a <b>${formatDate(bonusFim)}</b> — normalmente o ciclo de 1 a 30 do mês.`
-          : ' O bônus (Apto/Inapto) segue o valor da planilha; preencha "Retornos (bônus)" pra recalcular numa janela própria (ex.: 1 a 30 do mês).'}
-      </p>
-      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
-        <b>Frota/Aluguel:</b> carro <b>próprio</b> — o técnico roda com o veículo dele e o aluguel é
-        provento (entra no saldo dele). Carro <b>JH</b> — a empresa aluga da locadora direto (~R$ 2.300 no
-        ciclo, despesa da JH); o técnico não roda com carro próprio nesse caso, então não tem aluguel pra
-        receber. "Frota" e "Valor Aluguel" abaixo vêm como a planilha da folha trouxe; quando o cadastro da
-        aba <b>Frota</b> discorda (⚠ ao lado) ou um carro marcado "JH" ainda assim tem aluguel &gt; R$ 0,00
-        (⚠ vermelho), vale conferir a importação — pode ser planilha desatualizada.
-        <b>Dias Trab.</b> também mostra "⚠ Prod.: X" quando o número da planilha de RH diverge do calculado
-        na hora pela Produção (dias distintos com ordem concluída — mesma conta do Acompanhamento Técnico,
-        "Bônus dos técnicos"). As duas contas são de fontes diferentes de propósito; a divergência não é
-        corrigida sozinha, é só um aviso pra conferir qual dos dois está certo pra esse técnico/período.
-      </p>
       ${renderFolhaCompleta(ranking, pct, IFI_TARGET, IRR_TARGET)}
       ${(podeEditarFolhaPagamento() || podeEditarFolhaMaterial()) ? `<div class="fin-salvar-barra">
         <button class="btn" id="folha-salvar" disabled>Salvar alterações</button>
@@ -19743,9 +19869,7 @@ function renderFolhaPagamento(modo) {
         if (tdReceber) tdReceber.textContent = formatCurrency(linha.total_receber);
         // a quebra POR TIPO ("Valor Mud. Cômodo", "Valor Reparo Corretivo"
         // etc., cada uma com seu próprio valor de 26 dias) muda junto
-        const janela = datasDoPeriodoFolha(periodo);
-        const ordensDoTecnico = DB.producao.filter(p => isConcluido(p.status) && normalizeHeader(p.recurso) === normalizeHeader(tecnico));
-        const porTipo = quebraPorTipoDoTecnico(ordensDoTecnico, janela, sel.value === 'APTO');
+        const porTipo = quebraPorTipoDaLinha(linha, sel.value === 'APTO');
         tr.querySelectorAll('.folha-valor-tipo[data-tipo]').forEach(span => {
           const v = porTipo['v_' + span.dataset.tipo];
           span.textContent = v ? formatCurrency(v) : '-';
@@ -19902,6 +20026,37 @@ function quebraPorTipoDoTecnico(ordens, janela, apto) {
   });
   return out;
 }
+// Quebra por tipo de serviço de UMA LINHA da folha (técnico + ciclo) — a conta
+// que a tabela, o holerite e o troca-de-bônus usam (uma só pra os três nunca
+// discordarem). Fonte: o fechamento OFICIAL do mesmo ciclo (aba RELATORIO:
+// ativação, M.C, M.E, reparos e upgrade) e a PRODUÇÃO — vale a que tiver MAIS
+// ordens. Motivo (01/10/2026, "o total do Marco deu 185 e está contando 10 a
+// menos"): Upgrade/Downgrade e Mudança de Cômodo só existem na aba BASE_PRODUÇÃO
+// (a "BASE GERAL CONCLUÍDO" diária traz só ativação, M.E e reparo); quando essa
+// aba não foi reimportada até o fim do ciclo, a Produção fica sem eles e o total
+// sai menor que o oficial. Com o fechamento do ciclo importado, vale o dele.
+function quebraPorTipoDaLinha(linha, apto, ordensDoTecnico) {
+  const janela = datasDoPeriodoFolha(linha.periodo);
+  const lista = ordensDoTecnico || DB.producao.filter(p => normalizeHeader(p.recurso) === normalizeHeader(linha.tecnico));
+  const prod = quebraPorTipoDoTecnico(lista, janela, apto);
+  const f = janela.inicio ? (DB.fechamento || []).find(x => normalizeHeader(x.tecnico) === normalizeHeader(linha.tecnico)
+    && x.inicio === janela.inicio && x.ate_o_dia === janela.fim && (x.total_geral || 0) > 0) : null;
+  if (!f) return prod;
+  const oficial = quebraPorTipoVazia();
+  const mapa = { ativacao: f.ativacao, mudanca_comodo: f.mc, mudanca_endereco: f.me, reparo: f.reparos, upgrade: f.upgrade };
+  const tabela = valoresVigentesEm(janela.fim);
+  let totalOficial = 0;
+  Object.entries(mapa).forEach(([chave, q]) => {
+    const qtd = Number(q) || 0;
+    totalOficial += qtd;
+    oficial[chave] = qtd;
+    const t = TIPOS_FOLHA.find(x => x.chave === chave);
+    const l = tabela.find(v => t.re.test(normalizeHeader(v.label)));
+    if (l) oficial['v_' + chave] = qtd * (apto ? l.d26 : l.normal);
+  });
+  const totalProd = TIPOS_FOLHA.reduce((a, t) => a + prod[t.chave], 0);
+  return totalProd > totalOficial ? prod : oficial;
+}
 // Liga os campos do holerite. Quantidade e texto gravam direto; dinheiro usa a
 // mesma máscara da Folha (os DÍGITOS viram centavos). Toda edição redesenha o
 // holerite inteiro, porque mudar uma linha mexe nos três totais do rodapé.
@@ -19949,8 +20104,7 @@ function ligarEdicaoHolerite(tecnico, periodo, redesenhar, raiz) {
 function holeriteTecnicoHTML(linha) {
   const janela = datasDoPeriodoFolha(linha.periodo);
   const apto = String(linha.bonus || '').toUpperCase().startsWith('APTO');
-  const ordensDoTec = DB.producao.filter(p => normalizeHeader(p.recurso) === normalizeHeader(linha.tecnico));
-  const quebra = quebraPorTipoDoTecnico(ordensDoTec, janela, apto);
+  const quebra = quebraPorTipoDaLinha(linha, apto);
   // O que o usuário digitou por cima fica guardado em HOLERITE_MANUAL e vence
   // o número calculado — sem apagar o calculado, que volta no "Refazer".
   const manual = HOLERITE_MANUAL[`${linha.tecnico}|${linha.periodo}`] || {};
@@ -20119,16 +20273,15 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     const t = normalizeHeader(p.recurso);
     (producaoPorTecnico[t] = producaoPorTecnico[t] || []).push(p);
   });
-  const cachePorTipo = new Map(); // chave "tecnico|periodo" -> contagem, pra nao recalcular a mesma linha 5x (uma por coluna)
-  const contagemPorTipoNoPeriodo = (tecnico, periodo) => {
-    const chave = `${tecnico}|${periodo}`;
+  const cachePorTipo = new Map(); // "tecnico|periodo|bonus" -> contagem, pra nao recalcular a mesma linha 5x (uma por coluna)
+  const contagemPorTipoNoPeriodo = r => {
+    const apto = /apto/i.test(r.bonus || '') && !/inapto/i.test(r.bonus || '');
+    const chave = `${r.tecnico}|${r.periodo}|${apto}`;
     if (cachePorTipo.has(chave)) return cachePorTipo.get(chave);
+    const janela = datasDoPeriodoFolha(r.periodo);
     const vazio = quebraPorTipoVazia();
-    const janela = datasDoPeriodoFolha(periodo);
     if (!janela.inicio || !janela.fim) { cachePorTipo.set(chave, vazio); return vazio; }
-    const linha = DB.folhaPagamento[DB_INDEX.folhaPagamento.get(chave)];
-    const porTipo = quebraPorTipoDoTecnico(producaoPorTecnico[normalizeHeader(tecnico)] || [],
-      janela, /apto/i.test((linha && linha.bonus) || '') && !/inapto/i.test((linha && linha.bonus) || ''));
+    const porTipo = quebraPorTipoDaLinha(r, apto, producaoPorTecnico[normalizeHeader(r.tecnico)] || []);
     cachePorTipo.set(chave, porTipo);
     return porTipo;
   };
@@ -20198,9 +20351,9 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     // duas leituras que o cliente faz são separadas: "quantas ordens ele fez"
     // e "quanto isso deu". Agora cada leitura é um bloco contínuo, e ainda
     // casa com a cor: quantidade no cinza da produção, valor no azul.
-    ...TIPOS_FOLHA.map(t => [t.rot, r => contagemPorTipoNoPeriodo(r.tecnico, r.periodo)[t.chave]]),
+    ...TIPOS_FOLHA.map(t => [t.rot, r => contagemPorTipoNoPeriodo(r)[t.chave]]),
     ...TIPOS_FOLHA.map(t => ['Valor ' + t.rot, r => {
-      const v = contagemPorTipoNoPeriodo(r.tecnico, r.periodo)['v_' + t.chave];
+      const v = contagemPorTipoNoPeriodo(r)['v_' + t.chave];
       // data-tipo é o gancho que o troca-de-bônus usa pra recalcular só essa
       // célula (ver o listener de select[data-campo="bonus"] mais abaixo) —
       // por isso o span existe mesmo quando o valor é zero/"-".
@@ -20242,20 +20395,13 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     // frota" — antes a Folha só mostrava a coluna da planilha, sem checar se
     // batia com o cadastro. Cacheia por técnico+período (a mesma linha é lida
     // 3x: Frota, Dias Aluguel e Valor Aluguel).
-    ['Frota', r => {
-      const informado = r.frota || '';
-      const real = frotaRealDaLinha(r);
-      const ehJhInformado = /jh/i.test(informado) && !/propri/i.test(informado);
-      const ehJhReal = /jh/i.test(real);
-      const bate = !real || ehJhInformado === ehJhReal;
-      return bate ? esc(informado || '-')
-        : `<span style="color:var(--warn-text)" title="A aba Frota diz &quot;${esc(real)}&quot; pra este técnico nesse período — a planilha da folha diz &quot;${esc(informado || '-')}&quot;. Confira: pode ser cadastro ou importação desatualizada.">${esc(informado || '-')} ⚠</span>`;
-    }],
+    ['Frota', r => esc(frotaRealDaLinha(r) || r.frota || '-')],
     ['Dias Aluguel', r=>r.dias_aluguel],
     ['Valor Aluguel', r => {
       const v = Number(r.valor_aluguel) || 0;
-      const ehJh = /jh/i.test(r.frota || '') && !/propri/i.test(r.frota || '');
-      if (ehJh && v > 0) return `<span style="color:var(--danger)" title="Frota marcada como JH (empresa aluga da locadora direto) — o técnico não deveria receber aluguel nesse caso. Confira a planilha da folha.">${money(v)} ⚠</span>`;
+      const frotaDaLinha = frotaRealDaLinha(r) || r.frota || '';
+      const ehJh = /jh/i.test(frotaDaLinha) && !/propri/i.test(frotaDaLinha);
+      if (ehJh && v > 0) return `<span style="color:var(--danger)" title="Este técnico está na tabela de Frota (carro da empresa) — não deveria receber aluguel. Confira o valor lançado na folha.">${money(v)} ⚠</span>`;
       return money(v);
     }],
     ['Empréstimo', r=>money(r.emprestimo)],
@@ -20614,7 +20760,7 @@ function holeriteEscritorioHTML(l) {
   // "Dias trabalhados" usa a coluna de quantidade; o resto fica em branco ali.
   const linhaProv = c => `<tr><td>${c.rot}</td><td class="q"></td><td class="v">${cel(n(l[c.campo]))}</td></tr>`;
   const linhaDesc = c => `<tr><td>${c.rot}</td><td class="v">${cel(n(l[c.campo]))}</td></tr>`;
-  return `<div class="holerite">
+  return `<div class="holerite holerite-esc">
     <div class="hol-topo">
       <div class="hol-logo-linha"><div class="hol-marca">JH TELECOM<span>SOLUÇÕES EM FIBRA ÓPTICA</span></div></div>
       <div class="hol-tit">ESCRITÓRIO</div>
