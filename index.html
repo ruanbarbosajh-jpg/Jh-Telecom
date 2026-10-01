@@ -9190,13 +9190,33 @@ function valorAluguelPorRegra(frota, dias) {
   const d = Number(dias) || 0;
   return d >= BONUS_DIAS_MIN ? l.mensal : +(d * l.valor).toFixed(2);
 }
+// "DIAS C/ FROTA" (pedido do cliente 01/10/2026): técnico de carro PRÓPRIO que
+// usou carro da empresa em alguns dias não recebe aluguel por esses dias — era
+// por isso que o Adilson tinha o aluguel digitado à mão (27 dias, 1 com carro
+// da frota enquanto o dele estava na funilaria → 26 × 33,33). Com dia de frota
+// no ciclo NÃO é mês cheio: paga os dias com carro próprio × diária (mês cheio
+// é pra quem rodou o ciclo todo com o próprio carro). Sem dias de frota, vale a
+// regra de sempre (valorAluguelPorRegra). Carro da JH = 0.
+function diasFrotaDaLinha(linha) {
+  if (linha.dias_frota !== undefined && linha.dias_frota !== null && linha.dias_frota !== '') return Math.max(0, Number(linha.dias_frota) || 0);
+  // nunca digitado: sai da aba DESVINCULAÇÕES da Frota (diasComCarroDaFrota)
+  const j = datasDoPeriodoFolha(linha.periodo);
+  return j.inicio ? diasComCarroDaFrota(linha.tecnico, j.inicio, j.fim).comFrota : 0;
+}
+function aluguelDaLinha(linha) {
+  if (/^jh$/i.test(normalizeHeader(linha.frota))) return 0;
+  const diasFrota = diasFrotaDaLinha(linha);
+  const diasProprio = Math.max(0, (Number(linha.dias_trab) || 0) - diasFrota);
+  if (!diasFrota) return valorAluguelPorRegra(linha.frota, diasProprio);
+  return +(diasProprio * diariaDoAluguel(linha.frota)).toFixed(2);
+}
 // O valor gravado é o que a regra (nova ou a antiga, sempre proporcional) daria
 // pra aquela frota/dias? Então foi o SISTEMA que preencheu, não alguém na mão —
 // pode ser refeito. Valor diferente = acordo digitado, fica como está.
 function aluguelFoiAutomatico(linha) {
   const v = Number(linha.valor_aluguel) || 0;
   const d = Number(linha.dias_aluguel) || 0;
-  return [valorAluguelPorRegra(linha.frota, d), +(d * diariaDoAluguel(linha.frota)).toFixed(2)]
+  return [valorAluguelPorRegra(linha.frota, d), +(d * diariaDoAluguel(linha.frota)).toFixed(2), aluguelDaLinha(linha)]
     .some(x => Math.abs(x - v) < 0.05);
 }
 // Casamento de NOME entre a tabela de Frota e a folha (01/10/2026). Comparar o
@@ -9216,10 +9236,21 @@ function umaLetraDeDiferenca(a, b) {
   return false;
 }
 function palavraParecida(a, b) { return a === b || (a.length >= 6 && b.length >= 6 && umaLetraDeDiferenca(a, b)); }
+// Grafias da planilha de Frota que são a MESMA pessoa da folha, só com erro de
+// digitação (confirmado pelo cliente em 01/10/2026: "são as mesmas pessoas, só
+// um erro de digitação"). Fica no código, não só no banco, porque reimportar a
+// FROTA LITORAL.xlsx traria a grafia errada de volta. Chave e valor já
+// normalizados (normalizeHeader).
+const MESMA_PESSOA_GRAFIAS = {
+  'igor araujo dos santos': 'igor araujo de souza',
+  'kennedy': 'kenedy santos de souza vasconcelos',
+};
 function mesmaPessoa(a, b) {
-  const na = normalizeHeader(a), nb = normalizeHeader(b);
+  let na = normalizeHeader(a), nb = normalizeHeader(b);
   if (!na || !nb) return false;
+  na = MESMA_PESSOA_GRAFIAS[na] || na; nb = MESMA_PESSOA_GRAFIAS[nb] || nb;
   if (na === nb) return true;
+  a = na; b = nb;
   const pa = palavrasDoNome(a), pb = palavrasDoNome(b);
   const [curto, longo] = pa.length <= pb.length ? [pa, pb] : [pb, pa];
   if (curto.length < 2) return false;
@@ -9237,11 +9268,39 @@ function mesmaPessoa(a, b) {
 function linkDaFrotaDoTecnico(tecnico) {
   return (DB.frotaLinks || []).find(x => mesmaPessoa(x.motorista, tecnico)) || null;
 }
+// Dias TRABALHADOS no ciclo (Produção, ordem concluída) em que o técnico
+// estava com um carro da empresa segundo a aba DESVINCULAÇÕES da Frota
+// (vinculação → desvinculado; sem data de saída = ainda está). É o caso do
+// técnico de carro PRÓPRIO que pega um carro da frota enquanto o dele está na
+// oficina (Guilherme Marques 04/08–12/08) — e do que tinha carro da frota e
+// foi desvinculado no meio do ciclo (Rafael, 02/09/2026).
+function diasComCarroDaFrota(tecnico, inicio, fim) {
+  const vazio = { comFrota: 0, trabalhados: 0 };
+  if (!inicio || !fim) return vazio;
+  // quem nunca passou por DESVINCULAÇÕES sai daqui sem varrer a Produção (esta
+  // função roda pra cada técnico em várias telas — Dashboard, rankings, Folha)
+  const periodos = (DB.frotaDesvinc || []).filter(x => x.condutor && mesmaPessoa(x.condutor, tecnico)
+    && (!x.vinculacao || x.vinculacao <= fim) && (!x.desvinculado || x.desvinculado >= inicio));
+  if (!periodos.length) return vazio;
+  const dias = new Set(DB.producao.filter(p => isConcluido(p.status) && inRange(p.data, inicio, fim)
+    && normalizeHeader(p.recurso) === normalizeHeader(tecnico)).map(p => p.data));
+  if (!dias.size) return vazio;
+  let comFrota = 0;
+  dias.forEach(d => {
+    if (periodos.some(x => (!x.vinculacao || x.vinculacao <= d) && (!x.desvinculado || d <= x.desvinculado))) comFrota++;
+  });
+  return { comFrota, trabalhados: dias.size };
+}
 function frotaDoTecnico(tecnico, inicio, fim) {
   const f = (DB.fechamento || []).find(x => normalizeHeader(x.tecnico) === normalizeHeader(tecnico)
     && overlaps(x.inicio, x.ate_o_dia, inicio, fim));
   if (!(DB.frotaLinks || []).length) return (f && f.frota) || '';
   if (linkDaFrotaDoTecnico(tecnico)) return 'JH';
+  // não está mais na Frota, mas rodou o ciclo INTEIRO com carro da empresa
+  // (desvinculado depois do último dia trabalhado) — ex.: Rafael, desvinculado
+  // em 02/09/2026, frota "JH" no ciclo 21/08–20/09 na folha do cliente
+  const uso = diasComCarroDaFrota(tecnico, inicio, fim);
+  if (uso.trabalhados && uso.comFrota >= uso.trabalhados) return 'JH';
   const novo = x => /propri.*nov/.test(normalizeHeader(x || ''));
   if (f) return novo(f.frota) ? f.frota : 'PRÓPRIO';
   // Ciclo SEM fechamento — o RELATORIO deixou de ser importado em 01/10/2026
@@ -9366,7 +9425,14 @@ function recalcularCampoFolha(linhaAtual, campo, valor) {
   // aluguel e empréstimo também mexem no total a receber (são provento — ver
   // totalReceberFolha), por isso entram na mesma lista de campos que forçam o
   // recálculo do fecho da linha
-  if (CAMPOS_MATERIAL_FOLHA.includes(campo) || campo === 'valor_aluguel' || campo === 'emprestimo') {
+  // Dias c/ Frota (ou os dias trabalhados) mudaram: refaz os dias de aluguel e
+  // o valor pela regra (aluguelDaLinha) — quem digita esse campo quer
+  // justamente que o aluguel acompanhe
+  if (campo === 'dias_frota' || campo === 'dias_trab') {
+    linha.dias_aluguel = Math.max(0, (Number(linha.dias_trab) || 0) - diasFrotaDaLinha(linha));
+    linha.valor_aluguel = aluguelDaLinha(linha);
+  }
+  if (CAMPOS_MATERIAL_FOLHA.includes(campo) || campo === 'valor_aluguel' || campo === 'emprestimo' || campo === 'dias_frota' || campo === 'dias_trab') {
     linha.total_descontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(linha[c]) || 0), 0);
     linha.total_receber = totalReceberFolha(linha);
   }
@@ -9403,7 +9469,18 @@ async function salvarLinhaFolha(linha) {
   DB.folhaPagamento[idx] = { ...linha };
   if (!supa) return { ok: true, offline: true };
   try {
-    const { error } = await supa.from('folha_pagamento').upsert(linha, { onConflict: 'tecnico,periodo' });
+    // mesma proteção do syncBatchToSupabase: coluna nova que o banco ainda não
+    // tem (ex.: dias_frota antes do PASSO-29) sai do envio em vez de derrubar o
+    // salvamento da linha inteira
+    let envio = { ...linha };
+    Object.keys(envio).forEach(k => { if (k.startsWith('_')) delete envio[k]; });
+    let { error } = await supa.from('folha_pagamento').upsert(envio, { onConflict: 'tecnico,periodo' });
+    for (let i = 0; error && i < 5; i++) {
+      const faltando = /Could not find the '([^']+)' column/.exec(error.message || '');
+      if (!faltando) break;
+      delete envio[faltando[1]];
+      ({ error } = await supa.from('folha_pagamento').upsert(envio, { onConflict: 'tecnico,periodo' }));
+    }
     if (error) return { ok: false, error };
     return { ok: true };
   } catch (e) { return { ok: false, error: e }; }
@@ -9429,11 +9506,13 @@ function valorOrdensDoPeriodo(tecnico, inicio, fim, apto) {
 // (salvarCampoFolha) — não vêm da Produção, então gerarPeriodoFolha nunca pode
 // zerá-los ao reprocessar um período que já tinha lançamento.
 const CAMPOS_MANUAIS_FOLHA = [
-  'frota', 'dias_aluguel', 'valor_aluguel', 'emprestimo', ...CAMPOS_TODO_DESCONTO_FOLHA,
+  'frota', 'dias_aluguel', 'valor_aluguel', 'dias_frota', 'emprestimo', ...CAMPOS_TODO_DESCONTO_FOLHA,
   'parcela_equipamento', 'parcela_ferramentas', 'parcela_multa', 'parcela_miscelanea',
   'parcela_mecanica', 'parcela_vale', 'parcela_fiscalizacao', 'parcela_combustivel'
 ];
-const FOLHA_CAMPO_VAZIO = c => (c === 'frota' || c.startsWith('parcela_')) ? '' : 0;
+// dias_frota nasce VAZIO (null), não 0: vazio = "pega da aba DESVINCULAÇÕES";
+// 0 digitado = "não usou carro da frota" (ver diasFrotaDaLinha)
+const FOLHA_CAMPO_VAZIO = c => c === 'dias_frota' ? null : (c === 'frota' || c.startsWith('parcela_')) ? '' : 0;
 // ---- Parcelas que continuam no ciclo seguinte (01/10/2026) ----
 // Desconto parcelado ("2/3" = 2ª de 3) se repete no ciclo seguinte com o MESMO
 // valor e a parcela seguinte, até fechar ("3/3"). É o que a planilha da folha
@@ -9534,8 +9613,9 @@ function gerarPeriodoFolha(inicio, fim) {
     // o que estava GRAVADO) — acordo digitado na mão continua. Carro da JH = 0.
     const aluguelAuto = eraNovo || existente.valor_aluguel === undefined || existente.valor_aluguel === null
       || aluguelFoiAutomatico(existente);
-    manuais.dias_aluguel = diasTrab;
-    if (aluguelAuto) manuais.valor_aluguel = valorAluguelPorRegra(manuais.frota, diasTrab);
+    const baseAluguel = { tecnico, periodo, frota: manuais.frota, dias_trab: diasTrab, dias_frota: manuais.dias_frota };
+    manuais.dias_aluguel = Math.max(0, diasTrab - diasFrotaDaLinha(baseAluguel));
+    if (aluguelAuto) manuais.valor_aluguel = aluguelDaLinha(baseAluguel);
     if (/^jh$/i.test(normalizeHeader(manuais.frota))) manuais.valor_aluguel = 0;
     levarParcelasDoCicloAnterior(manuais, tecnico, inicio);
     const totalDescontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(manuais[c]) || 0), 0);
@@ -19580,7 +19660,8 @@ function renderFolhaPagamento(modo) {
     const brutasDias = brutas.map(r => {
       const auto = aluguelFoiAutomatico(r);
       const dias = diasTrabDaLinha(r);
-      return { ...r, dias_trab: dias, dias_aluguel: dias, _aluguelAuto: auto };
+      const diasFrota = diasFrotaDaLinha(r);
+      return { ...r, dias_trab: dias, dias_frota: diasFrota, dias_aluguel: Math.max(0, dias - diasFrota), _aluguelAuto: auto };
     });
     const retornosDoMes = {};
     const bonusAutomatico = r => {
@@ -19641,9 +19722,10 @@ function renderFolhaPagamento(modo) {
       // aluguel refeito pela regra quando foi o sistema que preencheu ou quando a
       // frota gravada não é mais a real (o valor era de outra frota). Acordo
       // digitado na mão, com a frota certa, fica como está.
-      if (r._aluguelAuto || frotaMudou) {
-        linha.valor_aluguel = valorAluguelPorRegra(linha.frota, Number(linha.dias_aluguel) || Number(linha.dias_trab) || 0);
-      }
+      if (r._aluguelAuto || frotaMudou) linha.valor_aluguel = aluguelDaLinha(linha);
+      // carro da JH: "Dias c/ Frota" não se aplica (o ciclo todo já é de frota)
+      // e os dias de aluguel voltam a ser os dias trabalhados, igual à planilha
+      if (/^jh$/i.test(normalizeHeader(linha.frota))) { linha.dias_frota = 0; linha.dias_aluguel = linha.dias_trab; }
       // carro da JH (empresa/locadora) NUNCA paga aluguel ao técnico — aluguel é
       // só de carro PRÓPRIO (cliente, 01/10/2026). Vale até sobre valor digitado.
       if (/^jh$/i.test(normalizeHeader(linha.frota))) linha.valor_aluguel = 0;
@@ -19941,15 +20023,22 @@ function renderFolhaPagamento(modo) {
         desenharHoleriteSeAberto();
       });
     });
-    document.querySelectorAll('input.folha-edit[data-campo="dias_trab"]').forEach(inp => {
+    document.querySelectorAll('input.folha-edit[data-campo="dias_trab"], input.folha-edit[data-campo="dias_frota"]').forEach(inp => {
       inp.addEventListener('change', () => {
         const valor = Math.max(0, parseInt(inp.value, 10) || 0);
         inp.value = valor;
-        const { tecnico, periodo } = inp.dataset;
+        const { tecnico, periodo, campo } = inp.dataset;
         const linha = ranking.find(x => x.tecnico === tecnico && x.periodo === periodo);
         if (!linha) return;
-        Object.assign(linha, recalcularCampoFolha(linha, 'dias_trab', valor));
-        marcarPendente(linha, inp.closest('tr'));
+        Object.assign(linha, recalcularCampoFolha(linha, campo, valor));
+        // dias e valor do aluguel + totais, só nessa linha
+        const tr = inp.closest('tr');
+        const set = (sel, txt) => { const el = tr.querySelector(sel); if (el) el.textContent = txt; };
+        set('.folha-dias-aluguel', linha.dias_aluguel);
+        set('.folha-valor-aluguel', formatCurrency(linha.valor_aluguel));
+        set('.folha-total-descontos', formatCurrency(linha.total_descontos));
+        set('.folha-total-receber', formatCurrency(linha.total_receber));
+        marcarPendente(linha, tr);
         desenharHoleriteSeAberto();
       });
     });
@@ -20492,13 +20581,17 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     // batia com o cadastro. Cacheia por técnico+período (a mesma linha é lida
     // 3x: Frota, Dias Aluguel e Valor Aluguel).
     ['Frota', r => esc(frotaRealDaLinha(r) || r.frota || '-')],
-    ['Dias Aluguel', r=>r.dias_aluguel],
+    // Dias em que o técnico de carro PRÓPRIO rodou com carro da empresa — saem
+    // da conta do aluguel (ver aluguelDaLinha). Vazio = vem da aba
+    // DESVINCULAÇÕES da Frota; o RH/Analista corrige digitando.
+    ['Dias c/ Frota', r => podePagamento(r) ? inputNumero(r, 'dias_frota', r.dias_frota) : String(r.dias_frota || 0)],
+    ['Dias Aluguel', r=>`<span class="folha-dias-aluguel">${r.dias_aluguel ?? 0}</span>`],
     ['Valor Aluguel', r => {
       const v = Number(r.valor_aluguel) || 0;
       const frotaDaLinha = frotaRealDaLinha(r) || r.frota || '';
       const ehJh = /jh/i.test(frotaDaLinha) && !/propri/i.test(frotaDaLinha);
-      if (ehJh && v > 0) return `<span style="color:var(--danger)" title="Este técnico está na tabela de Frota (carro da empresa) — não deveria receber aluguel. Confira o valor lançado na folha.">${money(v)} ⚠</span>`;
-      return money(v);
+      if (ehJh && v > 0) return `<span class="folha-valor-aluguel" style="color:var(--danger)" title="Este técnico está na tabela de Frota (carro da empresa) — não deveria receber aluguel. Confira o valor lançado na folha.">${money(v)} ⚠</span>`;
+      return `<span class="folha-valor-aluguel">${money(v)}</span>`;
     }],
     ['Empréstimo', r=>money(r.emprestimo)],
     ['Desc. IFI', r=>money(r.desc_ifi)], ['Desc. IRR', r=>money(r.desc_irr)],
