@@ -3246,19 +3246,12 @@ const ROUTE_PERMISSIONS = {
   // Presença (técnicos e escritório) saiu pra Gestão junto com os outros
   // perfis em 04/09/2026 — ficou exclusiva do Analista.
   gestao: ['finance', 'folha', 'comparisons', 'dashboard', 'relatoriofin', 'folhaescritorio', 'presenca'],
-  // Escritório (revisado 01/09/2026, pedido do cliente):
-  //   • PRAZO: tudo (reparo 24h, ativações 36h, ofensores, PCR, Parcial do Dia)
-  //     (as telas de Pleito foram removidas em 02/09/2026).
-  //   • QUALIDADE (IFI/IRR): tudo.
-  //   • PRESENÇA (técnicos e escritório): saiu de vez em 04/09/2026 — ficou
-  //     exclusiva do Analista (antes o Escritório via sem editar).
-  //   • PRODUÇÃO: entra na tela, mas só na seção "Ordens do Período —
-  //     Detalhamento" (ver podeVerProducaoCompleta).
-  //   • COMPARATIVOS: só o de Prazo.
-  //   • Fica de fora de frota, pedágio, financeiro, folha e Resumo Geral.
-  escritorio: ['dashboard', 'acomtec', 'fleet', 'toll',
-               'finance', 'folha', 'cmpproducao', 'cmpifiirr', 'comparisons',
-               'relatorios', 'import', 'retornosgiga', 'relatoriofin', 'folhaescritorio', 'presenca'],
+  // Escritório NÃO tem entrada aqui — usa `ROTAS_SO_PERMITIDAS` (lista de
+  // PERMISSÃO) desde 22/09/2026. A entrada antiga de bloqueio foi REMOVIDA em
+  // 01/10/2026 (auditoria pedida pelo cliente: era código morto — a allowlist
+  // sempre vence em `podeAcessar`, essa lista nunca mais era lida pra esse
+  // perfil; o comentário que tinha aqui também descrevia regra de antes de
+  // 22/09, já não batia com `ROTAS_SO_PERMITIDAS.escritorio`).
   // Almoxarifado (revisado 01/09/2026, pedido do cliente): "acessa tudo que o
   // RH acessa, MENOS o Financeiro" — por isso esta lista sempre acompanhou a
   // do RH. Se mexer nas permissões do RH, mexa aqui junto.
@@ -3309,11 +3302,6 @@ function podeEditarFinanceiro() { return !!currentUser && ['analista', 'rh'].inc
 // Folha do escritorio: RH e Analista. E o RH quem lanca salario, VT, ferias
 // e INSS — mesma logica de podeEditarFolhaPagamento, que ja e do RH.
 function podeEditarFolhaEscritorio() { return !!currentUser && ['analista', 'rh'].includes(currentUser.role); }
-// Produção: o Escritório entra na tela, mas só enxerga a seção "Ordens do
-// Período — Detalhamento" (pedido do cliente, 01/09/2026). Fica de fora dos
-// cards do topo, dos gráficos, do ranking de técnicos, da Tabela de Bônus, da
-// evolução e do painel de PDF — são números de gestão, não de consulta do dia.
-function podeVerProducaoCompleta() { return !!currentUser && currentUser.role !== 'escritorio'; }
 // Folha de Pagamento — a edição é dividida em DOIS grupos de campos, com donos
 // diferentes (pedido do cliente). Não dá pra resolver com uma permissão só:
 //
@@ -9540,12 +9528,7 @@ function renderProduction() {
       serieConcluidas: evolucao ? serieDoPeriodo(evolucao.caixas, concluidos, r => r.data) : [],
     });
 
-    // Escritório só vê a seção "Ordens do Período — Detalhamento" (ver
-    // podeVerProducaoCompleta). Os gráficos e a Tabela de Bônus nem entram no
-    // HTML — os helpers de gráfico já saem fora quando o elemento não existe.
-    const prodCompleta = podeVerProducaoCompleta();
     body.innerHTML = `
-      ${prodCompleta ? `
       <div class="cards-grid">
         ${metricCard('Total de ordens', baseRows.length, false, {sub:'OS únicas — se a mesma OS aparece 2x na planilha, conta 1 vez'})}
         ${metricCard('Concluídas', concluidos.length)}
@@ -9568,7 +9551,6 @@ function renderProduction() {
         <div class="panel"><h3>Técnicos que menos se deslocam (nº de cidades atendidas)</h3><p class="panel-subtitle">Nome em laranja: técnico com carro da frota da JH</p><div id="c-desloc-menos"></div></div>
       </div>
       <div id="desloc-detalhe"></div>
-      ` : ''}
       <div class="section-heading">Ordens do Período — Detalhamento</div>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
         <p style="font-size:13px;color:var(--text-secondary);margin:0">${rows.length} registro(s) no filtro${rows.length > limiteProd ? ` — mostrando os ${limiteProd} mais recentes na tabela` : ''}. Retornos IFI/IRR aparecem nas páginas Ofensor e Detalhe de Retornos.</p>
@@ -9580,12 +9562,10 @@ function renderProduction() {
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="prod-tab-periodo"><thead><tr><th>Data</th><th>Técnico</th><th>Cidade</th><th>Tipo</th><th>Status</th><th>Motivo da Baixa</th><th>OS</th><th>Contrato</th></tr></thead><tbody>
       ${[...rows].sort((a,b) => (b.data||'').localeCompare(a.data||'')).slice(0, limiteProd).map(r=>`<tr><td>${formatDate(r.data)}</td><td>${esc(r.recurso)}</td><td>${esc(r.cidade)}</td><td>${esc(r.tipo_atividade)}</td><td>${statusBadge(r.status)}</td><td>${esc(r.motivo) || '-'}</td><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td></tr>`).join('')}
       </tbody></table></div>
-      ${prodCompleta ? `
       <div class="panel" style="margin-bottom:1.5rem">
         <h3>Evolução dos Serviços no Período${evolucao ? ` <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(por ${evolucao.granularidade}${statusFilter ? ' — filtro de status aplicado' : ''})</span>` : ''}</h3>
         <div id="c-evolucao"></div>
       </div>
-      ` : ''}
     `;
 
     // ---- cards de Concluída/Não concluída/Cancelada SÓ da tabela "Ordens do
