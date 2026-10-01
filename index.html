@@ -6634,6 +6634,8 @@ const SCHEMAS = {
     desc_equipamento: ['desc equipamento'], desc_multa: ['desc multa'], desc_miscelanea: ['desc miscelanea'],
     desc_mecanica: ['des mecanica','desc mecanica'], desc_vale: ['desc vale'], desc_ferramentas: ['desc ferramentas'],
     desc_combustivel: ['desc cartao combustivel'], desc_fiscalizacao: ['desc fiscalizacao'],
+    // "DESC. PEDAGIO" ficava de fora e o desconto de pedágio sumia na importação
+    desc_pedagio: ['desc pedagio'],
     // "Parcela X" = em qual parcela está aquele desconto (texto "2/3", "1/1"),
     // pra desconto que o técnico paga aos poucos em vez de de uma vez só.
     // Dois apelidos em 'parcela_vale' de propósito: a planilha real do
@@ -6946,7 +6948,7 @@ function insertRow(target, map, row, extra) {
         desc_ifi: money('desc_ifi'), desc_irr: money('desc_irr'), desc_equipamento: money('desc_equipamento'),
         desc_multa: money('desc_multa'), desc_miscelanea: money('desc_miscelanea'), desc_mecanica: money('desc_mecanica'),
         desc_vale: money('desc_vale'), desc_ferramentas: money('desc_ferramentas'), desc_combustivel: money('desc_combustivel'),
-        desc_fiscalizacao: money('desc_fiscalizacao'), total_descontos: money('total_descontos'), total_receber: money('total_receber'),
+        desc_fiscalizacao: money('desc_fiscalizacao'), desc_pedagio: money('desc_pedagio'), total_descontos: money('total_descontos'), total_receber: money('total_receber'),
         parcela_equipamento: parcela('parcela_equipamento'), parcela_ferramentas: parcela('parcela_ferramentas'),
         parcela_multa: parcela('parcela_multa'), parcela_miscelanea: parcela('parcela_miscelanea'), parcela_mecanica: parcela('parcela_mecanica'),
         parcela_vale: parcela('parcela_vale'), parcela_fiscalizacao: parcela('parcela_fiscalizacao'), parcela_combustivel: parcela('parcela_combustivel'),
@@ -9143,6 +9145,83 @@ async function aplicarRetornosGigaNaFolha(periodo, porTecnico, bonusPorTecnico) 
   const r = alteradas.length ? await syncBatchToSupabase('folhaPagamento', alteradas) : { ok: true };
   return { alteradas: alteradas.length, semLinha, sync: r };
 }
+// ---- Descontos de MATERIAL vindos da planilha antiga da folha (01/10/2026) ----
+// Pedido do cliente: "puxe os dados de lá e adicione os descontos ...
+// futuramente não vou usar mais essa do navegador". O sistema já calcula
+// ordens, bônus, IFI/IRR, frota e aluguel; o que só existia na planilha eram os
+// descontos digitados (equipamento, multa, miscelânea, mecânica, vale,
+// ferramentas, cartão combustível, fiscalização, pedágio), o empréstimo e as
+// parcelas ("2/3"). Este import copia SÓ esses campos pra folha atual — nada que
+// o sistema calcula é sobrescrito. Daqui pra frente eles são digitados na
+// própria tela da Folha.
+// (função, não const: CAMPOS_MATERIAL_FOLHA/CAMPOS_MANUAIS_FOLHA são declarados
+// mais abaixo no arquivo e um const aqui cairia na zona morta ao carregar)
+function camposDescontoDaPlanilha() {
+  return [...CAMPOS_MATERIAL_FOLHA, 'emprestimo', ...CAMPOS_MANUAIS_FOLHA.filter(c => c.startsWith('parcela_'))];
+}
+function lerDescontosDaPlanilhaFolha(wb) {
+  const apelidos = SCHEMAS.folhaPagamento.fields;
+  // A planilha do cliente tem uma aba OCULTA "." com uma cópia antiga da folha
+  // (mesmo cabeçalho, valores de outra versão) ANTES da "FOLHA DE PAGAMENTO" —
+  // pegar a primeira aba que casasse trazia os descontos errados. Aba oculta
+  // fica de fora e a que tem "folha" no nome vem primeiro.
+  const info = (wb.Workbook && wb.Workbook.Sheets) || [];
+  const visivel = nome => { const s = info.find(x => x.name === nome); return !s || !s.Hidden; };
+  const abas = wb.SheetNames.filter(visivel)
+    .sort((a, b) => (normalizeHeader(b).includes('folha') ? 1 : 0) - (normalizeHeader(a).includes('folha') ? 1 : 0));
+  for (const nomeAba of abas) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[nomeAba], { header: 1, raw: true, defval: null });
+    for (let i = 0; i < Math.min(8, rows.length); i++) {
+      const cab = (rows[i] || []).map(normalizeHeader);
+      const iTec = cab.findIndex(c => apelidos.tecnico.includes(c));
+      if (iTec < 0 || !cab.includes('total dos descontos')) continue;
+      const colunas = {};
+      camposDescontoDaPlanilha().forEach(campo => {
+        const idx = cab.findIndex(c => (apelidos[campo] || []).includes(c));
+        if (idx >= 0) colunas[campo] = idx;
+      });
+      const linhas = [];
+      rows.slice(i + 1).forEach(r => {
+        const nome = String((r && r[iTec]) || '').trim();
+        if (!nome || ehLinhaDeTotalDaFolha(nome)) return;
+        const campos = {};
+        Object.entries(colunas).forEach(([campo, idx]) => {
+          const c = r[idx];
+          if (campo.startsWith('parcela_')) {
+            campos[campo] = c === null || c === undefined || c === '' ? ''
+              : c instanceof Date ? `${c.getDate()}/${c.getMonth() + 1}` : String(c).trim();
+          } else {
+            campos[campo] = typeof c === 'number' ? +c.toFixed(2) : (parseMoney(c) || 0);
+          }
+        });
+        linhas.push({ nome, campos });
+      });
+      return { aba: nomeAba, linhas, colunas: Object.keys(colunas) };
+    }
+  }
+  return { erro: 'Não achei a aba da folha (precisa das colunas "TÉCNICO" e "TOTAL DOS DESCONTOS").' };
+}
+async function aplicarDescontosDaPlanilhaNaFolha(periodo, linhasPlanilha) {
+  const alteradas = [], semLinha = [];
+  let totalMaterial = 0;
+  linhasPlanilha.forEach(({ nome, campos }) => {
+    const temValor = Object.values(campos).some(v => v && v !== 0);
+    const idx = DB.folhaPagamento.findIndex(l => l.periodo === periodo
+      && (normalizeHeader(l.tecnico) === normalizeHeader(nome) || mesmaPessoa(l.tecnico, nome)));
+    if (idx < 0) { if (temValor) semLinha.push(nome); return; }
+    const atual = DB.folhaPagamento[idx];
+    const mudou = Object.entries(campos).some(([c, v]) => (c.startsWith('parcela_') ? String(atual[c] || '') !== v : Math.abs((Number(atual[c]) || 0) - v) >= 0.005));
+    CAMPOS_MATERIAL_FOLHA.forEach(c => { totalMaterial += Number(campos[c]) || 0; });
+    if (!mudou) return;
+    const linha = { ...atual, ...campos };
+    linha.total_descontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(linha[c]) || 0), 0);
+    linha.total_receber = totalReceberFolha(linha);
+    DB.folhaPagamento[idx] = linha;
+    alteradas.push(linha);
+  });
+  const sync = alteradas.length ? await syncBatchToSupabase('folhaPagamento', alteradas) : { ok: true };
+  return { alteradas: alteradas.length, semLinha, totalMaterial, sync };
+}
 // ---- ALUGUEL DE CARRO ----
 // Quanto a JH paga por DIA ao técnico que roda com carro próprio. Os números
 // saíram do Relatório do próprio cliente (ciclo 21/07-20/08/2026), dividindo
@@ -9153,22 +9232,41 @@ async function aplicarRetornosGigaNaFolha(periodo, porTecnico, bonusPorTecnico) 
 //                                 técnico de 8 dias (8 × 50 = R$ 400,00).
 //   JH            R$ 0,00       — carro da empresa: quem paga a locadora é a
 //                                 JH, o técnico não recebe aluguel.
-// ATENÇÃO (achado ao conferir, ainda sem resposta do cliente): 6 técnicos do
-// ciclo receberam o valor CHEIO (R$ 1.000,00 / R$ 1.500,00) mesmo com 26-27
-// dias, enquanto outros com a mesma faixa de dias receberam proporcional. Ou
-// existe um mínimo de dias que fecha o mês, ou são acordos individuais. Até o
-// cliente dizer qual é a regra, aqui é sempre proporcional — e o campo
-// continua editável na tela pra corrigir caso a caso.
+// REGRA (01/10/2026, lida da FÓRMULA da coluna VALOR ALUGUEL da planilha
+// "FOLHA DE PAGAMENTO" do cliente — antes era dúvida em aberto):
+//   =SE(E(FROTA="PRÓPRIO"; DIAS>=26); 1000; SE(E(FROTA="PRÓPRIO"; DIAS<26); DIAS*33,33;
+//    SE(E(FROTA="PRÓPRIO NOVO"; DIAS>=26); 1500; SE(E(FROTA="PRÓPRIO NOVO"; DIAS<26); DIAS*50;
+//    SE(FROTA="JH"; 0)))))
+// Ou seja: 26 dias ou mais = mês CHEIO (R$ 1.000,00 / R$ 1.500,00); abaixo
+// disso, proporcional (diária × dias). Era exatamente o "6 técnicos receberam o
+// valor cheio com 26-27 dias" que não se explicava. O campo continua editável
+// na tela pra acordo individual (ex.: R$ 866,68 digitado na mão).
 const DIARIA_ALUGUEL = [
-  { re: /propri.*nov/, valor: 50.00 },   // "PRÓPRIO NOVO" antes de "PRÓPRIO"
-  { re: /propri/,      valor: 33.33 },
-  { re: /jh/,          valor: 0 },
+  { re: /propri.*nov/, valor: 50.00, mensal: 1500 },   // "PRÓPRIO NOVO" antes de "PRÓPRIO"
+  { re: /propri/,      valor: 33.33, mensal: 1000 },
+  { re: /jh/,          valor: 0,     mensal: 0 },
 ];
 function diariaDoAluguel(frota) {
   const f = normalizeHeader(frota);
   if (!f) return 0;
   const l = DIARIA_ALUGUEL.find(x => x.re.test(f));
   return l ? l.valor : 0;
+}
+function valorAluguelPorRegra(frota, dias) {
+  const f = normalizeHeader(frota);
+  const l = f ? DIARIA_ALUGUEL.find(x => x.re.test(f)) : null;
+  if (!l) return 0;
+  const d = Number(dias) || 0;
+  return d >= BONUS_DIAS_MIN ? l.mensal : +(d * l.valor).toFixed(2);
+}
+// O valor gravado é o que a regra (nova ou a antiga, sempre proporcional) daria
+// pra aquela frota/dias? Então foi o SISTEMA que preencheu, não alguém na mão —
+// pode ser refeito. Valor diferente = acordo digitado, fica como está.
+function aluguelFoiAutomatico(linha) {
+  const v = Number(linha.valor_aluguel) || 0;
+  const d = Number(linha.dias_aluguel) || 0;
+  return [valorAluguelPorRegra(linha.frota, d), +(d * diariaDoAluguel(linha.frota)).toFixed(2)]
+    .some(x => Math.abs(x - v) < 0.05);
 }
 // Casamento de NOME entre a tabela de Frota e a folha (01/10/2026). Comparar o
 // texto inteiro falhava por grafia: a Frota tem "Bruno Quirino" e a folha
@@ -9414,7 +9512,7 @@ function gerarPeriodoFolha(inicio, fim) {
     const ordens = porTecnico[tecnico];
     // mesma regra da Tabela de Bônus: dias trabalhados = dias DISTINTOS com
     // pelo menos 1 ordem concluída baixada nesse período
-    const diasTrab = new Set(ordens.map(p => p.data)).size;
+    const diasTrab = Math.max(new Set(ordens.map(p => p.data)).size, diasDoFechamentoDoCiclo(tecnico, inicio, fim));
     const ret = retornos[tecnico] || { ifi: 0, irr: 0 };
     const base = baseDoTecnico(tecnico, inicio, fim);
     const ifiPct = base.ativacao ? (ret.ifi / base.ativacao) * 100 : 0;
@@ -9433,7 +9531,7 @@ function gerarPeriodoFolha(inicio, fim) {
     //                da empresa, qualquer outra locadora = carro alugado).
     //   DIAS ALUGUEL = DIAS TRABALHADOS. Conferido no Relatório do cliente:
     //                bate em 35 de 35 linhas do ciclo 21/07-20/08.
-    //   VALOR        = dias × a diária do tipo de frota (ver DIARIA_ALUGUEL).
+    //   VALOR        = mês cheio com 26+ dias, senão dias × diária (valorAluguelPorRegra).
     // Só preenche o que ainda não foi mexido à mão: quem já lançou o valor na
     // tela continua mandando.
     //
@@ -9453,7 +9551,7 @@ function gerarPeriodoFolha(inicio, fim) {
       manuais.dias_aluguel = diasTrab;
     }
     if (eraNovo || existente.valor_aluguel === undefined || existente.valor_aluguel === null) {
-      manuais.valor_aluguel = +(Number(manuais.dias_aluguel) * diariaDoAluguel(manuais.frota)).toFixed(2);
+      manuais.valor_aluguel = valorAluguelPorRegra(manuais.frota, manuais.dias_aluguel);
     }
     const totalDescontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(manuais[c]) || 0), 0);
     // A quebra por tipo (Ativação/Reparo/...) NÃO fica gravada aqui — a tela
@@ -18105,7 +18203,7 @@ function fechamentoSintetico(inicio, fim) {
       total_geral: o.ativacao + o.mc + o.me + o.reparos + o.upgrade, dias_trabalhados: o.dias.size,
       valor_pago_giga: giga, valor_ordens: valor, despesas: 0, lucros: 0, gasolina: 0,
       qtd_ifi: qtdIfi, qtd_irr: qtdIrr, desc_ifi: rl ? rl.valorIfi : 0, desc_irr: rl ? rl.valorIrr : 0,
-      frota, aluguel_carro: /propri/i.test(norm(frota)) ? +(o.dias.size * diariaDoAluguel(frota)).toFixed(2) : 0,
+      frota, aluguel_carro: /propri/i.test(norm(frota)) ? valorAluguelPorRegra(frota, o.dias.size) : 0,
     };
   });
 }
@@ -19381,13 +19479,22 @@ function renderFolhaPagamento(modo) {
     <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
       Envie a planilha de retornos que a GIGA manda todo mês ("IFI e IRR ….xlsx"). Vale sempre para a
       <b>folha atual${periodoPadraoFolha ? ` (${esc(periodoPadraoFolha)})` : ''}</b>: a quantidade e o desconto de IFI/IRR
-      saem dos retornos do ciclo (21 a 20) e o <b>bônus</b> sai dos retornos do mês (1 a 30/31). O retorno
+      saem dos retornos do ciclo (21 a 20) dessa planilha; o <b>bônus</b> sai dos retornos do mês (1 a 30/31) da base do sistema. O retorno
       é lançado no <b>ofensor</b> (coluna "Executor"), não em quem foi refazer. Enquanto a planilha não é
       enviada, o sistema calcula tudo com os dados dele.
     </p>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
       <div class="field" style="margin:0"><label>Planilha da GIGA</label><input type="file" id="fol-giga-file" accept=".xlsx,.xls"></div>
       <span id="fol-giga-msg" style="font-size:13px"></span>
+    </div>
+    <p style="font-size:12px;color:var(--text-muted);margin:16px 0 10px">
+      <b>Descontos da planilha antiga da folha</b> — copia só os descontos de material (equipamento, multa,
+      miscelânea, mecânica, vale, ferramentas, combustível, fiscalização, pedágio), o empréstimo e as parcelas
+      para a folha atual. Ordens, bônus, IFI/IRR, frota e aluguel continuam sendo calculados pelo sistema.
+    </p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <div class="field" style="margin:0"><label>Planilha da folha</label><input type="file" id="fol-desc-file" accept=".xlsx,.xls"></div>
+      <span id="fol-desc-msg" style="font-size:13px"></span>
     </div>
   </div>` : ''}
   <div id="folha-body"></div>`;
@@ -19423,23 +19530,26 @@ function renderFolhaPagamento(modo) {
           msg.innerHTML = `<span style="color:var(--warn-text)">A planilha tem retorno, mas nenhum dentro de "${esc(periodo)}" (${conta.fora} fora do período). Confira se escolheu o ciclo certo.</span>`;
           return;
         }
-        // BÔNUS do mês (1 a 30/31): retornos da MESMA planilha no mês em que o ciclo
-        // termina ÷ ativações/reparos do técnico nesse mês (Produção). Técnico sem
-        // Produção no mês fica com o bônus que já tinha.
+        // BÔNUS do mês (1 a 30/31): retornos do PRÓPRIO SISTEMA (base de IFI/IRR,
+        // por ofensor) no mês em que o ciclo termina ÷ serviços do CICLO da folha
+        // (baseBonusDaLinha — fórmula da planilha do cliente). NÃO usa o arquivo da
+        // GIGA: ele cobre o CICLO (vai só até o dia 20) e deixava de fora os
+        // retornos de 21 a 30. Conferido em 01/10/2026: a aba "IFI E IRR BONUS" da
+        // folha do cliente bate 42 de 42 com contarRetornosPorOfensor(01/09–30/09)
+        // e só 25 de 42 com o arquivo da GIGA (Caio caía pra INAPTO e Marcos subia
+        // pra APTO). O arquivo da GIGA vale só pro DESCONTO (quantidade do ciclo).
         const mes = mesCalendarioDoFimDoCiclo(janela);
-        const contaMes = contarRetornosGiga(linhasDaGiga, mes.inicio, mes.fim);
+        const contaMes = contarRetornosPorOfensor(mes.inicio, mes.fim);
+        const contaMesNorm = {};
+        Object.entries(contaMes).forEach(([nome, c]) => { contaMesNorm[normalizeHeader(nome)] = c; });
         const bonusMes = {};
-        let avisoBonus = '';
-        if (!contaMes.erro && contaMes.noPeriodo) {
-          DB.folhaPagamento.filter(l => l.periodo === periodo).forEach(l => {
-            const base = baseProducaoDoTecnico(l.tecnico, mes.inicio, mes.fim);
-            if (!base.ativacao && !base.reparos) return;
-            const m = contaMes.porTecnico[normalizeHeader(l.tecnico)] || { ifi: 0, irr: 0 };
-            bonusMes[normalizeHeader(l.tecnico)] = bonusAptoPorIndicadores(m.ifi, m.irr, base, l.dias_trab) ? 'APTO' : 'INAPTO';
-          });
-        } else {
-          avisoBonus = `a planilha não tem retornos em ${formatDate(mes.inicio)} a ${formatDate(mes.fim)} — o bônus ficou como estava`;
-        }
+        const avisoBonus = '';
+        DB.folhaPagamento.filter(l => l.periodo === periodo).forEach(l => {
+          const base = baseBonusDaLinha(l, mes);
+          if (!base.ativacao && !base.reparos) return;
+          const m = contaMesNorm[normalizeHeader(l.tecnico)] || { ifi: 0, irr: 0 };
+          bonusMes[normalizeHeader(l.tecnico)] = bonusAptoPorIndicadores(m.ifi, m.irr, base, diasTrabDaLinha(l)) ? 'APTO' : 'INAPTO';
+        });
         const r = await aplicarRetornosGigaNaFolha(periodo, conta.porTecnico, bonusMes);
         const partes = [`<span style="color:var(--success)">${conta.noPeriodo} retorno(s) lançado(s) em ${r.alteradas} linha(s) de "${esc(periodo)}"</span>`];
         if (Object.keys(bonusMes).length) partes.push(`<span style="color:var(--success)">bônus de ${formatDate(mes.inicio)} a ${formatDate(mes.fim)} recalculado</span>`);
@@ -19456,6 +19566,37 @@ function renderFolhaPagamento(modo) {
         msg.innerHTML = `<span style="color:var(--danger)">Erro ao ler a planilha: ${esc(e.message)}</span>`;
       }
       inputGiga.value = '';
+    };
+    leitor.readAsArrayBuffer(arquivo);
+  });
+  // ---- descontos de material da planilha antiga da folha ----
+  const inputDesc = document.getElementById('fol-desc-file');
+  if (inputDesc) inputDesc.addEventListener('change', () => {
+    const arquivo = inputDesc.files && inputDesc.files[0];
+    const msg = document.getElementById('fol-desc-msg');
+    if (!arquivo) return;
+    const periodo = periodoPadraoFolha;
+    if (!periodo) { msg.innerHTML = '<span style="color:var(--danger)">Não há folha no sistema ainda.</span>'; inputDesc.value = ''; return; }
+    if (typeof XLSX === 'undefined') { msg.innerHTML = '<span style="color:var(--danger)">A biblioteca de planilha não carregou (sem internet?).</span>'; inputDesc.value = ''; return; }
+    msg.innerHTML = '<span style="color:var(--text-muted)">Lendo a planilha…</span>';
+    const leitor = new FileReader();
+    leitor.onload = async ev => {
+      try {
+        const lido = lerDescontosDaPlanilhaFolha(XLSX.read(ev.target.result, { type: 'array', cellDates: true }));
+        if (lido.erro) { msg.innerHTML = `<span style="color:var(--danger)">${esc(lido.erro)}</span>`; return; }
+        const r = await aplicarDescontosDaPlanilhaNaFolha(periodo, lido.linhas);
+        const partes = [`<span style="color:var(--success)">${r.alteradas} técnico(s) atualizado(s) em "${esc(periodo)}" — ${formatCurrency(r.totalMaterial)} em descontos de material</span>`];
+        if (r.semLinha.length) partes.push(`<span style="color:var(--warn-text)">sem linha na folha: ${esc(r.semLinha.join(', '))}</span>`);
+        if (supa) partes.push(r.sync && r.sync.ok !== false
+          ? '<span style="color:var(--success)">salvo no Supabase</span>'
+          : `<span style="color:var(--danger)">não consegui salvar: ${esc((r.sync && r.sync.error && r.sync.error.message) || 'erro desconhecido')}</span>`);
+        msg.innerHTML = partes.join(' — ');
+        toast('Descontos da planilha lançados na folha.', 'ok', 2500);
+        load();
+      } catch (e) {
+        msg.innerHTML = `<span style="color:var(--danger)">Erro ao ler a planilha: ${esc(e.message)}</span>`;
+      }
+      inputDesc.value = '';
     };
     leitor.readAsArrayBuffer(arquivo);
   });
@@ -19510,6 +19651,16 @@ function renderFolhaPagamento(modo) {
     // Produção no mês fica com o bônus gravado.
     const ordensPorTecnicoFolha = {};
     DB.producao.forEach(p => { const t = normalizeHeader(p.recurso); (ordensPorTecnicoFolha[t] = ordensPorTecnicoFolha[t] || []).push(p); });
+    // dias do fechamento oficial ANTES do bônus (menos de 26 = INAPTO). O
+    // aluguel acompanha os dias quando foi o sistema que preencheu (ver
+    // aluguelFoiAutomatico) — `_aluguelAuto` é lido na lente final, lá embaixo.
+    const brutasDias = brutas.map(r => {
+      const auto = aluguelFoiAutomatico(r);
+      const dias = diasTrabDaLinha(r);
+      if (dias === (Number(r.dias_trab) || 0)) return auto ? { ...r, _aluguelAuto: true } : r;
+      const mesmoDia = (Number(r.dias_aluguel) || 0) === (Number(r.dias_trab) || 0);
+      return { ...r, dias_trab: dias, dias_aluguel: mesmoDia ? dias : r.dias_aluguel, _aluguelAuto: auto };
+    });
     const retornosDoMes = {};
     const bonusAutomatico = r => {
       if (r.retorno_origem === 'giga') return r;
@@ -19519,13 +19670,13 @@ function renderFolhaPagamento(modo) {
       const mes = mesCalendarioDoFimDoCiclo(j);
       if (!mes.inicio) return r;
       const ordens = ordensPorTecnicoFolha[normalizeHeader(r.tecnico)] || [];
-      const base = baseProducaoDoTecnico(r.tecnico, mes.inicio, mes.fim, ordens);
+      const base = baseBonusDaLinha(r, mes, ordens);
       if (!base.ativacao && !base.reparos) return r;
       const cont = retornosDoMes[mes.inicio] || (retornosDoMes[mes.inicio] = contarRetornosPorOfensor(mes.inicio, mes.fim));
       const c = cont[r.tecnico] || cont[Object.keys(cont).find(k => normalizeHeader(k) === normalizeHeader(r.tecnico)) || ''] || { ifi: 0, irr: 0 };
       return { ...r, bonus: bonusAptoPorIndicadores(c.ifi, c.irr, base, r.dias_trab) ? 'APTO' : 'INAPTO', _bonusRecalculado: true };
     };
-    const linhasComBonus = !recalculaBonus ? brutas.map(bonusAutomatico) : brutas.map(r => {
+    const linhasComBonus = !recalculaBonus ? brutasDias.map(bonusAutomatico) : brutasDias.map(r => {
       const c = contagemRetBonus[r.tecnico] || { ifi: 0, irr: 0 };
       const base = baseDoTecnico(r.tecnico, bonusIni, bonusFim);
       const ifiPctBonus = base.ativacao ? (c.ifi / base.ativacao) * 100 : 0;
@@ -19575,7 +19726,15 @@ function renderFolhaPagamento(modo) {
       const j = datasDoPeriodoFolha(r.periodo);
       const linha = { ...r };
       const frotaReal = j.inicio ? frotaDoTecnico(r.tecnico, j.inicio, j.fim) : '';
+      const frotaMudou = frotaReal && normalizeHeader(frotaReal) !== normalizeHeader(r.frota);
       if (frotaReal) linha.frota = frotaReal;
+      // aluguel refeito pela regra quando foi o sistema que preencheu ou quando a
+      // frota gravada não é mais a real (o valor era de outra frota). Acordo
+      // digitado na mão, com a frota certa, fica como está.
+      if (r._aluguelAuto || frotaMudou) {
+        linha.valor_aluguel = valorAluguelPorRegra(linha.frota, Number(linha.dias_aluguel) || Number(linha.dias_trab) || 0);
+      }
+      linha.total_receber = totalReceberFolha(linha);
       const apto = /apto/i.test(linha.bonus || '') && !/inapto/i.test(linha.bonus || '');
       if (j.inicio) {
         const q = quebraPorTipoDaLinha(linha, apto, ordensPorTecnicoFolha[normalizeHeader(r.tecnico)] || []);
@@ -20035,6 +20194,39 @@ function quebraPorTipoDoTecnico(ordens, janela, apto) {
 // (a "BASE GERAL CONCLUÍDO" diária traz só ativação, M.E e reparo); quando essa
 // aba não foi reimportada até o fim do ciclo, a Produção fica sem eles e o total
 // sai menor que o oficial. Com o fechamento do ciclo importado, vale o dele.
+// Dias trabalhados do técnico no FECHAMENTO oficial daquele ciclo exato (aba
+// RELATORIO). A Produção diária ("BASE GERAL CONCLUÍDO") não traz Upgrade nem
+// Mudança de Cômodo, então dia em que o técnico só fez esses serviços não
+// aparecia — conferido em 01/10/2026 contra a folha do cliente (ciclo 21/08 a
+// 20/09): Marcos 25 × 27 e Samuel 25 × 26, e o Samuel caía pra INAPTO por isso.
+// 0 quando o ciclo ainda não tem fechamento.
+function diasDoFechamentoDoCiclo(tecnico, inicio, fim) {
+  if (!inicio || !fim) return 0;
+  const f = (DB.fechamento || []).find(x => normalizeHeader(x.tecnico) === normalizeHeader(tecnico)
+    && x.inicio === inicio && x.ate_o_dia === fim && (x.total_geral || 0) > 0);
+  return f ? (Number(f.dias_trabalhados) || 0) : 0;
+}
+// Dias da linha da folha: o maior entre o gravado e o do fechamento oficial
+// (nunca baixa um número digitado/importado — só corrige o que a Produção
+// incompleta deixou pra menos).
+function diasTrabDaLinha(linha) {
+  const j = datasDoPeriodoFolha(linha.periodo);
+  return Math.max(Number(linha.dias_trab) || 0, diasDoFechamentoDoCiclo(linha.tecnico, j.inicio, j.fim));
+}
+// Base do % do BÔNUS — a fórmula da planilha do cliente (01/10/2026):
+//   % IRR = IRR do bônus ÷ REPARO CORRETIVO do ciclo
+//   % IFI = IFI do bônus ÷ (ATIVAÇÃO + MUDANÇA DE ENDEREÇO) do ciclo
+// (=AE/G e =AD/(B+E) na aba FOLHA DE PAGAMENTO). O numerador são os retornos
+// do MÊS (1 a 30); o denominador são os serviços do CICLO da folha, os mesmos
+// da tabela (quebraPorTipoDaLinha). Antes o sistema dividia pelos serviços do
+// mês na Produção e Caio/Guilherme Ferreira saíam INAPTOS sendo APTOS na folha.
+// Sem serviço nenhum no ciclo, cai nos serviços do mês.
+function baseBonusDaLinha(linha, mes, ordensDoTecnico) {
+  const q = quebraPorTipoDaLinha(linha, true, ordensDoTecnico);
+  const ativacao = (q.ativacao || 0) + (q.mudanca_endereco || 0), reparos = q.reparo || 0;
+  if (ativacao || reparos) return { ativacao, reparos };
+  return baseProducaoDoTecnico(linha.tecnico, mes.inicio, mes.fim, ordensDoTecnico);
+}
 function quebraPorTipoDaLinha(linha, apto, ordensDoTecnico) {
   const janela = datasDoPeriodoFolha(linha.periodo);
   const lista = ordensDoTecnico || DB.producao.filter(p => normalizeHeader(p.recurso) === normalizeHeader(linha.tecnico));
