@@ -11762,6 +11762,23 @@ function abrirPainelTecnico(tecnico, rows, retornos, dia) {
   m.classList.add('active');
   ativarFiltrosDeColuna(m);
 }
+// Cards `.stat-card` (ícone em caixa colorida + borda lateral) compartilhados por
+// Parcial do Dia e PCR (01/10/2026, pedido do cliente: "melhore os cards
+// mantendo o padrao de parcial do dia"). Ícones SVG no mesmo traço do menu
+// lateral; a cor do ícone/borda vem da variante (`green/blue/orange/red/purple/
+// neutral`, ver CSS .stat-card--*). Nasceu em 30/09/2026 na tela Certificações.
+const icOk = '<svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><path d="M5.8 9.2 7.8 11.2 12.2 6.6"/></svg>';
+const icPlay = '<svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><path d="M7.3 6 12 9l-4.7 3Z" fill="currentColor" stroke="none"/></svg>';
+const icRota = '<svg viewBox="0 0 18 18"><circle cx="4" cy="14" r="1.6"/><circle cx="14" cy="4" r="1.6"/><path d="M5.2 12.8 12.8 5.2" stroke-dasharray="2.2 2.2"/></svg>';
+const icAviso = '<svg viewBox="0 0 18 18"><path d="M9 2 16.3 15.2H1.7Z"/><line x1="9" y1="7" x2="9" y2="10.6"/><line x1="9" y1="12.6" x2="9" y2="12.62"/></svg>';
+const icPausa = '<svg viewBox="0 0 18 18"><rect x="5" y="4" width="3" height="10" rx="1"/><rect x="10" y="4" width="3" height="10" rx="1"/></svg>';
+const icX = '<svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><line x1="6.3" y1="6.3" x2="11.7" y2="11.7"/><line x1="11.7" y1="6.3" x2="6.3" y2="11.7"/></svg>';
+const icPasta = '<svg viewBox="0 0 18 18"><path d="M2.3 5.3c0-.8.6-1.4 1.4-1.4h2.8l1.4 1.8h6c.8 0 1.4.6 1.4 1.4v5.6c0 .8-.6 1.4-1.4 1.4H3.7c-.8 0-1.4-.6-1.4-1.4Z"/></svg>';
+const icPessoas = '<svg viewBox="0 0 18 18"><circle cx="6.5" cy="6" r="2.3"/><circle cx="12.7" cy="6.8" r="1.9"/><path d="M2.3 15c0-2.4 1.9-4.2 4.2-4.2s4.2 1.8 4.2 4.2"/><path d="M11 11.3c1.9.3 3.3 1.8 3.3 3.7"/></svg>';
+const icBarras = '<svg viewBox="0 0 18 18"><rect x="2.5" y="9.5" width="3" height="6" rx="0.6"/><rect x="7.5" y="5.5" width="3" height="10" rx="0.6"/><rect x="12.5" y="11.5" width="3" height="4" rx="0.6"/></svg>';
+const icRelogio = '<svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><path d="M9 5v4.2l2.8 1.6"/></svg>';
+const icChave = '<svg viewBox="0 0 18 18"><path d="M11.6 2.6a3.7 3.7 0 0 0-3.3 5.1L2.6 13.4l2 2 5.7-5.7a3.7 3.7 0 0 0 5.1-3.3l-2.2 2.2-1.9-.5-.5-1.9Z"/></svg>';
+const statCard = (cor, icon, label, value) => `<div class="stat-card stat-card--${cor}"><div class="stat-top"><div class="stat-ic">${icon}</div><div class="stat-text"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div></div></div>`;
 function renderPCR() {
   if (PCR_LIVE_TIMER) { clearInterval(PCR_LIVE_TIMER); PCR_LIVE_TIMER = null; }
   const dias = [...new Set(DB.pcr.map(r => r.data))].sort().reverse();
@@ -12198,29 +12215,29 @@ function renderPCR() {
 
     body.innerHTML = `
       <div class="section-heading">Status das Ordens</div>
-      <div class="cards-grid">
-        ${metricCard('Concluídas', statusDasOrdens.concluido)}
-        ${metricCard('Iniciadas', statusDasOrdens.iniciado)}
-        ${metricCard('Em Rota', statusDasOrdens.em_rota)}
-        ${metricCard('Improdutivas', statusDasOrdens.nao_concluido)}
-        ${metricCard('Suspensas', statusDasOrdens.suspenso, statusDasOrdens.suspenso > 0)}
-        ${metricCard('Canceladas', statusDasOrdens.cancelado, statusDasOrdens.cancelado > 0)}
+      <div class="stat-cards">
+        ${statCard('green', icOk, 'Concluídas', statusDasOrdens.concluido)}
+        ${statCard('blue', icPlay, 'Iniciadas', statusDasOrdens.iniciado)}
+        ${statCard('orange', icRota, 'Em Rota', statusDasOrdens.em_rota)}
+        ${statCard('red', icAviso, 'Improdutivas', statusDasOrdens.nao_concluido)}
+        ${statCard('purple', icPausa, 'Suspensas', statusDasOrdens.suspenso)}
+        ${statCard('neutral', icX, 'Canceladas', statusDasOrdens.cancelado)}
       </div>
 
-      <div class="cards-grid">
-        ${metricCard('Total de O.S no dia', rows.length)}
-        ${metricCard('Pendentes agora', rowsPendentes.length)}
-        ${metricCard('Concluídas', statusTot.concluido)}
+      <div class="stat-cards">
+        ${statCard('neutral', icPasta, 'Total de O.S no dia', rows.length)}
+        ${statCard('orange', icRelogio, 'Pendentes agora', rowsPendentes.length)}
+        ${statCard('green', icOk, 'Concluídas', statusTot.concluido)}
       </div>
 
       <!-- "Vencendo Agora" e "Prazos do Dia — Detalhado" eram duas tabelas
            quase iguais (a mesma ordem de Reparo, uma só com as abertas
            ordenadas por urgência, outra com tudo mas sem status prazo pras
            pendentes) — viraram UMA tabela só, mais abaixo. -->
-      <div class="cards-grid">
-        ${metricCard('Já vencidas', vencidas.length, vencidas.length > 0)}
-        ${metricCard('Vencem em até 2h', vence2h.length, vence2h.length > 0)}
-        ${metricCard('Reparos em aberto', abertasOrdenadas.length)}
+      <div class="stat-cards">
+        ${statCard(vencidas.length > 0 ? 'red' : 'neutral', icAviso, 'Já vencidas', vencidas.length)}
+        ${statCard(vence2h.length > 0 ? 'orange' : 'neutral', icRelogio, 'Vencem em até 2h', vence2h.length)}
+        ${statCard('blue', icChave, 'Reparos em aberto', abertasOrdenadas.length)}
       </div>
 
       <div class="section-heading">Técnicos — Situação Agora</div>
@@ -13559,20 +13576,6 @@ function renderParcialDoDia() {
       .sort((a, b) => b.qtd - a.qtd || a.bairro.localeCompare(b.bairro, 'pt-BR'))
       .slice(0, 10);
 
-    // Ícones dos cards de Status/Totais (30/09/2026, pedido do cliente:
-    // "melhore o design dos cards da aba parcial do dia") — mesmo componente
-    // `.stat-card` que a tela Certificações já usa (ver CSS), generalizado
-    // no mesmo dia pra não duplicar estilo por tela.
-    const icOk = '<svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><path d="M5.8 9.2 7.8 11.2 12.2 6.6"/></svg>';
-    const icPlay = '<svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><path d="M7.3 6 12 9l-4.7 3Z" fill="currentColor" stroke="none"/></svg>';
-    const icRota = '<svg viewBox="0 0 18 18"><circle cx="4" cy="14" r="1.6"/><circle cx="14" cy="4" r="1.6"/><path d="M5.2 12.8 12.8 5.2" stroke-dasharray="2.2 2.2"/></svg>';
-    const icAviso = '<svg viewBox="0 0 18 18"><path d="M9 2 16.3 15.2H1.7Z"/><line x1="9" y1="7" x2="9" y2="10.6"/><line x1="9" y1="12.6" x2="9" y2="12.62"/></svg>';
-    const icPausa = '<svg viewBox="0 0 18 18"><rect x="5" y="4" width="3" height="10" rx="1"/><rect x="10" y="4" width="3" height="10" rx="1"/></svg>';
-    const icX = '<svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><line x1="6.3" y1="6.3" x2="11.7" y2="11.7"/><line x1="11.7" y1="6.3" x2="6.3" y2="11.7"/></svg>';
-    const icPasta = '<svg viewBox="0 0 18 18"><path d="M2.3 5.3c0-.8.6-1.4 1.4-1.4h2.8l1.4 1.8h6c.8 0 1.4.6 1.4 1.4v5.6c0 .8-.6 1.4-1.4 1.4H3.7c-.8 0-1.4-.6-1.4-1.4Z"/></svg>';
-    const icPessoas = '<svg viewBox="0 0 18 18"><circle cx="6.5" cy="6" r="2.3"/><circle cx="12.7" cy="6.8" r="1.9"/><path d="M2.3 15c0-2.4 1.9-4.2 4.2-4.2s4.2 1.8 4.2 4.2"/><path d="M11 11.3c1.9.3 3.3 1.8 3.3 3.7"/></svg>';
-    const icBarras = '<svg viewBox="0 0 18 18"><rect x="2.5" y="9.5" width="3" height="6" rx="0.6"/><rect x="7.5" y="5.5" width="3" height="10" rx="0.6"/><rect x="12.5" y="11.5" width="3" height="4" rx="0.6"/></svg>';
-    const statCard = (cor, icon, label, value) => `<div class="stat-card stat-card--${cor}"><div class="stat-top"><div class="stat-ic">${icon}</div><div class="stat-text"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div></div></div>`;
     body.innerHTML = `
       <div class="section-heading">Status das Ordens</div>
       <div class="stat-cards">
@@ -15072,7 +15075,6 @@ function renderCertificacoes() {
     const icCert = '<svg viewBox="0 0 18 18"><rect x="3" y="1.5" width="12" height="15" rx="1.5"/><path d="M6 9.5 8 11.5 12 6.5"/></svg>';
     const icAlerta = '<svg viewBox="0 0 18 18"><path d="M9 2 16.3 15.2H1.7Z"/><line x1="9" y1="7" x2="9" y2="10.6"/><line x1="9" y1="12.6" x2="9" y2="12.62"/></svg>';
     const icPct = '<svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="6.3"/><path d="M9 2.7A6.3 6.3 0 0 1 15.3 9H9Z" fill="currentColor" stroke="none"/></svg>';
-    const icPasta = '<svg viewBox="0 0 18 18"><path d="M2.3 5.3c0-.8.6-1.4 1.4-1.4h2.8l1.4 1.8h6c.8 0 1.4.6 1.4 1.4v5.6c0 .8-.6 1.4-1.4 1.4H3.7c-.8 0-1.4-.6-1.4-1.4Z"/></svg>';
     body.innerHTML = `
       <div class="stat-cards">
         <div class="stat-card stat-card--green">
