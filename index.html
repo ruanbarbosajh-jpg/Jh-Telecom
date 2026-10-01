@@ -165,7 +165,7 @@
   /* Números de tabela e indicador em largura fixa — sem isso as colunas de
      R$ não alinham dígito a dígito e a tabela financeira fica torta. */
   table.data-table td, table.data-table th,
-  .metric-card .value, .bar-value, .donut-centro-valor, .dp-num,
+  .metric-card .value, .stat-card .stat-value, .bar-value, .donut-centro-valor, .dp-num,
   .ring-stat-value, .legend-item b { font-variant-numeric: tabular-nums; }
   /* Foco visível pra quem navega por teclado (antes não existia nenhum) */
   a:focus-visible, button:focus-visible, input:focus-visible,
@@ -962,8 +962,8 @@
   .topbar-user b { color: var(--text-primary); display: block; font-size: 13.5px; }
   .content { padding: 1.5rem 1.75rem; overflow-x: auto; }
 
-  .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 14px; margin-bottom: 1.5rem; }
-  .cards-grid.wide { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+  .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 14px; margin-bottom: 1.5rem; }
+  .cards-grid.wide { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
   /* cards empilhados um sobre o outro (usado dentro de painéis estreitos) */
   .cards-stack { display: flex; flex-direction: column; gap: 12px; }
   .cards-stack .metric-card { width: 100%; }
@@ -972,11 +972,13 @@
      cards igual a imagem que enviei com design bonito", seguindo um mockup).
      Nasceu só pra Certificações (.cert-card) e virou GENÉRICO no mesmo dia
      quando o cliente pediu o mesmo visual pro Parcial do Dia — por isso o
-     nome de classe é `.stat-card`, não `.cert-card`. Não é o `.metric-card`
-     de sempre (usado em ~100 lugares do sistema) — só as telas que pedirem
-     esse visual específico usam `.stat-card`; o resto continua igual. */
+     nome de classe é `.stat-card`, não `.cert-card`. Em 01/10/2026 (pedido do
+     cliente: "deixe todos cards nesse padrao ... os que nao estiverem assim
+     altere") virou o visual de TODO card do sistema: `metricCard()` agora gera
+     `.stat-card` (ícone escolhido pelo rótulo, ver ICONE_DO_CARD). O CSS
+     `.metric-card` abaixo ficou só por compatibilidade, sem uso no HTML novo. */
   .stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; margin-bottom: 1.5rem; }
-  .stat-card { background: var(--card-bg); border: 1px solid var(--border); border-left: 4px solid var(--stat-cor); border-radius: 14px; padding: 16px 20px; transition: transform .15s ease, box-shadow .15s ease; }
+  .stat-card { background: var(--card-bg); border: 1px solid var(--border); border-left: 4px solid var(--stat-cor); border-radius: 14px; padding: 16px 20px; min-width: 0; transition: transform .15s ease, box-shadow .15s ease; }
   .stat-card:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(0,0,0,.14); }
   /* Ícone do LADO do título/número (30/09/2026, pedido do cliente: "quero que o
      titulo e numero fiquem do lado do icone e nao em baixo") — antes o ícone
@@ -993,6 +995,35 @@
   .stat-card .stat-bar-track { margin-top: 12px; height: 6px; border-radius: 4px; background: var(--border); overflow: hidden; }
   .stat-card .stat-bar-fill { height: 100%; border-radius: 4px; background: var(--stat-cor); }
   .stat-card .stat-link { display: inline-block; margin-top: 10px; font-size: 12px; font-weight: 600; color: var(--stat-cor); cursor: pointer; text-decoration: underline; background: none; border: none; padding: 0; }
+  /* Card em coluna estreita: com o ícone ao lado sobra pouco pro número, então
+     abaixo de ~200px o ícone sobe e o texto vai EMBAIXO dele (01/10/2026, pedido
+     do cliente: "verifique se da pra colocar os dados do lado ou em baixo, para
+     melhor visualizacao e espacamento") — container query, decide pela largura do
+     PRÓPRIO card e não da tela. Fonte do número encolhe por tamanho do texto
+     (.v-md/.v-sm/.v-xs, ver metricCard): "R$ 123.456,78" e nome de técnico não
+     estouram. */
+  /* só dentro de grade: container-type tira a largura intrínseca do cartão e,
+     numa barra de filtros (flex), ele colapsaria a zero */
+  .stat-cards > .stat-card, .cards-grid > .stat-card { container-type: inline-size; }
+  @container (max-width: 205px) {
+    .stat-card .stat-top { flex-direction: column; align-items: flex-start; gap: 8px; }
+  }
+  .stat-card .stat-value.v-md { font-size: 22px; }
+  .stat-card .stat-value.v-sm { font-size: 18px; }
+  .stat-card .stat-value.v-xs { font-size: 15px; line-height: 1.3; }
+  .stat-card .stat-value, .stat-card .stat-sub { overflow-wrap: anywhere; }
+  .stat-card .stat-ic .stat-emoji { font-size: 20px; line-height: 1; }
+  .stat-card .mc-var { margin-top: 10px; }
+  .stat-card--heroi { grid-column: span 2; padding: 20px 24px; }
+  .stat-card--heroi .stat-value { font-size: 32px; }
+  /* compacto: o cartão pequeno que vive dentro de barra de filtro */
+  .stat-card--compacto { padding: 8px 14px; border-radius: 12px; border-left-width: 3px; }
+  .stat-card--compacto .stat-top { gap: 10px; }
+  .stat-card--compacto .stat-ic { width: 32px; height: 32px; border-radius: 8px; }
+  .stat-card--compacto .stat-ic svg { width: 18px; height: 18px; }
+  .stat-card--compacto .stat-label { font-size: 12px; margin: 0; }
+  .stat-card--compacto .stat-value { font-size: 15px; }
+  .stat-card--compacto:hover { transform: none; box-shadow: none; }
   .stat-card--green { --stat-cor: var(--success); --stat-cor-bg: rgba(34,197,94,.14); }
   .stat-card--red { --stat-cor: var(--danger); --stat-cor-bg: rgba(239,68,68,.14); }
   .stat-card--blue { --stat-cor: var(--accent); --stat-cor-bg: rgba(79,127,255,.14); }
@@ -1822,6 +1853,8 @@
     .metric-card { padding: var(--sp-3); }
     .metric-card.nivel-heroi { grid-column: 1 / -1; padding: var(--sp-4); }
     .metric-card.nivel-compacto { grid-column: 1 / -1; }
+    .stat-card { padding: 12px 14px; }
+    .stat-card--heroi, .stat-card--compacto { grid-column: 1 / -1; }
     .cards-stack { gap: var(--sp-2); }
 
     /* GRÁFICOS: mais baixos e empilhados, sem esmagar */
@@ -5627,11 +5660,11 @@ function ringStat(centerText, pct, opts = {}) {
 // lugar do número solto. `pct` alimenta o anel; `centerText` é o que aparece
 // escrito dentro dele (normalmente o próprio percentual formatado).
 function ringStatCard(label, centerText, pct, opts = {}) {
-  return `<div class="metric-card ring-card"><div class="ring-card-inner">
+  return `<div class="stat-card stat-card--blue ring-card"><div class="stat-top">
     ${ringStat(centerText, pct, opts)}
-    <div class="ring-card-text">
-      <div class="label">${label}</div>
-      ${opts.sub ? `<div class="sub">${opts.sub}</div>` : ''}
+    <div class="stat-text">
+      <div class="stat-label">${label}</div>
+      ${opts.sub ? `<div class="stat-sub" style="margin-top:2px">${opts.sub}</div>` : ''}
     </div>
   </div></div>`;
 }
@@ -7772,21 +7805,47 @@ function skeletonTela(alvo, cards = 4, linhas = 6) {
   if (busca()) busca().addEventListener('input', () => { sel = 0; pintar(); });
   if (caixa()) caixa().addEventListener('click', ev => { if (ev.target === caixa()) fechar(); });
 })();
+// Ícone do card pelo texto do rótulo (01/10/2026, pedido do cliente: "deixe todos
+// cards nesse padrao ... os que nao estiverem assim altere"): TODO card do sistema
+// passa por aqui e sai como `.stat-card` (ícone em caixa colorida + borda lateral),
+// o mesmo desenho de Parcial do Dia/PCR/Certificações — antes eram 142 chamadas
+// de `metricCard` num cartão simples sem ícone. Ordem importa: o 1º que casar
+// vence. Sem casar nada, cai no ícone de pasta (genérico).
+const ICONE_DO_CARD = [
+  [/cancel|desvincul/, () => icX],
+  [/suspens/, () => icPausa],
+  [/improdut|nao conclu|vencid|vencim|fora d|multa|risco|atras|diverg|perd|inapto|sem o s|nao encontrad/, () => icAviso],
+  [/iniciad/, () => icPlay],
+  [/em rota|rota/, () => icRota],
+  [/conclu|entregue|aptos|no prazo|certificad/, () => icOk],
+  [/pendente|prazo|horario|hora|tempo|dias|folga|em aberto|projecao|revis/, () => icRelogio],
+  [/reparo|manuten|corretiv|ativac|chamado/, () => icChave],
+  [/tecnico|colaborador|equipe|presente|trabalhando|condutor|motorista|envolvid|pessoas/, () => icPessoas],
+  [/veicul|frota|carro|placa|locadora/, () => icCarro],
+  [/valor|receita|lucro|despesa|desconto|provento|saldo|pedagio|pagar|receber|financeiro|custo|r\$|gasto|margem/, () => icMoeda],
+  [/%|media|taxa|variac|eficien|indice|ifi|irr|retorno|voltou/, () => icBarras],
+];
+function iconeDoCard(label, iconeManual) {
+  if (iconeManual) return /<svg/.test(iconeManual) ? iconeManual : `<span class="stat-emoji">${iconeManual}</span>`;
+  const m = /^\s*(\p{Extended_Pictographic}\uFE0F?|[◆⇅])\s*/u.exec(String(label));
+  if (m) return `<span class="stat-emoji">${m[1]}</span>`;
+  const n = normalizeHeader(label);
+  const achou = ICONE_DO_CARD.find(([re]) => re.test(n));
+  return achou ? achou[1]() : icPasta;
+}
 function metricCard(label, value, negative, opts = {}) {
-  const icon = opts.icon ? `<span>${opts.icon}</span>` : '';
-  const sub = opts.sub ? `<div class="sub">${opts.sub}</div>` : '';
-  // O tamanho do número acompanha o TAMANHO DO TEXTO: "10" pode ser enorme,
-  // mas "GABRIEL MESSIAS DE OLIVEIRA" no mesmo corpo estoura o card e fica
-  // desproporcional ao lado dos outros. Só encolhe o texto longo — os números
-  // continuam grandes.
-  const comprimento = String(value ?? '').length;
-  const escala = !opts.big ? '' : comprimento <= 8 ? ' big-value' : comprimento <= 18 ? ' med-value' : '';
-  const classe = (opts.positive ? ' positive' : (negative ? ' negative' : '')) + escala;
-  // opts.nivel: 'heroi' | 'primario' | 'compacto'. Define o PESO VISUAL do
-  // card. Antes todos tinham o mesmo corpo (21.76px medido), então o
-  // "Valor Pago pela GIGA" competia de igual pra igual com "Aluguel de
-  // carro" — o gestor não tinha como saber onde olhar primeiro.
-  const nivel = opts.nivel ? ` nivel-${opts.nivel}` : '';
+  const sub = opts.sub ? `<div class="stat-sub">${opts.sub}</div>` : '';
+  // O corpo do número acompanha o TAMANHO DO TEXTO: "10" pode ser enorme, mas
+  // "GABRIEL MESSIAS DE OLIVEIRA" no mesmo corpo estoura o card e fica
+  // desproporcional ao lado dos outros. Só encolhe o texto longo.
+  const comprimento = String(value ?? '').replace(/<[^>]*>/g, '').length;
+  const escala = comprimento <= 9 ? '' : comprimento <= 14 ? ' v-md' : comprimento <= 22 ? ' v-sm' : ' v-xs';
+  // Cor: vermelho quando `negative` (o que antes pintava o número de vermelho),
+  // verde quando `positive`, azul no resto.
+  const cor = opts.positive ? 'green' : negative ? 'red' : 'blue';
+  // opts.nivel: 'heroi' (ocupa 2 colunas, número maior) | 'compacto' (cartão
+  // pequeno de barra de filtro) | 'primario' (igual ao normal).
+  const nivel = opts.nivel === 'heroi' ? ' stat-card--heroi' : opts.nivel === 'compacto' ? ' stat-card--compacto' : '';
   // opts.variacao: { pct, invertido } — seta de tendência vs. período anterior
   let variacao = '';
   if (opts.variacao && isFinite(opts.variacao.pct)) {
@@ -7795,7 +7854,8 @@ function metricCard(label, value, negative, opts = {}) {
     variacao = `<div class="mc-var" style="color:${bom ? 'var(--success)' : 'var(--danger)'}">
       ${p >= 0 ? '▲' : '▼'} ${formatPct(Math.abs(p))}<span>${opts.variacao.rotulo || 'vs. período anterior'}</span></div>`;
   }
-  return `<div class="metric-card${opts.accent?' accent':''}${nivel}"><div class="label">${icon}${label}</div><div class="value${classe}">${value}</div>${variacao}${sub}</div>`;
+  const rotulo = String(label).replace(/^\s*(\p{Extended_Pictographic}\uFE0F?|[◆⇅])\s*/u, '');
+  return `<div class="stat-card stat-card--${cor}${nivel}"><div class="stat-top"><div class="stat-ic">${iconeDoCard(label, opts.icon)}</div><div class="stat-text"><div class="stat-label">${rotulo}</div><div class="stat-value${escala}">${value}</div></div></div>${variacao}${sub}</div>`;
 }
 // Selo de ícone + linha pro resumo Receita/Despesa/Lucro — mesmo visual no
 // Financeiro e no Dashboard (08/09/2026, pedido do cliente: "melhore o
@@ -9366,23 +9426,11 @@ function renderBonusAoVivo(inicio, fim, filtroTecnico, retornoInicio, retornoFim
         atualiza a cada importação, sem esperar o fechamento do mês.
         Não segue os filtros de cidade e status da tela: mudar a base mudaria o percentual.
       </p>
-      <div class="bv-resumo">
-        <div class="bv-card ok">
-          <span class="r">Aptos</span><span class="v">${aptos}</span>
-          <span class="p">de ${linhas.length} técnicos</span>
-        </div>
-        <div class="bv-card ruim">
-          <span class="r">Inaptos</span><span class="v">${inaptos}</span>
-          <span class="p">${linhas.length ? formatPct(inaptos / linhas.length * 100) : '0%'} da equipe</span>
-        </div>
-        <div class="bv-card ${ifiMedio <= BONUS_IFI_MAX ? 'ok' : 'ruim'}">
-          <span class="r">% IFI médio</span><span class="v">${formatPct(ifiMedio, 2)}</span>
-          <span class="p">meta ${formatPct(BONUS_IFI_MAX, 2)}</span>
-        </div>
-        <div class="bv-card ${irrMedio <= BONUS_IRR_MAX ? 'ok' : 'ruim'}">
-          <span class="r">% IRR médio</span><span class="v">${formatPct(irrMedio, 2)}</span>
-          <span class="p">meta ${formatPct(BONUS_IRR_MAX, 2)}</span>
-        </div>
+      <div class="stat-cards">
+        ${statCard('green', icOk, 'Aptos', aptos, `de ${linhas.length} técnicos`)}
+        ${statCard('red', icAviso, 'Inaptos', inaptos, `${linhas.length ? formatPct(inaptos / linhas.length * 100) : '0%'} da equipe`)}
+        ${statCard(ifiMedio <= BONUS_IFI_MAX ? 'green' : 'red', icBarras, '% IFI médio', formatPct(ifiMedio, 2), `meta ${formatPct(BONUS_IFI_MAX, 2)}`)}
+        ${statCard(irrMedio <= BONUS_IRR_MAX ? 'green' : 'red', icBarras, '% IRR médio', formatPct(irrMedio, 2), `meta ${formatPct(BONUS_IRR_MAX, 2)}`)}
       </div>
       <div class="table-wrap"><table class="data-table bonus-vivo">
         <thead><tr>
@@ -11777,8 +11825,10 @@ const icPasta = '<svg viewBox="0 0 18 18"><path d="M2.3 5.3c0-.8.6-1.4 1.4-1.4h2
 const icPessoas = '<svg viewBox="0 0 18 18"><circle cx="6.5" cy="6" r="2.3"/><circle cx="12.7" cy="6.8" r="1.9"/><path d="M2.3 15c0-2.4 1.9-4.2 4.2-4.2s4.2 1.8 4.2 4.2"/><path d="M11 11.3c1.9.3 3.3 1.8 3.3 3.7"/></svg>';
 const icBarras = '<svg viewBox="0 0 18 18"><rect x="2.5" y="9.5" width="3" height="6" rx="0.6"/><rect x="7.5" y="5.5" width="3" height="10" rx="0.6"/><rect x="12.5" y="11.5" width="3" height="4" rx="0.6"/></svg>';
 const icRelogio = '<svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><path d="M9 5v4.2l2.8 1.6"/></svg>';
+const icMoeda = '<svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><path d="M11.2 6.6C10.8 6 10 5.7 9 5.7c-1.2 0-2.1.6-2.1 1.5 0 2 4.4 1 4.4 3.1 0 .9-.9 1.5-2.2 1.5-1 0-1.9-.4-2.3-1.1M9 4.4v1.3m0 6.7v1.2"/></svg>';
+const icCarro = '<svg viewBox="0 0 18 18"><path d="M2.5 10.5 3.8 6.6C4 5.9 4.6 5.5 5.3 5.5h7.4c.7 0 1.3.4 1.5 1.1l1.3 3.9v3H2.5Z"/><circle cx="5.5" cy="12.8" r="1.3"/><circle cx="12.5" cy="12.8" r="1.3"/></svg>';
 const icChave = '<svg viewBox="0 0 18 18"><path d="M11.6 2.6a3.7 3.7 0 0 0-3.3 5.1L2.6 13.4l2 2 5.7-5.7a3.7 3.7 0 0 0 5.1-3.3l-2.2 2.2-1.9-.5-.5-1.9Z"/></svg>';
-const statCard = (cor, icon, label, value) => `<div class="stat-card stat-card--${cor}"><div class="stat-top"><div class="stat-ic">${icon}</div><div class="stat-text"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div></div></div>`;
+const statCard = (cor, icon, label, value, sub) => `<div class="stat-card stat-card--${cor}"><div class="stat-top"><div class="stat-ic">${icon}</div><div class="stat-text"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div></div>${sub ? `<div class="stat-sub">${sub}</div>` : ''}</div>`;
 function renderPCR() {
   if (PCR_LIVE_TIMER) { clearInterval(PCR_LIVE_TIMER); PCR_LIVE_TIMER = null; }
   const dias = [...new Set(DB.pcr.map(r => r.data))].sort().reverse();
@@ -12224,22 +12274,21 @@ function renderPCR() {
         ${statCard('neutral', icX, 'Canceladas', statusDasOrdens.cancelado)}
       </div>
 
+      <!-- "Concluídas" aparecia duas vezes (aqui e em Status das Ordens, mesmo
+           número) — o de cima basta. Os cinco que sobram dividem UMA grade só,
+           pra não ficar linha com 2 cartões e meia tela vazia. -->
       <div class="stat-cards">
         ${statCard('neutral', icPasta, 'Total de O.S no dia', rows.length)}
         ${statCard('orange', icRelogio, 'Pendentes agora', rowsPendentes.length)}
-        ${statCard('green', icOk, 'Concluídas', statusTot.concluido)}
+        ${statCard(vencidas.length > 0 ? 'red' : 'neutral', icAviso, 'Já vencidas', vencidas.length)}
+        ${statCard(vence2h.length > 0 ? 'orange' : 'neutral', icRelogio, 'Vencem em até 2h', vence2h.length)}
+        ${statCard('blue', icChave, 'Reparos em aberto', abertasOrdenadas.length)}
       </div>
 
       <!-- "Vencendo Agora" e "Prazos do Dia — Detalhado" eram duas tabelas
            quase iguais (a mesma ordem de Reparo, uma só com as abertas
            ordenadas por urgência, outra com tudo mas sem status prazo pras
            pendentes) — viraram UMA tabela só, mais abaixo. -->
-      <div class="stat-cards">
-        ${statCard(vencidas.length > 0 ? 'red' : 'neutral', icAviso, 'Já vencidas', vencidas.length)}
-        ${statCard(vence2h.length > 0 ? 'orange' : 'neutral', icRelogio, 'Vencem em até 2h', vence2h.length)}
-        ${statCard('blue', icChave, 'Reparos em aberto', abertasOrdenadas.length)}
-      </div>
-
       <div class="section-heading">Técnicos — Situação Agora</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
         Em rota: amarelo depois de 35min, vermelho depois de 60min. Iniciado: vermelho com ⚠️ depois de 1h.
@@ -13733,9 +13782,9 @@ function renderParcialDoDia() {
         // os cards do topo ficavam presos na soma automática: depois de corrigir
         // a M.O na tabela, card e linha TOTAL mostravam números diferentes
         const valorDoCard = rotulo => {
-          const card = [...document.querySelectorAll('#pd-body .metric-card')]
-            .find(c => (c.querySelector('.label') || {}).textContent === rotulo);
-          return card ? card.querySelector('.value') : null;
+          const card = [...document.querySelectorAll('#pd-body .stat-card')]
+            .find(c => (c.querySelector('.stat-label') || {}).textContent === rotulo);
+          return card ? card.querySelector('.stat-value') : null;
         };
         const cardMo = valorDoCard('Mão de obra (técnicos)');
         const cardMed = valorDoCard('Média por técnico');
