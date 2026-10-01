@@ -696,8 +696,12 @@
     background: var(--bg-page); border: 1px solid var(--border); color: var(--text-secondary); font-size: 14px;
   }
   .mt-fechar:hover { color: var(--text-primary); border-color: var(--accent); }
+  /* Ao LADO do título, não na borda direita (01/10/2026, pedido do cliente:
+     "deixe os gerar imagem e ocultar/exibir ao lado do titulo em todo o
+     sistema"). Antes era margin-left:auto — o botão ia pro canto oposto da
+     tela, longe do título que ele controla. O espaço vem do `gap` do título. */
   .secao-toggle {
-    margin-left: auto; font-size: 12px; font-weight: 600; cursor: pointer; padding: 4px 10px; border-radius: 6px;
+    margin-left: 0; font-size: 12px; font-weight: 600; cursor: pointer; padding: 4px 10px; border-radius: 6px;
     background: var(--card-bg); border: 1px solid var(--border); color: var(--text-secondary);
   }
   .secao-toggle:hover { color: var(--text-primary); border-color: var(--accent); }
@@ -3033,7 +3037,6 @@ async function loadAllFromSupabase(onProgresso) {
     } catch (e) {} })()
   ]));
   await carregarMoManual();
-  await carregarSaldoPedagio();
   // só é "não consegui carregar" quando NENHUMA tabela veio (rede fora, chave
   // errada). Tabela que ainda não existe entra na lista de faltantes.
   if (SUPABASE_TABELAS_FALTANDO.length) {
@@ -3415,16 +3418,6 @@ const DB = {
   // não confundir com retornosGiga acima (aquele é a planilha de retorno
   // IFI/IRR do fechamento; este é o chamado de atendimento em aberto).
   chamadosGiga: [],
-  // Saldo do pedágio (Edenred, "Vale Pedágio") — lançamento MANUAL diário, um
-  // valor por dia (30/09/2026 na verdade 01/10/2026, pedido do cliente: "todo
-  // dia vou ver esse pedagio... voce vai salvando por dia"). Não vem de
-  // planilha nem de fetch automático — o portal da Edenred exige login
-  // (testado: sem sessão, cai direto em /login/bem-vindo), então não dá pra
-  // buscar ao vivo igual às Certificações (Google Sheets público). Tabela
-  // própria fora do padrão `SUPABASE_TABLES`/`loadAllFromSupabase` genérico —
-  // mesmo padrão simples do `pcr_mo` (ver `salvarMoManual`/`carregarMoManual`):
-  // load/save dedicados, direto no `supa.from(...)`.
-  saldoPedagio: [],
 };
 // Índices por "chave natural" — permitem que reimportar a mesma planilha (ou uma
 // versão atualizada dela) SUBSTITUA os registros já existentes em vez de duplicar.
@@ -9650,9 +9643,9 @@ function renderProduction() {
         if (!lista.length) { alvo.innerHTML = `<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Sem cidades registradas para ${esc(tecnico)} nesse período.</div></div>`; return; }
         alvo.innerHTML = `
           <div class="panel" style="margin-bottom:1.5rem;border-color:var(--accent)">
-            <h3 style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+            <h3 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
               <span>Cidades atendidas — ${esc(tecnico)}</span>
-              <button type="button" class="btn-secundario" id="desloc-fechar" style="padding:6px 12px;font-size:12px">Fechar</button>
+              <button type="button" class="btn-secundario" id="desloc-fechar" style="padding:6px 12px;font-size:12px;order:99;margin-left:auto">Fechar</button>
             </h3>
             <div class="cards-grid">
               ${metricCard('Cidades diferentes', lista.length)}
@@ -10234,37 +10227,6 @@ async function carregarMoManual() {
     const { data, error } = await supa.from('pcr_mo').select('dia, cidade, mo');
     if (error || !data) return;
     data.forEach(r => { MO_MANUAL[r.dia + '|' + r.cidade] = r.mo; });
-  } catch (e) {}
-}
-// Saldo do pedágio (Edenred) — lançamento MANUAL diário (01/10/2026, pedido do
-// cliente: "todo dia vou ver esse pedagio... voce vai salvando por dia quanto
-// que estava o valor de ontem"). O portal exige login (testado sem sessão: cai
-// direto em /login/bem-vindo), então não dá pra buscar automático — a pessoa
-// com acesso ao portal digita o valor do dia e o sistema guarda o histórico.
-// Mesmo padrão simples do `pcr_mo` acima: tabela própria fora do
-// `SUPABASE_TABLES` genérico, load/save dedicados.
-async function salvarSaldoPedagio(dia, saldo) {
-  if (!supa) return { ok: false, error: new Error('sem conexão') };
-  const registro = { data: dia, saldo, atualizado_em: new Date().toISOString(), atualizado_por: currentUser ? (currentUser.nome || currentUser.login) : null };
-  try {
-    const { error } = await supa.from('saldo_pedagio').upsert(registro, { onConflict: 'data' });
-    if (error) throw error;
-  } catch (e) {
-    supabaseStatus = { ok: false, mensagem: 'Não consegui salvar o saldo do pedágio: ' + (e.message || 'erro de rede') };
-    mostrarAvisoSupabase();
-    return { ok: false, error: e };
-  }
-  const i = DB.saldoPedagio.findIndex(r => r.data === dia);
-  if (i >= 0) DB.saldoPedagio[i] = registro; else DB.saldoPedagio.push(registro);
-  DB.saldoPedagio.sort((a, b) => a.data.localeCompare(b.data));
-  return { ok: true };
-}
-async function carregarSaldoPedagio() {
-  if (!supa) return;
-  try {
-    const { data, error } = await supa.from('saldo_pedagio').select('data, saldo, atualizado_em, atualizado_por');
-    if (error || !data) return;
-    DB.saldoPedagio = data.slice().sort((a, b) => a.data.localeCompare(b.data));
   } catch (e) {}
 }
 // "Quanto tempo o técnico está Em Rota/Iniciado": o cliente confirmou que a
@@ -16502,73 +16464,229 @@ function renderFleet() {
 }
 
 // ===================== PEDÁGIO =====================
-// Saldo do pedágio (Edenred) — painel em destaque, só pro Analista (pedido do
-// cliente: "esse valor somente o analista pode ver"). Lançamento manual (o
-// portal exige login, ver `salvarSaldoPedagio`); mostra o valor de hoje
-// comparado com o último lançado e o histórico dia a dia.
-function htmlSaldoPedagio() {
-  const hoje = hojeISOLocal();
-  const historico = DB.saldoPedagio.slice().sort((a, b) => b.data.localeCompare(a.data));
-  const deHoje = historico.find(r => r.data === hoje);
-  const anterior = historico.find(r => r.data < hoje);
-  let variacaoHtml = '<div class="stat-sub">Nenhum valor anterior lançado ainda.</div>';
-  if (deHoje && anterior) {
-    const dif = deHoje.saldo - anterior.saldo;
-    const seta = dif > 0 ? '▲' : dif < 0 ? '▼' : '=';
-    const cor = dif > 0 ? 'var(--success)' : dif < 0 ? 'var(--danger)' : 'var(--text-secondary)';
-    variacaoHtml = `<div class="stat-sub" style="color:${cor}">${seta} ${formatCurrency(Math.abs(dif))} vs. ${formatDate(anterior.data)} (${formatCurrency(anterior.saldo)})</div>`;
-  } else if (anterior) {
-    variacaoHtml = `<div class="stat-sub">Ainda sem lançamento de hoje. Último: ${formatCurrency(anterior.saldo)} em ${formatDate(anterior.data)}.</div>`;
+// ===================== PEDÁGIO — CSV DA EDENRED =====================
+// Importação direta do CSV "Detalhamento de Passagens" do portal da Edenred
+// (01/10/2026, pedido do cliente: "ao invés de importar o excel no sistema quero
+// importar o csv direto"). Grava na MESMA tabela `pedagio` que a planilha
+// GESTÃO PEDÁGIO alimentava, com a MESMA chave (data|hora HH:MM|placa) — quem
+// já foi importado pelo Excel é atualizado, não duplicado.
+//
+// Regras conferidas contra a planilha GESTÃO PEDÁGIO (5.221 passagens em comum):
+//  - CADASTRO = coluna "Apelido" do CSV (bateu 100%).
+//  - CONDUTOR ATUAL = motorista da placa na Frota (`DB.frotaLinks`); sem placa
+//    na frota = "NÃO ENCONTRADA" (mesmo texto da planilha).
+//  - STATUS = "Fora do Horário" antes das 6h ou a partir das 19h (bateu 99,5%
+//    com o que estava preenchido na planilha — o "MAIOR QUE 18H / MENOR QUE 7H"
+//    do cabeçalho dela não é o que foi aplicado de fato: 18h e 6h e pouco
+//    aparecem como "Dentro" em centenas de linhas).
+//  - Linha já gravada mantém o CONDUTOR ATUAL e o STATUS dela (foram preenchidos
+//    na época da passagem; a frota de hoje pode ter outro motorista no carro).
+//
+// ESTORNO: o mesmo "Código da transação" aparece até 3 vezes — cobrança errada,
+// "Estorno Pedágio" (valor positivo) e a cobrança certa — todas com a MESMA
+// data/hora/placa. O valor da passagem é o LÍQUIDO das linhas (ex.: -27,45 +
+// 27,45 -18,30 = R$ 18,30). A planilha antiga somava as três como gasto. O filtro
+// do portal é pela DATA DA TRANSAÇÃO e o estorno herda a data da cobrança
+// original, então todo CSV que cobre aquele dia traz as linhas juntas — reimportar
+// um período refaz o líquido certo. Linha IDÊNTICA repetida (dois arquivos que se
+// sobrepõem na mesma importação) conta uma vez só.
+//
+// O CSV NÃO traz saldo nem recarga da conta (9 meses conferidos: só "Pedágio",
+// "Estorno Pedágio" e "Estacionamento") — por isso o card do topo mostra o GASTO
+// do dia, não o saldo disponível do portal.
+function lerCsvPontoEVirgula(texto) {
+  // o `parseCSV` do PCR corta em vírgula também — aqui quebraria "-5,40"
+  const t = texto.charCodeAt(0) === 0xFEFF ? texto.slice(1) : texto;
+  const linhas = [];
+  let campo = '', linha = [], aspas = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (aspas) {
+      if (c === '"') { if (t[i + 1] === '"') { campo += '"'; i++; } else aspas = false; }
+      else campo += c;
+    } else if (c === '"') aspas = true;
+    else if (c === ';') { linha.push(campo); campo = ''; }
+    else if (c === '\n') { linha.push(campo); linhas.push(linha); linha = []; campo = ''; }
+    else if (c !== '\r') campo += c;
   }
-  const linhasHistorico = historico.slice(0, 30).map((r, i) => {
-    const prev = historico[i + 1];
-    let variacao = '-';
-    if (prev) {
-      const dif = r.saldo - prev.saldo;
-      const seta = dif > 0 ? '▲' : dif < 0 ? '▼' : '=';
-      const cor = dif > 0 ? 'var(--success)' : dif < 0 ? 'var(--danger)' : 'var(--text-secondary)';
-      variacao = `<span style="color:${cor}">${seta} ${formatCurrency(Math.abs(dif))}</span>`;
-    }
-    return `<tr><td>${formatDate(r.data)}</td><td>${formatCurrency(r.saldo)}</td><td>${variacao}</td><td>${esc(r.atualizado_por || '-')}</td><td>${r.atualizado_em ? new Date(r.atualizado_em).toLocaleString('pt-BR') : '-'}</td></tr>`;
+  if (campo !== '' || linha.length) { linha.push(campo); linhas.push(linha); }
+  return linhas;
+}
+function numeroBR(s) {
+  const n = parseFloat(String(s == null ? '' : s).trim().replace(/\./g, '').replace(',', '.'));
+  return isNaN(n) ? 0 : n;
+}
+// Devolve null quando o arquivo não é o "Detalhamento de Passagens" (sem a linha
+// de cabeçalho com "Código da transação" e "Valor cobrado").
+function transacoesDoCsvEdenred(texto) {
+  const linhas = lerCsvPontoEVirgula(texto);
+  const iCab = linhas.findIndex(l => normalizeHeader(l[0]) === 'codigo da transacao');
+  if (iCab < 0) return null;
+  const cab = linhas[iCab].map(normalizeHeader);
+  const col = prefixo => cab.findIndex(c => c.startsWith(prefixo));
+  const c = {
+    data: col('data da transacao'), hora: col('hora da transacao'), tipo: col('tipo de transacao'),
+    placa: col('placa'), marca: col('marca do veiculo'), modelo: col('modelo do veiculo'),
+    apelido: col('apelido'), endereco: col('endereco'), valor: col('valor cobrado'),
+  };
+  if (c.data < 0 || c.hora < 0 || c.placa < 0 || c.valor < 0) return null;
+  const v = (l, i) => (i >= 0 && l[i] != null ? String(l[i]).trim() : '');
+  const out = [];
+  linhas.slice(iCab + 1).forEach(l => {
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(v(l, c.data));
+    const placa = v(l, c.placa).replace(/\s+/g, '').toUpperCase();
+    if (!m || !placa) return;
+    out.push({
+      bruto: l.join(';'), data: `${m[3]}-${m[2]}-${m[1]}`, hora: v(l, c.hora).slice(0, 5), tipo: v(l, c.tipo),
+      placa, marca: v(l, c.marca), modelo: v(l, c.modelo), apelido: v(l, c.apelido),
+      endereco: v(l, c.endereco), valor: numeroBR(v(l, c.valor)),
+    });
+  });
+  return out;
+}
+function statusHorarioPedagio(hora) {
+  return hora && (hora >= '19:00' || hora < '06:00') ? 'Fora do Horário' : 'Dentro do Horário';
+}
+async function importarCsvPedagio(arquivos) {
+  const vistos = new Set(), grupos = new Map(), invalidos = [];
+  for (const f of arquivos) {
+    const trans = transacoesDoCsvEdenred(await f.text());
+    if (!trans) { invalidos.push(f.name); continue; }
+    trans.forEach(t => {
+      if (vistos.has(t.bruto)) return;
+      vistos.add(t.bruto);
+      const chave = `${t.data}|${t.hora}|${t.placa}`;
+      let g = grupos.get(chave);
+      if (!g) grupos.set(chave, g = { ...t, soma: 0 });
+      g.soma += t.valor;
+    });
+  }
+  const motoristaDaPlaca = new Map(DB.frotaLinks.map(l => [String(l.placa || '').replace(/\s+/g, '').toUpperCase(), l.motorista]));
+  const gravados = [];
+  grupos.forEach((g, chave) => {
+    const existente = DB_INDEX.pedagio.has(chave) ? DB.pedagio[DB_INDEX.pedagio.get(chave)] : null;
+    const obj = {
+      data_transacao: g.data, mes: MESES_PT[+g.data.slice(5, 7) - 1].toUpperCase(), hora: g.hora, placa: g.placa,
+      marca: g.marca, modelo: g.modelo, cadastro: g.apelido, endereco: g.endereco,
+      // cobrança vem negativa e estorno positivo: a passagem custa o líquido
+      valor: (Math.round(-g.soma * 100) / 100) || 0,
+    };
+    if (!existente || !existente.condutor_atual) obj.condutor_atual = motoristaDaPlaca.get(g.placa) || 'NÃO ENCONTRADA';
+    if (!existente || !existente.status) obj.status = statusHorarioPedagio(g.hora);
+    gravados.push(upsertRow(DB.pedagio, DB_INDEX.pedagio, chave, obj));
+  });
+  let sync = { ok: true };
+  if (gravados.length) {
+    sync = await syncBatchToSupabase('pedagio', gravados);
+    const logEntry = { sheet_name: 'Detalhamento de Passagens (Edenred CSV)', target_table: 'pedagio', row_count: gravados.length, imported_at: new Date().toLocaleString('pt-BR') };
+    DB.importsLog.unshift(logEntry);
+    logImportToSupabase({ ...logEntry, imported_by: currentUser ? (currentUser.nome || currentUser.login) : null });
+  }
+  const datas = [...grupos.values()].map(g => g.data).sort();
+  return { passagens: gravados.length, linhas: vistos.size, de: datas[0], ate: datas[datas.length - 1], invalidos, sync };
+}
+// Gasto por dia a partir das passagens gravadas (qualquer origem: CSV ou planilha).
+function gastoPedagioPorDia() {
+  const porDia = new Map();
+  DB.pedagio.forEach(r => {
+    if (!r.data_transacao) return;
+    const d = porDia.get(r.data_transacao) || { data: r.data_transacao, valor: 0, qtd: 0 };
+    d.valor += Number(r.valor) || 0; d.qtd++;
+    porDia.set(r.data_transacao, d);
+  });
+  return [...porDia.values()].sort((a, b) => b.data.localeCompare(a.data));
+}
+// Gasto SUBINDO é ruim: ▲ vermelho, ▼ verde.
+function variacaoGastoHtml(atual, anterior) {
+  const dif = Math.round((atual - anterior) * 100) / 100;
+  const seta = dif > 0 ? '▲' : dif < 0 ? '▼' : '=';
+  const cor = dif > 0 ? 'var(--danger)' : dif < 0 ? 'var(--success)' : 'var(--text-secondary)';
+  return `<span style="color:${cor};font-weight:600">${seta} ${formatCurrency(Math.abs(dif))}</span>`;
+}
+function exportarPlanilhaPedagio() {
+  const linhas = DB.pedagio.slice()
+    .sort((a, b) => (a.data_transacao || '').localeCompare(b.data_transacao || '') || (a.hora || '').localeCompare(b.hora || ''))
+    .map(r => [formatDate(r.data_transacao), r.mes || (r.data_transacao ? MESES_PT[+r.data_transacao.slice(5, 7) - 1].toUpperCase() : ''),
+      r.hora || '', r.placa || '', r.marca || '', r.modelo || '', r.cadastro || '', r.condutor_atual || '', r.endereco || '',
+      Math.round((Number(r.valor) || 0) * 100) / 100, r.status || '']);
+  if (!linhas.length) { toast('Nenhuma passagem importada ainda.', 'aviso'); return; }
+  exportarQuadroPresenca(`GESTAO-PEDAGIO-${hojeISOLocal()}`,
+    ['Data da Transação', 'MÊS', 'Hora da Transação', 'Placa', 'Marca do veículo', 'Modelo do veículo', 'CADASTRO', 'CONDUTOR ATUAL', 'Endereço', 'VALOR COBRADO', 'STATUS'],
+    linhas, 'GESTÃO PEDAGIO');
+}
+// Card do topo da tela Pedágio — só pro Analista (pedido do cliente: "esse valor
+// somente o analista pode ver"), com a importação do CSV e a exportação da
+// planilha no mesmo lugar.
+function htmlPedagioDoDia() {
+  const dias = gastoPedagioPorDia();
+  const ult = dias[0], ant = dias[1];
+  const mes = ult ? ult.data.slice(0, 7) : '';
+  const doMes = dias.filter(d => d.data.slice(0, 7) === mes);
+  const totMes = doMes.reduce((a, d) => a + d.valor, 0), qtdMes = doMes.reduce((a, d) => a + d.qtd, 0);
+  const nomeMes = ult ? MESES_PT[+mes.slice(5, 7) - 1].toLowerCase() : '';
+  const linhasHist = dias.slice(0, 31).map((d, i) => {
+    const prev = dias[i + 1];
+    return `<tr><td>${formatDate(d.data)}</td><td>${d.qtd}</td><td>${formatCurrency(d.valor)}</td><td>${prev ? variacaoGastoHtml(d.valor, prev.valor) : '-'}</td></tr>`;
   }).join('');
   return `
-  <div class="panel" id="saldo-pedagio-painel" style="border-left:4px solid var(--accent); margin-bottom:1.5rem;">
-    <div class="section-heading"><h3>💳 Saldo do Pedágio (Edenred)</h3><span class="badge" style="background:var(--accent);color:#fff;">Só Analista</span></div>
-    <div class="stat-cards">
+  <div class="panel" id="pedagio-dia-painel" style="border-left:4px solid var(--accent); margin-bottom:1.5rem;">
+    <h3>💳 Pedágio do Dia (Edenred) <span class="badge" style="background:var(--accent);color:#fff;">Só Analista</span></h3>
+    ${ult ? `<div class="stat-cards">
       <div class="stat-card stat-card--blue">
-        <div class="stat-top">
-          <div class="stat-ic">💳</div>
-          <div class="stat-text">
-            <div class="stat-label">Saldo de hoje — ${formatDate(hoje)}</div>
-            <div class="stat-value">${deHoje ? formatCurrency(deHoje.saldo) : 'Não lançado'}</div>
-          </div>
-        </div>
-        ${variacaoHtml}
+        <div class="stat-top"><div class="stat-ic">💳</div><div class="stat-text">
+          <div class="stat-label">Gasto do dia — ${formatDate(ult.data)}</div>
+          <div class="stat-value">${formatCurrency(ult.valor)}</div>
+        </div></div>
+        <div class="stat-sub">${ult.qtd} passagem(ns)${ant ? ` · ${variacaoGastoHtml(ult.valor, ant.valor)} vs. ${formatDate(ant.data)} (${formatCurrency(ant.valor)})` : ''}</div>
       </div>
+      <div class="stat-card stat-card--purple">
+        <div class="stat-top"><div class="stat-ic">📅</div><div class="stat-text">
+          <div class="stat-label">Acumulado de ${nomeMes}</div>
+          <div class="stat-value">${formatCurrency(totMes)}</div>
+        </div></div>
+        <div class="stat-sub">${qtdMes} passagem(ns) em ${doMes.length} dia(s)</div>
+      </div>
+    </div>` : '<div class="empty">Nenhuma passagem importada ainda — importe o CSV "Detalhamento de Passagens" da Edenred.</div>'}
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0 0">
+      <label class="btn" for="ped-csv-file" style="cursor:pointer">📥 Importar CSV (Edenred)</label>
+      <input type="file" id="ped-csv-file" accept=".csv,text/csv" multiple hidden>
+      <button type="button" class="btn-export-xls" id="ped-exportar-planilha">⤓ Exportar planilha (Excel)</button>
+      <span id="ped-csv-status" style="font-size:12px;color:var(--text-muted)">Importe o CSV do dia; pode mandar vários de uma vez (repetido não duplica).</span>
     </div>
-    <div class="toolbar" style="border:none; padding:0; background:transparent; margin:14px 0 0;">
-      <div class="field"><label>Data</label><input type="date" id="sp-data" value="${hoje}" max="${hoje}"></div>
-      <div class="field"><label>Saldo (R$)</label><input type="number" id="sp-valor" step="0.01" placeholder="0,00" value="${deHoje ? deHoje.saldo : ''}"></div>
-      <button class="btn" id="sp-salvar">💾 Salvar saldo do dia</button>
-    </div>
-    ${historico.length ? `<div class="table-wrap" style="margin-top:14px;"><table class="data-table" id="sp-historico"><thead><tr><th>Data</th><th>Saldo</th><th>Variação</th><th>Atualizado por</th><th>Quando</th></tr></thead><tbody>${linhasHistorico}</tbody></table></div>` : ''}
+    <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0">O CSV da Edenred não traz o saldo da conta nem as recargas — só as passagens. Por isso o card mostra quanto foi GASTO no dia.</p>
+    ${linhasHist ? `<div class="table-wrap" style="margin-top:14px;max-height:360px;overflow-y:auto"><table class="data-table" id="ped-hist-dia"><thead><tr><th>Data</th><th>Passagens</th><th>Gasto do dia</th><th>vs dia anterior</th></tr></thead><tbody>${linhasHist}</tbody></table></div>` : ''}
   </div>`;
 }
-function wireSaldoPedagio() {
-  const btn = document.getElementById('sp-salvar');
-  if (!btn) return;
-  btn.addEventListener('click', async () => {
-    const dia = document.getElementById('sp-data').value;
-    const valorStr = document.getElementById('sp-valor').value;
-    const original = btn.textContent;
-    if (!dia || valorStr === '' || isNaN(parseFloat(valorStr))) { avisoBotao(btn, 'Preencha data e saldo', original); return; }
-    btn.disabled = true;
-    btn.textContent = 'Salvando...';
-    const r = await salvarSaldoPedagio(dia, parseFloat(valorStr));
-    btn.disabled = false;
-    if (!r.ok) { btn.textContent = original; return; }
-    const painel = document.getElementById('saldo-pedagio-painel');
-    if (painel) { painel.outerHTML = htmlSaldoPedagio(); wireSaldoPedagio(); }
+function wirePedagioDoDia() {
+  const input = document.getElementById('ped-csv-file');
+  const btnExp = document.getElementById('ped-exportar-planilha');
+  if (btnExp) btnExp.addEventListener('click', exportarPlanilhaPedagio);
+  // o load() da tela só liga os botões dentro de #toll-body. "Ocultar" ANTES da
+  // imagem: o botão de imagem também tem a classe .secao-toggle, e o
+  // ativarTogglesDeSecao pula quem já tem uma — na ordem inversa o "ocultar" sumia.
+  const conteudo = document.getElementById('content');
+  ativarTogglesDeSecao(conteudo);
+  ativarBotoesImagem(conteudo);
+  if (!input) return;
+  input.addEventListener('change', async () => {
+    const arquivos = [...input.files];
+    if (!arquivos.length) return;
+    const st = document.getElementById('ped-csv-status');
+    if (st) st.textContent = 'Importando...';
+    try {
+      const r = await importarCsvPedagio(arquivos);
+      if (!r.passagens) {
+        toast(r.invalidos.length ? `Arquivo não reconhecido: ${r.invalidos.join(', ')} — use o "Detalhamento de Passagens" da Edenred.` : 'Nenhuma passagem no arquivo.', 'aviso');
+        if (st) st.textContent = '';
+        input.value = '';
+        return;
+      }
+      toast(`${r.passagens} passagem(ns) importada(s), de ${formatDate(r.de)} a ${formatDate(r.ate)}.` + (r.invalidos.length ? ` Ignorado(s): ${r.invalidos.join(', ')}.` : '') + (r.sync && r.sync.ok === false ? ' Atenção: não salvou no banco.' : ''));
+    } catch (e) {
+      console.error('[pedágio csv] falhou:', e);
+      toast('Não consegui ler o CSV do pedágio.', 'aviso');
+    }
+    navigate('toll');
   });
 }
 function renderToll() {
@@ -16580,7 +16698,7 @@ function renderToll() {
   // no ciclo que contém a passagem mais RECENTE importada, não no de hoje.
   const ultimaData = DB.pedagio.reduce((a, r) => (r.data_transacao && (!a || r.data_transacao > a)) ? r.data_transacao : a, '');
   const { start, end } = defaultPeriod(ultimaData || undefined);
-  document.getElementById('content').innerHTML = `${ehAnalista() ? htmlSaldoPedagio() : ''}${periodToolbar(start,end,`
+  document.getElementById('content').innerHTML = `${ehAnalista() ? htmlPedagioDoDia() : ''}${periodToolbar(start,end,`
     <div class="field"><label>Condutor</label><input type="text" id="f-condutor" placeholder="Nome" list="condutor-list"></div>
     <div class="field"><label>Placa</label><input type="text" id="f-placa" placeholder="Placa"></div>
     <div class="field"><label>Endereço</label><input type="text" id="f-endereco" placeholder="Endereço, cidade, rodovia..."></div>
@@ -16601,7 +16719,7 @@ function renderToll() {
   // quantas linhas a tabela mostra. Antes cortava em 200 sem avisar — e a
   // exportação, que lê a tabela da tela, levava só essas 200 sem dizer nada.
   let limitePed = 200;
-  if (ehAnalista()) wireSaldoPedagio();
+  if (ehAnalista()) wirePedagioDoDia();
   document.getElementById('f-apply').addEventListener('click', load);
   load();
   function enderecoForaDasCidades(endereco) {
