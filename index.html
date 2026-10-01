@@ -3033,6 +3033,7 @@ async function loadAllFromSupabase(onProgresso) {
     } catch (e) {} })()
   ]));
   await carregarMoManual();
+  await carregarSaldoPedagio();
   // só é "não consegui carregar" quando NENHUMA tabela veio (rede fora, chave
   // errada). Tabela que ainda não existe entra na lista de faltantes.
   if (SUPABASE_TABELAS_FALTANDO.length) {
@@ -3414,6 +3415,16 @@ const DB = {
   // não confundir com retornosGiga acima (aquele é a planilha de retorno
   // IFI/IRR do fechamento; este é o chamado de atendimento em aberto).
   chamadosGiga: [],
+  // Saldo do pedágio (Edenred, "Vale Pedágio") — lançamento MANUAL diário, um
+  // valor por dia (30/09/2026 na verdade 01/10/2026, pedido do cliente: "todo
+  // dia vou ver esse pedagio... voce vai salvando por dia"). Não vem de
+  // planilha nem de fetch automático — o portal da Edenred exige login
+  // (testado: sem sessão, cai direto em /login/bem-vindo), então não dá pra
+  // buscar ao vivo igual às Certificações (Google Sheets público). Tabela
+  // própria fora do padrão `SUPABASE_TABLES`/`loadAllFromSupabase` genérico —
+  // mesmo padrão simples do `pcr_mo` (ver `salvarMoManual`/`carregarMoManual`):
+  // load/save dedicados, direto no `supa.from(...)`.
+  saldoPedagio: [],
 };
 // Índices por "chave natural" — permitem que reimportar a mesma planilha (ou uma
 // versão atualizada dela) SUBSTITUA os registros já existentes em vez de duplicar.
@@ -10225,6 +10236,37 @@ async function carregarMoManual() {
     data.forEach(r => { MO_MANUAL[r.dia + '|' + r.cidade] = r.mo; });
   } catch (e) {}
 }
+// Saldo do pedágio (Edenred) — lançamento MANUAL diário (01/10/2026, pedido do
+// cliente: "todo dia vou ver esse pedagio... voce vai salvando por dia quanto
+// que estava o valor de ontem"). O portal exige login (testado sem sessão: cai
+// direto em /login/bem-vindo), então não dá pra buscar automático — a pessoa
+// com acesso ao portal digita o valor do dia e o sistema guarda o histórico.
+// Mesmo padrão simples do `pcr_mo` acima: tabela própria fora do
+// `SUPABASE_TABLES` genérico, load/save dedicados.
+async function salvarSaldoPedagio(dia, saldo) {
+  if (!supa) return { ok: false, error: new Error('sem conexão') };
+  const registro = { data: dia, saldo, atualizado_em: new Date().toISOString(), atualizado_por: currentUser ? (currentUser.nome || currentUser.login) : null };
+  try {
+    const { error } = await supa.from('saldo_pedagio').upsert(registro, { onConflict: 'data' });
+    if (error) throw error;
+  } catch (e) {
+    supabaseStatus = { ok: false, mensagem: 'Não consegui salvar o saldo do pedágio: ' + (e.message || 'erro de rede') };
+    mostrarAvisoSupabase();
+    return { ok: false, error: e };
+  }
+  const i = DB.saldoPedagio.findIndex(r => r.data === dia);
+  if (i >= 0) DB.saldoPedagio[i] = registro; else DB.saldoPedagio.push(registro);
+  DB.saldoPedagio.sort((a, b) => a.data.localeCompare(b.data));
+  return { ok: true };
+}
+async function carregarSaldoPedagio() {
+  if (!supa) return;
+  try {
+    const { data, error } = await supa.from('saldo_pedagio').select('data, saldo, atualizado_em, atualizado_por');
+    if (error || !data) return;
+    DB.saldoPedagio = data.slice().sort((a, b) => a.data.localeCompare(b.data));
+  } catch (e) {}
+}
 // "Quanto tempo o técnico está Em Rota/Iniciado": o cliente confirmou que a
 // coluna "Início" do CSV É a hora real dessa troca de status (quando saiu pra
 // rota, ou quando começou o atendimento) — não é só a janela agendada como eu
@@ -16460,6 +16502,75 @@ function renderFleet() {
 }
 
 // ===================== PEDÁGIO =====================
+// Saldo do pedágio (Edenred) — painel em destaque, só pro Analista (pedido do
+// cliente: "esse valor somente o analista pode ver"). Lançamento manual (o
+// portal exige login, ver `salvarSaldoPedagio`); mostra o valor de hoje
+// comparado com o último lançado e o histórico dia a dia.
+function htmlSaldoPedagio() {
+  const hoje = hojeISOLocal();
+  const historico = DB.saldoPedagio.slice().sort((a, b) => b.data.localeCompare(a.data));
+  const deHoje = historico.find(r => r.data === hoje);
+  const anterior = historico.find(r => r.data < hoje);
+  let variacaoHtml = '<div class="stat-sub">Nenhum valor anterior lançado ainda.</div>';
+  if (deHoje && anterior) {
+    const dif = deHoje.saldo - anterior.saldo;
+    const seta = dif > 0 ? '▲' : dif < 0 ? '▼' : '=';
+    const cor = dif > 0 ? 'var(--success)' : dif < 0 ? 'var(--danger)' : 'var(--text-secondary)';
+    variacaoHtml = `<div class="stat-sub" style="color:${cor}">${seta} ${formatCurrency(Math.abs(dif))} vs. ${formatDate(anterior.data)} (${formatCurrency(anterior.saldo)})</div>`;
+  } else if (anterior) {
+    variacaoHtml = `<div class="stat-sub">Ainda sem lançamento de hoje. Último: ${formatCurrency(anterior.saldo)} em ${formatDate(anterior.data)}.</div>`;
+  }
+  const linhasHistorico = historico.slice(0, 30).map((r, i) => {
+    const prev = historico[i + 1];
+    let variacao = '-';
+    if (prev) {
+      const dif = r.saldo - prev.saldo;
+      const seta = dif > 0 ? '▲' : dif < 0 ? '▼' : '=';
+      const cor = dif > 0 ? 'var(--success)' : dif < 0 ? 'var(--danger)' : 'var(--text-secondary)';
+      variacao = `<span style="color:${cor}">${seta} ${formatCurrency(Math.abs(dif))}</span>`;
+    }
+    return `<tr><td>${formatDate(r.data)}</td><td>${formatCurrency(r.saldo)}</td><td>${variacao}</td><td>${esc(r.atualizado_por || '-')}</td><td>${r.atualizado_em ? new Date(r.atualizado_em).toLocaleString('pt-BR') : '-'}</td></tr>`;
+  }).join('');
+  return `
+  <div class="panel" id="saldo-pedagio-painel" style="border-left:4px solid var(--accent); margin-bottom:1.5rem;">
+    <div class="section-heading"><h3>💳 Saldo do Pedágio (Edenred)</h3><span class="badge" style="background:var(--accent);color:#fff;">Só Analista</span></div>
+    <div class="stat-cards">
+      <div class="stat-card stat-card--blue">
+        <div class="stat-top">
+          <div class="stat-ic">💳</div>
+          <div class="stat-text">
+            <div class="stat-label">Saldo de hoje — ${formatDate(hoje)}</div>
+            <div class="stat-value">${deHoje ? formatCurrency(deHoje.saldo) : 'Não lançado'}</div>
+          </div>
+        </div>
+        ${variacaoHtml}
+      </div>
+    </div>
+    <div class="toolbar" style="border:none; padding:0; background:transparent; margin:14px 0 0;">
+      <div class="field"><label>Data</label><input type="date" id="sp-data" value="${hoje}" max="${hoje}"></div>
+      <div class="field"><label>Saldo (R$)</label><input type="number" id="sp-valor" step="0.01" placeholder="0,00" value="${deHoje ? deHoje.saldo : ''}"></div>
+      <button class="btn" id="sp-salvar">💾 Salvar saldo do dia</button>
+    </div>
+    ${historico.length ? `<div class="table-wrap" style="margin-top:14px;"><table class="data-table" id="sp-historico"><thead><tr><th>Data</th><th>Saldo</th><th>Variação</th><th>Atualizado por</th><th>Quando</th></tr></thead><tbody>${linhasHistorico}</tbody></table></div>` : ''}
+  </div>`;
+}
+function wireSaldoPedagio() {
+  const btn = document.getElementById('sp-salvar');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const dia = document.getElementById('sp-data').value;
+    const valorStr = document.getElementById('sp-valor').value;
+    const original = btn.textContent;
+    if (!dia || valorStr === '' || isNaN(parseFloat(valorStr))) { avisoBotao(btn, 'Preencha data e saldo', original); return; }
+    btn.disabled = true;
+    btn.textContent = 'Salvando...';
+    const r = await salvarSaldoPedagio(dia, parseFloat(valorStr));
+    btn.disabled = false;
+    if (!r.ok) { btn.textContent = original; return; }
+    const painel = document.getElementById('saldo-pedagio-painel');
+    if (painel) { painel.outerHTML = htmlSaldoPedagio(); wireSaldoPedagio(); }
+  });
+}
 function renderToll() {
   // ACHADO NA AUDITORIA DE 04/09/2026: a tela sempre abria no ciclo de HOJE
   // (21 a 20) — mas a planilha da Taggy costuma vir atrasada (semanas), então
@@ -16469,7 +16580,7 @@ function renderToll() {
   // no ciclo que contém a passagem mais RECENTE importada, não no de hoje.
   const ultimaData = DB.pedagio.reduce((a, r) => (r.data_transacao && (!a || r.data_transacao > a)) ? r.data_transacao : a, '');
   const { start, end } = defaultPeriod(ultimaData || undefined);
-  document.getElementById('content').innerHTML = `${periodToolbar(start,end,`
+  document.getElementById('content').innerHTML = `${ehAnalista() ? htmlSaldoPedagio() : ''}${periodToolbar(start,end,`
     <div class="field"><label>Condutor</label><input type="text" id="f-condutor" placeholder="Nome" list="condutor-list"></div>
     <div class="field"><label>Placa</label><input type="text" id="f-placa" placeholder="Placa"></div>
     <div class="field"><label>Endereço</label><input type="text" id="f-endereco" placeholder="Endereço, cidade, rodovia..."></div>
@@ -16490,6 +16601,7 @@ function renderToll() {
   // quantas linhas a tabela mostra. Antes cortava em 200 sem avisar — e a
   // exportação, que lê a tabela da tela, levava só essas 200 sem dizer nada.
   let limitePed = 200;
+  if (ehAnalista()) wireSaldoPedagio();
   document.getElementById('f-apply').addEventListener('click', load);
   load();
   function enderecoForaDasCidades(endereco) {
