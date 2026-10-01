@@ -2484,7 +2484,9 @@
       <a data-route="fleet"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.3" y="5.8" width="9" height="7.2" rx="1"/><path d="M10.3 8.6h3.4l2.4 2.6v1.8h-5.8Z"/><circle cx="4.8" cy="14.6" r="1.4"/><circle cx="13.2" cy="14.6" r="1.4"/></svg></i><span class="nav-txt">Frota</span></a>
       <a data-route="toll"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="6.5" y1="1.8" x2="2.8" y2="16.2"/><line x1="11.5" y1="1.8" x2="15.2" y2="16.2"/><line x1="8.9" y1="2.8" x2="8.5" y2="5.1"/><line x1="9.2" y1="7.5" x2="8.8" y2="9.8"/><line x1="8.5" y1="12.2" x2="8.1" y2="14.5"/></svg></i><span class="nav-txt">Pedágio</span></a>
       <div class="sidebar-group">Financeiro</div>
-      <a data-route="finance"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.8" y="4.8" width="14.4" height="10" rx="1.8"/><path d="M1.8 7.8h14.4"/><line x1="12.5" y1="11.3" x2="12.8" y2="11.3"/></svg></i><span class="nav-txt">Financeiro</span></a>
+      <!-- "Financeiro" (rota finance) saiu do menu em 01/10/2026, pedido do cliente:
+           "da aba financeiro pode tirar o Financeiro". A rota fica trancada em
+           podeAcessar; pra devolver, recoloque o link e tire o bloqueio de lá. -->
       <a data-route="folha"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="1.3" y="5.3" width="15.4" height="8.6" rx="1.5"/><circle cx="9" cy="9.6" r="2.2"/><line x1="3.6" y1="7.6" x2="3.8" y2="7.6"/><line x1="14.4" y1="11.6" x2="14.6" y2="11.6"/></svg></i><span class="nav-txt">Folha de Pagamento</span></a>
       <a data-route="relatoriofin"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2.4" y="2.4" width="13.2" height="13.2" rx="1.6"/><line x1="5.6" y1="12" x2="5.6" y2="8.6"/><line x1="9" y1="12" x2="9" y2="6.2"/><line x1="12.4" y1="12" x2="12.4" y2="9.8"/></svg></i><span class="nav-txt">Relatório do Financeiro</span></a>
       <a data-route="folhaescritorio"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="3" y="2.2" width="12" height="13.6" rx="1.5"/><line x1="6" y1="6" x2="12" y2="6"/><line x1="6" y1="9" x2="12" y2="9"/><line x1="6" y1="12" x2="9.6" y2="12"/></svg></i><span class="nav-txt">Folha — Escritório</span></a>
@@ -3470,6 +3472,10 @@ function podeAcessar(role, route) {
   // diferentes (ROUTE_PERMISSIONS de admin/rh/gestao/escritorio/almox) nem
   // na allowlist da Gestão — bloqueia direto, incondicional.
   if (route === 'presenca' || route === 'presencaescritorio') return false;
+  // Tela "Financeiro" (cadastro de despesas do ciclo): tirada pra TODOS em
+  // 01/10/2026, pedido do cliente. O Dashboard/Relatório do Financeiro continuam
+  // lendo DB.financeiro normalmente — só a tela de lançamento some.
+  if (route === 'finance') return false;
   const perfil = perfilValido(role);
   // Perfil com lista de PERMISSÃO (Gestão): só entra o que está na lista.
   // ROUTE_PERMISSIONS é lista de BLOQUEIO — tela nova nasce liberada pra todo
@@ -8906,8 +8912,10 @@ const BONUS_IFI_MAX = 2.50, BONUS_IRR_MAX = 4.50, BONUS_DIAS_MIN = 26;
 // 22/09/2026) — o desconto (dinheiro) segue o ciclo da folha, 21 a 20; o
 // bônus (Apto/Inapto) segue o calendário do mês, 1 a 30, que é OUTRA janela.
 // Antes era um filtro só, e não dava pra isolar as duas contas.
-const FOLHA_RET_DESC_PERIODO = { inicio: '', fim: '' };
-const FOLHA_RET_BONUS_PERIODO = { inicio: '', fim: '' };
+// (Os dois campos de data que existiam na tela — "Retornos (desconto)" e
+// "Retornos (bônus)" — SAÍRAM em 01/10/2026, pedido do cliente: "vai ser
+// padrão: os descontos vêm da GIGA e o bônus é sempre o do mês". Com uma janela
+// digitada o bônus usava outra base e a tela divergia da planilha.)
 // Regras da Folha (pedido do cliente 01/10/2026): SERVIÇOS do ciclo (21 a 20),
 // BÔNUS no mês calendário (1 a 30/31) e DESCONTO de IFI/IRR pela planilha da
 // GIGA — e enquanto a GIGA não é importada, o sistema calcula tudo de si.
@@ -9145,83 +9153,6 @@ async function aplicarRetornosGigaNaFolha(periodo, porTecnico, bonusPorTecnico) 
   const r = alteradas.length ? await syncBatchToSupabase('folhaPagamento', alteradas) : { ok: true };
   return { alteradas: alteradas.length, semLinha, sync: r };
 }
-// ---- Descontos de MATERIAL vindos da planilha antiga da folha (01/10/2026) ----
-// Pedido do cliente: "puxe os dados de lá e adicione os descontos ...
-// futuramente não vou usar mais essa do navegador". O sistema já calcula
-// ordens, bônus, IFI/IRR, frota e aluguel; o que só existia na planilha eram os
-// descontos digitados (equipamento, multa, miscelânea, mecânica, vale,
-// ferramentas, cartão combustível, fiscalização, pedágio), o empréstimo e as
-// parcelas ("2/3"). Este import copia SÓ esses campos pra folha atual — nada que
-// o sistema calcula é sobrescrito. Daqui pra frente eles são digitados na
-// própria tela da Folha.
-// (função, não const: CAMPOS_MATERIAL_FOLHA/CAMPOS_MANUAIS_FOLHA são declarados
-// mais abaixo no arquivo e um const aqui cairia na zona morta ao carregar)
-function camposDescontoDaPlanilha() {
-  return [...CAMPOS_MATERIAL_FOLHA, 'emprestimo', ...CAMPOS_MANUAIS_FOLHA.filter(c => c.startsWith('parcela_'))];
-}
-function lerDescontosDaPlanilhaFolha(wb) {
-  const apelidos = SCHEMAS.folhaPagamento.fields;
-  // A planilha do cliente tem uma aba OCULTA "." com uma cópia antiga da folha
-  // (mesmo cabeçalho, valores de outra versão) ANTES da "FOLHA DE PAGAMENTO" —
-  // pegar a primeira aba que casasse trazia os descontos errados. Aba oculta
-  // fica de fora e a que tem "folha" no nome vem primeiro.
-  const info = (wb.Workbook && wb.Workbook.Sheets) || [];
-  const visivel = nome => { const s = info.find(x => x.name === nome); return !s || !s.Hidden; };
-  const abas = wb.SheetNames.filter(visivel)
-    .sort((a, b) => (normalizeHeader(b).includes('folha') ? 1 : 0) - (normalizeHeader(a).includes('folha') ? 1 : 0));
-  for (const nomeAba of abas) {
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[nomeAba], { header: 1, raw: true, defval: null });
-    for (let i = 0; i < Math.min(8, rows.length); i++) {
-      const cab = (rows[i] || []).map(normalizeHeader);
-      const iTec = cab.findIndex(c => apelidos.tecnico.includes(c));
-      if (iTec < 0 || !cab.includes('total dos descontos')) continue;
-      const colunas = {};
-      camposDescontoDaPlanilha().forEach(campo => {
-        const idx = cab.findIndex(c => (apelidos[campo] || []).includes(c));
-        if (idx >= 0) colunas[campo] = idx;
-      });
-      const linhas = [];
-      rows.slice(i + 1).forEach(r => {
-        const nome = String((r && r[iTec]) || '').trim();
-        if (!nome || ehLinhaDeTotalDaFolha(nome)) return;
-        const campos = {};
-        Object.entries(colunas).forEach(([campo, idx]) => {
-          const c = r[idx];
-          if (campo.startsWith('parcela_')) {
-            campos[campo] = c === null || c === undefined || c === '' ? ''
-              : c instanceof Date ? `${c.getDate()}/${c.getMonth() + 1}` : String(c).trim();
-          } else {
-            campos[campo] = typeof c === 'number' ? +c.toFixed(2) : (parseMoney(c) || 0);
-          }
-        });
-        linhas.push({ nome, campos });
-      });
-      return { aba: nomeAba, linhas, colunas: Object.keys(colunas) };
-    }
-  }
-  return { erro: 'Não achei a aba da folha (precisa das colunas "TÉCNICO" e "TOTAL DOS DESCONTOS").' };
-}
-async function aplicarDescontosDaPlanilhaNaFolha(periodo, linhasPlanilha) {
-  const alteradas = [], semLinha = [];
-  let totalMaterial = 0;
-  linhasPlanilha.forEach(({ nome, campos }) => {
-    const temValor = Object.values(campos).some(v => v && v !== 0);
-    const idx = DB.folhaPagamento.findIndex(l => l.periodo === periodo
-      && (normalizeHeader(l.tecnico) === normalizeHeader(nome) || mesmaPessoa(l.tecnico, nome)));
-    if (idx < 0) { if (temValor) semLinha.push(nome); return; }
-    const atual = DB.folhaPagamento[idx];
-    const mudou = Object.entries(campos).some(([c, v]) => (c.startsWith('parcela_') ? String(atual[c] || '') !== v : Math.abs((Number(atual[c]) || 0) - v) >= 0.005));
-    CAMPOS_MATERIAL_FOLHA.forEach(c => { totalMaterial += Number(campos[c]) || 0; });
-    if (!mudou) return;
-    const linha = { ...atual, ...campos };
-    linha.total_descontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(linha[c]) || 0), 0);
-    linha.total_receber = totalReceberFolha(linha);
-    DB.folhaPagamento[idx] = linha;
-    alteradas.push(linha);
-  });
-  const sync = alteradas.length ? await syncBatchToSupabase('folhaPagamento', alteradas) : { ok: true };
-  return { alteradas: alteradas.length, semLinha, totalMaterial, sync };
-}
 // ---- ALUGUEL DE CARRO ----
 // Quanto a JH paga por DIA ao técnico que roda com carro próprio. Os números
 // saíram do Relatório do próprio cliente (ciclo 21/07-20/08/2026), dividindo
@@ -9311,7 +9242,20 @@ function frotaDoTecnico(tecnico, inicio, fim) {
     && overlaps(x.inicio, x.ate_o_dia, inicio, fim));
   if (!(DB.frotaLinks || []).length) return (f && f.frota) || '';
   if (linkDaFrotaDoTecnico(tecnico)) return 'JH';
-  return f && /propri.*nov/.test(normalizeHeader(f.frota || '')) ? f.frota : 'PRÓPRIO';
+  const novo = x => /propri.*nov/.test(normalizeHeader(x || ''));
+  if (f) return novo(f.frota) ? f.frota : 'PRÓPRIO';
+  // Ciclo SEM fechamento — o RELATORIO deixou de ser importado em 01/10/2026
+  // ("não preciso mais importar relatório geral"). PRÓPRIO NOVO (R$ 1.500) só
+  // existia lá: sem isto, Isaque/Leandro/Samuel virariam PRÓPRIO (R$ 1.000) a
+  // partir do ciclo seguinte. Vale a última informação conhecida do técnico —
+  // o último fechamento ou a última linha da folha (que a tela da Folha edita).
+  const mesmo = nome => normalizeHeader(nome) === normalizeHeader(tecnico);
+  const ultFech = (DB.fechamento || []).filter(x => mesmo(x.tecnico))
+    .sort((a, b) => String(b.inicio || '').localeCompare(String(a.inicio || '')))[0];
+  const ultFolha = (DB.folhaPagamento || []).filter(x => mesmo(x.tecnico) && x.frota)
+    .sort((a, b) => String(datasDoPeriodoFolha(b.periodo).fim || '').localeCompare(String(datasDoPeriodoFolha(a.periodo).fim || '')))[0];
+  const ult = [ultFolha && ultFolha.frota, ultFech && ultFech.frota].find(x => x);
+  return novo(ult) ? ult : 'PRÓPRIO';
 }
 // "Tem carro da frota da empresa?" — destaca o nome nos rankings. Mesma conta
 // do frotaDoTecnico acima.
@@ -9490,6 +9434,44 @@ const CAMPOS_MANUAIS_FOLHA = [
   'parcela_mecanica', 'parcela_vale', 'parcela_fiscalizacao', 'parcela_combustivel'
 ];
 const FOLHA_CAMPO_VAZIO = c => (c === 'frota' || c.startsWith('parcela_')) ? '' : 0;
+// ---- Parcelas que continuam no ciclo seguinte (01/10/2026) ----
+// Desconto parcelado ("2/3" = 2ª de 3) se repete no ciclo seguinte com o MESMO
+// valor e a parcela seguinte, até fechar ("3/3"). É o que a planilha da folha
+// do cliente faz à mão — conferido entre 3 ciclos seguidos: Marcos 725,33
+// 1/3 → 2/3 → 3/3, Anderson 475,33 e Vinicius 400,00 2/3 → 3/3, Carlos
+// Henrique e Ricardo 300,00 1/3 → 2/3, Guilherme Messias 718,33 1/3 → 2/3.
+// Só preenche campo que ainda está VAZIO no ciclo novo (quem já lançou ou
+// zerou na mão manda); parcela que não deve seguir é zerada na tela da Folha.
+const PARCELA_DO_DESCONTO = [
+  ['parcela_equipamento', 'desc_equipamento'], ['parcela_ferramentas', 'desc_ferramentas'],
+  ['parcela_multa', 'desc_multa'], ['parcela_miscelanea', 'desc_miscelanea'],
+  ['parcela_mecanica', 'desc_mecanica'], ['parcela_vale', 'desc_vale'],
+  ['parcela_fiscalizacao', 'desc_fiscalizacao'], ['parcela_combustivel', 'desc_combustivel'],
+];
+// "21/09/2026 a 20/10/2026" → período do ciclo de antes ("21/08/2026 a 20/09/2026")
+function periodoDoCicloAnterior(inicioISO) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(inicioISO || '');
+  if (!m) return '';
+  const ano = +m[1], mes = +m[2];
+  const mesAnt = mes === 1 ? 12 : mes - 1, anoAnt = mes === 1 ? ano - 1 : ano;
+  const dd = n => String(n).padStart(2, '0');
+  return `21/${dd(mesAnt)}/${anoAnt} a 20/${dd(mes)}/${ano}`;
+}
+function levarParcelasDoCicloAnterior(linha, tecnico, inicioISO) {
+  const periodoAnt = periodoDoCicloAnterior(inicioISO);
+  if (!periodoAnt) return linha;
+  const ant = DB.folhaPagamento.find(l => l.periodo === periodoAnt
+    && (normalizeHeader(l.tecnico) === normalizeHeader(tecnico) || mesmaPessoa(l.tecnico, tecnico)));
+  if (!ant) return linha;
+  PARCELA_DO_DESCONTO.forEach(([parc, desc]) => {
+    const m = /^\s*(\d+)\s*\/\s*(\d+)\s*$/.exec(String(ant[parc] || ''));
+    if (!m || +m[1] >= +m[2] || !(Number(ant[desc]) > 0)) return;
+    if ((Number(linha[desc]) || 0) !== 0 || String(linha[parc] || '').trim()) return;
+    linha[desc] = Number(ant[desc]);
+    linha[parc] = `${+m[1] + 1}/${m[2]}`;
+  });
+  return linha;
+}
 // Gera (ou substitui) as linhas da folha de um ciclo INTEIRO a partir do que o
 // sistema já sabe: ordens e valor delas vêm da Produção (fonte: DB.producao,
 // preço fixo por tipo de serviço — VALORES_ORDENS_FIXOS, faixa "d26" só pra
@@ -9547,12 +9529,15 @@ function gerarPeriodoFolha(inicio, fim) {
     if (eraNovo || existente.frota === undefined || existente.frota === null || existente.frota === '') {
       manuais.frota = frotaDoTecnico(tecnico, inicio, fim);
     }
-    if (eraNovo || existente.dias_aluguel === undefined || existente.dias_aluguel === null) {
-      manuais.dias_aluguel = diasTrab;
-    }
-    if (eraNovo || existente.valor_aluguel === undefined || existente.valor_aluguel === null) {
-      manuais.valor_aluguel = valorAluguelPorRegra(manuais.frota, manuais.dias_aluguel);
-    }
+    // DIAS ALUGUEL = DIAS TRAB. sempre (fórmula da planilha). O valor só é
+    // refeito quando foi o sistema que preencheu (aluguelFoiAutomatico, olhando
+    // o que estava GRAVADO) — acordo digitado na mão continua. Carro da JH = 0.
+    const aluguelAuto = eraNovo || existente.valor_aluguel === undefined || existente.valor_aluguel === null
+      || aluguelFoiAutomatico(existente);
+    manuais.dias_aluguel = diasTrab;
+    if (aluguelAuto) manuais.valor_aluguel = valorAluguelPorRegra(manuais.frota, diasTrab);
+    if (/^jh$/i.test(normalizeHeader(manuais.frota))) manuais.valor_aluguel = 0;
+    levarParcelasDoCicloAnterior(manuais, tecnico, inicio);
     const totalDescontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(manuais[c]) || 0), 0);
     // A quebra por tipo (Ativação/Reparo/...) NÃO fica gravada aqui — a tela
     // calcula na hora, direto da Produção (ver contagemPorTipoNoPeriodo em
@@ -9986,7 +9971,7 @@ function renderAcomTec() {
   // IFI/IRR sempre no MESMO período de cima (o da produção) — sem como
   // isolar, por exemplo, só os retornos baixados entre dia 01 e 30 de um mês
   // específico sem mudar o período da produção junto. Filtro separado, igual
-  // já existe na Folha (fol-ret-de/ate): em branco, cai no período de cima.
+  // existia na Folha até 01/10/2026: em branco, cai no período de cima.
   document.getElementById('acom-ret-reset').addEventListener('click', () => {
     document.getElementById('acom-ret-de').value = '';
     document.getElementById('acom-ret-ate').value = '';
@@ -19462,10 +19447,6 @@ function renderFolhaPagamento(modo) {
       ${periodosNomeados.map(p=>`<option value="${esc(p)}"${p === periodoPadraoFolha ? ' selected' : ''}>${esc(p)}</option>`).join('')}
       ${temSemPeriodo ? `<option value="__sem_periodo__">(sem período definido)</option>` : ''}
     </select></div>` : ''}
-    <div class="field"><label>Retornos (desconto) — de</label><input type="date" id="fol-ret-desc-de"></div>
-    <div class="field"><label>até</label><input type="date" id="fol-ret-desc-ate"></div>
-    <div class="field"><label>Retornos (bônus) — de</label><input type="date" id="fol-ret-bonus-de"></div>
-    <div class="field"><label>até</label><input type="date" id="fol-ret-bonus-ate"></div>
     ${soRelatorio ? `
     <div class="field"><label>Colaborador (Escritório)</label><input type="text" id="f-esc-nome" placeholder="Nome"></div>
     <div class="field"><label>Período (Escritório)</label><select id="f-esc-periodo">
@@ -19477,24 +19458,15 @@ function renderFolhaPagamento(modo) {
   <div class="panel" style="margin-bottom:1.5rem">
     <h3 style="margin:0 0 8px">Retornos da GIGA (IFI / IRR)</h3>
     <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
-      Envie a planilha de retornos que a GIGA manda todo mês ("IFI e IRR ….xlsx"). Vale sempre para a
-      <b>folha atual${periodoPadraoFolha ? ` (${esc(periodoPadraoFolha)})` : ''}</b>: a quantidade e o desconto de IFI/IRR
-      saem dos retornos do ciclo (21 a 20) dessa planilha; o <b>bônus</b> sai dos retornos do mês (1 a 30/31) da base do sistema. O retorno
+      Envie a planilha de retornos que a GIGA manda todo mês ("IFI e IRR ….xlsx"). Ela é lançada no
+      <b>ciclo da folha que tem os retornos do arquivo</b> (o que acabou de fechar): a quantidade e o desconto de IFI/IRR
+      saem dessa planilha; o <b>bônus</b> é sempre o do mês (1 a 30/31), com a base do sistema. O retorno
       é lançado no <b>ofensor</b> (coluna "Executor"), não em quem foi refazer. Enquanto a planilha não é
       enviada, o sistema calcula tudo com os dados dele.
     </p>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
       <div class="field" style="margin:0"><label>Planilha da GIGA</label><input type="file" id="fol-giga-file" accept=".xlsx,.xls"></div>
       <span id="fol-giga-msg" style="font-size:13px"></span>
-    </div>
-    <p style="font-size:12px;color:var(--text-muted);margin:16px 0 10px">
-      <b>Descontos da planilha antiga da folha</b> — copia só os descontos de material (equipamento, multa,
-      miscelânea, mecânica, vale, ferramentas, combustível, fiscalização, pedágio), o empréstimo e as parcelas
-      para a folha atual. Ordens, bônus, IFI/IRR, frota e aluguel continuam sendo calculados pelo sistema.
-    </p>
-    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
-      <div class="field" style="margin:0"><label>Planilha da folha</label><input type="file" id="fol-desc-file" accept=".xlsx,.xls"></div>
-      <span id="fol-desc-msg" style="font-size:13px"></span>
     </div>
   </div>` : ''}
   <div id="folha-body"></div>`;
@@ -19505,10 +19477,8 @@ function renderFolhaPagamento(modo) {
     const arquivo = inputGiga.files && inputGiga.files[0];
     const msg = document.getElementById('fol-giga-msg');
     if (!arquivo) return;
-    const periodo = periodoPadraoFolha;   // sempre a folha ATUAL (o fechamento mais recente)
-    if (!periodo) { msg.innerHTML = '<span style="color:var(--danger)">Não há folha importada ainda — importe a folha primeiro.</span>'; inputGiga.value = ''; return; }
+    if (!periodosNomeados.length) { msg.innerHTML = '<span style="color:var(--danger)">Ainda não há folha no sistema — ela nasce sozinha quando a Produção é importada.</span>'; inputGiga.value = ''; return; }
     if (typeof XLSX === 'undefined') { msg.innerHTML = '<span style="color:var(--danger)">A biblioteca de planilha não carregou (sem internet?).</span>'; inputGiga.value = ''; return; }
-    const janela = datasDoPeriodoFolha(periodo);
     msg.innerHTML = '<span style="color:var(--text-muted)">Lendo a planilha…</span>';
     const leitor = new FileReader();
     leitor.onload = async ev => {
@@ -19516,18 +19486,28 @@ function renderFolhaPagamento(modo) {
         const wb = XLSX.read(ev.target.result, { type: 'array', cellDates: true });
         // a aba costuma se chamar "IFI e IRR", mas usa a primeira que tiver as
         // colunas certas — o nome da aba muda de mês pra mês
-        let conta = null, linhasDaGiga = null;
+        // CICLO: o da folha que tem MAIS retornos desse arquivo. Antes ia sempre
+        // pro período mais recente — mas a folha do ciclo ABERTO nasce sozinha
+        // com a importação da Produção, e o arquivo de setembro (ciclo 21/08 a
+        // 20/09) caía no ciclo 21/09 a 20/10 com "nenhum retorno no período".
+        let conta = null, linhasDaGiga = null, periodo = '', janela = {};
         for (const nome of wb.SheetNames) {
           const linhas = XLSX.utils.sheet_to_json(wb.Sheets[nome], { header: 1, raw: true, defval: null });
-          const tentativa = contarRetornosGiga(linhas, janela.inicio, janela.fim);
-          if (!tentativa.erro) { conta = tentativa; linhasDaGiga = linhas; break; }
+          if (contarRetornosGiga(linhas, '', '').erro) continue;
+          linhasDaGiga = linhas;
+          periodosNomeados.forEach(p => {
+            const j = datasDoPeriodoFolha(p);
+            const t = contarRetornosGiga(linhas, j.inicio, j.fim);
+            if (!conta || t.noPeriodo > conta.noPeriodo) { conta = t; periodo = p; janela = j; }
+          });
+          break;
         }
         if (!conta) {
           msg.innerHTML = '<span style="color:var(--danger)">Não encontrei as colunas "Data", "IND" e "Executor" em nenhuma aba desse arquivo.</span>';
           return;
         }
         if (!conta.noPeriodo) {
-          msg.innerHTML = `<span style="color:var(--warn-text)">A planilha tem retorno, mas nenhum dentro de "${esc(periodo)}" (${conta.fora} fora do período). Confira se escolheu o ciclo certo.</span>`;
+          msg.innerHTML = `<span style="color:var(--warn-text)">A planilha tem retorno, mas nenhum cai num ciclo que já tem folha no sistema (${conta.fora} retorno(s) fora). Importe a Produção do ciclo primeiro.</span>`;
           return;
         }
         // BÔNUS do mês (1 a 30/31): retornos do PRÓPRIO SISTEMA (base de IFI/IRR,
@@ -19569,37 +19549,6 @@ function renderFolhaPagamento(modo) {
     };
     leitor.readAsArrayBuffer(arquivo);
   });
-  // ---- descontos de material da planilha antiga da folha ----
-  const inputDesc = document.getElementById('fol-desc-file');
-  if (inputDesc) inputDesc.addEventListener('change', () => {
-    const arquivo = inputDesc.files && inputDesc.files[0];
-    const msg = document.getElementById('fol-desc-msg');
-    if (!arquivo) return;
-    const periodo = periodoPadraoFolha;
-    if (!periodo) { msg.innerHTML = '<span style="color:var(--danger)">Não há folha no sistema ainda.</span>'; inputDesc.value = ''; return; }
-    if (typeof XLSX === 'undefined') { msg.innerHTML = '<span style="color:var(--danger)">A biblioteca de planilha não carregou (sem internet?).</span>'; inputDesc.value = ''; return; }
-    msg.innerHTML = '<span style="color:var(--text-muted)">Lendo a planilha…</span>';
-    const leitor = new FileReader();
-    leitor.onload = async ev => {
-      try {
-        const lido = lerDescontosDaPlanilhaFolha(XLSX.read(ev.target.result, { type: 'array', cellDates: true }));
-        if (lido.erro) { msg.innerHTML = `<span style="color:var(--danger)">${esc(lido.erro)}</span>`; return; }
-        const r = await aplicarDescontosDaPlanilhaNaFolha(periodo, lido.linhas);
-        const partes = [`<span style="color:var(--success)">${r.alteradas} técnico(s) atualizado(s) em "${esc(periodo)}" — ${formatCurrency(r.totalMaterial)} em descontos de material</span>`];
-        if (r.semLinha.length) partes.push(`<span style="color:var(--warn-text)">sem linha na folha: ${esc(r.semLinha.join(', '))}</span>`);
-        if (supa) partes.push(r.sync && r.sync.ok !== false
-          ? '<span style="color:var(--success)">salvo no Supabase</span>'
-          : `<span style="color:var(--danger)">não consegui salvar: ${esc((r.sync && r.sync.error && r.sync.error.message) || 'erro desconhecido')}</span>`);
-        msg.innerHTML = partes.join(' — ');
-        toast('Descontos da planilha lançados na folha.', 'ok', 2500);
-        load();
-      } catch (e) {
-        msg.innerHTML = `<span style="color:var(--danger)">Erro ao ler a planilha: ${esc(e.message)}</span>`;
-      }
-      inputDesc.value = '';
-    };
-    leitor.readAsArrayBuffer(arquivo);
-  });
   load();
   function load() {
     const tech = document.getElementById('f-tech').value.toLowerCase();
@@ -19608,62 +19557,33 @@ function renderFolhaPagamento(modo) {
     const matchPeriodo = r => !periodo || (periodo === '__sem_periodo__' ? ehSemPeriodoFolha(r.periodo) : r.periodo === periodo);
     const brutas = DB.folhaPagamento.filter(r => (!tech || (r.tecnico||'').toLowerCase().includes(tech)) && matchPeriodo(r));
     const body = document.getElementById('folha-body');
-    if (!brutas.length) { body.innerHTML = '<div class="panel"><div class="empty">Nenhum lançamento encontrado. Importe a aba "FOLHA DE PAGAMENTO".</div></div>'; return; }
+    if (!brutas.length) { body.innerHTML = '<div class="panel"><div class="empty">Nenhum lançamento encontrado. A folha do ciclo nasce sozinha quando a Produção é importada.</div></div>'; return; }
 
-    // ---- dois filtros de retorno, INDEPENDENTES (pedido do cliente 22/09/2026)
-    // Antes era um filtro só, usado pras duas contas ao mesmo tempo — sem jeito
-    // de isolar uma da outra. DESCONTO (dinheiro) acompanha o ciclo da folha,
-    // 21 a 20; vazio usa a planilha (ou a lente automática enquanto a GIGA não
-    // manda o arquivo do mês, ver abaixo). BÔNUS (Apto/Inapto) é outra janela,
-    // normalmente 1 a 30 do mês — decide só o Apto/Inapto, não mexe no desconto.
     const janelaFolha = datasDoPeriodoFolha(periodo || (brutas[0] && brutas[0].periodo));
-    const elDescDe = document.getElementById('fol-ret-desc-de'), elDescAte = document.getElementById('fol-ret-desc-ate');
-    if (elDescDe && !elDescDe.value && FOLHA_RET_DESC_PERIODO.inicio) elDescDe.value = FOLHA_RET_DESC_PERIODO.inicio;
-    if (elDescAte && !elDescAte.value && FOLHA_RET_DESC_PERIODO.fim) elDescAte.value = FOLHA_RET_DESC_PERIODO.fim;
-    const descIni = elDescDe ? elDescDe.value : '', descFim = elDescAte ? elDescAte.value : '';
-    FOLHA_RET_DESC_PERIODO.inicio = descIni; FOLHA_RET_DESC_PERIODO.fim = descFim;
-    const recalculaDesc = !!(descIni && descFim);
-
-    const elBonusDe = document.getElementById('fol-ret-bonus-de'), elBonusAte = document.getElementById('fol-ret-bonus-ate');
-    if (elBonusDe && !elBonusDe.value && FOLHA_RET_BONUS_PERIODO.inicio) elBonusDe.value = FOLHA_RET_BONUS_PERIODO.inicio;
-    if (elBonusAte && !elBonusAte.value && FOLHA_RET_BONUS_PERIODO.fim) elBonusAte.value = FOLHA_RET_BONUS_PERIODO.fim;
-    const bonusIni = elBonusDe ? elBonusDe.value : '', bonusFim = elBonusAte ? elBonusAte.value : '';
-    FOLHA_RET_BONUS_PERIODO.inicio = bonusIni; FOLHA_RET_BONUS_PERIODO.fim = bonusFim;
-    const recalculaBonus = !!(bonusIni && bonusFim);
-
-    // Denominador do DESCONTO (ativações/reparos): o CICLO da folha. Se a
-    // planilha da folha não trouxe o período, usa o ciclo do fechamento que
-    // contém a data final da janela de desconto; em último caso, a própria
-    // janela escolhida.
-    const janelaBase = janelaFolha.inicio ? janelaFolha
-      : (cicloQueContem(descFim).inicio ? cicloQueContem(descFim) : { inicio: descIni, fim: descFim });
-    const contagemRetDesc = recalculaDesc ? contarRetornosPorOfensor(descIni, descFim) : null;
-    const contagemRetBonus = recalculaBonus ? contarRetornosPorOfensor(bonusIni, bonusFim) : null;
 
     // ---- 1) BÔNUS primeiro — o PREÇO do desconto depende da faixa do técnico
     // (apto/inapto, ver precoRetornoDoTecnico), então o bônus precisa estar
-    // decidido ANTES do desconto rodar. Sem janela própria, o bônus segue
-    // como veio da planilha (a linha de desconto, abaixo, não mexe nele).
-    // Sem janela digitada, o bônus é calculado SOZINHO pelo mês (1 a 30/31) em que o
-    // ciclo termina, com os retornos e a Produção do próprio sistema — só nas
-    // linhas que ainda NÃO receberam a planilha da GIGA (nessas vale o que o
-    // lançamento da GIGA decidiu, que o RH ainda pode ajustar). Técnico sem
-    // Produção no mês fica com o bônus gravado.
+    // decidido ANTES do desconto rodar. É SEMPRE o do mês (1 a 30/31) em que o
+    // ciclo termina, com os retornos do próprio sistema ÷ serviços do ciclo
+    // (baseBonusDaLinha) — em TODA linha, inclusive a que já recebeu a planilha
+    // da GIGA (01/10/2026: "o bônus é sempre o do mês"; a GIGA só decide o
+    // desconto). Técnico sem serviço nenhum fica com o bônus gravado.
     const ordensPorTecnicoFolha = {};
     DB.producao.forEach(p => { const t = normalizeHeader(p.recurso); (ordensPorTecnicoFolha[t] = ordensPorTecnicoFolha[t] || []).push(p); });
-    // dias do fechamento oficial ANTES do bônus (menos de 26 = INAPTO). O
-    // aluguel acompanha os dias quando foi o sistema que preencheu (ver
-    // aluguelFoiAutomatico) — `_aluguelAuto` é lido na lente final, lá embaixo.
+    // dias do fechamento oficial ANTES do bônus (menos de 26 = INAPTO). DIAS
+    // ALUGUEL = DIAS TRAB. sempre (fórmula da planilha: =N). Antes ficava o
+    // número de quando a linha nasceu — a folha é gerada no começo do ciclo e
+    // o "Dias Aluguel" travava em 12 com 27 dias trabalhados (Leandro recebia
+    // R$ 600,00 em vez de R$ 1.500,00, achado no Excel exportado em 01/10/2026).
+    // `_aluguelAuto` (o valor gravado foi o sistema que preencheu, com os dias
+    // e a frota GRAVADOS) é lido na lente final, lá embaixo.
     const brutasDias = brutas.map(r => {
       const auto = aluguelFoiAutomatico(r);
       const dias = diasTrabDaLinha(r);
-      if (dias === (Number(r.dias_trab) || 0)) return auto ? { ...r, _aluguelAuto: true } : r;
-      const mesmoDia = (Number(r.dias_aluguel) || 0) === (Number(r.dias_trab) || 0);
-      return { ...r, dias_trab: dias, dias_aluguel: mesmoDia ? dias : r.dias_aluguel, _aluguelAuto: auto };
+      return { ...r, dias_trab: dias, dias_aluguel: dias, _aluguelAuto: auto };
     });
     const retornosDoMes = {};
     const bonusAutomatico = r => {
-      if (r.retorno_origem === 'giga') return r;
       // menos de 26 dias trabalhados = INAPTO, não depende de Produção nem de retorno
       if ((Number(r.dias_trab) || 0) < BONUS_DIAS_MIN) return { ...r, bonus: 'INAPTO', _bonusRecalculado: true };
       const j = datasDoPeriodoFolha(r.periodo);
@@ -19676,14 +19596,7 @@ function renderFolhaPagamento(modo) {
       const c = cont[r.tecnico] || cont[Object.keys(cont).find(k => normalizeHeader(k) === normalizeHeader(r.tecnico)) || ''] || { ifi: 0, irr: 0 };
       return { ...r, bonus: bonusAptoPorIndicadores(c.ifi, c.irr, base, r.dias_trab) ? 'APTO' : 'INAPTO', _bonusRecalculado: true };
     };
-    const linhasComBonus = !recalculaBonus ? brutasDias.map(bonusAutomatico) : brutasDias.map(r => {
-      const c = contagemRetBonus[r.tecnico] || { ifi: 0, irr: 0 };
-      const base = baseDoTecnico(r.tecnico, bonusIni, bonusFim);
-      const ifiPctBonus = base.ativacao ? (c.ifi / base.ativacao) * 100 : 0;
-      const irrPctBonus = base.reparos ? (c.irr / base.reparos) * 100 : 0;
-      const apto = ifiPctBonus <= IFI_TARGET && irrPctBonus <= IRR_TARGET && (r.dias_trab || 0) >= BONUS_DIAS_MIN;
-      return { ...r, bonus: apto ? 'APTO' : 'INAPTO', _bonusRecalculado: true };
-    });
+    const linhasComBonus = brutasDias.map(bonusAutomatico);
 
     // ---- 2) DESCONTO — ENQUANTO A PLANILHA DA GIGA NÃO CHEGA (pedido do
     // cliente 03/09/2026): a GIGA só manda o arquivo de retornos depois que o
@@ -19692,11 +19605,13 @@ function renderFolhaPagamento(modo) {
     // direto da base de IFI/IRR já importada, atribuídos ao ofensor. Assim que
     // a planilha da GIGA for enviada, aquela linha passa a valer a contagem
     // dela e para de ser recalculada. Não grava nada: é uma LENTE sobre a tela.
-    const autoRetorno = !recalculaDesc && janelaFolha.inicio && janelaFolha.fim
+    const autoRetorno = janelaFolha.inicio && janelaFolha.fim
       ? contarRetornosPorOfensor(janelaFolha.inicio, janelaFolha.fim) : null;
     let quantosAuto = 0;
     const brutasComRetorno = !autoRetorno ? linhasComBonus : linhasComBonus.map(r => {
-      if (r.retorno_origem === 'giga') return r;
+      // linha da GIGA: a QUANTIDADE é a da GIGA, mas o preço segue a faixa do
+      // bônus do mês decidido acima — refaz o valor do desconto com ela
+      if (r.retorno_origem === 'giga') return aplicarDescontoRetorno({ ...r, _recalculado: true }, janelaFolha);
       const c = autoRetorno[r.tecnico]
         || autoRetorno[Object.keys(autoRetorno).find(k => normalizeHeader(k) === normalizeHeader(r.tecnico)) || ''];
       // recontar a QUANTIDADE sem refazer o DESCONTO deixava a tela mostrando
@@ -19711,12 +19626,7 @@ function renderFolhaPagamento(modo) {
       quantosAuto++;
       return aplicarDescontoRetorno({ ...r, qtd_ifi: c.ifi, qtd_irr: c.irr, _retornoAuto: true, _recalculado: true }, janelaFolha);
     });
-    const rows = !recalculaDesc ? brutasComRetorno : linhasComBonus.map(r => {
-      const c = contagemRetDesc[r.tecnico] || { ifi: 0, irr: 0 };
-      const linha = { ...r, qtd_ifi: c.ifi, qtd_irr: c.irr, _recalculado: true };
-      aplicarDescontoRetorno(linha, janelaBase.inicio && janelaBase.fim ? janelaBase : { inicio: descIni, fim: descFim });
-      return linha;
-    });
+    const rows = brutasComRetorno;
 
     // ---- lente final (não grava nada): FROTA da tabela de Frota e SERVIÇOS do
     // ciclo (total, valor e quebra por tipo vêm da mesma conta — ver
@@ -19734,6 +19644,9 @@ function renderFolhaPagamento(modo) {
       if (r._aluguelAuto || frotaMudou) {
         linha.valor_aluguel = valorAluguelPorRegra(linha.frota, Number(linha.dias_aluguel) || Number(linha.dias_trab) || 0);
       }
+      // carro da JH (empresa/locadora) NUNCA paga aluguel ao técnico — aluguel é
+      // só de carro PRÓPRIO (cliente, 01/10/2026). Vale até sobre valor digitado.
+      if (/^jh$/i.test(normalizeHeader(linha.frota))) linha.valor_aluguel = 0;
       linha.total_receber = totalReceberFolha(linha);
       const apto = /apto/i.test(linha.bonus || '') && !/inapto/i.test(linha.bonus || '');
       if (j.inicio) {
@@ -19861,7 +19774,6 @@ function renderFolhaPagamento(modo) {
     body.innerHTML = soRelatorio ? blocoRelatorio + blocoRelatorioEscritorio : `
       <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">Folha de Pagamento completa
         <button type="button" class="btn-export-xls" id="folha-export-xls">⤓ Excel da folha</button>
-        <button type="button" class="btn-export-img" id="folha-export-img">🖼 Imagem da folha</button>
       </div>
       <div id="folha-export-aviso"></div>
       ${renderFolhaCompleta(ranking, pct, IFI_TARGET, IRR_TARGET)}
@@ -19975,24 +19887,16 @@ function renderFolhaPagamento(modo) {
       if (!avisoExport) return;
       avisoExport.innerHTML = exportacaoPendente
         ? `<p style="margin:0 0 10px;font-size:var(--fs-sm);color:var(--warn-text);background:color-mix(in srgb, var(--warn-text) 12%, transparent);border:1px solid color-mix(in srgb, var(--warn-text) 35%, transparent);border-radius:var(--r-sm);padding:10px 12px">
-             <b>Falta exportar.</b> A folha foi alterada e salva — gere o <b>Excel</b> ou a <b>imagem</b> acima pra guardar o comprovante desse fechamento.
+             <b>Falta exportar.</b> A folha foi alterada e salva — gere o <b>Excel</b> acima pra guardar o comprovante desse fechamento.
            </p>` : '';
     };
     const tabelaFolha = () => document.getElementById('folha-tab');
     const btnXls = document.getElementById('folha-export-xls');
-    const btnImg = document.getElementById('folha-export-img');
     if (btnXls) btnXls.addEventListener('click', () => {
       if (!tabelaFolha()) { toast('Sem folha na tela pra exportar.', 'aviso'); return; }
       exportarFolhaXlsxFormatada(tabelaFolha(), nomeArqFolha);
       exportacaoPendente = false; atualizarAvisoExport();
       toast('Excel da folha gerado.', 'ok', 2000);
-    });
-    if (btnImg) btnImg.addEventListener('click', () => {
-      const r = tabelaFolha() && exportarTabelaImagem(tabelaFolha(), nomeArqFolha,
-        'Folha de Pagamento — ' + (periodo || 'todos os períodos'));
-      if (!r) { toast('Sem linha visível pra gerar a imagem.', 'aviso'); return; }
-      exportacaoPendente = false; atualizarAvisoExport();
-      toast(`Imagem gerada (${r.linhas} linha(s)).`, 'ok', 2000);
     });
 
     const btnSalvar = document.getElementById('folha-salvar');
@@ -21659,31 +21563,21 @@ const ARQUIVOS_IMPORT = [
   // destino. Várias planilhas diferentes alimentam a MESMA tabela (ex: producao),
   // então só checar "a tabela tem dado?" marcava cards errados como importados.
   // Conferir aba+destino juntos identifica o arquivo certo.
-  { nome: 'RELATORIO_GERAL.xlsx', desc: 'Abas RELATORIO (fechamento/bônus), REPAROS OK e BASE_PRODUÇÃO', assinaturas: [{sheet:'RELATORIO', target:'fechamento'}] },
+  // 01/10/2026 (pedido do cliente: "não preciso mais importar"): saíram os cards
+  // RELATORIO_GERAL (a folha/fechamento agora sai da Produção + base de IFI/IRR),
+  // GESTAO_PEDAGIO (o pedágio entra pelo CSV da Edenred, na aba Pedágio),
+  // CLEAN_UP e PORTAS DA CTO (já salvos no sistema) e FOLHA_DE_PAGAMENTO (o
+  // sistema monta a folha sozinho). Arrastar um desses arquivos ainda funciona —
+  // a importação é pelo CONTEÚDO das colunas, o card é só o guia da tela.
   { nome: 'PRODUÇÃO_GERAL_JH.xlsx', desc: 'Aba BASE PRODUÇÃO — todos os serviços por técnico', assinaturas: [{sheet:'BASE PRODUÇÃO', target:'producao'}] },
   { nome: 'BASE_CONCLUIDOS-IRR-IFI.xlsx', desc: 'Abas BASE GERAL CONCLUIDO e REPAROS OK — retornos IFI/IRR', assinaturas: [{sheet:'BASE GERAL CONCLUIDO', target:'producao'}] },
   { nome: 'PRAZOS_ESCRITÓRIO.xlsx', desc: 'Abas BASE DE DADOS, BASE DO DIA, PRAZO REPARO DO DIA (parcial do dia) e PRAZO INFORMADO REPARO/AT-ME (PLEITO)', assinaturas: [{sheet:'BASE DE DADOS', target:'prazo'}, {sheet:'BASE DO DIA', target:'baseDoDia'}, {sheet:'PRAZO REPARO DO DIA', target:'prazoReparoDia'}, {sheet:'PRAZO INFORMADO REPARO (PLEITO)', target:'pleito'}, {sheet:'PRAZO INFORMADO AT-ME (PLEITO)', target:'pleito'}] },
   { nome: 'FROTA_LITORAL.xlsx', desc: 'Abas FROTA LITORAL, TROCA DE VEICULO, MANUTENÇÕES, DESVINCULAÇÕES, MULTAS', assinaturas: [{sheet:'FROTA LITORAL', target:'frotaLinks'}] },
-  { nome: 'GESTAO_PEDAGIO.xlsx', desc: 'Passagens de pedágio (Taggy)', assinaturas: [{target:'pedagio'}] },
-  // Sem "sheet" de propósito (mesmo padrão do Pedágio): a planilha do Clean Up
-  // vinha do Power BI e o nome da aba varia ("Tabela1", "Planilha1", "BAIXADA"…).
-  // Quem decide o destino é o conteúdo das colunas (ver pickBestTarget).
-  { nome: 'CLEAN_UP.xlsx', desc: 'Histórico de limpeza de CTO — localização, portas liberadas, contrato, técnico e data (alimenta o mapa da aba Clean Up)', assinaturas: [{target:'cleanUp'}] },
   // base_dados_financeiro.xlsx saiu daqui em 04/09/2026 (pedido do cliente):
   // despesa do ciclo agora é digitada direto na tela Financeiro (cadastro
   // por período, RH/Analista) — a planilha de comparação (COMPARATIVO.xlsx,
   // linha abaixo) continua valendo pros ciclos antigos, essa não muda.
-  // sem "sheet" de propósito (mesmo padrão do Pedágio, logo acima): o nome da
-  // aba real muda a cada mês ("FOLHA 21.07 a 20.08", "FOLHA 21.08 a 20.09"...
-  // — é dali que resolverPeriodoPorNomeDaAba tira o período). Exigir o nome
-  // exato "FOLHA DE PAGAMENTO" fazia o card nunca ficar verde, mesmo com a
-  // importação certa — quem decide o destino é o conteúdo das colunas
-  // (pickBestTarget), não o nome da aba.
-  { nome: 'FOLHA_DE_PAGAMENTO...xlsx', desc: 'Aba FOLHA DE PAGAMENTO (ordens/descontos/bônus). A aba VALORES ORDENS não é importada — os valores por serviço são fixos no sistema.', assinaturas: [{target:'folhaPagamento'}] },
-  { nome: 'COMPARATIVO.xlsx', desc: 'Abas BASE_PRODUCAO (produção) e COMAPARATIVO (tabela financeira pronta por período)', assinaturas: [{sheet:'BASE_PRODUCAO', target:'producao'}, {sheet:'COMAPARATIVO', target:'comparativoFinanceiro'}] },
-  // é a mesma planilha que alimentava o Power BI "CLEAN UP - BAIXADA & SP" —
-  // uma linha por PORTA; o sistema agrupa por caixa sozinho (tryParsePortasCTO)
-  { nome: 'PORTAS DA CTO.xlsx', desc: 'Aba PORTAS DA CTO — uma linha por porta (LOCALIZAÇÃO CTO, Porta, Status). Vira o mapa da aba Clean Up, agrupado por caixa.', assinaturas: [{sheet:'PORTAS DA CTO', target:'cleanUp'}] }
+  { nome: 'COMPARATIVO.xlsx', desc: 'Abas BASE_PRODUCAO (produção) e COMAPARATIVO (tabela financeira pronta por período)', assinaturas: [{sheet:'BASE_PRODUCAO', target:'producao'}, {sheet:'COMAPARATIVO', target:'comparativoFinanceiro'}] }
 ];
 function renderImport() {
   document.getElementById('content').innerHTML = `
