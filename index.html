@@ -12,6 +12,15 @@
      apagado; cor única do azul da marca deixa o "JH" mais nítido no tamanho
      minúsculo da aba do navegador. -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='45' font-family='Arial,Helvetica,sans-serif' font-weight='800' font-size='30' fill='%23ffffff' text-anchor='middle'%3EJH%3C/text%3E%3C/svg%3E" />
+<!-- PWA (02/10/2026): "instalar como aplicativo". manifest + service worker são ARQUIVOS
+     À PARTE (manifest.webmanifest, sw.js, ícones) publicados junto do index.html; abrindo
+     este HTML direto do disco (file://) eles simplesmente não existem e nada muda. -->
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#2563eb" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="JH Nexus" />
+<link rel="apple-touch-icon" href="icon-192.png" />
 <!-- xlsx-js-style: mesmo SheetJS 0.18.5 de sempre, só que com suporte a
      estilo de célula (cor, negrito, borda) no arquivo exportado — a
      "xlsx" comum (cdnjs) nunca escreve estilo, só valor puro. Substituída
@@ -376,6 +385,12 @@
   .btn:disabled, .icon-btn:disabled, .btn-mini:disabled { opacity: .45; cursor: not-allowed; transform: none; }
 
   .topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  /* Janela de compartilhar imagem (celular) */
+  .img-share-fundo { position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,.72); display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .img-share-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; width: min(520px, 100%); max-height: 92vh; display: flex; flex-direction: column; gap: 12px; }
+  .img-share-card img { max-width: 100%; max-height: 62vh; object-fit: contain; background: #fff; border-radius: 6px; align-self: center; }
+  .img-share-botoes { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .img-share-botoes .btn { flex: 1 1 100%; }
   .icon-btn {
     display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px; cursor: pointer;
     background: var(--card-bg); border: 1px solid var(--border); color: var(--text-secondary);
@@ -1207,6 +1222,11 @@
   input[type="file"]::file-selector-button { margin-right: 12px; padding: 7px 14px; border: none; border-radius: 6px;
     background: var(--accent-solid); color: #fff; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: background .15s; }
   input[type="file"]::file-selector-button:hover { background: var(--accent-dark); }
+  /* Barra "Fechar ciclo" da Folha */
+  .fol-fech { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 1rem !important; padding: 12px 16px !important; border-left: 4px solid var(--accent) !important; }
+  .fol-fech-fechada { border-left-color: var(--success) !important; }
+  .fol-fech > div { flex: 1 1 280px; min-width: 0; }
+  .fol-fech-ic { font-size: 20px; line-height: 1; }
   .campo-arquivo { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0; cursor: pointer; }
   .campo-arquivo-rot { font-size: 14px; font-weight: 700; color: var(--text-primary); white-space: nowrap; }
   .campo-arquivo-seta { color: var(--accent); font-weight: 700; font-size: 16px; line-height: 1; }
@@ -2537,6 +2557,7 @@
       <div class="sidebar-group">Relatórios</div>
       <a data-route="relatorios"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M5.2 1.8h5.2l3.3 3.3v11.1h-8.5Z"/><path d="M10.4 1.8v3.3h3.3"/><line x1="6.8" y1="9.6" x2="12" y2="9.6"/><line x1="6.8" y1="12.4" x2="12" y2="12.4"/></svg></i><span class="nav-txt">Gerar Relatório</span></a>
       <a data-route="import"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M9 11.8V2.8"/><path d="M5.3 6.3 9 2.6l3.7 3.7"/><path d="M2.8 13.5v1.4a1.8 1.8 0 0 0 1.8 1.8h8.8a1.8 1.8 0 0 0 1.8-1.8v-1.4"/></svg></i><span class="nav-txt">Importar Excel</span></a>
+      <a data-route="saude"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2.4" y="2.8" width="13.2" height="5" rx="1.2"/><rect x="2.4" y="10.2" width="13.2" height="5" rx="1.2"/><circle cx="5.2" cy="5.3" r=".7"/><circle cx="5.2" cy="12.7" r=".7"/></svg></i><span class="nav-txt">Saúde do Sistema</span></a>
     </nav>
     <button class="logout-btn" id="logout-btn">Sair</button>
   </aside>
@@ -2555,6 +2576,7 @@
         <!-- Escape hatch do cache local: joga fora a cópia guardada no
              navegador e busca tudo de novo do Supabase. Serve pra "tá
              estranho, recarrega do zero" sem precisar de suporte. -->
+        <button class="icon-btn" id="btn-instalar" type="button" hidden title="Instalar o sistema como aplicativo" aria-label="Instalar o sistema como aplicativo">📲 Instalar app</button>
         <button class="icon-btn" id="btn-tema" type="button" title="Alternar tema claro/escuro" aria-label="Alternar tema claro/escuro"><span id="btn-tema-icone">☀</span><span id="btn-tema-texto">Tema claro</span></button>
         <button class="icon-btn" id="btn-trocar-usuario" type="button" title="Entrar com outro perfil" aria-label="Entrar com outro perfil">⇄ Alterar usuário</button>
         <div class="topbar-user" id="user-name"></div>
@@ -2658,6 +2680,9 @@ const SUPABASE_TABLES = {
   // Histórico de alterações da Folha (02/10/2026): cada campo editado e salvo na
   // tabela, importação da GIGA/SP e troca de valor de SP. Só INSERT. sql/PASSO-32
   folhaHistorico:  { table: 'folha_historico',      conflict: 'chave' },
+  // Ciclo da Folha FECHADO (02/10/2026): 1 linha por ciclo com a cópia dos números pagos.
+  // Entra no cache incremental (atualizado_em, PASSO-34). sql/PASSO-34
+  folhaFechamentos: { table: 'folha_fechamentos',   conflict: 'periodo' },
 };
 // devolve os campos de data de uma linha do PCR ao formato Date
 function hidratarLinhaPCR(r) {
@@ -3209,6 +3234,7 @@ const SCRIPT_DA_TABELA = {
   chamados_giga: 'PASSO-25',
   ordens_sp: 'PASSO-31', valores_sp_historico: 'PASSO-31',
   folha_historico: 'PASSO-32',
+  folha_fechamentos: 'PASSO-34',
 };
 // Barra de aviso do topo. Substitui o alerta que travava a tela a cada login:
 // tabela que falta não impede nada, então vira uma linha discreta com o que
@@ -3357,7 +3383,7 @@ const ROUTE_PERMISSIONS = {
   //     04/09/2026 (pedido do cliente) — nem Matheus/Sebastião, que editavam
   //     a de técnicos, continuam vendo. Ver 'presenca' abaixo e
   //     podeAcessar (presencaescritorio tem regra própria, fora desta lista).
-  admin: ['import', 'dashboard', 'finance', 'comparisons', 'folha',
+  admin: ['saude', 'import', 'dashboard', 'finance', 'comparisons', 'folha',
           'retornosgiga', 'relatoriofin', 'folhaescritorio', 'presenca',
           'cmpproducao', 'cmpifiirr', 'cmpprazo'],
   // RH: "no momento" (28/08/2026, pedido do cliente) só enxerga Pedágio —
@@ -3380,7 +3406,7 @@ const ROUTE_PERMISSIONS = {
   // 'dashboard' saiu do bloqueio e 'cleanup' entrou (10/09/2026, pedido do
   // cliente): RH passou a ver o Resumo Geral, mas não precisa do Clean Up
   // (mapa de limpeza de CTO é operação de campo, fora do escopo do RH).
-  rh: ['cleanup', 'relatorios', 'import', 'retornosgiga',
+  rh: ['cleanup', 'relatorios', 'saude', 'import', 'retornosgiga',
        'comparisons', 'relatoriofin', 'presenca',
        'cmpproducao', 'cmpifiirr', 'cmpprazo'],
   // Gestão (02/09/2026, pedido do cliente): MESMO acesso do Analista, EXCETO
@@ -3422,7 +3448,7 @@ const ROUTE_PERMISSIONS = {
   // cliente) — essa mudança tinha ficado só no RH numa auditoria anterior,
   // quebrando o "sempre acompanhou" acima (achado em nova auditoria).
   // Replicado aqui pra manter o Almoxarifado espelhando o RH.
-  almox: ['cleanup', 'relatorios', 'import', 'retornosgiga',
+  almox: ['cleanup', 'relatorios', 'saude', 'import', 'retornosgiga',
           'finance', 'folha', 'comparisons', 'relatoriofin', 'folhaescritorio', 'presenca',
           'cmpproducao', 'cmpifiirr', 'cmpprazo'],
 };
@@ -3577,6 +3603,7 @@ const DB = {
   ordensSp: [],            // ordens de SP importadas na Folha (concluídas valem pro técnico)
   valoresSpHistorico: [],  // histórico do valor por ordem de SP, por ciclo
   folhaHistorico: [],      // histórico de alterações da Folha de Pagamento
+  folhaFechamentos: [],    // ciclos da Folha fechados (cópia dos números pagos)
 };
 // Índices por "chave natural" — permitem que reimportar a mesma planilha (ou uma
 // versão atualizada dela) SUBSTITUA os registros já existentes em vez de duplicar.
@@ -3591,7 +3618,7 @@ const DB_INDEX = {
   presencaTecnicos: new Map(), presenca: new Map(),
   presencaEscritorioPessoas: new Map(), presencaEscritorio: new Map(),
   chamadosGiga: new Map(),
-  ordensSp: new Map(), valoresSpHistorico: new Map(), folhaHistorico: new Map(),
+  ordensSp: new Map(), valoresSpHistorico: new Map(), folhaHistorico: new Map(), folhaFechamentos: new Map(),
 };
 
 // ===================== CLEAN UP — BASE JÁ EMBUTIDA =====================
@@ -5439,13 +5466,7 @@ function baixarTabelaComoImagem({ titulo, subtitulo, colunas, linhas, total, nom
       cx += larguras[i];
     });
   }
-  cv.toBlob(blob => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = (nomeArquivo || 'tabela') + '.png';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-  }, 'image/png');
+  cv.toBlob(blob => entregarImagemPng(blob, nomeArquivo || 'tabela'), 'image/png');
 }
 // Colunas de status no formato da planilha de remanejamento (só entram as que
 // têm pelo menos uma ordem no dia — igual à dinâmica do Excel, que não cria
@@ -7277,6 +7298,7 @@ const DESCRICAO_ROTAS = {
   comparisons: 'Comparativo financeiro entre ciclos: despesas, receita e lucro.',
   relatorios: 'Montagem de relatório em PDF escolhendo as seções.',
   import: 'Importação das planilhas e do CSV de atividades.',
+  saude: 'Confere o banco, a segurança, as importações em dia e gera o backup completo.',
   retornosgiga: 'Conferência da planilha de retornos enviada pela GIGA.',
   chamadosgiga: 'Chamados abertos na GIGA que ainda não foram puxados pro campo (PCR).',
   certificacoes: 'Certificação de ordens do dia, lido ao vivo da planilha Google Sheets.',
@@ -7405,6 +7427,7 @@ const PAGES = {
   comparisons: { title: 'Comparativo Financeiro', render: renderComparisons },
   relatorios: { title: 'Relatórios', render: renderRelatorios },
   import: { title: 'Importar Excel', render: renderImport },
+  saude: { title: 'Saúde do Sistema', render: renderSaude },
 };
 document.getElementById('sidebar-nav').addEventListener('click', e => {
   const a = e.target.closest('a[data-route]');
@@ -7864,6 +7887,91 @@ function ativarFiltrosDeColuna(raiz) {
 //   toast('deu certo','ok')   -> verde
 //   toast('falhou','erro')    -> vermelho (fica até fechar)
 // ============================================================
+// ---- PWA: instalar como aplicativo + service worker (02/10/2026) ----
+// Chrome/Edge/Android: o navegador avisa (beforeinstallprompt) e o botão "📲 Instalar
+// app" do topo abre a janela de instalação. iPhone/Safari não tem esse aviso: o botão
+// aparece e ensina o caminho (Compartilhar → Adicionar à Tela de Início). Dentro do
+// app instalado (standalone) o botão some. O service worker só registra em http(s).
+let PWA_EVENTO_INSTALAR = null;
+function pwaJaInstalado() {
+  return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+}
+function pwaAtualizarBotao() {
+  const b = document.getElementById('btn-instalar');
+  if (!b) return;
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+  b.hidden = pwaJaInstalado() || !(PWA_EVENTO_INSTALAR || ios);
+}
+window.addEventListener('beforeinstallprompt', ev => { ev.preventDefault(); PWA_EVENTO_INSTALAR = ev; pwaAtualizarBotao(); });
+window.addEventListener('appinstalled', () => { PWA_EVENTO_INSTALAR = null; pwaAtualizarBotao(); toast('Aplicativo instalado.', 'ok', 2500); });
+document.addEventListener('DOMContentLoaded', () => {
+  const b = document.getElementById('btn-instalar');
+  if (b) b.addEventListener('click', async () => {
+    if (PWA_EVENTO_INSTALAR) {
+      PWA_EVENTO_INSTALAR.prompt();
+      try { await PWA_EVENTO_INSTALAR.userChoice; } catch (e) { /* recusou */ }
+      PWA_EVENTO_INSTALAR = null; pwaAtualizarBotao();
+    } else toast('No iPhone: toque em Compartilhar (□↑) e depois em "Adicionar à Tela de Início".', '', 7000);
+  });
+  pwaAtualizarBotao();
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    navigator.serviceWorker.register('sw.js').catch(() => { /* sem sw.js (ex.: servidor sem o arquivo): o sistema segue normal */ });
+  }
+});
+// ---- ENTREGA DE IMAGEM: baixar no computador, COMPARTILHAR no celular ----
+// (02/10/2026, pedido do cliente: "compartilhar imagem direto no WhatsApp, no
+// celular"). Toda imagem PNG do sistema passa por aqui. No computador baixa como
+// sempre. Em tela de toque, se o navegador sabe compartilhar arquivo (Web Share
+// API: Chrome/Android e Safari/iPhone), abre uma janelinha com a prévia e os
+// botões "Compartilhar" (WhatsApp, e-mail...) e "Baixar". A janela existe pra o
+// toque do "Compartilhar" ser um clique NOVO — o navegador só deixa compartilhar
+// com gesto do usuário, e a imagem demora uns segundos pra ficar pronta.
+function baixarBlobPng(blob, nome) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = nome + '.png';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+function podeCompartilharImagem(arquivo) {
+  try {
+    const toque = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    return toque && !!navigator.share && !!navigator.canShare && navigator.canShare({ files: [arquivo] });
+  } catch (e) { return false; }
+}
+function entregarImagemPng(blob, nome) {
+  nome = String(nome || 'imagem');
+  if (!blob) { toast('Não consegui gerar a imagem — tente de novo.', 'aviso'); return; }
+  const arquivo = new File([blob], nome + '.png', { type: 'image/png' });
+  if (!podeCompartilharImagem(arquivo)) { baixarBlobPng(blob, nome); return; }
+  const url = URL.createObjectURL(blob);
+  const fundo = document.createElement('div');
+  fundo.className = 'img-share-fundo';
+  fundo.setAttribute('role', 'dialog'); fundo.setAttribute('aria-modal', 'true'); fundo.setAttribute('aria-label', 'Compartilhar imagem');
+  fundo.innerHTML = `<div class="img-share-card">
+    <img src="${url}" alt="Prévia da imagem">
+    <div class="img-share-botoes">
+      <button type="button" class="btn" data-acao="compartilhar">📲 Compartilhar</button>
+      <button type="button" class="btn-secundario" data-acao="baixar">⬇ Baixar</button>
+      <button type="button" class="btn-secundario" data-acao="fechar">Fechar</button>
+    </div></div>`;
+  const fechar = () => { fundo.remove(); URL.revokeObjectURL(url); document.removeEventListener('keydown', aoTeclar); };
+  const aoTeclar = ev => { if (ev.key === 'Escape') fechar(); };
+  fundo.addEventListener('click', ev => {
+    if (ev.target === fundo) { fechar(); return; }
+    const alvo = ev.target.closest('[data-acao]');
+    const acao = alvo && alvo.dataset.acao;
+    if (acao === 'fechar') fechar();
+    else if (acao === 'baixar') { baixarBlobPng(blob, nome); fechar(); }
+    else if (acao === 'compartilhar') {
+      navigator.share({ files: [arquivo], title: nome }).then(fechar).catch(err => {
+        if (err && err.name !== 'AbortError') toast('Não consegui compartilhar — use "Baixar".', 'aviso');
+      });
+    }
+  });
+  document.addEventListener('keydown', aoTeclar);
+  document.body.appendChild(fundo);
+}
 function toast(mensagem, tipo = '', ms) {
   const area = document.getElementById('toast-area');
   if (!area) { console.log('[toast]', mensagem); return; }
@@ -9332,6 +9440,7 @@ function extrairRetornosGigaDetalhe(rows, inicio, fim) {
 // Só mexe em Qtd. IFI / Qtd. IRR (e no desconto que sai deles) — desconto de
 // material, parcela, frota e bônus ficam exatamente como estavam.
 async function aplicarRetornosGigaNaFolha(periodo, porTecnico, bonusPorTecnico) {
+  if (folhaFechada(periodo)) return { alteradas: 0, semLinha: [], sync: { ok: true }, fechada: true };
   const janela = datasDoPeriodoFolha(periodo);
   const alteradas = [], semLinha = [];
   // `bonusPorTecnico` (opcional): { nomeNormalizado: 'APTO'|'INAPTO' } — o bônus do
@@ -9702,6 +9811,29 @@ function recalcularCampoFolha(linhaAtual, campo, valor) {
   }
   return linha;
 }
+// ---- FECHAMENTO DO CICLO DA FOLHA (02/10/2026) ----
+// Pedido do cliente: "fechar ciclo da folha". Depois de paga, a folha de um ciclo NÃO
+// pode mudar: nem por edição, nem por importação (Produção, GIGA, SP, valor de SP),
+// nem porque a Produção ou a frota mudaram depois. Fechar (1) grava na folha os números
+// finais que a tela calculou, (2) guarda uma CÓPIA completa em folha_fechamentos (inclui
+// a quebra por tipo, que a tela calcula na hora) e (3) a tela passa a mostrar essa
+// cópia. Só o Analista reabre; fechar/reabrir ficam no histórico. A trava é do
+// navegador: quem estava com a tela aberta antes só enxerga o fechamento no próximo F5.
+function folhaFechada(periodo) {
+  return (DB.folhaFechamentos || []).find(x => x.periodo === periodo && x.fechada) || null;
+}
+// A linha do técnico como foi paga (ou null se o ciclo está aberto / o técnico não estava)
+function linhaDaFolhaFechada(r) {
+  const f = folhaFechada(r.periodo);
+  if (!f || !Array.isArray(f.linhas)) return null;
+  const s = f.linhas.find(l => l.tecnico === r.tecnico);
+  if (!s) return null;
+  const { quebra, recalc, ...resto } = s;
+  return { ...resto, _fechada: true, _quebraFechada: quebra, _recalculado: !!recalc };
+}
+// campos finais que o fechamento grava de volta na folha (outras telas leem de lá)
+const FOLHA_CAMPOS_FECHAMENTO = ['total_ordens', 'valor_total_ordens', 'dias_trab', 'bonus', 'qtd_ifi', 'qtd_irr', 'desc_ifi', 'desc_irr',
+  'total_descontos', 'total_receber', 'frota', 'dias_frota', 'dias_aluguel', 'valor_aluguel', 'emprestimo'];
 // Histórico de alterações da Folha (02/10/2026, pedido do cliente: "embaixo da
 // folha quero um histórico que mostre as alterações"). Cada item: { periodo,
 // tecnico, campo, rotulo, de, para }. Só INSERT, tabela folha_historico (PASSO-32);
@@ -9725,6 +9857,7 @@ async function registrarHistoricoFolha(itens) {
 // recalculado (recalcularCampoFolha foi aplicado a cada edição, na hora, só
 // que sem persistir) — aqui é só gravar o estado atual dela.
 async function salvarLinhaFolha(linha) {
+  if (folhaFechada(linha.periodo)) return { ok: false, error: { message: `Ciclo "${linha.periodo}" fechado — reabra pra alterar.` } };
   const idx = DB_INDEX.folhaPagamento.get(`${linha.tecnico}|${linha.periodo}`);
   if (idx === undefined) return { ok: false, error: { message: 'Linha da folha não encontrada (tecnico/período).' } };
   // Cópia, não a mesma referência da linha do ranking — senão, depois de
@@ -9829,6 +9962,7 @@ function levarParcelasDoCicloAnterior(linha, tecnico, inicioISO) {
 // zerados quando a linha é nova de verdade.
 function gerarPeriodoFolha(inicio, fim) {
   const periodo = `${formatDate(inicio)} a ${formatDate(fim)}`;
+  if (folhaFechada(periodo)) return { periodo, total: 0, fechada: true };   // ciclo fechado não muda
   const porTecnico = {};
   DB.producao.forEach(p => {
     if (!isConcluido(p.status) || !inRange(p.data, inicio, fim) || !ehRecursoTecnico(p.recurso)) return;
@@ -11025,11 +11159,7 @@ function capturarElementoComoImagem(elemento, nomeArquivo, aoTerminar) {
     limpar();
     cv.toBlob(blob => {
       if (!blob) { toast('Não consegui gerar a imagem — tente de novo.', 'aviso'); return; }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = nomeArquivo + '.png';
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      entregarImagemPng(blob, nomeArquivo);
     });
   }).catch(err => {
     limpar();
@@ -11214,13 +11344,7 @@ function exportarTabelaImagem(tabela, nomeArquivo, titulo) {
   });
   ctx.strokeStyle = cores.borda; ctx.lineWidth = 1;
   ctx.strokeRect(0.5, TOPO + 0.5, larg - 1, LINHA * (corpo.length + 1));
-  cv.toBlob(blob => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = nomeArquivo + '.png';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  });
+  cv.toBlob(blob => entregarImagemPng(blob, nomeArquivo));
   return { linhas: corpo.length };
 }
 // Exporta pro Excel escolhendo e REORDENANDO as colunas pelo cabeçalho.
@@ -17040,6 +17164,14 @@ function renderReuniaoPrazos() {
     const taxaImp = t => { const f = t.imp + (concluidasPorTec[t.nome] || 0); return f ? (t.imp / f) * 100 : 0; };
     const impTodos = Object.values(impPorTec).sort((a, b) => b.imp - a.imp || taxaImp(b) - taxaImp(a));
     const impTecnicos = mostrarImprodutivas === 'todos' ? impTodos : impTodos.slice(0, mostrarImprodutivas);
+    // Ranking por TAXA (02/10/2026, pedido do cliente: "quero o ranking de improdutivas"):
+    // improdutivas ÷ (improdutivas + concluídas) do próprio técnico. Quem fez poucas
+    // visitas (1 de 1 = 100%) distorceria o topo, então só entra com 10+ visitas finalizadas.
+    const IMP_MIN_VISITAS = 10;
+    const visitasImp = t => t.imp + (concluidasPorTec[t.nome] || 0);
+    const impPorTaxaTodos = impTodos.filter(t => visitasImp(t) >= IMP_MIN_VISITAS)
+      .sort((a, b) => taxaImp(b) - taxaImp(a) || b.imp - a.imp);
+    const impPorTaxa = mostrarImprodutivas === 'todos' ? impPorTaxaTodos : impPorTaxaTodos.slice(0, mostrarImprodutivas);
     const totalImp = tentativasImp.size;
     const taxaImpGeral = (totalImp + concluidasPcr.size) ? (totalImp / (totalImp + concluidasPcr.size)) * 100 : 0;
     const motivoTop = t => { const e = Object.entries(t.motivos).sort((a, b) => b[1] - a[1])[0]; return e ? `${e[0]} (${e[1]})` : '-'; };
@@ -17265,6 +17397,16 @@ function renderReuniaoPrazos() {
           valor: `<span style="color:var(--danger)">${t.imp}</span>`,
           sub: `Taxa <b>${formatPct(taxaImp(t), 1)}</b> (${t.imp} de ${t.imp + (concluidasPorTec[t.nome] || 0)} visitas finalizadas) · motivo mais comum: ${esc(motivoTop(t))}`,
         })), { rotuloNome: 'Técnico', rotuloValor: 'Improdutivas', rotuloSub: 'Taxa e motivo principal', vazio: 'Nenhuma visita improdutiva nesse período.' })}
+      </div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Ranking por taxa de improdutividade
+          <span style="font-size:12px;font-weight:500;color:var(--text-muted)">só técnicos com ${IMP_MIN_VISITAS}+ visitas finalizadas</span>
+        </h3>
+        ${tabelaRankingReuniao(impPorTaxa.map(t => ({
+          nome: t.nome,
+          valor: `<span style="color:var(--danger)">${formatPct(taxaImp(t), 1)}</span>`,
+          sub: `${t.imp} improdutiva(s) de ${visitasImp(t)} visitas finalizadas · motivo mais comum: ${esc(motivoTop(t))}`,
+        })), { rotuloNome: 'Técnico', rotuloValor: 'Taxa', rotuloSub: 'Improdutivas e motivo principal', vazio: `Nenhum técnico com ${IMP_MIN_VISITAS}+ visitas finalizadas e improdutivas nesse período.` })}
       </div>`}
 
       <div class="section-heading">14. Média de serviços por técnico no dia</div>
@@ -17273,7 +17415,7 @@ function renderReuniaoPrazos() {
       <div class="cards-grid">
         ${metricCard('Média geral por técnico no dia', fmtMedia(mediaGeralDia), false, { big: true, nivel: 'heroi', sub: `${prodConc.length.toLocaleString('pt-BR')} ordens em ${tecDiasTodos.size.toLocaleString('pt-BR')} técnico-dia(s)` })}
         ${metricCard('Técnicos medidos', mdTodos.length.toLocaleString('pt-BR'), false, {})}
-        ${metricCard('Maior média', mdTodos.length ? fmtMedia(mediaTec(mdTodos[0])) : '-', false, { positive: true, sub: mdTodos.length ? mdTodos[0].nome : '' })}
+        ${metricCard('Maior média', mdTodos.length ? fmtMedia(mediaTec(mdTodos[0])) : '-', false, { positive: true, sub: mdTodos.length ? 'ordens por dia trabalhado' : '' })}
       </div>
       <div class="panels-grid" style="margin-bottom:1.5rem">
         <div class="panel">
@@ -20257,6 +20399,10 @@ function renderFolhaPagamento(modo) {
           msg.innerHTML = `<span style="color:var(--warn-text)">Nenhum retorno de técnico da JH Litoral cai num ciclo que já tem folha no sistema (${conta.fora} fora do período, ${conta.retornosOutros} de outros técnicos). Importe a Produção do ciclo primeiro.</span>`;
           return;
         }
+        if (folhaFechada(periodo)) {
+          msg.innerHTML = `<span style="color:var(--warn-text)">🔒 O ciclo "${esc(periodo)}" está FECHADO — nada foi lançado. Reabra o ciclo pra aplicar a planilha da GIGA.</span>`;
+          return;
+        }
         // BÔNUS do mês (1 a 30/31): retornos do PRÓPRIO SISTEMA (base de IFI/IRR,
         // por ofensor) no mês em que o ciclo termina ÷ serviços do CICLO da folha
         // (baseBonusDaLinha — fórmula da planilha do cliente). NÃO usa o arquivo da
@@ -20355,7 +20501,8 @@ function renderFolhaPagamento(modo) {
       alvo.innerHTML = campoSp ? `<div class="panel"><h3 style="margin:0 0 14px">Ordens de São Paulo</h3>${campoSp}</div>` : '';
       return;
     }
-    const pode = podeEditarFolhaPagamento();
+    const fechadoSp = !!folhaFechada(per);
+    const pode = podeEditarFolhaPagamento() && !fechadoSp;
     const hist = [...DB.valoresSpHistorico].sort((a, b) => String(b.alterado_em).localeCompare(String(a.alterado_em)));
     const qtdSp = {};
     DB.folhaPagamento.filter(l => l.periodo === per).forEach(l => {
@@ -20387,6 +20534,7 @@ function renderFolhaPagamento(modo) {
           title="${semSp ? 'Volta a pagar as ordens de SP pelo valor de SP das caixinhas' : 'As ordens de SP passam a contar como Ativação / Mudança de Endereço normal (tarifa do Litoral)'}">
           ${semSp ? '↩ Voltar a usar o valor de SP' : 'Desconsiderar valores de SP (somar na Ativação)'}</button>
         ${semSp ? '<span style="font-size:12px;color:var(--warn-text);font-weight:600">LIGADO: somadas na Ativação / M.E normal</span>' : ''}
+        ${fechadoSp ? '<span style="font-size:12px;color:var(--text-muted)">🔒 ciclo fechado — travado</span>' : ''}
       </div>
       <details style="margin-top:14px"><summary style="cursor:pointer;color:var(--text-secondary)">Histórico de valores (${hist.length})</summary>
         ${!hist.length ? '<div class="empty" style="margin-top:8px">Nenhuma alteração ainda — vale o padrão.</div>' : `
@@ -20504,13 +20652,15 @@ function renderFolhaPagamento(modo) {
       quantosAuto++;
       return aplicarDescontoRetorno({ ...r, qtd_ifi: c.ifi, qtd_irr: c.irr, _retornoAuto: true, _recalculado: true }, janelaFolha);
     });
-    const rows = brutasComRetorno;
+    // ciclo FECHADO: a linha vem da cópia guardada (não passa pela lente abaixo)
+    const rows = brutasComRetorno.map(r => linhaDaFolhaFechada(r) || r);
 
     // ---- lente final (não grava nada): FROTA da tabela de Frota e SERVIÇOS do
     // ciclo (total, valor e quebra por tipo vêm da mesma conta — ver
     // quebraPorTipoDaLinha). Sem ordem nenhuma na fonte (período sem Produção nem
     // fechamento), fica o que a planilha trouxe.
     rows.forEach((r, i) => {
+      if (r._fechada) return;
       const j = datasDoPeriodoFolha(r.periodo);
       const linha = { ...r };
       const frotaReal = j.inicio ? frotaDoTecnico(r.tecnico, j.inicio, j.fim) : '';
@@ -20663,6 +20813,7 @@ function renderFolhaPagamento(modo) {
       <div class="panel" style="margin-bottom:1.5rem"><h3>Descontos por tipo (equipe)</h3><div id="c-desc"></div></div>`;
 
     body.innerHTML = soRelatorio ? blocoRelatorio + blocoRelatorioEscritorio : `
+      <div id="folha-fechamento"></div>
       <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">Folha de Pagamento completa
         <button type="button" class="btn-export-xls" id="folha-export-xls">⤓ Excel da folha</button>
       </div>
@@ -21021,6 +21172,89 @@ function renderFolhaPagamento(modo) {
       load();
     });
     atualizarBarraSalvar();
+
+    // ---- fechar / reabrir o ciclo (02/10/2026) ----
+    const alvoFech = document.getElementById('folha-fechamento');
+    if (alvoFech) {
+      const umCiclo = !!periodo && periodo !== '__sem_periodo__';
+      const fech = umCiclo ? folhaFechada(periodo) : null;
+      const doCiclo = umCiclo ? ranking.filter(r => r.periodo === periodo) : [];
+      if (fech) {
+        alvoFech.innerHTML = `<div class="panel fol-fech fol-fech-fechada">
+          <span class="fol-fech-ic">🔒</span>
+          <div><b>Ciclo ${esc(periodo)} FECHADO</b> em ${esc(new Date(fech.fechado_em).toLocaleString('pt-BR'))} por ${esc(fech.fechado_por || '-')}
+            <div style="font-size:12px;color:var(--text-muted)">${fech.qtd} técnicos · total a receber ${formatCurrency(fech.total_receber)} · edição e importações travadas neste ciclo</div></div>
+          ${ehAnalista() ? '<button type="button" class="btn-secundario" id="folha-reabrir">🔓 Reabrir ciclo</button>' : ''}</div>`;
+      } else if (umCiclo && doCiclo.length && podeEditarFolhaPagamento()) {
+        alvoFech.innerHTML = `<div class="panel fol-fech">
+          <span class="fol-fech-ic">🔓</span>
+          <div><b>Ciclo ${esc(periodo)} aberto</b>
+            <div style="font-size:12px;color:var(--text-muted)">Depois de pago, feche: trava edição e importações e guarda uma cópia dos números.</div></div>
+          <button type="button" class="btn" id="folha-fechar">🔒 Fechar folha deste ciclo</button></div>`;
+      } else alvoFech.innerHTML = '';
+
+      const btnFechar = document.getElementById('folha-fechar');
+      if (btnFechar) btnFechar.addEventListener('click', async () => {
+        if (pendentes.size) { toast('Salve ou descarte as alterações da tabela antes de fechar o ciclo.', 'aviso'); return; }
+        if (document.getElementById('f-tech').value.trim()) { toast('Limpe o filtro de Técnico (e clique em Filtrar) — o fechamento precisa da folha inteira.', 'aviso'); return; }
+        const total = doCiclo.reduce((a, r) => a + (Number(r.total_receber) || 0), 0);
+        if (!confirm(`Fechar a folha de ${periodo}?\n\n${doCiclo.length} técnicos · total a receber ${formatCurrency(total)}\n\nDepois de fechada, ninguém edita nem importa nada neste ciclo (só o Analista reabre). Se ainda não gerou o Excel da folha, gere antes.`)) return;
+        btnFechar.disabled = true;
+        const snap = doCiclo.map(r => {
+          const l = {};
+          Object.keys(r).forEach(k => { if (!k.startsWith('_')) l[k] = r[k]; });
+          const apto = /apto/i.test(r.bonus || '') && !/inapto/i.test(r.bonus || '');
+          l.quebra = quebraPorTipoDaLinha(r, apto, ordensPorTecnicoFolha[normalizeHeader(r.tecnico)] || []);
+          l.recalc = !!r._recalculado;
+          return l;
+        });
+        // 1) grava os números finais na folha (as outras telas leem de lá)
+        const resultados = await Promise.all(doCiclo.map(async r => {
+          const idx = DB_INDEX.folhaPagamento.get(`${r.tecnico}|${r.periodo}`);
+          if (idx === undefined) return { ok: false, error: { message: 'linha não encontrada: ' + r.tecnico } };
+          const mesclada = { ...DB.folhaPagamento[idx] };
+          FOLHA_CAMPOS_FECHAMENTO.forEach(c => { mesclada[c] = r[c]; });
+          return salvarLinhaFolha(mesclada);
+        }));
+        const falha = resultados.find(x => !x.ok);
+        if (falha) {
+          toast('Não consegui gravar a folha: ' + ((falha.error && falha.error.message) || 'erro') + ' — o ciclo NÃO foi fechado.', 'erro');
+          btnFechar.disabled = false; return;
+        }
+        // 2) cópia + marca de fechado
+        const reg = { periodo, fechada: true, fechado_por: pcrTravaQuem(), fechado_em: new Date().toISOString(), reaberto_por: null, reaberto_em: null,
+          qtd: snap.length, total_receber: total, linhas: snap };
+        const antes = DB_INDEX.folhaFechamentos.has(periodo) ? { ...DB.folhaFechamentos[DB_INDEX.folhaFechamentos.get(periodo)] } : null;
+        upsertRow(DB.folhaFechamentos, DB_INDEX.folhaFechamentos, periodo, reg);
+        const sync = await syncBatchToSupabase('folhaFechamentos', [reg]);
+        if (supa && !(sync && sync.ok)) {
+          // sem gravar no servidor, os outros usuários não veriam a trava: melhor não fechar
+          if (antes) upsertRow(DB.folhaFechamentos, DB_INDEX.folhaFechamentos, periodo, antes);
+          else { DB.folhaFechamentos = DB.folhaFechamentos.filter(x => x.periodo !== periodo); DB_INDEX.folhaFechamentos = new Map(DB.folhaFechamentos.map((x, i) => [x.periodo, i])); }
+          toast('Não consegui gravar o fechamento no servidor' + (ehAnalista() ? ' — rode o sql/PASSO-34-fechamento-folha.sql' : '') + '. O ciclo NÃO foi fechado.', 'erro', 6000);
+          btnFechar.disabled = false; return;
+        }
+        await registrarHistoricoFolha([{ periodo, tecnico: '—', campo: 'fechamento', rotulo: 'Fechamento do ciclo', de: 'aberto', para: `fechado (${snap.length} técnicos, ${formatCurrency(total)})` }]);
+        toast('Ciclo fechado.', 'ok', 2500);
+        exportacaoPendente = true;
+        load();
+      });
+      const btnReabrir = document.getElementById('folha-reabrir');
+      if (btnReabrir) btnReabrir.addEventListener('click', async () => {
+        if (!confirm(`Reabrir a folha de ${periodo}?\n\nO ciclo volta a aceitar edição e importações. Os números congelados continuam guardados até o próximo fechamento.`)) return;
+        btnReabrir.disabled = true;
+        const reg = { ...fech, fechada: false, reaberto_por: pcrTravaQuem(), reaberto_em: new Date().toISOString() };
+        upsertRow(DB.folhaFechamentos, DB_INDEX.folhaFechamentos, periodo, reg);
+        const sync = await syncBatchToSupabase('folhaFechamentos', [reg]);
+        if (supa && !(sync && sync.ok)) {
+          upsertRow(DB.folhaFechamentos, DB_INDEX.folhaFechamentos, periodo, fech);
+          toast('Não consegui reabrir no servidor — tente de novo.', 'erro'); btnReabrir.disabled = false; return;
+        }
+        await registrarHistoricoFolha([{ periodo, tecnico: '—', campo: 'fechamento', rotulo: 'Fechamento do ciclo', de: 'fechado', para: 'REABERTO' }]);
+        toast('Ciclo reaberto.', 'ok', 2500);
+        load();
+      });
+    }
   }
 }
 // Planilha da folha renderizada por inteiro — todas as colunas importadas.
@@ -21074,6 +21308,7 @@ function periodosDaFolhaQueCobrem(dataISO) {
 // ordens de SP e depois de mudar o valor de SP — a tela já recalcula sozinha ao
 // desenhar, isto é pro que fica no banco (Excel, holerite, outras telas).
 async function reaplicarOrdensNaFolha(periodo) {
+  if (folhaFechada(periodo)) return { alteradas: 0, sync: { ok: true }, fechada: true };
   const alteradas = [];
   DB.folhaPagamento.forEach((l, i) => {
     if (l.periodo !== periodo) return;
@@ -21118,6 +21353,7 @@ async function importarOrdensSp(ordens) {
 }
 // Troca o valor de SP de UM tipo num ciclo (ou volta ao padrão) e guarda no histórico.
 async function salvarValorSp(periodo, chave, valor, ehPadrao) {
+  if (folhaFechada(periodo)) return { mudou: false, fechada: true };
   const anterior = valorSpDoPeriodo(periodo, chave);
   if (Math.abs(anterior - valor) < 0.005) return { mudou: false };
   const quando = new Date().toISOString();
@@ -21282,6 +21518,7 @@ function baseBonusDaLinha(linha, mes, ordensDoTecnico) {
   return baseProducaoDoTecnico(linha.tecnico, mes.inicio, mes.fim, ordensDoTecnico);
 }
 function quebraPorTipoDaLinha(linha, apto, ordensDoTecnico) {
+  if (linha._quebraFechada) return linha._quebraFechada;   // ciclo fechado: números como foram pagos
   const janela = datasDoPeriodoFolha(linha.periodo);
   const lista = ordensDoTecnico || DB.producao.filter(p => normalizeHeader(p.recurso) === normalizeHeader(linha.tecnico));
   // Produção + ordens de SP importadas (sem repetir a O.S que a Produção já tem)
@@ -21520,8 +21757,9 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
   // ATÉ 04/09/2026 só o período ATUAL podia ser editado — o cliente voltou
   // atrás em 09/09/2026 ("não é possível alterar os períodos passados"):
   // agora qualquer período editável entra, não só periodoMaisRecenteFolha().
-  const podePagamento = () => podeEditarFolhaPagamento();
-  const podeMaterial = () => podeEditarFolhaMaterial();
+  // linha de ciclo FECHADO nunca é editável (r._fechada)
+  const podePagamento = r => !(r && r._fechada) && podeEditarFolhaPagamento();
+  const podeMaterial = r => !(r && r._fechada) && podeEditarFolhaMaterial();
   const attrsChave = r => `data-tecnico="${esc(r.tecnico)}" data-periodo="${esc(r.periodo)}"`;
   // Quantas ordens de CADA tipo (mesmas 5 categorias da tabela de preço fixa —
   // VALORES_ORDENS_FIXOS) o técnico teve CONCLUÍDAS no período da linha.
@@ -21619,7 +21857,7 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     // precisa de um intervalo de datas pra filtrar a Produção.
     ['Período', r => {
       const j = datasDoPeriodoFolha(r.periodo);
-      return j.inicio ? esc(r.periodo)
+      return j.inicio ? esc(r.periodo) + (r._fechada ? ' <span title="Ciclo fechado">🔒</span>' : '')
         : `<span title="Este período não tem data no nome, então a quebra por tipo de serviço não tem como ser calculada." style="color:var(--warn-text)">${esc(r.periodo || '(sem período)')} ⚠</span>`;
     }],
     ['Total Ordens', r=>r.total_ordens],
@@ -22780,6 +23018,279 @@ const ARQUIVOS_IMPORT = [
   // linha abaixo) continua valendo pros ciclos antigos, essa não muda.
   { nome: 'COMPARATIVO.xlsx', desc: 'Abas BASE_PRODUCAO (produção) e COMAPARATIVO (tabela financeira pronta por período)', assinaturas: [{sheet:'BASE_PRODUCAO', target:'producao'}, {sheet:'COMAPARATIVO', target:'comparativoFinanceiro'}] }
 ];
+// ===================== SAÚDE DO SISTEMA + BACKUP (só Analista) =====================
+// Pedido do cliente (02/10/2026): "painel Saúde do sistema" e "backup". Uma tela só
+// pra o Analista ver, antes de alguém reclamar: (1) quais SQL ainda NÃO rodaram no
+// banco, (2) se alguma tabela está aberta pra quem não fez login, (3) se as
+// importações estão em dia, (4) quanto o banco guarda, (5) o consumo (link pro painel
+// do Supabase — o consumo real só o painel dele sabe) e (6) o BACKUP completo.
+// Tudo é leitura; o único botão que "faz" algo é o do backup (que só baixa).
+const BACKUP_TABELAS = [
+  'base_do_dia', 'chamados_giga', 'clean_up', 'comparativo_financeiro', 'fechamento', 'financeiro',
+  'folha_escritorio', 'folha_fechamentos', 'folha_historico', 'folha_pagamento', 'frota_desvinc', 'frota_links',
+  'frota_manutencao', 'frota_multas', 'frota_revisao', 'frota_troca', 'imports_log', 'ordens_sp', 'pcr', 'pcr_mo',
+  'pedagio', 'perfis', 'pleito', 'prazo', 'prazo_reparo_dia', 'presenca', 'presenca_escritorio',
+  'presenca_escritorio_folgas', 'presenca_escritorio_log', 'presenca_escritorio_pessoas', 'presenca_log',
+  'presenca_tecnicos', 'producao', 'valores_ordens', 'valores_sp_historico',
+];
+// o que cada PASSO de SQL criou — conferido perguntando ao banco se a coluna/tabela/função existe
+const SAUDE_CHECAGENS_SQL = [
+  { passo: 'PASSO-1 / 3', rotulo: 'Tipo de atividade no Prazo', tabela: 'prazo', coluna: 'tipo_atividade' },
+  { passo: 'PASSO-6 / 9 / 10', rotulo: 'Início e endereço na PCR', tabela: 'pcr', coluna: 'inicio,endereco' },
+  { passo: 'PASSO-24', rotulo: 'Carimbo atualizado_em (cache local incremental)', tabela: 'producao', coluna: 'atualizado_em' },
+  { passo: 'PASSO-25', rotulo: 'Chamados em Aberto (GIGA)', tabela: 'chamados_giga' },
+  { passo: 'PASSO-29', rotulo: 'Dias c/ Frota na Folha', tabela: 'folha_pagamento', coluna: 'dias_frota' },
+  { passo: 'PASSO-30', rotulo: 'Abertura do chamado na Produção', tabela: 'producao', coluna: 'abertura' },
+  { passo: 'PASSO-31', rotulo: 'Ordens de São Paulo na Folha', tabela: 'ordens_sp' },
+  { passo: 'PASSO-31', rotulo: 'Histórico do valor de SP', tabela: 'valores_sp_historico' },
+  { passo: 'PASSO-32', rotulo: 'Ajuste de Frota/Aluguel na Folha', tabela: 'folha_pagamento', coluna: 'frota_manual,dias_aluguel_manual,valor_aluguel_manual' },
+  { passo: 'PASSO-32', rotulo: 'Histórico de alterações da Folha', tabela: 'folha_historico' },
+  { passo: 'PASSO-33', rotulo: 'Trava da importação da PCR', rpc: 'pcr_trava_status', args: { p_token: 'saude' } },
+  { passo: 'PASSO-34', rotulo: 'Fechamento do ciclo da Folha', tabela: 'folha_fechamentos' },
+];
+function saudeNaoExiste(erro) {
+  const m = String((erro && (erro.message || erro.details)) || '');
+  const c = String((erro && erro.code) || '');
+  return ['42P01', '42703', '42883', 'PGRST202', 'PGRST204', 'PGRST205'].includes(c) || /does not exist|Could not find/i.test(m);
+}
+async function saudeChecarSql() {
+  const out = [];
+  for (const c of SAUDE_CHECAGENS_SQL) {
+    let estado = 'ok', detalhe = '';
+    try {
+      const { error } = c.rpc ? await supa.rpc(c.rpc, c.args || {}) : await supa.from(c.tabela).select(c.coluna || '*').limit(0);
+      if (error) { estado = saudeNaoExiste(error) ? 'falta' : 'duvida'; detalhe = error.message || ''; }
+    } catch (e) { estado = 'duvida'; detalhe = String((e && e.message) || e); }
+    out.push({ ...c, estado, detalhe });
+  }
+  return out;
+}
+// Pergunta a API como VISITANTE (só a chave pública, sem login): tabela que devolve
+// linha é tabela aberta. Tabela vazia devolve 0 igual à trancada — por isso o
+// resultado diz "nenhuma devolveu dado", não "todas trancadas".
+async function saudeChecarAbertas() {
+  const abertas = [], inexistentes = [];
+  let verificadas = 0;
+  await Promise.all(BACKUP_TABELAS.map(async t => {
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/${t}?select=*&limit=1`, { headers: { apikey: SUPABASE_KEY, Prefer: 'count=exact', Range: '0-0' } });
+      if (r.status === 404) { inexistentes.push(t); return; }
+      verificadas++;
+      const total = Number(((r.headers.get('content-range') || '').split('/')[1])) || 0;
+      let corpo = []; try { corpo = await r.json(); } catch (e) { /* sem corpo */ }
+      if (r.ok && ((Array.isArray(corpo) && corpo.length) || total > 0)) abertas.push({ tabela: t, linhas: total || corpo.length });
+    } catch (e) { /* sem rede: não conta como verificada */ }
+  }));
+  return { abertas, inexistentes, verificadas };
+}
+function saudeFrescor() {
+  const hoje = hojeISOLocal();
+  const maxData = (lista, campo) => lista.reduce((m, r) => (r[campo] && String(r[campo]) > m ? String(r[campo]) : m), '');
+  const pcrUlt = ultimaAtualizacaoPCR();
+  const periodoFolha = periodoMaisRecenteFolha();
+  const itens = [
+    { base: 'Produção (BASE CONCLUÍDOS / PRODUÇÃO GERAL)', ultimo: maxData(DB.producao, 'data'), limite: 4, onde: 'Importar Excel' },
+    { base: 'Prazo (PRAZOS ESCRITÓRIO)', ultimo: maxData(DB.prazo, 'data'), limite: 4, onde: 'Importar Excel' },
+    { base: 'PCR (CSV de atividades)', ultimo: maxData(DB.pcr, 'data'), limite: 2, onde: 'PCR', extra: pcrUlt ? `importado ${fmtDataHoraCompleta(pcrUlt.quando)}${pcrUlt.quem ? ' por ' + pcrUlt.quem : ''}` : '' },
+    { base: 'Pedágio (CSV Edenred)', ultimo: maxData(DB.pedagio, 'data_transacao') || maxData(DB.pedagio, 'data'), limite: 4, onde: 'Pedágio' },
+    { base: 'Fechamento oficial (RELATORIO)', ultimo: maxData(DB.fechamento, 'ate_o_dia'), limite: 40, onde: 'Importar Excel' },
+  ];
+  itens.forEach(i => { i.dias = i.ultimo ? diasEntre(hoje, i.ultimo) : null; });
+  return { itens, periodoFolha };
+}
+function saudeEstimarTamanho() {
+  const linhas = [];
+  Object.entries(SUPABASE_TABLES).forEach(([chave, cfg]) => {
+    const dados = DB[chave];
+    if (!Array.isArray(dados)) return;
+    const amostra = dados.slice(0, 30);
+    const porLinha = amostra.length ? JSON.stringify(amostra).length / amostra.length : 0;
+    linhas.push({ tabela: cfg.table, linhas: dados.length, bytes: Math.round(porLinha * dados.length) });
+  });
+  return linhas.sort((a, b) => b.bytes - a.bytes);
+}
+const BACKUP_CHAVE_LS = 'jh_ultimo_backup';
+function backupUltimoNesteNavegador() {
+  try { return JSON.parse(localStorage.getItem(BACKUP_CHAVE_LS) || 'null'); } catch (e) { return null; }
+}
+// Baixa TODAS as tabelas direto do servidor (não da memória — é a cópia de verdade),
+// em UM arquivo .json.gz (gzip nativo do navegador; sem suporte, .json puro).
+// Só LÊ o banco. Restaurar um backup é trabalho de quem mexe no banco, de propósito:
+// um botão de "restaurar" na tela seria perigoso demais.
+async function gerarBackupCompleto(onProgresso) {
+  const statusAntes = supabaseStatus;           // fetchAllRows marca erro global se uma tabela faltar
+  const partes = [], resumo = {}, falhas = [];
+  partes.push(`{"versao":1,"sistema":"JH TELECOM Nexus","geradoEm":${JSON.stringify(new Date().toISOString())},"geradoPor":${JSON.stringify(pcrTravaQuem())},"tabelas":{`);
+  let primeira = true;
+  try {
+    for (let i = 0; i < BACKUP_TABELAS.length; i++) {
+      const t = BACKUP_TABELAS[i];
+      if (onProgresso) onProgresso(i, BACKUP_TABELAS.length, t);
+      try {
+        const rows = await fetchAllRows(t);
+        resumo[t] = rows.length;
+        partes.push((primeira ? '' : ',') + JSON.stringify(t) + ':' + JSON.stringify(rows));
+        primeira = false;
+      } catch (e) { falhas.push({ tabela: t, erro: String((e && e.message) || e) }); }
+    }
+  } finally { supabaseStatus = statusAntes; }
+  partes.push(`},"resumo":${JSON.stringify(resumo)},"falhas":${JSON.stringify(falhas)}}`);
+  let blob = new Blob(partes, { type: 'application/json' }), ext = 'json';
+  if (typeof CompressionStream !== 'undefined') {
+    try { blob = await new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).blob(); ext = 'json.gz'; } catch (e) { /* fica sem compactar */ }
+  }
+  const agora = new Date(), dd = n => String(n).padStart(2, '0');
+  const nome = `jh-backup-${hojeISOLocal()}-${dd(agora.getHours())}${dd(agora.getMinutes())}.${ext}`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = nome;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  const total = Object.values(resumo).reduce((s, n) => s + n, 0);
+  const reg = { quando: agora.toISOString(), quem: pcrTravaQuem(), linhas: total, tabelas: Object.keys(resumo).length, bytes: blob.size, arquivo: nome, falhas: falhas.length };
+  try { localStorage.setItem(BACKUP_CHAVE_LS, JSON.stringify(reg)); } catch (e) { /* sem storage: só não lembra */ }
+  return { ...reg, resumo, falhasLista: falhas };
+}
+function renderSaude() {
+  const raiz = document.getElementById('content');
+  if (!ehAnalista()) { raiz.innerHTML = '<div class="panel"><div class="empty">Tela exclusiva do Analista.</div></div>'; return; }
+  const ref = (() => { try { return new URL(SUPABASE_URL).hostname.split('.')[0]; } catch (e) { return ''; } })();
+  const MB = b => (b / 1048576).toFixed(b >= 10485760 ? 0 : 1) + ' MB';
+  const badge = (cls, txt) => `<span class="badge ${cls}">${txt}</span>`;
+  raiz.innerHTML = `
+    <div class="toolbar"><button class="btn" id="saude-rodar" type="button">↻ Conferir tudo de novo</button>
+      <span id="saude-quando" style="font-size:12px;color:var(--text-muted)"></span></div>
+    <div id="saude-resumo"></div>
+    <div class="section-heading">Banco de dados — o que ainda falta rodar (SQL)</div><div id="saude-sql"></div>
+    <div class="section-heading">Segurança — acesso de quem não fez login</div><div id="saude-seg"></div>
+    <div class="section-heading">Importações — os dados estão em dia?</div><div id="saude-dados"></div>
+    <div class="section-heading">Tamanho — linhas guardadas</div><div id="saude-tam"></div>
+    <div class="section-heading">Consumo do Supabase (plano gratuito)</div><div id="saude-consumo"></div>
+    <div class="section-heading">Backup</div><div id="saude-backup"></div>
+    <div class="section-heading">Este navegador</div><div id="saude-nav"></div>`;
+  const $ = id => document.getElementById(id);
+  const estado = { sql: null, seg: null };
+
+  function pintarResumo() {
+    const falta = estado.sql ? estado.sql.filter(x => x.estado === 'falta').length : null;
+    const abertas = estado.seg ? estado.seg.abertas.length : null;
+    const f = saudeFrescor();
+    const atrasadas = f.itens.filter(i => i.dias === null || i.dias > i.limite).length;
+    const bk = backupUltimoNesteNavegador();
+    const diasBk = bk ? diasEntre(hojeISOLocal(), String(bk.quando).slice(0, 10)) : null;
+    $('saude-resumo').innerHTML = `<div class="cards-grid">
+      ${metricCard('SQL pendente', falta === null ? '…' : String(falta), falta > 0)}
+      ${metricCard('Tabelas abertas ao público', abertas === null ? '…' : String(abertas), abertas > 0)}
+      ${metricCard('Importações atrasadas', String(atrasadas), atrasadas > 0)}
+      ${metricCard('Último backup (neste navegador)', bk ? (diasBk === 0 ? 'hoje' : `há ${diasBk} dia(s)`) : 'nunca', !bk || diasBk > 7)}
+    </div>`;
+  }
+  function pintarSql() {
+    const lista = estado.sql;
+    $('saude-sql').innerHTML = !lista ? '<div class="panel"><div class="empty">Conferindo…</div></div>' : `
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr><th>O que é</th><th>Rodar o arquivo</th><th>Situação</th></tr></thead><tbody>
+      ${lista.map(x => `<tr><td>${esc(x.rotulo)}</td><td>sql/${esc(x.passo.replace(/ \/ /g, ' ou '))}…</td>
+        <td>${x.estado === 'ok' ? badge('ok', '✔ rodou') : x.estado === 'falta' ? badge('warn', '✖ FALTA RODAR') : badge('neutral', '? não consegui conferir')}${x.estado !== 'ok' && x.detalhe ? `<div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(x.detalhe.slice(0, 110))}</div>` : ''}</td></tr>`).join('')}
+      </tbody></table></div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-6px 0 1.5rem">Não dá pra conferir por aqui o PASSO-26/27/28 (gatilho do carimbo e política da PCR): rode o final do <b>PASSO-26</b> no SQL Editor, que lista o que falta.</p>`;
+  }
+  function pintarSeg() {
+    const s = estado.seg;
+    $('saude-seg').innerHTML = !s ? '<div class="panel"><div class="empty">Conferindo…</div></div>' : `<div class="panel" style="margin-bottom:1.5rem">
+      ${s.abertas.length
+        ? `<p style="margin:0 0 8px;color:var(--danger);font-weight:700">⚠ ${s.abertas.length} tabela(s) devolvem dados pra qualquer pessoa SEM login:</p>
+           <p style="margin:0 0 8px">${s.abertas.map(a => `<b>${esc(a.tabela)}</b> (${a.linhas} linhas)`).join(', ')}</p>
+           <p style="margin:0;font-size:12px;color:var(--text-muted)">Rode o PASSO-2 / 23 / 26 / 28 no Supabase pra trancar.</p>`
+        : `<p style="margin:0;color:var(--success);font-weight:700">✔ Nenhuma das ${s.verificadas} tabelas devolveu dado sem login.</p>
+           <p style="margin:6px 0 0;font-size:12px;color:var(--text-muted)">O teste usa só a chave pública, como um visitante. Tabela vazia também responde "0", então isto prova que nada vaza hoje — não que toda política está certa.${s.inexistentes.length ? ` Não existem no banco: ${esc(s.inexistentes.join(', '))}.` : ''}</p>`}
+    </div>`;
+  }
+  function pintarDados() {
+    const f = saudeFrescor();
+    const cor = i => i.dias === null ? 'warn' : i.dias > i.limite * 2 ? 'warn' : i.dias > i.limite ? 'amber' : 'ok';
+    $('saude-dados').innerHTML = `<div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr><th>Base</th><th>Último dado</th><th>Faz quanto tempo</th><th>Onde importar</th></tr></thead><tbody>
+      ${f.itens.map(i => `<tr><td>${esc(i.base)}${i.extra ? `<div style="font-size:11px;color:var(--text-muted)">${esc(i.extra)}</div>` : ''}</td>
+        <td>${i.ultimo ? formatDate(i.ultimo) : '-'}</td>
+        <td>${i.dias === null ? badge('warn', 'sem dado') : badge(cor(i), i.dias === 0 ? 'hoje' : `${i.dias} dia(s)`)}</td><td>${esc(i.onde)}</td></tr>`).join('')}
+      <tr><td>Folha de Pagamento</td><td colspan="3">${f.periodoFolha ? esc(f.periodoFolha) : 'sem folha'}</td></tr>
+      </tbody></table></div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-6px 0 1.5rem">Alerta quando passa de 4 dias sem dado novo (PCR: 2 dias) — fim de semana já entra na conta.</p>`;
+  }
+  function pintarTamanho() {
+    const t = saudeEstimarTamanho();
+    const total = t.reduce((s, x) => s + x.bytes, 0);
+    $('saude-tam').innerHTML = `<div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr><th>Tabela</th><th>Linhas</th><th>Tamanho aprox.</th></tr></thead><tbody>
+      ${t.map(x => `<tr><td>${esc(x.tabela)}</td><td>${x.linhas.toLocaleString('pt-BR')}</td><td>${MB(x.bytes)}</td></tr>`).join('')}
+      <tr class="total-row"><td>TOTAL em memória</td><td>${t.reduce((s, x) => s + x.linhas, 0).toLocaleString('pt-BR')}</td><td>${MB(total)}</td></tr>
+      </tbody></table></div>`;
+  }
+  function pintarConsumo() {
+    $('saude-consumo').innerHTML = `<div class="panel" style="margin-bottom:1.5rem">
+      <p style="margin:0 0 10px;font-size:13px">O plano gratuito inclui <b>5 GB de tráfego por mês</b>, <b>500 MB de banco</b> e 1 GB de arquivos. O consumo real só o painel do Supabase mostra:</p>
+      <p style="margin:0;display:flex;gap:10px;flex-wrap:wrap">
+        <a class="btn-secundario" style="text-decoration:none;padding:8px 14px" target="_blank" rel="noopener" href="https://supabase.com/dashboard/project/${esc(ref)}">Abrir o projeto no Supabase</a>
+        <a class="btn-secundario" style="text-decoration:none;padding:8px 14px" target="_blank" rel="noopener" href="https://supabase.com/dashboard/project/${esc(ref)}/observability/database">CPU, memória e disco</a></p>
+      <p style="margin:10px 0 0;font-size:12px;color:var(--text-muted)">Em 02/10/2026: tráfego 0,79 GB em 15 dias (5 usuários), banco 83 MB, sem backup automático (plano Free).</p></div>`;
+  }
+  function pintarBackup() {
+    const bk = backupUltimoNesteNavegador();
+    const dias = bk ? diasEntre(hojeISOLocal(), String(bk.quando).slice(0, 10)) : null;
+    $('saude-backup').innerHTML = `<div class="panel" style="margin-bottom:1.5rem">
+      <p style="margin:0 0 10px;font-size:13px">O plano gratuito <b>não tem backup automático</b>: se alguém apagar dado por engano, só este arquivo salva. Baixa as ${BACKUP_TABELAS.length} tabelas direto do servidor num arquivo compactado (uns 10 a 20 MB; gasta uns 80 MB do tráfego mensal — <b>1 vez por semana</b> basta). Guarde fora deste computador (OneDrive, Drive).</p>
+      <p style="margin:0 0 12px;display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+        <button class="btn" id="saude-backup-btn" type="button">⬇ Gerar backup agora</button>
+        <span id="saude-backup-msg" style="font-size:13px"></span></p>
+      <p style="margin:0;font-size:12px;color:${!bk || dias > 7 ? 'var(--warn-text)' : 'var(--text-muted)'}">${bk
+        ? `Último backup <b>neste navegador</b>: ${esc(new Date(bk.quando).toLocaleString('pt-BR'))} por ${esc(bk.quem)} — ${bk.linhas.toLocaleString('pt-BR')} linhas, ${MB(bk.bytes)} (${esc(bk.arquivo)})${dias > 7 ? ' — <b>faz mais de 7 dias</b>' : ''}.`
+        : 'Nenhum backup feito <b>neste navegador</b> ainda (outro computador pode ter feito).'}</p></div>`;
+    const btn = $('saude-backup-btn');
+    if (btn) btn.addEventListener('click', async () => {
+      if (!supa) { toast('Sem conexão com o banco.', 'aviso'); return; }
+      btn.disabled = true;
+      const msg = $('saude-backup-msg');
+      try {
+        const r = await gerarBackupCompleto((i, n, t) => { msg.innerHTML = `<span style="color:var(--text-muted)">Baixando ${i + 1}/${n}: ${esc(t)}…</span>`; });
+        msg.innerHTML = r.falhas
+          ? `<span style="color:var(--warn-text)">Backup gerado, mas ${r.falhas} tabela(s) falharam: ${esc(r.falhasLista.map(f => f.tabela).join(', '))}</span>`
+          : `<span style="color:var(--success)">✔ ${esc(r.arquivo)} — ${r.linhas.toLocaleString('pt-BR')} linhas em ${r.tabelas} tabelas (${MB(r.bytes)})</span>`;
+        toast('Backup gerado.', 'ok', 2500);
+        pintarResumo();
+      } catch (e) { msg.innerHTML = `<span style="color:var(--danger)">Não consegui gerar o backup: ${esc((e && e.message) || e)}</span>`; }
+      btn.disabled = false;
+    });
+  }
+  function pintarNavegador() {
+    const sw = 'serviceWorker' in navigator ? (navigator.serviceWorker.controller ? 'ativo' : 'ainda não ativo (recarregue a página)') : 'não suportado';
+    $('saude-nav').innerHTML = `<div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><tbody>
+      <tr><td>Conexão com a internet</td><td>${navigator.onLine ? badge('ok', 'online') : badge('warn', 'offline')}</td></tr>
+      <tr><td>Conexão com o Supabase</td><td>${supa ? badge('ok', 'configurada') : badge('warn', 'modo local (sem banco)')}</td></tr>
+      <tr><td>Aplicativo instalado (PWA)</td><td>${pwaJaInstalado() ? 'sim' : 'não (abrindo pelo navegador)'}</td></tr>
+      <tr><td>Cópia local para abrir mais rápido (service worker)</td><td>${esc(sw)}</td></tr>
+      <tr><td>Versão do cache local</td><td>${typeof CACHE_VERSAO !== 'undefined' ? CACHE_VERSAO : '-'}</td></tr>
+      <tr><td>Dados lidos do banco às</td><td>${typeof textoDadosLidosEm === 'function' ? esc(String(textoDadosLidosEm()).replace(/<[^>]*>/g, '')) : '-'}</td></tr>
+      </tbody></table></div>`;
+  }
+  async function rodar() {
+    const btn = $('saude-rodar');
+    if (btn) btn.disabled = true;
+    estado.sql = null; estado.seg = null;
+    pintarResumo(); pintarSql(); pintarSeg();
+    pintarDados(); pintarTamanho(); pintarConsumo(); pintarBackup(); pintarNavegador();
+    if (!supa) {
+      $('saude-sql').innerHTML = '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Sem conexão com o Supabase (modo local) — nada pra conferir no banco.</div></div>';
+      $('saude-seg').innerHTML = $('saude-sql').innerHTML;
+    } else {
+      const [sql, seg] = await Promise.all([saudeChecarSql(), saudeChecarAbertas()]);
+      if (!$('saude-sql')) return;                        // trocou de tela enquanto conferia
+      estado.sql = sql; estado.seg = seg;
+      pintarSql(); pintarSeg();
+    }
+    pintarResumo();
+    const q = $('saude-quando'); if (q) q.textContent = 'Conferido às ' + new Date().toLocaleTimeString('pt-BR');
+    if (btn) btn.disabled = false;
+  }
+  $('saude-rodar').addEventListener('click', rodar);
+  rodar();
+}
 function renderImport() {
   document.getElementById('content').innerHTML = `
     <div class="panel" style="margin-bottom:1.5rem">
@@ -22922,6 +23433,10 @@ async function atualizarFolhaDoCiclo(inicio, fim, msg, automatico) {
   if (!DB.producao.length) { escrever('<span style="color:var(--danger)">Sem dados de Produção carregados.</span>'); return { total: 0 }; }
   escrever('<span style="color:var(--text-muted)">Atualizando a folha…</span>');
   const r = gerarPeriodoFolha(inicio, fim);
+  if (r.fechada) {
+    escrever(`<span style="color:var(--warn-text)">🔒 A folha de "${esc(r.periodo)}" está FECHADA — não foi alterada. O Analista pode reabrir na tela Folha de Pagamento.</span>`);
+    return r;
+  }
   if (!r.total) {
     escrever('<span style="color:var(--warn-text)">Nenhuma ordem concluída da Produção nesse intervalo — nada foi atualizado.</span>');
     return r;
