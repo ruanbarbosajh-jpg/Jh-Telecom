@@ -16317,11 +16317,78 @@ function tabelaRankingReuniao(itens, opts = {}) {
     </tr></thead><tbody>
       ${itens.map((it, i) => `<tr>
         <td><span class="badge ${cor}">${String(i + 1).padStart(2, '0')}</span></td>
-        <td class="cat-cell">${esc(it.nome)}</td>
+        <td class="cat-cell">${opts.clicavelOs
+          ? `<a href="#" class="link-tec" data-os-tec="${esc(it.nome)}"${opts.periodoOs ? ` data-os-periodo="${opts.periodoOs}"` : ''} title="Ver as O.S que ele perdeu o prazo">${esc(it.nome)}</a>`
+          : esc(it.nome)}</td>
         <td style="font-weight:700">${it.valor}</td>
         ${temSub ? `<td style="font-size:12px;color:var(--text-secondary);white-space:normal">${it.sub === undefined ? '-' : it.sub}</td>` : ''}
       </tr>`).join('')}
     </tbody></table></div>`;
+}
+// Data e hora de um campo da planilha de prazo (tempo_limite/encerramento): vem
+// como número de série do Excel (às vezes como texto "46253.54"), Date ou texto
+// pronto. Número com parte inteira traz data+hora; só fração = só a hora.
+function dataHoraDoExcel(v) {
+  if (v === null || v === undefined || v === '') return '-';
+  if (typeof v === 'string' && /^\d+(\.\d+)?$/.test(v.trim())) v = Number(v);
+  if (typeof v === 'number') {
+    const hh = excelTimeToHHMM(v);
+    return v >= 1 ? `${formatDate(excelDateToISO(v))} ${hh}` : hh;
+  }
+  if (v instanceof Date) return fmtDT(v);
+  return String(v);
+}
+// Janela com as O.S que UM técnico perdeu o prazo (24h de reparo) no período e
+// cidades da tela — abre ao clicar no nome dele nos rankings da seção 2 e 4 do
+// Relatório Operacional (02/10/2026, pedido do cliente: "quando eu clicar no
+// nome do técnico quero que apareça as o.s que ele perdeu prazo (cidade, o.s,
+// data, motivo, contrato, horário, período etc)"). `linhas` já vem filtrado
+// (mesma base `foraPrazo` da tela), então o número daqui bate com o do ranking.
+function abrirModalOsPerdidas(tecnico, linhas, opts = {}) {
+  const ordenado = [...linhas].sort((a, b) =>
+    (ORDEM_FAIXA_PRAZO[classifyBucket(a.status_prazo)] - ORDEM_FAIXA_PRAZO[classifyBucket(b.status_prazo)])
+    || ((Number(b.aging) || 0) - (Number(a.aging) || 0)));
+  const porCidade = {};
+  ordenado.forEach(r => { const c = r.cidade || 'Não informado'; porCidade[c] = (porCidade[c] || 0) + 1; });
+  const rotuloPer = r => { const per = periodoDoPrazo(r); return per === 'manha' ? 'Manhã' : per === 'tarde' ? 'Tarde' : '-'; };
+  const m = document.getElementById('modal-tecnico');
+  m.querySelector('.mt-corpo').innerHTML = `
+    <h3 style="margin:0 0 4px">O.S que ${esc(tecnico)} perdeu o prazo</h3>
+    <p style="margin:0 0 14px;font-size:13px;color:var(--text-secondary)">${esc(opts.periodoTxt || '')}${opts.periodo ? ` · só prazo que vencia ${opts.periodo === 'manha' ? 'pela manhã' : 'à tarde'}` : ''} · reparos concluídos fora das 24h, da pior pra menos grave.</p>
+    <div class="cards-grid" style="margin-bottom:12px">
+      ${metricCard('O.S fora do prazo', ordenado.length.toLocaleString('pt-BR'), true)}
+      ${metricCard('Cidades', Object.keys(porCidade).length.toLocaleString('pt-BR'), false, { sub: Object.entries(porCidade).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} (${n})`).join(' · ') })}
+    </div>
+    <div style="margin:0 0 8px"><button type="button" class="btn-export-xls" id="osp-excel">⤓ Excel</button></div>
+    ${!ordenado.length ? '<div class="empty">Nenhuma O.S fora do prazo para esse técnico nesse filtro.</div>' : `
+    <div class="table-wrap"><table class="data-table" id="osp-tab"><thead><tr>
+      <th>Faixa</th><th>O.S</th><th>Contrato</th><th>Cidade</th><th>Data</th><th>Serviço</th><th>Período</th><th>Limite</th><th>Encerramento</th><th>Tempo até a Conclusão</th><th>Motivo da baixa</th>
+    </tr></thead><tbody>
+      ${ordenado.map(r => {
+        const info = FAIXA_INFO_PRAZO[classifyBucket(r.status_prazo)] || { rotulo: r.status_prazo || '-', classe: 'neutral' };
+        return `<tr>
+          <td><span class="badge ${info.classe}">${esc(info.rotulo)}</span></td>
+          <td class="cat-cell">${esc(r.os) || '-'}</td>
+          <td>${esc(r.contrato) || '-'}</td>
+          <td>${esc(r.cidade) || '-'}</td>
+          <td>${r.data ? formatDate(r.data) : '-'}</td>
+          <td>${esc(r.tipo_atividade) || '-'}</td>
+          <td>${rotuloPer(r)}</td>
+          <td>${esc(dataHoraDoExcel(r.tempo_limite))}</td>
+          <td>${esc(dataHoraDoExcel(r.encerramento))}</td>
+          <td style="font-weight:700;color:var(--danger)">${formatTempoGastoPrazo(r.aging)}</td>
+          <td style="white-space:normal">${htmlMotivoPrazo(r)}</td>
+        </tr>`;
+      }).join('')}
+    </tbody></table></div>`}`;
+  const tab = document.getElementById('osp-tab');
+  if (tab) ativarFiltrosDeColuna(m.querySelector('.mt-corpo'));
+  const btn = document.getElementById('osp-excel');
+  if (btn) btn.addEventListener('click', () => {
+    if (!tab) { toast('Sem O.S pra exportar.', 'aviso'); return; }
+    exportarTabelaVisivel(tab, 'os-perdidas-' + normalizeHeader(tecnico).replace(/[^a-z0-9]+/g, '-') + '-' + hojeISOLocal());
+  });
+  m.classList.add('active');
 }
 // 8.75 -> "08:45" (hora média de início do dia)
 function horaDeDecimal(dec) {
@@ -16683,15 +16750,15 @@ function renderReuniaoPrazos() {
       </div>
 
       <div class="section-heading">2. Técnicos — produção e entrega no prazo</div>
-      ${nota('Os dois rankings são por volume de ordens: à esquerda quem mais produz, à direita quem mais perde prazo.')}
+      ${nota('Os dois rankings são por volume de ordens: à esquerda quem mais produz, à direita quem mais perde prazo. <b>Clique no nome do técnico</b> pra ver as O.S que ele perdeu o prazo.')}
       <div class="panels-grid">
         <div class="panel">
           <h3>Quem mais produz — e o prazo deles</h3>
-          ${tabelaRankingReuniao(maisProduzem.map(itemTecProducao), { cor: 'ok', rotuloNome: 'Técnico', rotuloValor: '% no prazo', rotuloSub: 'Fora do prazo', vazio: 'Sem reparos nesse filtro.' })}
+          ${tabelaRankingReuniao(maisProduzem.map(itemTecProducao), { cor: 'ok', clicavelOs: true, rotuloNome: 'Técnico', rotuloValor: '% no prazo', rotuloSub: 'Fora do prazo', vazio: 'Sem reparos nesse filtro.' })}
         </div>
         <div class="panel">
           <h3>Ofensores — quem mais perde prazo</h3>
-          ${tabelaRankingReuniao(pioresTec.map(itemTecOfensor), { cor: 'warn', rotuloNome: 'Técnico', rotuloValor: '% fora do prazo', rotuloSub: 'No prazo', vazio: 'Nenhum reparo fora do prazo nesse filtro.' })}
+          ${tabelaRankingReuniao(pioresTec.map(itemTecOfensor), { cor: 'warn', clicavelOs: true, rotuloNome: 'Técnico', rotuloValor: '% fora do prazo', rotuloSub: 'No prazo', vazio: 'Nenhum reparo fora do prazo nesse filtro.' })}
         </div>
       </div>
 
@@ -16721,11 +16788,11 @@ function renderReuniaoPrazos() {
       <div class="panels-grid" style="margin-bottom:1.5rem" id="reu-periodo-panels">
         <div class="panel" data-periodo="manha">
           <h3>Técnicos ofensores da manhã${periodoPior === 'manha' ? ' <span class="badge warn" style="font-size:10px;vertical-align:middle">pior período</span>' : ''}</h3>
-          ${tabelaRankingReuniao(rankManha.map(itemOfensorPeriodo), { rotuloNome: 'Técnico', rotuloValor: '% das perdas da manhã', vazio: 'Sem ordens fora do prazo pela manhã.' })}
+          ${tabelaRankingReuniao(rankManha.map(itemOfensorPeriodo), { clicavelOs: true, periodoOs: 'manha', rotuloNome: 'Técnico', rotuloValor: '% das perdas da manhã', vazio: 'Sem ordens fora do prazo pela manhã.' })}
         </div>
         <div class="panel" data-periodo="tarde">
           <h3>Técnicos ofensores da tarde${periodoPior === 'tarde' ? ' <span class="badge warn" style="font-size:10px;vertical-align:middle">pior período</span>' : ''}</h3>
-          ${tabelaRankingReuniao(rankTarde.map(itemOfensorPeriodo), { rotuloNome: 'Técnico', rotuloValor: '% das perdas da tarde', vazio: 'Sem ordens fora do prazo à tarde.' })}
+          ${tabelaRankingReuniao(rankTarde.map(itemOfensorPeriodo), { clicavelOs: true, periodoOs: 'tarde', rotuloNome: 'Técnico', rotuloValor: '% das perdas da tarde', vazio: 'Sem ordens fora do prazo à tarde.' })}
         </div>
       </div>
 
@@ -16907,6 +16974,18 @@ function renderReuniaoPrazos() {
     `;
     ativarTogglesDeSecao(body);
     ativarBotoesImagem(body);
+    // clique no nome do técnico (seções 2 e 4) → janela com as O.S fora do prazo.
+    // `onclick` por atribuição (não addEventListener): o body é o MESMO elemento
+    // a cada Filtrar, então um listener novo por load() se acumularia.
+    body.onclick = ev => {
+      const a = ev.target.closest('a[data-os-tec]');
+      if (!a) return;
+      ev.preventDefault();
+      const nome = a.dataset.osTec, per = a.dataset.osPeriodo || '';
+      abrirModalOsPerdidas(nome,
+        foraPrazo.filter(r => (r.recurso || 'Não informado') === nome && (!per || periodoDoPrazo(r) === per)),
+        { periodoTxt, periodo: per });
+    };
     [['reu-imp-mostrar', v => { mostrarImprodutivas = v; }], ['reu-media-mostrar', v => { mostrarMediaDia = v; }], ['reu-a18-mostrar', v => { mostrarApos18 = v; }]].forEach(([id, set]) => {
       const sel = document.getElementById(id);
       if (sel) sel.addEventListener('change', () => { set(sel.value === 'todos' ? 'todos' : parseInt(sel.value, 10)); load(); });
