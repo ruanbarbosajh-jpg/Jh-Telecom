@@ -11781,6 +11781,25 @@ function ligarMapaOS(m) {
         if (!temFiltroMotivo) return true;
         return motivosLigados.has((o.motivoImprodutiva || '').trim() || MOTIVO_SEM);
       });
+      // Contagem de cada motivo acompanha o filtro (02/10/2026, pedido do cliente:
+      // "o total de cada improdutiva deve alterar de acordo com o que eu filtrar —
+      // pendentes, concluídos etc."): conta só as já visitadas que passam no
+      // bairro e nos status marcados. Motivo zerado fica apagado, não some.
+      const contMotivo = {};
+      ordensAbertasComBairro.forEach(o => {
+        if (!o.revisita || !revisitaLigada) return;
+        if (bairro && o.bairro !== bairro) return;
+        if (!statusLigados.has(classifyStatusGranular(o.status))) return;
+        const k = (o.motivoImprodutiva || '').trim() || MOTIVO_SEM;
+        contMotivo[k] = (contMotivo[k] || 0) + 1;
+      });
+      checksMotivo().forEach(c => {
+        const rot = c.closest('label');
+        const qtd = rot && rot.querySelector('.mapa-motivo-qtd');
+        const n = contMotivo[c.value] || 0;
+        if (qtd) qtd.textContent = n;
+        if (rot) rot.style.opacity = n ? '' : '0.45';
+      });
       renderMapaOrdensAbertas('pd-mapa', filtradas);
     };
     selBairroMapa.addEventListener('change', desenhaMapaAbertos);
