@@ -6530,6 +6530,9 @@ const SCHEMAS = {
     // 2 atendimentos diferentes no mesmo dia (cliente com 2 pontos de internet,
     // por exemplo) — não vira Date, só compara igual/diferente (ver upsertRowByDate)
     inicio: ['inicio','início'],
+    // "Data Abertura Chamado" ("30/05 10:38" — sem ANO) — mostrada na tabela
+    // "Ordens do Período — Detalhamento" da Produção (02/10/2026, pedido do cliente)
+    abertura: ['data abertura chamado'],
     // endereço completo ("RUA X, 123 BAIRRO, CIDADE - SP") — a planilha não tem
     // uma coluna de bairro separada; o bairro é extraído daqui na hora de usar
     // (ver extrairBairro), não fica pré-calculado, pra não precisar reimportar
@@ -6771,6 +6774,7 @@ function insertRow(target, map, row, extra) {
         ofensor: s('ofensor'), tipo_ordem: s('tipo_ordem'), data_ordem_anterior: d('data_ordem_anterior'),
         dias: s('dias'), ifi_irr: s('ifi_irr'), motivo: s('motivo'), nome: s('nome'), inicio: s('inicio'),
         endereco: s('endereco'),
+        abertura: aberturaDaProducao(cell(row, map.abertura), d('data')),
       };
       // a MESMA ordem de serviço aparece em REPAROS OK, BASE_PRODUÇÃO e BASE GERAL
       // CONCLUIDO ao mesmo tempo — sem deduplicar por OS, o total de ordens dobra
@@ -9806,6 +9810,14 @@ function renderProduction() {
   // 10/09/2026) — mesmo remédio que Pedágio, Clean Up e Acompanhamento
   // Técnico já usam pra tabelas grandes.
   let limiteProd = 300;
+  // Abertura do chamado pra coluna "Abertura" do Detalhamento: o campo gravado na
+  // Produção (preenchido a partir da próxima importação da planilha) e, enquanto
+  // ele não existe numa ordem, a abertura que o CSV da PCR trouxe pra mesma O.S
+  // (só cobre os dias importados por CSV). Sem nenhum dos dois: "-".
+  const aberturaPcrPorOs = new Map();
+  DB.pcr.forEach(x => { if (x.os && x.abertura && !aberturaPcrPorOs.has(x.os)) aberturaPcrPorOs.set(x.os, x.abertura); });
+  const aberturaDaOrdem = r => formatAberturaProducao(r.abertura)
+    || (aberturaPcrPorOs.has(r.os) ? fmtDT(aberturaPcrPorOs.get(r.os)) : '-');
   document.getElementById('content').innerHTML = `${periodToolbar(start,end,`
     <div class="field"><label>Técnico</label><input type="text" id="f-tech" placeholder="Nome" list="tech-list"></div>
     ${multiCityField('prod-cidades', 'Cidades')}
@@ -9948,8 +9960,8 @@ function renderProduction() {
         </select>
       </div>
       <div class="cards-grid" id="prod-det-cards" style="margin-bottom:1rem"></div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="prod-tab-periodo"><thead><tr><th>Data</th><th>Técnico</th><th>Cidade</th><th>Tipo</th><th>Status</th><th>Motivo da Baixa</th><th>OS</th><th>Contrato</th></tr></thead><tbody>
-      ${[...rows].sort((a,b) => (b.data||'').localeCompare(a.data||'')).slice(0, limiteProd).map(r=>`<tr><td>${formatDate(r.data)}</td><td>${esc(r.recurso)}</td><td>${esc(r.cidade)}</td><td>${esc(r.tipo_atividade)}</td><td>${statusBadge(r.status)}</td><td>${esc(r.motivo) || '-'}</td><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td></tr>`).join('')}
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="prod-tab-periodo"><thead><tr><th>Data</th><th>Abertura</th><th>Técnico</th><th>Cidade</th><th>Tipo</th><th>Status</th><th>Motivo da Baixa</th><th>OS</th><th>Contrato</th></tr></thead><tbody>
+      ${[...rows].sort((a,b) => (b.data||'').localeCompare(a.data||'')).slice(0, limiteProd).map(r=>`<tr><td>${formatDate(r.data)}</td><td>${esc(aberturaDaOrdem(r))}</td><td>${esc(r.recurso)}</td><td>${esc(r.cidade)}</td><td>${esc(r.tipo_atividade)}</td><td>${statusBadge(r.status)}</td><td>${esc(r.motivo) || '-'}</td><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td></tr>`).join('')}
       </tbody></table></div>
       <div class="panel" style="margin-bottom:1.5rem">
         <h3>Evolução dos Serviços no Período${evolucao ? ` <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(por ${evolucao.granularidade}${statusFilter ? ' — filtro de status aplicado' : ''})</span>` : ''}</h3>
@@ -9971,7 +9983,7 @@ function renderProduction() {
           : [...tabPeriodo.querySelectorAll('tbody tr')].filter(tr => tr.querySelector('td'));
         let conc = 0, canc = 0;
         visiveis.forEach(tr => {
-          const statusTxt = (tr.querySelectorAll('td')[4] || {}).textContent || '';
+          const statusTxt = (tr.querySelectorAll('td')[5] || {}).textContent || '';   // 6ª coluna = Status
           if (isConcluido(statusTxt)) conc++;
           else if (/cancel/i.test(statusTxt)) canc++;
         });
@@ -11260,6 +11272,23 @@ function pcrParseAbertura(s, dataDia) {             // "18/08 09:32" -> Date
   // chamado aberto em dezembro e atendido em janeiro: cai no ano anterior
   if (d.getTime() > dataDia.getTime() + 36e5 * 30) d = new Date(d.getFullYear() - 1, d.getMonth(), d.getDate(), d.getHours(), d.getMinutes());
   return d;
+}
+// "Data Abertura Chamado" da planilha de Produção → "AAAA-MM-DD HH:MM" (ou ''). Na
+// planilha vem como texto "30/05 10:38", SEM ano: o ano sai da data da ordem
+// (mesma regra de pcrParseAbertura — chamado aberto em dezembro e atendido em
+// janeiro cai no ano anterior). Também aceita Date (célula de data de verdade).
+function aberturaDaProducao(valor, dataIso) {
+  if (valor === null || valor === undefined || valor === '') return '';
+  const dd = n => String(n).padStart(2, '0');
+  if (valor instanceof Date) return `${valor.getFullYear()}-${dd(valor.getMonth() + 1)}-${dd(valor.getDate())} ${dd(valor.getHours())}:${dd(valor.getMinutes())}`;
+  const dia = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dataIso || '');
+  const d = pcrParseAbertura(String(valor), dia ? new Date(+dia[1], +dia[2] - 1, +dia[3]) : null);
+  return d ? `${d.getFullYear()}-${dd(d.getMonth() + 1)}-${dd(d.getDate())} ${dd(d.getHours())}:${dd(d.getMinutes())}` : '';
+}
+// "2026-05-30 10:38" → "30/05/2026 10:38"
+function formatAberturaProducao(v) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(v || '');
+  return m ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}` : '';
 }
 function pcrParseHora(s) {
   const m = String(s||'').trim().match(/^(\d{1,2}):(\d{2})/);
