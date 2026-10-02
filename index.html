@@ -20071,6 +20071,7 @@ function renderFolhaPagamento(modo) {
       const q = quebraPorTipoDaLinha(l, apto);
       Object.keys(SP_VALOR_PADRAO).forEach(c => { qtdSp[c] = (qtdSp[c] || 0) + (q[c] || 0); });
     });
+    const semSp = spDesconsideradoNoPeriodo(per);
     const caixa = chave => {
       const v = valorSpDoPeriodo(per, chave), ehPad = Math.abs(v - SP_VALOR_PADRAO[chave]) < 0.005;
       const centavos = Math.round(v * 100);
@@ -20078,20 +20079,30 @@ function renderFolhaPagamento(modo) {
         <label>${SP_ROTULO[chave]} — por ordem</label>
         <div style="display:flex;gap:8px;align-items:center">
           <input type="text" inputmode="decimal" class="sp-valor-input" data-chave="${chave}" data-centavos="${centavos}" value="${formatCurrency(v)}"
-            style="width:130px;text-align:right" ${pode ? '' : 'disabled'}>
-          <button type="button" class="btn-secundario sp-padrao" data-chave="${chave}" ${(!pode || ehPad) ? 'disabled' : ''} title="Volta pro valor padrão (${formatCurrency(SP_VALOR_PADRAO[chave])})">Padrão</button>
+            style="width:130px;text-align:right" ${(pode && !semSp) ? '' : 'disabled'}>
+          <button type="button" class="btn-secundario sp-padrao" data-chave="${chave}" ${(!pode || ehPad || semSp) ? 'disabled' : ''} title="Volta pro valor padrão (${formatCurrency(SP_VALOR_PADRAO[chave])})">Padrão</button>
         </div>
-        <span style="font-size:11px;color:var(--text-muted)">${ehPad ? 'padrão' : `padrão: ${formatCurrency(SP_VALOR_PADRAO[chave])}`} · ${qtdSp[chave] || 0} ordem(ns) no ciclo</span>
+        <span style="font-size:11px;color:var(--text-muted)">${semSp ? 'desconsiderado neste ciclo' : `${ehPad ? 'padrão' : `padrão: ${formatCurrency(SP_VALOR_PADRAO[chave])}`} · ${qtdSp[chave] || 0} ordem(ns) no ciclo`}</span>
       </div>`;
     };
     alvo.innerHTML = `<div class="panel" style="margin-bottom:1.5rem">
       <h3 style="margin:0 0 6px">Valor por ordem de São Paulo — ciclo ${esc(per)}</h3>
       <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">As ordens feitas em São Paulo pagam um valor próprio (hoje R$ 80,00 na Ativação e na Mudança de Endereço), diferente do Litoral. O valor vale pro ciclo inteiro e refaz o total de todos os técnicos na hora. ${pode ? 'Digite o valor e tecle Enter (ou saia do campo) pra salvar.' : 'Só RH/Analista alteram.'}</p>
-      <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">${Object.keys(SP_VALOR_PADRAO).map(caixa).join('')}</div>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">${Object.keys(SP_VALOR_PADRAO).map(caixa).join('')}
+        <div class="field" style="margin:0;min-width:260px">
+          <label>Ordens de SP sem valor próprio?</label>
+          <button type="button" class="${semSp ? 'btn' : 'btn-secundario'}" id="sp-desconsiderar" ${pode ? '' : 'disabled'}
+            title="${semSp ? 'Volta a pagar as ordens de SP pelo valor de SP das caixinhas' : 'As ordens de SP passam a contar como Ativação / Mudança de Endereço normal (tarifa do Litoral)'}">
+            ${semSp ? '↩ Voltar a usar o valor de SP' : 'Desconsiderar valores de SP (somar na Ativação)'}</button>
+          <span style="font-size:11px;color:${semSp ? 'var(--warn-text)' : 'var(--text-muted)'}">${semSp ? 'LIGADO: as ordens de SP deste ciclo estão somadas na Ativação / M.E normal' : 'desligado: ordem de SP paga o valor das caixinhas'}</span>
+        </div>
+      </div>
       <details style="margin-top:14px"><summary style="cursor:pointer;color:var(--text-secondary)">Histórico de valores (${hist.length})</summary>
         ${!hist.length ? '<div class="empty" style="margin-top:8px">Nenhuma alteração ainda — vale o padrão.</div>' : `
         <div class="table-wrap" style="margin-top:8px"><table class="data-table"><thead><tr><th>Quando</th><th>Ciclo</th><th>Tipo</th><th>De</th><th>Para</th><th>Quem</th></tr></thead><tbody>
-          ${hist.slice(0, 40).map(x => `<tr><td>${esc(new Date(x.alterado_em).toLocaleString('pt-BR'))}</td><td>${esc(x.periodo)}</td><td>${esc(SP_ROTULO[x.tipo] || x.tipo)}</td><td>${formatCurrency(Number(x.anterior))}</td><td style="font-weight:700">${formatCurrency(Number(x.valor))}${x.padrao ? ' <span class="badge neutral">padrão</span>' : ''}</td><td>${esc(x.alterado_por || '-')}</td></tr>`).join('')}
+          ${hist.slice(0, 40).map(x => `<tr><td>${esc(new Date(x.alterado_em).toLocaleString('pt-BR'))}</td><td>${esc(x.periodo)}</td>${x.tipo === SP_CHAVE_DESCONSIDERAR
+            ? `<td>Desconsiderar SP</td><td>${Number(x.anterior) === 1 ? 'ligado' : 'desligado'}</td><td style="font-weight:700">${Number(x.valor) === 1 ? 'ligado (soma na Ativação)' : 'desligado (valor de SP)'}</td>`
+            : `<td>${esc(SP_ROTULO[x.tipo] || x.tipo)}</td><td>${formatCurrency(Number(x.anterior))}</td><td style="font-weight:700">${formatCurrency(Number(x.valor))}${x.padrao ? ' <span class="badge neutral">padrão</span>' : ''}</td>`}<td>${esc(x.alterado_por || '-')}</td></tr>`).join('')}
         </tbody></table></div>`}
       </details>
       <div id="fol-sp-aviso" style="font-size:13px;margin-top:8px"></div>
@@ -20101,7 +20112,9 @@ function renderFolhaPagamento(modo) {
       aviso.innerHTML = '<span style="color:var(--text-muted)">Salvando…</span>';
       const r = await salvarValorSp(per, chave, valor, padrao);
       if (!r.mudou) { aviso.innerHTML = ''; pintarPainelSp(); return; }
-      toast(`${SP_ROTULO[chave]}: ${formatCurrency(valor)} por ordem${padrao ? ' (padrão)' : ''}.`, 'ok', 2500);
+      toast(chave === SP_CHAVE_DESCONSIDERAR
+        ? (valor === 1 ? 'Ordens de SP somadas na Ativação / M.E normal neste ciclo.' : 'Ordens de SP voltaram a usar o valor de SP.')
+        : `${SP_ROTULO[chave]}: ${formatCurrency(valor)} por ordem${padrao ? ' (padrão)' : ''}.`, 'ok', 2500);
       load();   // refaz a tabela e este painel já com o valor novo
       if (r.sync && r.sync.ok === false) {
         const av = document.getElementById('fol-sp-aviso');
@@ -20117,6 +20130,8 @@ function renderFolhaPagamento(modo) {
       inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
     });
     alvo.querySelectorAll('.sp-padrao').forEach(btn => btn.addEventListener('click', () => gravar(btn.dataset.chave, SP_VALOR_PADRAO[btn.dataset.chave], true)));
+    const btnSem = alvo.querySelector('#sp-desconsiderar');
+    if (btnSem) btnSem.addEventListener('click', () => gravar(SP_CHAVE_DESCONSIDERAR, semSp ? 0 : 1, false));
   }
   load();
   function load() {
@@ -20754,12 +20769,27 @@ function quebraPorTipoVazia() {
 // continuam na linha normal do tipo (não existe linha "SP" pra eles).
 const SP_VALOR_PADRAO = { ativacao_sp: 80, mudanca_endereco_sp: 80 };
 const SP_ROTULO = { ativacao_sp: 'Ativação SP', mudanca_endereco_sp: 'M.E SP' };
-function valorSpDoPeriodo(periodo, chave) {
+function ultimoRegistroSp(periodo, chave) {
   let ult = null;
   (DB.valoresSpHistorico || []).forEach(x => {
     if (x.periodo === periodo && x.tipo === chave && (!ult || String(x.alterado_em) >= String(ult.alterado_em))) ult = x;
   });
-  return ult ? Number(ult.valor) : SP_VALOR_PADRAO[chave];
+  return ult;
+}
+function valorSpDoPeriodo(periodo, chave) {
+  const ult = ultimoRegistroSp(periodo, chave);
+  return ult ? Number(ult.valor) : (chave === SP_CHAVE_DESCONSIDERAR ? 0 : SP_VALOR_PADRAO[chave]);
+}
+// "Desconsiderar valores de SP" (02/10/2026, pedido do cliente: "tem casos que as
+// O.S de São Paulo não dão valor, nesse caso adicione na soma da ativação normal").
+// Ligado no ciclo, as ordens de SP deixam de ter linha/valor próprio e entram como
+// Ativação / Mudança de Endereço NORMAL (tarifa normal ou de 26 dias, igual a
+// qualquer ordem do Litoral — e passam a contar na base do bônus, como na planilha).
+// Fica no MESMO histórico (tipo "desconsiderar_sp", valor 1 = ligado, 0 = desligado),
+// então não precisa de tabela nova e a tela mostra quem ligou/desligou e quando.
+const SP_CHAVE_DESCONSIDERAR = 'desconsiderar_sp';
+function spDesconsideradoNoPeriodo(periodo) {
+  return !!periodo && valorSpDoPeriodo(periodo, SP_CHAVE_DESCONSIDERAR) === 1;
 }
 // O.S que já estão na PRODUÇÃO como concluídas — a planilha de SP traz ordens que
 // a base já tinha (3 no ciclo 21/08–20/09, todas do Inácio em 29/08); contar as
@@ -20788,11 +20818,12 @@ function quebraPorTipoDoTecnico(ordens, janela, apto, periodo) {
   const out = quebraPorTipoVazia();
   const vSp = {};
   Object.keys(SP_VALOR_PADRAO).forEach(c => { vSp[c] = periodo ? valorSpDoPeriodo(periodo, c) : SP_VALOR_PADRAO[c]; });
+  const semSp = spDesconsideradoNoPeriodo(periodo);   // SP vai pra linha normal do tipo
   ordens.forEach(p => {
     if (!isConcluido(p.status)) return;
     if (janela && janela.inicio && janela.fim && !inRange(p.data, janela.inicio, janela.fim)) return;
     const t = normalizeHeader(p.tipo_atividade);
-    const sp = ehOrdemSP(p.cidade);
+    const sp = ehOrdemSP(p.cidade) && !semSp;
     // Só ATIVAÇÃO e M.ENDEREÇO têm linha "SP" separada (é o que existe no
     // holerite em papel do cliente). Reparo, Upgrade e M.Cômodo feitos fora do
     // Litoral Sul caem na linha NORMAL do tipo deles — sem esse segundo find,
@@ -20855,7 +20886,8 @@ function quebraPorTipoDaLinha(linha, apto, ordensDoTecnico) {
   const janela = datasDoPeriodoFolha(linha.periodo);
   const lista = ordensDoTecnico || DB.producao.filter(p => normalizeHeader(p.recurso) === normalizeHeader(linha.tecnico));
   // Produção + ordens de SP importadas (sem repetir a O.S que a Produção já tem)
-  const prod = quebraPorTipoDoTecnico(lista.concat(ordensSpDoTecnico(linha.tecnico)), janela, apto, linha.periodo);
+  const importadas = ordensSpDoTecnico(linha.tecnico);
+  const prod = quebraPorTipoDoTecnico(lista.concat(importadas), janela, apto, linha.periodo);
   const f = janela.inicio ? (DB.fechamento || []).find(x => normalizeHeader(x.tecnico) === normalizeHeader(linha.tecnico)
     && x.inicio === janela.inicio && x.ate_o_dia === janela.fim && (x.total_geral || 0) > 0) : null;
   if (!f) return prod;
@@ -20879,6 +20911,14 @@ function quebraPorTipoDaLinha(linha, apto, ordensDoTecnico) {
   Object.keys(SP_VALOR_PADRAO).forEach(chave => {      // balde SP (Produção + importadas)
     oficial[chave] = prod[chave]; oficial['v_' + chave] = prod['v_' + chave];
     totalOficial += prod[chave];
+  });
+  // ordens de SP IMPORTADAS que caem na linha normal (modo "desconsiderar SP", ou
+  // tipo sem linha SP — reparo/upgrade/cômodo): o RELATORIO não tem essas ordens,
+  // então somam por cima das colunas oficiais
+  const imp = quebraPorTipoDoTecnico(importadas, janela, apto, linha.periodo);
+  TIPOS_FOLHA.filter(t => !t.sp).forEach(t => {
+    oficial[t.chave] += imp[t.chave]; oficial['v_' + t.chave] += imp['v_' + t.chave];
+    totalOficial += imp[t.chave];
   });
   const totalProd = TIPOS_FOLHA.reduce((a, t) => a + prod[t.chave], 0);
   return totalProd > totalOficial ? prod : oficial;
