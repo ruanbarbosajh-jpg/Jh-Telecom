@@ -9099,6 +9099,143 @@ function contarRetornosGiga(rows, inicio, fim) {
   });
   return { porTecnico, noPeriodo, fora, semOfensor, foraDaJanela };
 }
+// ===================== VALIDADOR DE IFI / IRR (arquivo da GIGA) =====================
+// Pedido do cliente (02/10/2026): "no final dos holerites quero um validador de IFI
+// e IRR — quando eu importar lá em cima os retornos da GIGA, me mostre os retornos
+// que não são retorno, igual àquela tabela". Roda sobre as linhas do arquivo da
+// GIGA de técnicos da JH LITORAL (quem tem linha na folha do ciclo) e aponta cada
+// regra quebrada — as mesmas da auditoria do arquivo de set/26:
+//   • serviço anterior NÃO é anterior: data do anterior depois do retorno, AGING
+//     negativo, ou mesmo dia com a O.S do retorno de número MENOR (aberta antes —
+//     caso do Caio: o reparo foi concluído antes da mudança de endereço);
+//   • fora da janela pelas datas (IFI > 15 dias, IRR > 30) — esses o sistema já NÃO
+//     desconta (contarRetornosGiga);
+//   • serviço na área de São Paulo com ofensor da Litoral;
+//   • ordem do retorno que não é Reparo, ou serviço anterior que não gera aquele
+//     indicador (IFI só de Ativação/M.E, IRR só de Reparo; Cômodo/Upgrade nunca);
+//   • a base oficial (coluna IFI-IRR da BASE_CONCLUIDOS, em DB.producao) diz outra
+//     coisa: DESC, primeira visita ("-") ou o outro indicador.
+// O resultado fica em memória e no navegador (localStorage, por conveniência) —
+// não vai pro banco: é conferência pra contestar com a GIGA, não dado de folha.
+const CHAVE_VALIDADOR_GIGA = 'jh_validador_giga_v1';
+let VALIDADOR_GIGA = null;
+try { VALIDADOR_GIGA = JSON.parse(localStorage.getItem(CHAVE_VALIDADOR_GIGA) || 'null'); } catch (e) { VALIDADOR_GIGA = null; }
+function decisaoOficialDoRetorno(os) {
+  // só vale como decisão oficial a linha que tem ifi_irr IFI/IRR/DESC ou tipo_ordem
+  // preenchido ('-' = 1ª visita) — ver armadilha 12 do CLAUDE.md
+  const alvo = normalizeChaveOS(os);
+  let achou = null;
+  DB.producao.forEach(p => {
+    if (normalizeChaveOS(p.os) !== alvo) return;
+    const ind = String(p.ifi_irr || '').trim().toUpperCase();
+    if (['IFI', 'IRR', 'DESC'].includes(ind)) achou = ind;
+    else if (!achou && String(p.tipo_ordem || '').trim()) achou = String(p.tipo_ordem).trim() === '-' ? 'PRIMEIRA' : achou;
+  });
+  return achou;   // 'IFI' | 'IRR' | 'DESC' | 'PRIMEIRA' | null (sem decisão na base)
+}
+function validarRetornosGiga(rows, periodo) {
+  const cab = rows[0].map(normalizeHeader);
+  const col = nome => cab.indexOf(normalizeHeader(nome));
+  const ix = {
+    data: col('Data'), ind: col('IND'), exec: col('Executor'), os: col('Ordem de Serviço'), osAnt: col('OS anterior'),
+    dtExec: col('Dt Exec'), aging: col('AGING'), servAnt: col('Serv Anter'), tipo: col('Tipo de Atividade'),
+    area: col('Área de Trabalho'), ctt: col('Número do contrato'), nome: col('Nome'), rec: col('Recurso'),
+    motivo: col('Motivo de Encerramento das atividades'),
+  };
+  const j = datasDoPeriodoFolha(periodo);
+  const daFolha = new Set(DB.folhaPagamento.filter(l => l.periodo === periodo).map(l => normalizeHeader(l.tecnico)));
+  const v = (r, k) => ix[k] >= 0 ? r[ix[k]] : null;
+  const txt = (r, k) => String(v(r, k) ?? '').trim();
+  const itens = []; let litoral = 0;
+  rows.slice(1).forEach(r => {
+    const ind = txt(r, 'ind').toUpperCase();
+    if (ind !== 'IFI' && ind !== 'IRR') return;
+    const dataISO = excelDateToISO(v(r, 'data'));
+    if (!dataISO || (j.inicio && !inRange(dataISO, j.inicio, j.fim))) return;
+    const ofensor = txt(r, 'exec');
+    if (!ofensor || !daFolha.has(normalizeHeader(ofensor))) return;   // só JH Litoral
+    litoral++;
+    const motivos = []; let naoDescontado = false;
+    const antISO = excelDateToISO(v(r, 'dtExec'));
+    const dias = antISO ? diasEntre(dataISO, antISO) : null;
+    const aging = Number(v(r, 'aging'));
+    const os = txt(r, 'os').replace(/\.0+$/, ''), osAnt = txt(r, 'osAnt').replace(/\.0+$/, '');
+    const servAnt = normalizeHeader(txt(r, 'servAnt'));
+    if ((dias !== null && dias < 0) || (isFinite(aging) && txt(r, 'aging') !== '' && aging < 0)
+        || (dias === 0 && /^\d+$/.test(os) && /^\d+$/.test(osAnt) && Number(os) < Number(osAnt))) {
+      const quando = dias !== null && dias < 0 ? `o serviço anterior (${formatDate(antISO)}) é DEPOIS do reparo (${formatDate(dataISO)})`
+        : `mesmo dia, e a O.S do reparo (${os}) é anterior à do serviço "anterior" (${osAnt})`;
+      motivos.push(`Não é retorno: ${quando} — o reparo foi feito antes${isFinite(aging) && txt(r, 'aging') !== '' ? ` (AGING ${aging})` : ''}`);
+    }
+    const limite = ind === 'IFI' ? JANELA_IFI : JANELA_IRR;
+    if (dias !== null && dias > limite) { motivos.push(`Fora da janela: ${dias} dias (limite ${limite})`); naoDescontado = true; }
+    if (/sao paulo/.test(normalizeHeader(txt(r, 'area')))) motivos.push(`Serviço na área de São Paulo (${txt(r, 'area')})`);
+    if (ix.tipo >= 0 && !/reparo/.test(normalizeHeader(txt(r, 'tipo')))) motivos.push(`A ordem do retorno não é Reparo (${txt(r, 'tipo')})`);
+    if (servAnt) {
+      if (/comodo|upgrade|downgrade/.test(servAnt)) motivos.push(`Serviço anterior (${txt(r, 'servAnt')}) nunca gera retorno`);
+      else if (ind === 'IFI' && !/ativa|endereco/.test(servAnt)) motivos.push(`IFI com serviço anterior ${txt(r, 'servAnt')} (IFI só vem de Ativação/M.E)`);
+      else if (ind === 'IRR' && !/reparo/.test(servAnt)) motivos.push(`IRR com serviço anterior ${txt(r, 'servAnt')} (IRR só vem de Reparo)`);
+    }
+    const oficial = decisaoOficialDoRetorno(os);
+    if (oficial === 'DESC') motivos.push('Base oficial (BASE_CONCLUIDOS) marca DESC — fora da janela');
+    else if (oficial === 'PRIMEIRA') motivos.push('Base oficial (BASE_CONCLUIDOS) marca primeira visita — não é retorno');
+    else if (oficial && oficial !== ind) motivos.push(`Base oficial marca ${oficial}, a GIGA lançou ${ind}`);
+    if (!motivos.length) return;
+    itens.push({
+      os, osAnt, servAnt: txt(r, 'servAnt'), dataAnt: antISO, data: dataISO, contrato: txt(r, 'ctt'), cliente: txt(r, 'nome'),
+      ind, ofensor, recurso: txt(r, 'rec'), motivoBaixa: txt(r, 'motivo'), area: txt(r, 'area'), motivos, naoDescontado,
+    });
+  });
+  // os que ainda estão sendo descontados (a contestar) primeiro
+  itens.sort((a, b) => (a.naoDescontado ? 1 : 0) - (b.naoDescontado ? 1 : 0));
+  return { itens, litoral };
+}
+function htmlValidadorGiga() {
+  const val = VALIDADOR_GIGA;
+  const cabecalho = `<div class="section-heading">Validador de IFI / IRR — arquivo da GIGA</div>`;
+  if (!val) return cabecalho + `<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Importe a planilha de retornos da GIGA (painel "Retornos da GIGA", no topo da tela) pra validar quais lançamentos não são retorno de fato.</div></div>`;
+  const desc = val.itens.filter(x => !x.naoDescontado).length;
+  return cabecalho + `
+    <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 12px;line-height:1.5">
+      ${esc(val.arquivo || 'arquivo da GIGA')} · ciclo ${esc(val.periodo)} · validado em ${esc(new Date(val.quando).toLocaleString('pt-BR'))}.
+      Só retornos de técnicos da JH Litoral (${val.litoral} no arquivo). "Fora da janela" o sistema já não desconta; os outros
+      continuam descontados até a GIGA aceitar a contestação.
+    </p>
+    <div class="cards-grid">
+      ${metricCard('Retornos da Litoral no arquivo', String(val.litoral))}
+      ${metricCard('Com problema', String(val.itens.length), val.itens.length > 0)}
+      ${metricCard('Ainda descontados — contestar', String(desc), desc > 0)}
+    </div>
+    ${!val.itens.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhum problema encontrado: todos os retornos da Litoral batem com as regras.</div></div>' : `
+    <div style="margin:0 0 8px"><button type="button" class="btn-export-xls" id="val-giga-excel">⤓ Excel</button></div>
+    <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="val-giga-tab"><thead><tr>
+      <th>O.S do retorno</th><th>O.S anterior</th><th>Contrato</th><th>Cliente</th><th>Tipo</th><th>Ofensor</th><th>Retorno feito por</th><th>Data</th><th>Motivo</th><th>Na folha</th>
+    </tr></thead><tbody>
+      ${val.itens.map(x => `<tr>
+        <td class="cat-cell">${esc(x.os)}</td>
+        <td>${esc(x.osAnt) || '-'}<br><span style="font-size:11px;color:var(--text-muted)">${esc(x.servAnt)}${x.dataAnt ? ', ' + formatDate(x.dataAnt) : ''}</span></td>
+        <td style="font-weight:700">${esc(x.contrato) || '-'}</td>
+        <td>${esc(x.cliente) || '-'}</td>
+        <td><span class="badge ${x.ind === 'IFI' ? 'warn' : 'amber'}">${x.ind}</span></td>
+        <td>${esc(x.ofensor)}</td>
+        <td>${esc(x.recurso) || '-'}</td>
+        <td>${formatDate(x.data)}</td>
+        <td style="white-space:normal;min-width:280px;font-size:12px">${x.motivos.map(m => '• ' + esc(m)).join('<br>')}</td>
+        <td>${x.naoDescontado ? '<span class="badge ok">não descontado</span>' : '<span class="badge warn">descontado — contestar</span>'}</td>
+      </tr>`).join('')}
+    </tbody></table></div>`}`;
+}
+function pintarValidadorGiga() {
+  const alvo = document.getElementById('fol-validador');
+  if (!alvo) return;
+  alvo.innerHTML = htmlValidadorGiga();
+  ativarFiltrosDeColuna(alvo);
+  const btn = document.getElementById('val-giga-excel');
+  if (btn) btn.addEventListener('click', () => {
+    const tab = document.getElementById('val-giga-tab');
+    if (tab) exportarTabelaVisivel(tab, 'validador-ifi-irr-giga-' + hojeISOLocal());
+  });
+}
 // O arquivo de retornos da GIGA traz a JH inteira — Litoral E São Paulo
 // (cliente, 01/10/2026: "vai aparecer técnicos que não são da JH Litoral").
 // Só entra na folha quem é da LITORAL, e "é da Litoral" = tem linha na folha
@@ -19932,7 +20069,8 @@ function renderFolhaPagamento(modo) {
     </div>
   </div>` : ''}
   ${soRelatorio ? '' : '<div id="fol-sp-painel"></div>'}
-  <div id="folha-body"></div>`;
+  <div id="folha-body"></div>
+  ${soRelatorio ? '' : '<div id="fol-validador" style="margin-top:1.5rem"></div>'}`;
   document.getElementById('f-apply').addEventListener('click', load);
   // ---- planilha de retornos da GIGA ----
   const inputGiga = document.getElementById('fol-giga-file');
@@ -19995,10 +20133,15 @@ function renderFolhaPagamento(modo) {
           bonusMes[normalizeHeader(l.tecnico)] = bonusAptoPorIndicadores(m.ifi, m.irr, base, diasTrabDaLinha(l)) ? 'APTO' : 'INAPTO';
         });
         const r = await aplicarRetornosGigaNaFolha(periodo, conta.porTecnico, bonusMes);
+        // validador do fim da tela (holerites): retornos da Litoral que não são retorno
+        const validado = validarRetornosGiga(linhasDaGiga, periodo);
+        VALIDADOR_GIGA = { ...validado, periodo, arquivo: arquivo.name, quando: new Date().toISOString() };
+        try { localStorage.setItem(CHAVE_VALIDADOR_GIGA, JSON.stringify(VALIDADOR_GIGA)); } catch (e) { /* sem storage: vale só nesta tela */ }
         const partes = [`<span style="color:var(--success)">${conta.noPeriodo} retorno(s) de técnicos da JH Litoral lançado(s) em ${r.alteradas} linha(s) de "${esc(periodo)}"</span>`];
         if (Object.keys(bonusMes).length) partes.push(`<span style="color:var(--success)">bônus de ${formatDate(mes.inicio)} a ${formatDate(mes.fim)} recalculado</span>`);
         if (avisoBonus) partes.push(`<span style="color:var(--warn-text)">${esc(avisoBonus)}</span>`);
         if (conta.fora) partes.push(`<span style="color:var(--text-muted)">${conta.fora} fora do período (ignorados)</span>`);
+        if (VALIDADOR_GIGA && VALIDADOR_GIGA.itens.length) partes.push(`<a href="#fol-validador" style="color:var(--warn-text);font-weight:700">${VALIDADOR_GIGA.itens.length} retorno(s) com problema — ver o validador no fim da tela</a>`);
         if (conta.foraDaJanela && conta.foraDaJanela.length) partes.push(`<details style="display:inline-block;vertical-align:top"><summary style="cursor:pointer;color:var(--warn-text)">${conta.foraDaJanela.length} retorno(s) fora da janela de ${JANELA_IFI} dias (IFI) / ${JANELA_IRR} dias (IRR) NÃO descontado(s)</summary><div style="font-size:12px;color:var(--text-muted);max-width:640px;margin-top:4px">${conta.foraDaJanela.map(x => `O.S ${esc(x.os)} — ${esc(x.ofensor)} (${x.ind}, ${x.dias} dias depois do serviço anterior)`).join('<br>')}<br><i>Pela data o serviço anterior passou da garantia; a coluna AGING da GIGA contou um dia a menos.</i></div></details>`);
         if (conta.outros.length) partes.push(`<details style="display:inline-block;vertical-align:top"><summary style="cursor:pointer;color:var(--text-muted)">${conta.retornosOutros} retorno(s) de ${conta.outros.length} técnico(s) fora da JH Litoral (São Paulo) ignorado(s)</summary><div style="font-size:12px;color:var(--text-muted);max-width:640px;margin-top:4px">${esc(conta.outros.join(', '))}<br><i>Se algum desses for da Litoral, o nome no arquivo da GIGA está diferente do da folha.</i></div></details>`);
         if (supa) partes.push(r.sync && r.sync.ok !== false
@@ -20136,6 +20279,7 @@ function renderFolhaPagamento(modo) {
   load();
   function load() {
     pintarPainelSp();
+    pintarValidadorGiga();
     const tech = document.getElementById('f-tech').value.toLowerCase();
     const periodoEl = document.getElementById('f-periodo');
     const periodo = periodoEl ? periodoEl.value : '';
