@@ -1195,9 +1195,38 @@
      texto no meio ("Nenhum ar…o escolhido") — botão + "Nenhum arquivo
      escolhido" precisam de ~330px. No celular a barra vira coluna e o campo
      ocupa a linha inteira (regra de .toolbar .field mais abaixo). */
-  .toolbar input[type="file"] { padding: 5px 10px; color: var(--text-secondary); width: 340px; max-width: 100%; box-sizing: border-box; text-overflow: clip; }
-  .toolbar input[type="file"]::file-selector-button { margin-right: 10px; padding: 6px 12px; border: none; border-radius: var(--r-sm); background: var(--accent-solid); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
-  .toolbar input[type="file"]::file-selector-button:hover { background: var(--accent-dark); }
+  .toolbar input[type="file"] { width: 340px; text-overflow: clip; }
+  /* Campo de arquivo em TODO o sistema (02/10/2026, pedido do cliente: "melhore o
+     design de todas as caixinhas de Escolher arquivo ... algo assim: Planilha da
+     GIGA → Escolher arquivo"): caixa tracejada + botão azul, e campoArquivo()
+     põe o rótulo na MESMA linha, com a seta. */
+  input[type="file"] { font: inherit; font-size: 13px; color: var(--text-secondary); background: var(--bg-page);
+    border: 1px dashed var(--border); border-radius: var(--r-sm); padding: 4px 12px 4px 4px; max-width: 100%;
+    box-sizing: border-box; cursor: pointer; transition: border-color .15s; }
+  input[type="file"]:hover { border-color: var(--accent); }
+  input[type="file"]::file-selector-button { margin-right: 12px; padding: 7px 14px; border: none; border-radius: 6px;
+    background: var(--accent-solid); color: #fff; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: background .15s; }
+  input[type="file"]::file-selector-button:hover { background: var(--accent-dark); }
+  .campo-arquivo { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0; cursor: pointer; }
+  .campo-arquivo-rot { font-size: 14px; font-weight: 700; color: var(--text-primary); white-space: nowrap; }
+  .campo-arquivo-seta { color: var(--accent); font-weight: 700; font-size: 16px; line-height: 1; }
+  .campo-arquivo input[type="file"] { width: 320px; }
+  .toolbar .campo-arquivo { min-height: 38px; }
+  .toolbar .campo-arquivo-rot { font-size: 13px; }
+  /* Folha: GIGA e valor de SP lado a lado (02/10/2026) */
+  .fol-topo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 16px; margin-bottom: 1.5rem; align-items: stretch; }
+  .fol-topo-grid .panel { margin: 0 !important; height: 100%; box-sizing: border-box; }
+  .fol-topo-grid > div:empty { display: none; }
+  .fol-msg { font-size: 13px; margin-top: 10px; line-height: 1.7; }
+  .fol-msg:empty { display: none; }
+  .fol-sp-caixas { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; margin-top: 14px; }
+  .fol-sp-desc { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .fol-sp-desc-rot { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+  /* Folha: campo ajustado à mão (frota, dias e valor do aluguel) e o ↺ que volta ao automático */
+  .folha-manual { color: var(--accent) !important; font-weight: 700 !important; border-color: var(--accent) !important; }
+  .folha-auto { border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; }
+  .folha-auto:hover { color: var(--accent); }
+  input.folha-edit-moeda.folha-sem-destaque.tem-valor { color: inherit; font-weight: 400; }
   /* card pequeno (ex.: "Última importação") vai pro canto DIREITO da barra */
   .toolbar > .stat-card--compacto { margin-left: auto; }
   /* "🔄 Atualizar" fica na barra do topo (PCR, Parcial do Dia, Chamados GIGA) */
@@ -2626,6 +2655,9 @@ const SUPABASE_TABLES = {
   // pequenas, fora do cache (ver TABELAS_SEM_CACHE). sql/PASSO-31-ordens-sp.sql
   ordensSp:        { table: 'ordens_sp',            conflict: 'os' },
   valoresSpHistorico: { table: 'valores_sp_historico', conflict: 'chave' },
+  // Histórico de alterações da Folha (02/10/2026): cada campo editado e salvo na
+  // tabela, importação da GIGA/SP e troca de valor de SP. Só INSERT. sql/PASSO-32
+  folhaHistorico:  { table: 'folha_historico',      conflict: 'chave' },
 };
 // devolve os campos de data de uma linha do PCR ao formato Date
 function hidratarLinhaPCR(r) {
@@ -2917,7 +2949,7 @@ const CACHE_VERSAO = 1;
 // gratuito. Delta por `atualizado_em` + conferência de contagem continuam
 // valendo em toda entrada; só a recarga de segurança ficou mais espaçada.
 const CACHE_VALIDADE_MS = 7 * 24 * 60 * 60 * 1000;
-const TABELAS_SEM_CACHE = new Set(['pcr', 'clean_up', 'presenca_escritorio_folgas', 'chamados_giga', 'ordens_sp', 'valores_sp_historico']);
+const TABELAS_SEM_CACHE = new Set(['pcr', 'clean_up', 'presenca_escritorio_folgas', 'chamados_giga', 'ordens_sp', 'valores_sp_historico', 'folha_historico']);
 
 let cacheDbPromessa = null;
 function cacheAbrir() {
@@ -3176,6 +3208,7 @@ const SCRIPT_DA_TABELA = {
   folha_escritorio: 'PASSO-18',
   chamados_giga: 'PASSO-25',
   ordens_sp: 'PASSO-31', valores_sp_historico: 'PASSO-31',
+  folha_historico: 'PASSO-32',
 };
 // Barra de aviso do topo. Substitui o alerta que travava a tela a cada login:
 // tabela que falta não impede nada, então vira uma linha discreta com o que
@@ -3543,6 +3576,7 @@ const DB = {
   chamadosGiga: [],
   ordensSp: [],            // ordens de SP importadas na Folha (concluídas valem pro técnico)
   valoresSpHistorico: [],  // histórico do valor por ordem de SP, por ciclo
+  folhaHistorico: [],      // histórico de alterações da Folha de Pagamento
 };
 // Índices por "chave natural" — permitem que reimportar a mesma planilha (ou uma
 // versão atualizada dela) SUBSTITUA os registros já existentes em vez de duplicar.
@@ -3557,7 +3591,7 @@ const DB_INDEX = {
   presencaTecnicos: new Map(), presenca: new Map(),
   presencaEscritorioPessoas: new Map(), presencaEscritorio: new Map(),
   chamadosGiga: new Map(),
-  ordensSp: new Map(), valoresSpHistorico: new Map(),
+  ordensSp: new Map(), valoresSpHistorico: new Map(), folhaHistorico: new Map(),
 };
 
 // ===================== CLEAN UP — BASE JÁ EMBUTIDA =====================
@@ -9099,6 +9133,12 @@ function contarRetornosGiga(rows, inicio, fim) {
   });
   return { porTecnico, noPeriodo, fora, semOfensor, foraDaJanela };
 }
+// Campo de arquivo no padrão do sistema: "Rótulo → [Escolher arquivo]" (02/10/2026)
+function campoArquivo(id, rotulo, accept, extra) {
+  return `<label class="campo-arquivo" for="${id}"><span class="campo-arquivo-rot">${esc(rotulo)}</span>`
+    + `<span class="campo-arquivo-seta" aria-hidden="true">→</span>`
+    + `<input type="file" id="${id}" accept="${accept}"${extra || ''}></label>`;
+}
 // ===================== VALIDADOR DE IFI / IRR (arquivo da GIGA) =====================
 // Pedido do cliente (02/10/2026): "no final dos holerites quero um validador de IFI
 // e IRR — quando eu importar lá em cima os retornos da GIGA, me mostre os retornos
@@ -9196,10 +9236,8 @@ function htmlValidadorGiga() {
   if (!val) return cabecalho + `<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Importe a planilha de retornos da GIGA (painel "Retornos da GIGA", no topo da tela) pra validar quais lançamentos não são retorno de fato.</div></div>`;
   const desc = val.itens.filter(x => !x.naoDescontado).length;
   return cabecalho + `
-    <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 12px;line-height:1.5">
-      ${esc(val.arquivo || 'arquivo da GIGA')} · ciclo ${esc(val.periodo)} · validado em ${esc(new Date(val.quando).toLocaleString('pt-BR'))}.
-      Só retornos de técnicos da JH Litoral (${val.litoral} no arquivo). "Fora da janela" o sistema já não desconta; os outros
-      continuam descontados até a GIGA aceitar a contestação.
+    <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 12px">
+      ${esc(val.arquivo || 'arquivo da GIGA')} · ciclo ${esc(val.periodo)} · ${esc(new Date(val.quando).toLocaleString('pt-BR'))}
     </p>
     <div class="cards-grid">
       ${metricCard('Retornos da Litoral no arquivo', String(val.litoral))}
@@ -9399,10 +9437,18 @@ function diasFrotaDaLinha(linha) {
   const j = datasDoPeriodoFolha(linha.periodo);
   return j.inicio ? diasComCarroDaFrota(linha.tecnico, j.inicio, j.fim).comFrota : 0;
 }
+// Campo de AJUSTE MANUAL da folha (frota_manual, dias_aluguel_manual,
+// valor_aluguel_manual — 02/10/2026, pedido do cliente: "quero que seja possível
+// editar Frota, Dias Aluguel e Valor do Aluguel"): vazio/null = automático.
+function valorManualFolha(v) {
+  return (v === null || v === undefined || v === '') ? null : Number(v);
+}
 function aluguelDaLinha(linha) {
   if (/^jh$/i.test(normalizeHeader(linha.frota))) return 0;
   const diasFrota = diasFrotaDaLinha(linha);
-  const diasProprio = Math.max(0, (Number(linha.dias_trab) || 0) - diasFrota);
+  // dias de aluguel digitados à mão valem como os dias com carro próprio
+  const diasMan = valorManualFolha(linha.dias_aluguel_manual);
+  const diasProprio = diasMan !== null ? Math.max(0, diasMan) : Math.max(0, (Number(linha.dias_trab) || 0) - diasFrota);
   if (!diasFrota) return valorAluguelPorRegra(linha.frota, diasProprio);
   return +(diasProprio * diariaDoAluguel(linha.frota)).toFixed(2);
 }
@@ -9624,11 +9670,19 @@ function recalcularCampoFolha(linhaAtual, campo, valor) {
   // Dias c/ Frota (ou os dias trabalhados) mudaram: refaz os dias de aluguel e
   // o valor pela regra (aluguelDaLinha) — quem digita esse campo quer
   // justamente que o aluguel acompanhe
-  if (campo === 'dias_frota' || campo === 'dias_trab') {
-    linha.dias_aluguel = Math.max(0, (Number(linha.dias_trab) || 0) - diasFrotaDaLinha(linha));
-    linha.valor_aluguel = aluguelDaLinha(linha);
+  // Frota / Dias Aluguel / Valor Aluguel digitados à mão (02/10/2026) vencem o
+  // automático; null volta pro automático (botão ↺ / opção "(auto)" da Frota).
+  const CAMPOS_ALUGUEL = ['dias_frota', 'dias_trab', 'frota_manual', 'dias_aluguel_manual', 'valor_aluguel_manual'];
+  if (CAMPOS_ALUGUEL.includes(campo)) {
+    if (campo === 'frota_manual') linha.frota = valor || linha._frotaAuto || linha.frota;
+    const jh = /^jh$/i.test(normalizeHeader(linha.frota));
+    const dm = valorManualFolha(linha.dias_aluguel_manual);
+    linha.dias_aluguel = dm !== null ? dm
+      : jh ? (Number(linha.dias_trab) || 0) : Math.max(0, (Number(linha.dias_trab) || 0) - diasFrotaDaLinha(linha));
+    const vm = valorManualFolha(linha.valor_aluguel_manual);
+    linha.valor_aluguel = vm !== null ? vm : aluguelDaLinha(linha);
   }
-  if (CAMPOS_MATERIAL_FOLHA.includes(campo) || campo === 'valor_aluguel' || campo === 'emprestimo' || campo === 'dias_frota' || campo === 'dias_trab') {
+  if (CAMPOS_MATERIAL_FOLHA.includes(campo) || campo === 'valor_aluguel' || campo === 'emprestimo' || CAMPOS_ALUGUEL.includes(campo)) {
     linha.total_descontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(linha[c]) || 0), 0);
     linha.total_receber = totalReceberFolha(linha);
   }
@@ -9647,6 +9701,23 @@ function recalcularCampoFolha(linhaAtual, campo, valor) {
     }
   }
   return linha;
+}
+// Histórico de alterações da Folha (02/10/2026, pedido do cliente: "embaixo da
+// folha quero um histórico que mostre as alterações"). Cada item: { periodo,
+// tecnico, campo, rotulo, de, para }. Só INSERT, tabela folha_historico (PASSO-32);
+// sem a tabela vale na sessão.
+async function registrarHistoricoFolha(itens) {
+  if (!itens || !itens.length) return { ok: true };
+  const quem = currentUser ? (currentUser.nome || currentUser.login) : null;
+  const quando = new Date().toISOString();
+  const regs = itens.map((x, i) => ({
+    chave: `${x.periodo || ''}|${x.tecnico || ''}|${x.campo}|${Date.now()}|${i}`,
+    periodo: x.periodo || '', tecnico: x.tecnico || '', campo: x.campo, rotulo: x.rotulo || x.campo,
+    de: x.de == null ? '' : String(x.de), para: x.para == null ? '' : String(x.para),
+    alterado_por: quem, alterado_em: quando,
+  }));
+  regs.forEach(r => { DB.folhaHistorico.push(r); DB_INDEX.folhaHistorico.set(r.chave, DB.folhaHistorico.length - 1); });
+  try { return await syncBatchToSupabase('folhaHistorico', regs); } catch (e) { return { ok: false, error: e }; }
 }
 // Grava a linha INTEIRA da folha (tecnico+período) como está agora — chamada
 // pelo botão "Salvar alterações" em renderFolhaPagamento, uma vez por linha
@@ -9701,12 +9772,13 @@ function valorOrdensDoPeriodo(tecnico, inicio, fim, apto) {
 // zerá-los ao reprocessar um período que já tinha lançamento.
 const CAMPOS_MANUAIS_FOLHA = [
   'frota', 'dias_aluguel', 'valor_aluguel', 'dias_frota', 'emprestimo', ...CAMPOS_TODO_DESCONTO_FOLHA,
+  'frota_manual', 'dias_aluguel_manual', 'valor_aluguel_manual',
   'parcela_equipamento', 'parcela_ferramentas', 'parcela_multa', 'parcela_miscelanea',
   'parcela_mecanica', 'parcela_vale', 'parcela_fiscalizacao', 'parcela_combustivel'
 ];
 // dias_frota nasce VAZIO (null), não 0: vazio = "pega da aba DESVINCULAÇÕES";
 // 0 digitado = "não usou carro da frota" (ver diasFrotaDaLinha)
-const FOLHA_CAMPO_VAZIO = c => c === 'dias_frota' ? null : (c === 'frota' || c.startsWith('parcela_')) ? '' : 0;
+const FOLHA_CAMPO_VAZIO = c => (c === 'dias_frota' || c.endsWith('_manual')) ? null : (c === 'frota' || c.startsWith('parcela_')) ? '' : 0;
 // ---- Parcelas que continuam no ciclo seguinte (01/10/2026) ----
 // Desconto parcelado ("2/3" = 2ª de 3) se repete no ciclo seguinte com o MESMO
 // valor e a parcela seguinte, até fechar ("3/3"). É o que a planilha da folha
@@ -11008,7 +11080,7 @@ function ativarBotoesImagem(raiz) {
   // por esta função usa .gerar-imagem-btn, mas PCR e Parcial do Dia têm botões
   // escritos à mão no HTML com .btn-export-img. Checando só a primeira, essas
   // duas telas ganhavam um SEGUNDO botão na mesma tabela (achado do cliente).
-  const jaTemBotaoImagem = el => !!el.querySelector('.gerar-imagem-btn, .btn-export-img');
+  const jaTemBotaoImagem = el => (el.hasAttribute && el.hasAttribute('data-sem-imagem')) || !!el.querySelector('.gerar-imagem-btn, .btn-export-img');
   alvo.querySelectorAll('.section-heading, .faixa-secao').forEach(h => {
     if (jaTemBotaoImagem(h)) return;
     const alvos = [];
@@ -11046,6 +11118,10 @@ function ativarBotoesImagem(raiz) {
 // em branco. Mesmo cuidado que ativarFiltrosDeColuna já tinha com <select>.
 function textoCelulaExport(td) {
   const campo = td.querySelector('input, select, textarea');
+  if (campo && campo.tagName === 'SELECT') {
+    const o = campo.selectedOptions && campo.selectedOptions[0];
+    if (o) return String(o.dataset.export != null ? o.dataset.export : o.text).trim();
+  }
   if (campo) return String(campo.value == null ? '' : campo.value).trim();
   return (td.textContent || '').trim();
 }
@@ -12458,7 +12534,7 @@ function renderPCR() {
   const ultimaGeral = ultimaAtualizacaoPCR();
   document.getElementById('content').innerHTML = `
     <div class="toolbar">
-      <div class="field"><label>Arquivo CSV de atividades</label><input type="file" id="pcr-file" accept=".csv,text/csv"></div>
+      <div class="field">${campoArquivo('pcr-file', 'CSV de atividades', '.csv,text/csv')}</div>
       ${dias.length ? `<div class="field"><label>Dia</label><select id="pcr-dia">${dias.map(d=>`<option value="${d}">${formatDate(d)}</option>`).join('')}</select></div>` : ''}
       ${dias.length ? `<div class="field"><label>Período do prazo</label><select id="pcr-periodo">
         <option value="">Manhã e tarde</option><option value="MANHÃ">Só manhã</option><option value="TARDE">Só tarde</option>
@@ -13455,7 +13531,7 @@ function renderChamadosGiga() {
   let limiteGiga = 100;
   document.getElementById('content').innerHTML = `
     <div class="toolbar">
-      <div class="field"><label>Arquivo CSV de chamados (GIGA)</label><input type="file" id="giga-file" accept=".csv,text/csv"></div>
+      <div class="field">${campoArquivo('giga-file', 'CSV de chamados (GIGA)', '.csv,text/csv')}</div>
     </div>
     <p id="giga-msg" style="font-size:13px;color:var(--text-secondary);margin:0 0 6px"></p>
     <div id="giga-body"></div>`;
@@ -19423,7 +19499,7 @@ function renderFinance() {
           GIGA de dentro da tela Folha de Pagamento.
         </p>
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
-          <div class="field" style="margin:0"><label>Planilha da GIGA</label><input type="file" id="fin-giga-file" accept=".xlsx,.xls"></div>
+          ${campoArquivo('fin-giga-file', 'Planilha da GIGA', '.xlsx,.xls')}
           <div class="field" style="margin:0"><label>Ofensor</label><input type="text" id="fin-giga-ofensor" placeholder="Nome" list="tech-list"></div>
           <span id="fin-giga-msg" style="font-size:13px"></span>
         </div>
@@ -20044,34 +20120,20 @@ function renderFolhaPagamento(modo) {
     </select></div>` : ''}
     <button class="btn" id="f-apply">Filtrar</button>
   </div>
-  ${ehAnalista() && !soRelatorio ? `
-  <div class="panel" style="margin-bottom:1.5rem">
-    <h3 style="margin:0 0 8px">Retornos da GIGA (IFI / IRR)</h3>
-    <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">
-      Envie a planilha de retornos que a GIGA manda todo mês ("IFI e IRR ….xlsx"). Ela é lançada no
-      <b>ciclo da folha que tem os retornos do arquivo</b> (o que acabou de fechar): a quantidade e o desconto de IFI/IRR
-      saem dessa planilha; o <b>bônus</b> é sempre o do mês (1 a 30/31), com a base do sistema. O retorno
-      é lançado no <b>ofensor</b> (coluna "Executor"), não em quem foi refazer. Enquanto a planilha não é
-      enviada, o sistema calcula tudo com os dados dele.
-    </p>
-    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
-      <div class="field" style="margin:0"><label>Planilha da GIGA</label><input type="file" id="fol-giga-file" accept=".xlsx,.xls"></div>
-      <span id="fol-giga-msg" style="font-size:13px"></span>
-    </div>
-    <p style="font-size:12px;color:var(--text-muted);margin:16px 0 10px">
-      <b>Ordens feitas em São Paulo</b> — envie a planilha "Produção Litoral …" (uma tabela por técnico).
-      Só entram as <b>concluídas</b>, uma vez por O.S: a que a Produção já tem não é paga duas vezes.
-      Reenviar o mesmo período substitui o anterior.
-    </p>
-    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
-      <div class="field" style="margin:0"><label>Planilha de São Paulo</label><input type="file" id="fol-sp-file" accept=".xlsx,.xls"></div>
-      <span id="fol-sp-msg" style="font-size:13px"></span>
-    </div>
-  </div>` : ''}
-  ${soRelatorio ? '' : '<div id="fol-sp-painel"></div>'}
+  ${soRelatorio ? '' : `<div class="fol-topo-grid">
+    ${ehAnalista() ? `<div><div class="panel">
+      <h3 style="margin:0 0 14px">Retornos da GIGA (IFI / IRR)</h3>
+      ${campoArquivo('fol-giga-file', 'Planilha da GIGA', '.xlsx,.xls')}
+      <div id="fol-giga-msg" class="fol-msg"></div>
+    </div></div>` : ''}
+    <div id="fol-sp-painel"></div>
+  </div>`}
   <div id="folha-body"></div>
   ${soRelatorio ? '' : '<div id="fol-validador" style="margin-top:1.5rem"></div>'}`;
   document.getElementById('f-apply').addEventListener('click', load);
+  // msgSp: resultado da última importação de SP (o painel é redesenhado a cada
+  // load()); histAberto: o histórico de alterações continua aberto entre Filtrar
+  let msgSp = '', histAberto = false;
   // ---- planilha de retornos da GIGA ----
   const inputGiga = document.getElementById('fol-giga-file');
   if (inputGiga) inputGiga.addEventListener('change', () => {
@@ -20137,17 +20199,14 @@ function renderFolhaPagamento(modo) {
         const validado = validarRetornosGiga(linhasDaGiga, periodo);
         VALIDADOR_GIGA = { ...validado, periodo, arquivo: arquivo.name, quando: new Date().toISOString() };
         try { localStorage.setItem(CHAVE_VALIDADOR_GIGA, JSON.stringify(VALIDADOR_GIGA)); } catch (e) { /* sem storage: vale só nesta tela */ }
-        const partes = [`<span style="color:var(--success)">${conta.noPeriodo} retorno(s) de técnicos da JH Litoral lançado(s) em ${r.alteradas} linha(s) de "${esc(periodo)}"</span>`];
-        if (Object.keys(bonusMes).length) partes.push(`<span style="color:var(--success)">bônus de ${formatDate(mes.inicio)} a ${formatDate(mes.fim)} recalculado</span>`);
-        if (avisoBonus) partes.push(`<span style="color:var(--warn-text)">${esc(avisoBonus)}</span>`);
-        if (conta.fora) partes.push(`<span style="color:var(--text-muted)">${conta.fora} fora do período (ignorados)</span>`);
-        if (VALIDADOR_GIGA && VALIDADOR_GIGA.itens.length) partes.push(`<a href="#fol-validador" style="color:var(--warn-text);font-weight:700">${VALIDADOR_GIGA.itens.length} retorno(s) com problema — ver o validador no fim da tela</a>`);
-        if (conta.foraDaJanela && conta.foraDaJanela.length) partes.push(`<details style="display:inline-block;vertical-align:top"><summary style="cursor:pointer;color:var(--warn-text)">${conta.foraDaJanela.length} retorno(s) fora da janela de ${JANELA_IFI} dias (IFI) / ${JANELA_IRR} dias (IRR) NÃO descontado(s)</summary><div style="font-size:12px;color:var(--text-muted);max-width:640px;margin-top:4px">${conta.foraDaJanela.map(x => `O.S ${esc(x.os)} — ${esc(x.ofensor)} (${x.ind}, ${x.dias} dias depois do serviço anterior)`).join('<br>')}<br><i>Pela data o serviço anterior passou da garantia; a coluna AGING da GIGA contou um dia a menos.</i></div></details>`);
-        if (conta.outros.length) partes.push(`<details style="display:inline-block;vertical-align:top"><summary style="cursor:pointer;color:var(--text-muted)">${conta.retornosOutros} retorno(s) de ${conta.outros.length} técnico(s) fora da JH Litoral (São Paulo) ignorado(s)</summary><div style="font-size:12px;color:var(--text-muted);max-width:640px;margin-top:4px">${esc(conta.outros.join(', '))}<br><i>Se algum desses for da Litoral, o nome no arquivo da GIGA está diferente do da folha.</i></div></details>`);
-        if (supa) partes.push(r.sync && r.sync.ok !== false
-          ? '<span style="color:var(--success)">salvo no Supabase</span>'
-          : `<span style="color:var(--danger)">não consegui salvar: ${esc((r.sync && r.sync.error && r.sync.error.message) || 'erro desconhecido')}</span>`);
-        msg.innerHTML = partes.join(' — ');
+        await registrarHistoricoFolha([{ periodo, tecnico: '—', campo: 'importacao_giga', rotulo: 'Importação da GIGA',
+          de: '', para: `${conta.noPeriodo} retornos lançados (${arquivo.name})` }]);
+        const partes = [`<span style="color:var(--success);font-weight:700">✔ ${conta.noPeriodo} retornos lançados</span> <span style="color:var(--text-muted)">· ${esc(periodo)}</span>`];
+        if (VALIDADOR_GIGA && VALIDADOR_GIGA.itens.length) partes.push(`<a href="javascript:void 0" onclick="document.getElementById('fol-validador').scrollIntoView({behavior:'smooth'})" style="color:var(--warn-text);font-weight:700">⚠ ${VALIDADOR_GIGA.itens.length} com problema — ver validador</a>`);
+        if (conta.foraDaJanela && conta.foraDaJanela.length) partes.push(`<details style="display:inline-block;vertical-align:top"><summary style="cursor:pointer;color:var(--warn-text)">${conta.foraDaJanela.length} fora da janela (não descontados)</summary><div style="font-size:12px;color:var(--text-muted);margin-top:4px">${conta.foraDaJanela.map(x => `O.S ${esc(x.os)} — ${esc(x.ofensor)} (${x.ind}, ${x.dias} dias)`).join('<br>')}</div></details>`);
+        if (conta.outros.length) partes.push(`<details style="display:inline-block;vertical-align:top"><summary style="cursor:pointer;color:var(--text-muted)">${conta.retornosOutros} de São Paulo ignorados</summary><div style="font-size:12px;color:var(--text-muted);margin-top:4px">${esc(conta.outros.join(', '))}</div></details>`);
+        if (supa && !(r.sync && r.sync.ok !== false)) partes.push(`<span style="color:var(--danger)">não consegui salvar: ${esc((r.sync && r.sync.error && r.sync.error.message) || 'erro desconhecido')}</span>`);
+        msg.innerHTML = partes.join(' <span style="color:var(--text-muted)">·</span> ');
         toast(`${conta.noPeriodo} retorno(s) da GIGA (JH Litoral) lançados.`, 'ok', 2500);
         load();
       } catch (e) {
@@ -20158,10 +20217,14 @@ function renderFolhaPagamento(modo) {
     leitor.readAsArrayBuffer(arquivo);
   });
   // ---- importar as ordens de São Paulo ----
-  const inputSp = document.getElementById('fol-sp-file');
-  if (inputSp) inputSp.addEventListener('change', () => {
+  // o painel de SP é redesenhado a cada load(): o "change" do campo de arquivo é
+  // ouvido no CONTÊINER (fixo) e a mensagem fica em msgSp pra sobreviver ao redesenho
+  const painelSpFixo = document.getElementById('fol-sp-painel');
+  if (painelSpFixo) painelSpFixo.addEventListener('change', ev => {
+    const inputSp = ev.target;
+    if (!inputSp || inputSp.id !== 'fol-sp-file') return;
     const arquivo = inputSp.files && inputSp.files[0];
-    const msg = document.getElementById('fol-sp-msg');
+    const msg = { set innerHTML(v) { msgSp = v; const el = document.getElementById('fol-sp-msg'); if (el) el.innerHTML = v; } };
     if (!arquivo) return;
     if (typeof XLSX === 'undefined') { msg.innerHTML = '<span style="color:var(--danger)">A biblioteca de planilha não carregou (sem internet?).</span>'; inputSp.value = ''; return; }
     msg.innerHTML = '<span style="color:var(--text-muted)">Lendo a planilha…</span>';
@@ -20178,16 +20241,13 @@ function renderFolhaPagamento(modo) {
         if (lido.erro) { msg.innerHTML = `<span style="color:var(--danger)">${esc(lido.erro)}</span>`; return; }
         if (!lido.ordens.length) { msg.innerHTML = '<span style="color:var(--warn-text)">Nenhuma ordem encontrada na planilha.</span>'; return; }
         const r = await importarOrdensSp(lido.ordens);
-        const partes = [`<span style="color:var(--success)">${r.concluidas} ordem(ns) concluída(s) de SP lida(s)</span> <span style="color:var(--text-muted)">(${r.total - r.concluidas} não concluída(s) guardada(s), não pagam)</span>`];
-        if (r.repetidasNaProducao.length) partes.push(`<span style="color:var(--warn-text)">${r.repetidasNaProducao.length} já estava(m) na Produção (${esc(r.repetidasNaProducao.map(o => o.os).join(', '))}) — contada(s) uma vez só</span>`);
-        partes.push(`<span style="color:var(--success)">${r.novas} nova(s) na folha</span>`);
-        partes.push(esc(Object.entries(r.porTecnico).map(([t, n]) => `${t}: ${n}`).join(' · ')));
-        if (r.sobrando) partes.push(`<span style="color:var(--text-muted)">${r.sobrando} ordem(ns) antiga(s) do mesmo período substituída(s)</span>`);
-        if (!r.periodos.length) partes.push('<span style="color:var(--warn-text)">nenhum ciclo da folha cobre essas datas — as ordens ficaram guardadas e entram quando a folha do ciclo existir</span>');
-        if (supa) partes.push(r.sync && r.sync.ok !== false
-          ? '<span style="color:var(--success)">salvo no Supabase</span>'
-          : `<span style="color:var(--danger)">não consegui salvar: ${esc((r.sync && r.sync.error && r.sync.error.message) || 'erro desconhecido')} — rode o sql/PASSO-31-ordens-sp.sql</span>`);
-        msg.innerHTML = partes.join(' — ');
+        await registrarHistoricoFolha((r.periodos || []).map(per => ({ periodo: per, tecnico: '—', campo: 'importacao_sp',
+          rotulo: 'Importação de SP', de: '', para: `${r.novas} ordens novas (${arquivo.name})` })));
+        const partes = [`<span style="color:var(--success);font-weight:700" title="${esc(Object.entries(r.porTecnico).map(([t, n]) => `${t}: ${n}`).join(' · '))}">✔ ${r.concluidas} concluídas · ${r.novas} novas</span>`];
+        if (r.repetidasNaProducao.length) partes.push(`<span style="color:var(--warn-text)" title="${esc(r.repetidasNaProducao.map(o => o.os).join(', '))}">${r.repetidasNaProducao.length} já na Produção (contadas 1×)</span>`);
+        if (!r.periodos.length) partes.push('<span style="color:var(--warn-text)">sem ciclo da folha pra essas datas</span>');
+        if (supa && !(r.sync && r.sync.ok !== false)) partes.push(`<span style="color:var(--danger)">não salvou: rode o sql/PASSO-31-ordens-sp.sql</span>`);
+        msg.innerHTML = partes.join(' <span style="color:var(--text-muted)">·</span> ');
         toast(`${r.novas} ordem(ns) de SP lançada(s) na folha.`, 'ok', 2500);
         load();
       } catch (e) {
@@ -20205,7 +20265,13 @@ function renderFolhaPagamento(modo) {
     if (!alvo) return;
     const sel = document.getElementById('f-periodo');
     const per = (sel && sel.value && sel.value !== '__sem_periodo__') ? sel.value : periodoPadraoFolha;
-    if (!per) { alvo.innerHTML = ''; return; }
+    const campoSp = ehAnalista()
+      ? `<div style="margin-top:4px">${campoArquivo('fol-sp-file', 'Planilha de São Paulo', '.xlsx,.xls')}</div><div id="fol-sp-msg" class="fol-msg">${msgSp}</div>`
+      : '';
+    if (!per) {
+      alvo.innerHTML = campoSp ? `<div class="panel"><h3 style="margin:0 0 14px">Ordens de São Paulo</h3>${campoSp}</div>` : '';
+      return;
+    }
     const pode = podeEditarFolhaPagamento();
     const hist = [...DB.valoresSpHistorico].sort((a, b) => String(b.alterado_em).localeCompare(String(a.alterado_em)));
     const qtdSp = {};
@@ -20225,20 +20291,19 @@ function renderFolhaPagamento(modo) {
             style="width:130px;text-align:right" ${(pode && !semSp) ? '' : 'disabled'}>
           <button type="button" class="btn-secundario sp-padrao" data-chave="${chave}" ${(!pode || ehPad || semSp) ? 'disabled' : ''} title="Volta pro valor padrão (${formatCurrency(SP_VALOR_PADRAO[chave])})">Padrão</button>
         </div>
-        <span style="font-size:11px;color:var(--text-muted)">${semSp ? 'desconsiderado neste ciclo' : `${ehPad ? 'padrão' : `padrão: ${formatCurrency(SP_VALOR_PADRAO[chave])}`} · ${qtdSp[chave] || 0} ordem(ns) no ciclo`}</span>
+        <span style="font-size:11px;color:var(--text-muted)">${semSp ? 'desconsiderado' : `${qtdSp[chave] || 0} ordem(ns)${ehPad ? '' : ` · padrão ${formatCurrency(SP_VALOR_PADRAO[chave])}`}`}</span>
       </div>`;
     };
-    alvo.innerHTML = `<div class="panel" style="margin-bottom:1.5rem">
-      <h3 style="margin:0 0 6px">Valor por ordem de São Paulo — ciclo ${esc(per)}</h3>
-      <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">As ordens feitas em São Paulo pagam um valor próprio (hoje R$ 80,00 na Ativação e na Mudança de Endereço), diferente do Litoral. O valor vale pro ciclo inteiro e refaz o total de todos os técnicos na hora. ${pode ? 'Digite o valor e tecle Enter (ou saia do campo) pra salvar.' : 'Só RH/Analista alteram.'}</p>
-      <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">${Object.keys(SP_VALOR_PADRAO).map(caixa).join('')}
-        <div class="field" style="margin:0;min-width:260px">
-          <label>Ordens de SP sem valor próprio?</label>
-          <button type="button" class="${semSp ? 'btn' : 'btn-secundario'}" id="sp-desconsiderar" ${pode ? '' : 'disabled'}
-            title="${semSp ? 'Volta a pagar as ordens de SP pelo valor de SP das caixinhas' : 'As ordens de SP passam a contar como Ativação / Mudança de Endereço normal (tarifa do Litoral)'}">
-            ${semSp ? '↩ Voltar a usar o valor de SP' : 'Desconsiderar valores de SP (somar na Ativação)'}</button>
-          <span style="font-size:11px;color:${semSp ? 'var(--warn-text)' : 'var(--text-muted)'}">${semSp ? 'LIGADO: as ordens de SP deste ciclo estão somadas na Ativação / M.E normal' : 'desligado: ordem de SP paga o valor das caixinhas'}</span>
-        </div>
+    alvo.innerHTML = `<div class="panel">
+      <h3 style="margin:0 0 14px">Valor por ordem de São Paulo — ciclo ${esc(per)}</h3>
+      ${campoSp}
+      <div class="fol-sp-caixas">${Object.keys(SP_VALOR_PADRAO).map(caixa).join('')}</div>
+      <div class="fol-sp-desc">
+        <span class="fol-sp-desc-rot">Ordens de SP sem valor próprio?</span>
+        <button type="button" class="${semSp ? 'btn' : 'btn-secundario'}" id="sp-desconsiderar" ${pode ? '' : 'disabled'}
+          title="${semSp ? 'Volta a pagar as ordens de SP pelo valor de SP das caixinhas' : 'As ordens de SP passam a contar como Ativação / Mudança de Endereço normal (tarifa do Litoral)'}">
+          ${semSp ? '↩ Voltar a usar o valor de SP' : 'Desconsiderar valores de SP (somar na Ativação)'}</button>
+        ${semSp ? '<span style="font-size:12px;color:var(--warn-text);font-weight:600">LIGADO: somadas na Ativação / M.E normal</span>' : ''}
       </div>
       <details style="margin-top:14px"><summary style="cursor:pointer;color:var(--text-secondary)">Histórico de valores (${hist.length})</summary>
         ${!hist.length ? '<div class="empty" style="margin-top:8px">Nenhuma alteração ainda — vale o padrão.</div>' : `
@@ -20366,18 +20431,30 @@ function renderFolhaPagamento(modo) {
       const j = datasDoPeriodoFolha(r.periodo);
       const linha = { ...r };
       const frotaReal = j.inicio ? frotaDoTecnico(r.tecnico, j.inicio, j.fim) : '';
-      const frotaMudou = frotaReal && normalizeHeader(frotaReal) !== normalizeHeader(r.frota);
-      if (frotaReal) linha.frota = frotaReal;
-      // aluguel refeito pela regra quando foi o sistema que preencheu ou quando a
-      // frota gravada não é mais a real (o valor era de outra frota). Acordo
-      // digitado na mão, com a frota certa, fica como está.
-      if (r._aluguelAuto || frotaMudou) linha.valor_aluguel = aluguelDaLinha(linha);
-      // carro da JH: "Dias c/ Frota" não se aplica (o ciclo todo já é de frota)
-      // e os dias de aluguel voltam a ser os dias trabalhados, igual à planilha
-      if (/^jh$/i.test(normalizeHeader(linha.frota))) { linha.dias_frota = 0; linha.dias_aluguel = linha.dias_trab; }
-      // carro da JH (empresa/locadora) NUNCA paga aluguel ao técnico — aluguel é
-      // só de carro PRÓPRIO (cliente, 01/10/2026). Vale até sobre valor digitado.
-      if (/^jh$/i.test(normalizeHeader(linha.frota))) linha.valor_aluguel = 0;
+      // frota que o sistema daria sozinho (a opção "(auto)" do campo Frota)
+      linha._frotaAuto = frotaReal || r.frota || '';
+      // Frota escolhida à mão na tabela (frota_manual, 02/10/2026) vence a da Frota
+      const frotaEfetiva = r.frota_manual || frotaReal;
+      const frotaMudou = frotaEfetiva && normalizeHeader(frotaEfetiva) !== normalizeHeader(r.frota);
+      if (frotaEfetiva) linha.frota = frotaEfetiva;
+      const diasMan = valorManualFolha(r.dias_aluguel_manual), valorMan = valorManualFolha(r.valor_aluguel_manual);
+      if (diasMan !== null) linha.dias_aluguel = diasMan;
+      // aluguel refeito pela regra quando foi o sistema que preencheu, quando a
+      // frota gravada não é mais a real (o valor era de outra frota) ou quando os
+      // dias de aluguel foram digitados. Acordo antigo digitado, com a frota
+      // certa, fica como está.
+      if (r._aluguelAuto || frotaMudou || diasMan !== null) linha.valor_aluguel = aluguelDaLinha(linha);
+      // carro da JH: "Dias c/ Frota" não se aplica (o ciclo todo já é de frota),
+      // os dias de aluguel voltam a ser os dias trabalhados (igual à planilha) e
+      // NUNCA paga aluguel ao técnico — aluguel é só de carro PRÓPRIO (01/10/2026)
+      if (/^jh$/i.test(normalizeHeader(linha.frota))) {
+        linha.dias_frota = 0;
+        if (diasMan === null) linha.dias_aluguel = linha.dias_trab;
+        linha.valor_aluguel = 0;
+      }
+      // Valor do Aluguel digitado na coluna (02/10/2026) vence tudo — quem
+      // digitou sabe; carro da JH com valor > 0 ganha borda vermelha na tabela
+      if (valorMan !== null) linha.valor_aluguel = valorMan;
       linha.total_receber = totalReceberFolha(linha);
       const apto = /apto/i.test(linha.bonus || '') && !/inapto/i.test(linha.bonus || '');
       if (j.inicio) {
@@ -20513,6 +20590,11 @@ function renderFolhaPagamento(modo) {
         <button class="btn-secundario" id="folha-descartar" disabled>Descartar alterações</button>
         <span id="folha-edit-msg" style="font-size:13px;color:var(--text-muted)"></span>
       </div>` : ''}
+      <div class="section-heading" data-sem-imagem style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">Histórico de alterações
+        <span id="folha-hist-qtd" style="font-size:12px;font-weight:500;color:var(--text-muted)"></span>
+        <button type="button" class="secao-toggle" id="folha-hist-btn">${histAberto ? '▾ ocultar' : '▸ exibir'}</button>
+      </div>
+      <div id="folha-hist" class="${histAberto ? '' : 'secao-oculta'}" style="margin-bottom:1.5rem"></div>
       <div class="section-heading">Holerite<span class="sec-nota">extrato de serviços do técnico, no formato que vai pra assinatura</span></div>
       <div class="panel" style="margin-bottom:1.5rem">
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:6px">
@@ -20606,6 +20688,45 @@ function renderFolhaPagamento(modo) {
     // a cada tecla fazia a página voltar pro topo e a tabela "tremer" — só o
     // botão "Descartar" (uma ação deliberada, não uma tecla) recarrega tudo.
     const pendentes = new Map();
+    // ---- histórico de alterações (02/10/2026) ----
+    // O "de → para" de cada campo é anotado NA EDIÇÃO (o valor que estava na tela
+    // antes da 1ª mudança) e vai pro histórico só quando a linha é SALVA.
+    const alteracoes = new Map();
+    const rotuloDaColuna = el => {
+      const td = el.closest('td'), tab = td && td.closest('table');
+      const th = tab && tab.querySelectorAll('thead th')[td.cellIndex];
+      return th ? th.textContent.replace(/[▲▼▾▸⏷]/g, '').trim() : el.dataset.campo;
+    };
+    const anotar = (linha, el, de, para) => {
+      const campo = el.dataset.campo;
+      const m = alteracoes.get(linha) || {};
+      alteracoes.set(linha, m);
+      if (!m[campo]) m[campo] = { rotulo: rotuloDaColuna(el), de: String(de == null ? '' : de) };
+      m[campo].para = String(para == null ? '' : para);
+    };
+    function pintarHistoricoFolha() {
+      const alvoHist = document.getElementById('folha-hist');
+      if (!alvoHist) return;
+      const lista = DB.folhaHistorico
+        .filter(x => !periodo || periodo === '__sem_periodo__' || x.periodo === periodo)
+        .sort((a, b) => String(b.alterado_em).localeCompare(String(a.alterado_em)));
+      const qtd = document.getElementById('folha-hist-qtd');
+      if (qtd) qtd.textContent = `(${lista.length})`;
+      alvoHist.innerHTML = !lista.length
+        ? '<div class="panel"><div class="empty">Nenhuma alteração registrada neste ciclo.</div></div>'
+        : `<div class="table-wrap"><table class="data-table"><thead><tr><th>Quando</th><th>Ciclo</th><th>Técnico</th><th>Campo</th><th>De</th><th>Para</th><th>Quem</th></tr></thead><tbody>
+          ${lista.slice(0, 500).map(x => `<tr><td>${esc(new Date(x.alterado_em).toLocaleString('pt-BR'))}</td><td>${esc(x.periodo)}</td><td>${esc(x.tecnico)}</td>
+            <td>${esc(x.rotulo || x.campo)}</td><td>${esc(x.de) || '-'}</td><td style="font-weight:700">${esc(x.para) || '-'}</td><td>${esc(x.alterado_por || '-')}</td></tr>`).join('')}
+        </tbody></table></div>`;
+      ativarFiltrosDeColuna(alvoHist);
+    }
+    pintarHistoricoFolha();
+    const btnHist = document.getElementById('folha-hist-btn');
+    if (btnHist) btnHist.addEventListener('click', () => {
+      histAberto = !histAberto;
+      document.getElementById('folha-hist').classList.toggle('secao-oculta', !histAberto);
+      btnHist.textContent = histAberto ? '▾ ocultar' : '▸ exibir';
+    });
     // ---- Excel e imagem da folha (pedido do cliente 09/09/2026) ----
     // A tabela da folha é toda editável, então a exportação genérica lia
     // célula vazia onde tem <input> — resolvido em textoCelulaExport(), que
@@ -20653,6 +20774,7 @@ function renderFolhaPagamento(modo) {
         const { tecnico, periodo } = sel.dataset;
         const linha = ranking.find(x => x.tecnico === tecnico && x.periodo === periodo);
         if (!linha) return;
+        anotar(linha, sel, linha.bonus, sel.value);
         Object.assign(linha, recalcularCampoFolha(linha, 'bonus', sel.value));
         // bônus muda a faixa de preço das ordens (APTO usa o valor de 26 dias,
         // INAPTO usa o padrão) — corrige Valor Ordens e Total a Receber só
@@ -20672,23 +20794,59 @@ function renderFolhaPagamento(modo) {
         desenharHoleriteSeAberto();
       });
     });
-    document.querySelectorAll('input.folha-edit[data-campo="dias_trab"], input.folha-edit[data-campo="dias_frota"]').forEach(inp => {
+    // reflete frota / dias / valor do aluguel (e o ↺) e os totais só nessa linha
+    const refletirAluguel = (tr, linha) => {
+      const dias = tr.querySelector('input[data-campo="dias_aluguel_manual"]');
+      if (dias) { dias.value = linha.dias_aluguel ?? 0; dias.classList.toggle('folha-manual', valorManualFolha(linha.dias_aluguel_manual) !== null); }
+      else { const s = tr.querySelector('.folha-dias-aluguel'); if (s) s.textContent = linha.dias_aluguel ?? 0; }
+      const val = tr.querySelector('input[data-campo="valor_aluguel_manual"]');
+      if (val) {
+        const c = Math.round((Number(linha.valor_aluguel) || 0) * 100);
+        val.dataset.centavos = c; val.value = formatCurrency(c / 100);
+        val.classList.toggle('folha-manual', valorManualFolha(linha.valor_aluguel_manual) !== null);
+      } else { const s = tr.querySelector('.folha-valor-aluguel'); if (s) s.textContent = formatCurrency(linha.valor_aluguel); }
+      const fr = tr.querySelector('select[data-campo="frota_manual"]');
+      if (fr) fr.classList.toggle('folha-manual', !!linha.frota_manual);
+      tr.querySelectorAll('.folha-auto').forEach(b => { b.hidden = valorManualFolha(linha[b.dataset.campo]) === null; });
+      const set = (sel, txt) => { const el = tr.querySelector(sel); if (el) el.textContent = txt; };
+      set('.folha-total-descontos', formatCurrency(linha.total_descontos));
+      set('.folha-total-receber', formatCurrency(linha.total_receber));
+    };
+    const linhaDoCampo = el => ranking.find(x => x.tecnico === el.dataset.tecnico && x.periodo === el.dataset.periodo);
+    const aplicarEdicao = (el, campo, valor, de, para) => {
+      const linha = linhaDoCampo(el);
+      if (!linha) return;
+      const deTela = de(linha);
+      Object.assign(linha, recalcularCampoFolha(linha, campo, valor));
+      anotar(linha, el, deTela, para(linha));
+      const tr = el.closest('tr');
+      refletirAluguel(tr, linha);
+      marcarPendente(linha, tr);
+      desenharHoleriteSeAberto();
+    };
+    document.querySelectorAll('input.folha-edit[data-campo="dias_trab"], input.folha-edit[data-campo="dias_frota"], input.folha-edit[data-campo="dias_aluguel_manual"]').forEach(inp => {
       inp.addEventListener('change', () => {
+        const campo = inp.dataset.campo;
+        // Dias Aluguel apagado = volta pro automático
+        if (campo === 'dias_aluguel_manual' && inp.value.trim() === '') {
+          aplicarEdicao(inp, campo, null, l => l.dias_aluguel, l => `automático (${l.dias_aluguel})`);
+          return;
+        }
         const valor = Math.max(0, parseInt(inp.value, 10) || 0);
         inp.value = valor;
-        const { tecnico, periodo, campo } = inp.dataset;
-        const linha = ranking.find(x => x.tecnico === tecnico && x.periodo === periodo);
-        if (!linha) return;
-        Object.assign(linha, recalcularCampoFolha(linha, campo, valor));
-        // dias e valor do aluguel + totais, só nessa linha
-        const tr = inp.closest('tr');
-        const set = (sel, txt) => { const el = tr.querySelector(sel); if (el) el.textContent = txt; };
-        set('.folha-dias-aluguel', linha.dias_aluguel);
-        set('.folha-valor-aluguel', formatCurrency(linha.valor_aluguel));
-        set('.folha-total-descontos', formatCurrency(linha.total_descontos));
-        set('.folha-total-receber', formatCurrency(linha.total_receber));
-        marcarPendente(linha, tr);
-        desenharHoleriteSeAberto();
+        aplicarEdicao(inp, campo, valor, l => campo === 'dias_aluguel_manual' ? l.dias_aluguel : (l[campo] ?? ''), () => valor);
+      });
+    });
+    document.querySelectorAll('select.folha-edit[data-campo="frota_manual"]').forEach(sel => {
+      sel.addEventListener('change', () => aplicarEdicao(sel, 'frota_manual', sel.value || null,
+        l => l.frota, l => sel.value ? l.frota : `automático (${l.frota})`));
+    });
+    document.querySelectorAll('button.folha-auto').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const campo = btn.dataset.campo, ehValor = campo === 'valor_aluguel_manual';
+        aplicarEdicao(btn, campo, null,
+          l => ehValor ? formatCurrency(l.valor_aluguel) : l.dias_aluguel,
+          l => `automático (${ehValor ? formatCurrency(l.valor_aluguel) : l.dias_aluguel})`);
       });
     });
     // "Parcela X" — texto livre, não mexe em nenhum total (só marca pendente).
@@ -20698,6 +20856,7 @@ function renderFolhaPagamento(modo) {
         const { tecnico, periodo, campo } = inp.dataset;
         const linha = ranking.find(x => x.tecnico === tecnico && x.periodo === periodo);
         if (!linha) return;
+        anotar(linha, inp, linha[campo] || '', valor);
         Object.assign(linha, recalcularCampoFolha(linha, campo, valor));
         marcarPendente(linha, inp.closest('tr'));
         desenharHoleriteSeAberto();
@@ -20721,12 +20880,12 @@ function renderFolhaPagamento(modo) {
         const { tecnico, periodo, campo } = inp.dataset;
         const linha = ranking.find(x => x.tecnico === tecnico && x.periodo === periodo);
         if (!linha) return;
+        const de = campo === 'valor_aluguel_manual' ? linha.valor_aluguel : linha[campo];
+        anotar(linha, inp, formatCurrency(Number(de) || 0), formatCurrency(valor));
         Object.assign(linha, recalcularCampoFolha(linha, campo, valor));
-        // só a linha editada: TOTAL DESCONTOS e TOTAL A RECEBER dessa mesma linha
+        // só a linha editada: aluguel, TOTAL DESCONTOS e TOTAL A RECEBER dela
         const tr = inp.closest('tr');
-        const tdDesc = tr.querySelector('.folha-total-descontos'), tdReceber = tr.querySelector('.folha-total-receber');
-        if (tdDesc) tdDesc.textContent = formatCurrency(linha.total_descontos);
-        if (tdReceber) tdReceber.textContent = formatCurrency(linha.total_receber);
+        refletirAluguel(tr, linha);
         marcarPendente(linha, tr);
         desenharHoleriteSeAberto();
       });
@@ -20737,13 +20896,21 @@ function renderFolhaPagamento(modo) {
       const entradas = [...pendentes.entries()];
       const resultados = await Promise.all(entradas.map(async ([linha]) => ({ linha, r: await salvarLinhaFolha(linha) })));
       let falhas = 0;
+      const regsHist = [];
       resultados.forEach(({ linha, r }) => {
         if (r.ok) {
           const tr = pendentes.get(linha);
           if (tr) tr.classList.remove('linha-nao-salva');
           pendentes.delete(linha);
+          Object.entries(alteracoes.get(linha) || {}).forEach(([campo, x]) => {
+            // "PRÓPRIO" → "automático (PRÓPRIO)" é ir e voltar: não mudou nada
+            const limpo = s => String(s).replace(/^automático \((.*)\)$/, '$1');
+            if (limpo(x.de) !== limpo(x.para)) regsHist.push({ periodo: linha.periodo, tecnico: linha.tecnico, campo, rotulo: x.rotulo, de: x.de, para: x.para });
+          });
+          alteracoes.delete(linha);
         } else falhas++;
       });
+      if (regsHist.length) { await registrarHistoricoFolha(regsHist); pintarHistoricoFolha(); }
       // atualiza só os botões (habilita/desabilita pelo que sobrou em
       // `pendentes`) — NÃO chama atualizarBarraSalvar() aqui: ela também
       // reescreve a mensagem, e apagaria o "salvo"/"não consegui" que acabou
@@ -20878,6 +21045,11 @@ async function salvarValorSp(periodo, chave, valor, ehPadrao) {
   DB.valoresSpHistorico.push(reg);
   DB_INDEX.valoresSpHistorico.set(reg.chave, DB.valoresSpHistorico.length - 1);
   const sync = await syncBatchToSupabase('valoresSpHistorico', [reg]);
+  const desc = chave === SP_CHAVE_DESCONSIDERAR;
+  await registrarHistoricoFolha([{ periodo, tecnico: '—', campo: 'sp_' + chave,
+    rotulo: desc ? 'Desconsiderar SP' : 'Valor ' + SP_ROTULO[chave],
+    de: desc ? (anterior === 1 ? 'ligado' : 'desligado') : formatCurrency(anterior),
+    para: desc ? (valor === 1 ? 'ligado' : 'desligado') : formatCurrency(valor) }]);
   const r = await reaplicarOrdensNaFolha(periodo);
   return { mudou: true, sync, alteradas: r.alteradas };
 }
@@ -21342,6 +21514,19 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
   // material (é o mesmo assunto: o que o técnico está pagando aos poucos).
   const inputParcela = (r, campo, valor) => `<input type="text" class="folha-edit folha-edit-parcela"
     data-campo="${campo}" ${attrsChave(r)} value="${esc(valor || '')}" placeholder="-" style="width:52px;text-align:center">`;
+  // Frota / Dias Aluguel / Valor Aluguel editáveis (02/10/2026): vazio = automático.
+  // ↺ volta pro automático; a opção "(auto)" da Frota mostra a frota da tabela de Frota.
+  const FROTAS_FOLHA = ['PRÓPRIO', 'PRÓPRIO NOVO', 'JH'];
+  const botaoAuto = (r, campo) => `<button type="button" class="folha-auto" data-campo="${campo}" ${attrsChave(r)}
+    title="Voltar ao automático"${valorManualFolha(r[campo]) === null ? ' hidden' : ''}>↺</button>`;
+  const selectFrota = r => {
+    const auto = r._frotaAuto || frotaRealDaLinha(r) || '';
+    const man = r.frota_manual || '';
+    return `<select class="folha-edit${man ? ' folha-manual' : ''}" data-campo="frota_manual" ${attrsChave(r)} title="(auto) = tabela de Frota">
+      <option value="" data-export="${esc(auto)}">${esc(auto || '-')} (auto)</option>
+      ${FROTAS_FOLHA.map(f => `<option value="${f}"${man && normalizeHeader(man) === normalizeHeader(f) ? ' selected' : ''}>${f}</option>`).join('')}
+    </select>`;
+  };
   const cols = [
     ['Técnico', r=>r.tecnico],
     // Período logo depois do nome: sem ele, com o filtro em "Todos os
@@ -21405,20 +21590,32 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     // frota" — antes a Folha só mostrava a coluna da planilha, sem checar se
     // batia com o cadastro. Cacheia por técnico+período (a mesma linha é lida
     // 3x: Frota, Dias Aluguel e Valor Aluguel).
-    ['Frota', r => esc(frotaRealDaLinha(r) || r.frota || '-')],
+    ['Frota', r => podePagamento(r) ? selectFrota(r) : esc(r.frota || frotaRealDaLinha(r) || '-')],
     // Dias em que o técnico de carro PRÓPRIO rodou com carro da empresa — saem
     // da conta do aluguel (ver aluguelDaLinha). Vazio = vem da aba
     // DESVINCULAÇÕES da Frota; o RH/Analista corrige digitando.
     ['Dias c/ Frota', r => podePagamento(r) ? inputNumero(r, 'dias_frota', r.dias_frota) : String(r.dias_frota || 0)],
-    ['Dias Aluguel', r=>`<span class="folha-dias-aluguel">${r.dias_aluguel ?? 0}</span>`],
+    ['Dias Aluguel', r => {
+      if (!podePagamento(r)) return `<span class="folha-dias-aluguel">${r.dias_aluguel ?? 0}</span>`;
+      const man = valorManualFolha(r.dias_aluguel_manual) !== null;
+      return `<span style="white-space:nowrap"><input type="number" class="folha-edit${man ? ' folha-manual' : ''}" step="1" min="0"
+        data-campo="dias_aluguel_manual" ${attrsChave(r)} value="${r.dias_aluguel ?? 0}" style="width:64px" title="Apague pra voltar ao automático">${botaoAuto(r, 'dias_aluguel_manual')}</span>`;
+    }],
     ['Valor Aluguel', r => {
       const v = Number(r.valor_aluguel) || 0;
-      const frotaDaLinha = frotaRealDaLinha(r) || r.frota || '';
+      const frotaDaLinha = r.frota || frotaRealDaLinha(r) || '';
       const ehJh = /jh/i.test(frotaDaLinha) && !/propri/i.test(frotaDaLinha);
-      if (ehJh && v > 0) return `<span class="folha-valor-aluguel" style="color:var(--danger)" title="Este técnico está na tabela de Frota (carro da empresa) — não deveria receber aluguel. Confira o valor lançado na folha.">${money(v)} ⚠</span>`;
-      return `<span class="folha-valor-aluguel">${money(v)}</span>`;
+      if (!podePagamento(r)) {
+        if (ehJh && v > 0) return `<span class="folha-valor-aluguel" style="color:var(--danger)" title="Este técnico está na tabela de Frota (carro da empresa) — não deveria receber aluguel. Confira o valor lançado na folha.">${money(v)} ⚠</span>`;
+        return `<span class="folha-valor-aluguel">${money(v)}</span>`;
+      }
+      const man = valorManualFolha(r.valor_aluguel_manual) !== null;
+      const centavos = Math.round(v * 100);
+      return `<span style="white-space:nowrap"><input type="text" inputmode="decimal" class="folha-edit folha-edit-moeda folha-sem-destaque${man ? ' folha-manual' : ''}"
+        data-campo="valor_aluguel_manual" ${attrsChave(r)} data-centavos="${centavos}" value="${formatCurrency(centavos / 100)}"
+        style="width:110px;text-align:right${ehJh && v > 0 ? ';border-color:var(--danger)' : ''}"${ehJh && v > 0 ? ' title="Carro da empresa — não deveria ter aluguel"' : ''}>${botaoAuto(r, 'valor_aluguel_manual')}</span>`;
     }],
-    ['Empréstimo', r=>money(r.emprestimo)],
+    ['Empréstimo', r => podePagamento(r) ? inputMoeda(r, 'emprestimo', r.emprestimo) : money(r.emprestimo)],
     ['Desc. IFI', r=>money(r.desc_ifi)], ['Desc. IRR', r=>money(r.desc_irr)],
     ['Desc. Equipamento', r => podeMaterial(r) ? inputMoeda(r, 'desc_equipamento', r.desc_equipamento) : money(r.desc_equipamento)],
     ['Desc. Multa', r => podeMaterial(r) ? inputMoeda(r, 'desc_multa', r.desc_multa) : money(r.desc_multa)],
