@@ -2621,6 +2621,11 @@ const SUPABASE_TABLES = {
   // CSV novo (ver sincronizarChamadosGiga) — por isso fica em
   // TABELAS_SEM_CACHE, não entra no cache incremental.
   chamadosGiga:    { table: 'chamados_giga',        conflict: 'protocolo' },
+  // Ordens feitas em SÃO PAULO (planilha "Produção Litoral …" que o cliente importa
+  // na Folha) e HISTÓRICO do valor pago por ordem de SP (02/10/2026). Tabelas
+  // pequenas, fora do cache (ver TABELAS_SEM_CACHE). sql/PASSO-31-ordens-sp.sql
+  ordensSp:        { table: 'ordens_sp',            conflict: 'os' },
+  valoresSpHistorico: { table: 'valores_sp_historico', conflict: 'chave' },
 };
 // devolve os campos de data de uma linha do PCR ao formato Date
 function hidratarLinhaPCR(r) {
@@ -2912,7 +2917,7 @@ const CACHE_VERSAO = 1;
 // gratuito. Delta por `atualizado_em` + conferência de contagem continuam
 // valendo em toda entrada; só a recarga de segurança ficou mais espaçada.
 const CACHE_VALIDADE_MS = 7 * 24 * 60 * 60 * 1000;
-const TABELAS_SEM_CACHE = new Set(['pcr', 'clean_up', 'presenca_escritorio_folgas', 'chamados_giga']);
+const TABELAS_SEM_CACHE = new Set(['pcr', 'clean_up', 'presenca_escritorio_folgas', 'chamados_giga', 'ordens_sp', 'valores_sp_historico']);
 
 let cacheDbPromessa = null;
 function cacheAbrir() {
@@ -3170,6 +3175,7 @@ const SCRIPT_DA_TABELA = {
   presenca_escritorio_log: 'PASSO-5', presenca_escritorio_folgas: 'PASSO-5',
   folha_escritorio: 'PASSO-18',
   chamados_giga: 'PASSO-25',
+  ordens_sp: 'PASSO-31', valores_sp_historico: 'PASSO-31',
 };
 // Barra de aviso do topo. Substitui o alerta que travava a tela a cada login:
 // tabela que falta não impede nada, então vira uma linha discreta com o que
@@ -3535,6 +3541,8 @@ const DB = {
   // não confundir com retornosGiga acima (aquele é a planilha de retorno
   // IFI/IRR do fechamento; este é o chamado de atendimento em aberto).
   chamadosGiga: [],
+  ordensSp: [],            // ordens de SP importadas na Folha (concluídas valem pro técnico)
+  valoresSpHistorico: [],  // histórico do valor por ordem de SP, por ciclo
 };
 // Índices por "chave natural" — permitem que reimportar a mesma planilha (ou uma
 // versão atualizada dela) SUBSTITUA os registros já existentes em vez de duplicar.
@@ -3549,6 +3557,7 @@ const DB_INDEX = {
   presencaTecnicos: new Map(), presenca: new Map(),
   presencaEscritorioPessoas: new Map(), presencaEscritorio: new Map(),
   chamadosGiga: new Map(),
+  ordensSp: new Map(), valoresSpHistorico: new Map(),
 };
 
 // ===================== CLEAN UP — BASE JÁ EMBUTIDA =====================
@@ -9543,14 +9552,12 @@ async function salvarLinhaFolha(linha) {
 // bônus na mão (ver salvarCampoFolha) mesmo sem o indicador bater, e isso
 // también precisa valer o valor de 26 dias.
 function valorOrdensDoPeriodo(tecnico, inicio, fim, apto) {
-  let valor = 0;
-  DB.producao.forEach(p => {
-    if (!isConcluido(p.status) || !inRange(p.data, inicio, fim)) return;
-    if (normalizeHeader(p.recurso) !== normalizeHeader(tecnico)) return;
-    const l = linhaValorOrdem(p.tipo_atividade, p.data);
-    if (l) valor += apto ? l.d26 : l.normal;
-  });
-  return valor;
+  // MESMA conta da tabela/holerite (quebraPorTipoDoTecnico): as ordens de SÃO
+  // PAULO (da Produção e as importadas) valem o valor de SP do ciclo, não a tarifa.
+  const lista = DB.producao.filter(p => normalizeHeader(p.recurso) === normalizeHeader(tecnico));
+  const periodo = `${formatDate(inicio)} a ${formatDate(fim)}`;
+  const q = quebraPorTipoDoTecnico(lista.concat(ordensSpDoTecnico(tecnico)), { inicio, fim }, apto, periodo);
+  return TIPOS_FOLHA.reduce((a, t) => a + (q['v_' + t.chave] || 0), 0);
 }
 // campos que o Almoxarifado/RH preenche à mão na própria tela da Folha
 // (salvarCampoFolha) — não vêm da Produção, então gerarPeriodoFolha nunca pode
@@ -19914,7 +19921,17 @@ function renderFolhaPagamento(modo) {
       <div class="field" style="margin:0"><label>Planilha da GIGA</label><input type="file" id="fol-giga-file" accept=".xlsx,.xls"></div>
       <span id="fol-giga-msg" style="font-size:13px"></span>
     </div>
+    <p style="font-size:12px;color:var(--text-muted);margin:16px 0 10px">
+      <b>Ordens feitas em São Paulo</b> — envie a planilha "Produção Litoral …" (uma tabela por técnico).
+      Só entram as <b>concluídas</b>, uma vez por O.S: a que a Produção já tem não é paga duas vezes.
+      Reenviar o mesmo período substitui o anterior.
+    </p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <div class="field" style="margin:0"><label>Planilha de São Paulo</label><input type="file" id="fol-sp-file" accept=".xlsx,.xls"></div>
+      <span id="fol-sp-msg" style="font-size:13px"></span>
+    </div>
   </div>` : ''}
+  ${soRelatorio ? '' : '<div id="fol-sp-painel"></div>'}
   <div id="folha-body"></div>`;
   document.getElementById('f-apply').addEventListener('click', load);
   // ---- planilha de retornos da GIGA ----
@@ -19997,8 +20014,113 @@ function renderFolhaPagamento(modo) {
     };
     leitor.readAsArrayBuffer(arquivo);
   });
+  // ---- importar as ordens de São Paulo ----
+  const inputSp = document.getElementById('fol-sp-file');
+  if (inputSp) inputSp.addEventListener('change', () => {
+    const arquivo = inputSp.files && inputSp.files[0];
+    const msg = document.getElementById('fol-sp-msg');
+    if (!arquivo) return;
+    if (typeof XLSX === 'undefined') { msg.innerHTML = '<span style="color:var(--danger)">A biblioteca de planilha não carregou (sem internet?).</span>'; inputSp.value = ''; return; }
+    msg.innerHTML = '<span style="color:var(--text-muted)">Lendo a planilha…</span>';
+    const leitor = new FileReader();
+    leitor.onload = async ev => {
+      try {
+        const wb = XLSX.read(ev.target.result, { type: 'array', cellDates: true });
+        let lido = null;
+        for (const nome of wb.SheetNames) {
+          const tent = lerOrdensSpDaPlanilha(XLSX.utils.sheet_to_json(wb.Sheets[nome], { header: 1, raw: true, defval: null }));
+          if (!tent.erro) { lido = tent; break; }
+          lido = lido || tent;
+        }
+        if (lido.erro) { msg.innerHTML = `<span style="color:var(--danger)">${esc(lido.erro)}</span>`; return; }
+        if (!lido.ordens.length) { msg.innerHTML = '<span style="color:var(--warn-text)">Nenhuma ordem encontrada na planilha.</span>'; return; }
+        const r = await importarOrdensSp(lido.ordens);
+        const partes = [`<span style="color:var(--success)">${r.concluidas} ordem(ns) concluída(s) de SP lida(s)</span> <span style="color:var(--text-muted)">(${r.total - r.concluidas} não concluída(s) guardada(s), não pagam)</span>`];
+        if (r.repetidasNaProducao.length) partes.push(`<span style="color:var(--warn-text)">${r.repetidasNaProducao.length} já estava(m) na Produção (${esc(r.repetidasNaProducao.map(o => o.os).join(', '))}) — contada(s) uma vez só</span>`);
+        partes.push(`<span style="color:var(--success)">${r.novas} nova(s) na folha</span>`);
+        partes.push(esc(Object.entries(r.porTecnico).map(([t, n]) => `${t}: ${n}`).join(' · ')));
+        if (r.sobrando) partes.push(`<span style="color:var(--text-muted)">${r.sobrando} ordem(ns) antiga(s) do mesmo período substituída(s)</span>`);
+        if (!r.periodos.length) partes.push('<span style="color:var(--warn-text)">nenhum ciclo da folha cobre essas datas — as ordens ficaram guardadas e entram quando a folha do ciclo existir</span>');
+        if (supa) partes.push(r.sync && r.sync.ok !== false
+          ? '<span style="color:var(--success)">salvo no Supabase</span>'
+          : `<span style="color:var(--danger)">não consegui salvar: ${esc((r.sync && r.sync.error && r.sync.error.message) || 'erro desconhecido')} — rode o sql/PASSO-31-ordens-sp.sql</span>`);
+        msg.innerHTML = partes.join(' — ');
+        toast(`${r.novas} ordem(ns) de SP lançada(s) na folha.`, 'ok', 2500);
+        load();
+      } catch (e) {
+        msg.innerHTML = `<span style="color:var(--danger)">Erro ao ler a planilha: ${esc(e.message)}</span>`;
+      }
+      inputSp.value = '';
+    };
+    leitor.readAsArrayBuffer(arquivo);
+  });
+  // ---- painel "Valor por ordem de São Paulo" (em cima da tabela) ----
+  // Uma caixinha por tipo (Ativação SP, M.E SP), "Padrão" volta ao valor de sempre
+  // (R$ 80,00) e o histórico guarda cada troca (ciclo, tipo, de → para, quem, quando).
+  function pintarPainelSp() {
+    const alvo = document.getElementById('fol-sp-painel');
+    if (!alvo) return;
+    const sel = document.getElementById('f-periodo');
+    const per = (sel && sel.value && sel.value !== '__sem_periodo__') ? sel.value : periodoPadraoFolha;
+    if (!per) { alvo.innerHTML = ''; return; }
+    const pode = podeEditarFolhaPagamento();
+    const hist = [...DB.valoresSpHistorico].sort((a, b) => String(b.alterado_em).localeCompare(String(a.alterado_em)));
+    const qtdSp = {};
+    DB.folhaPagamento.filter(l => l.periodo === per).forEach(l => {
+      const apto = /apto/i.test(l.bonus || '') && !/inapto/i.test(l.bonus || '');
+      const q = quebraPorTipoDaLinha(l, apto);
+      Object.keys(SP_VALOR_PADRAO).forEach(c => { qtdSp[c] = (qtdSp[c] || 0) + (q[c] || 0); });
+    });
+    const caixa = chave => {
+      const v = valorSpDoPeriodo(per, chave), ehPad = Math.abs(v - SP_VALOR_PADRAO[chave]) < 0.005;
+      const centavos = Math.round(v * 100);
+      return `<div class="field" style="margin:0;min-width:200px">
+        <label>${SP_ROTULO[chave]} — por ordem</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="text" inputmode="decimal" class="sp-valor-input" data-chave="${chave}" data-centavos="${centavos}" value="${formatCurrency(v)}"
+            style="width:130px;text-align:right" ${pode ? '' : 'disabled'}>
+          <button type="button" class="btn-secundario sp-padrao" data-chave="${chave}" ${(!pode || ehPad) ? 'disabled' : ''} title="Volta pro valor padrão (${formatCurrency(SP_VALOR_PADRAO[chave])})">Padrão</button>
+        </div>
+        <span style="font-size:11px;color:var(--text-muted)">${ehPad ? 'padrão' : `padrão: ${formatCurrency(SP_VALOR_PADRAO[chave])}`} · ${qtdSp[chave] || 0} ordem(ns) no ciclo</span>
+      </div>`;
+    };
+    alvo.innerHTML = `<div class="panel" style="margin-bottom:1.5rem">
+      <h3 style="margin:0 0 6px">Valor por ordem de São Paulo — ciclo ${esc(per)}</h3>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">As ordens feitas em São Paulo pagam um valor próprio (hoje R$ 80,00 na Ativação e na Mudança de Endereço), diferente do Litoral. O valor vale pro ciclo inteiro e refaz o total de todos os técnicos na hora. ${pode ? 'Digite o valor e tecle Enter (ou saia do campo) pra salvar.' : 'Só RH/Analista alteram.'}</p>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">${Object.keys(SP_VALOR_PADRAO).map(caixa).join('')}</div>
+      <details style="margin-top:14px"><summary style="cursor:pointer;color:var(--text-secondary)">Histórico de valores (${hist.length})</summary>
+        ${!hist.length ? '<div class="empty" style="margin-top:8px">Nenhuma alteração ainda — vale o padrão.</div>' : `
+        <div class="table-wrap" style="margin-top:8px"><table class="data-table"><thead><tr><th>Quando</th><th>Ciclo</th><th>Tipo</th><th>De</th><th>Para</th><th>Quem</th></tr></thead><tbody>
+          ${hist.slice(0, 40).map(x => `<tr><td>${esc(new Date(x.alterado_em).toLocaleString('pt-BR'))}</td><td>${esc(x.periodo)}</td><td>${esc(SP_ROTULO[x.tipo] || x.tipo)}</td><td>${formatCurrency(Number(x.anterior))}</td><td style="font-weight:700">${formatCurrency(Number(x.valor))}${x.padrao ? ' <span class="badge neutral">padrão</span>' : ''}</td><td>${esc(x.alterado_por || '-')}</td></tr>`).join('')}
+        </tbody></table></div>`}
+      </details>
+      <div id="fol-sp-aviso" style="font-size:13px;margin-top:8px"></div>
+    </div>`;
+    const aviso = alvo.querySelector('#fol-sp-aviso');
+    const gravar = async (chave, valor, padrao) => {
+      aviso.innerHTML = '<span style="color:var(--text-muted)">Salvando…</span>';
+      const r = await salvarValorSp(per, chave, valor, padrao);
+      if (!r.mudou) { aviso.innerHTML = ''; pintarPainelSp(); return; }
+      toast(`${SP_ROTULO[chave]}: ${formatCurrency(valor)} por ordem${padrao ? ' (padrão)' : ''}.`, 'ok', 2500);
+      load();   // refaz a tabela e este painel já com o valor novo
+      if (r.sync && r.sync.ok === false) {
+        const av = document.getElementById('fol-sp-aviso');
+        if (av) av.innerHTML = `<span style="color:var(--danger)">Valor aplicado nesta tela, mas não consegui salvar o histórico no banco: ${esc((r.sync.error && r.sync.error.message) || 'erro')} — rode o sql/PASSO-31-ordens-sp.sql</span>`;
+      }
+    };
+    alvo.querySelectorAll('.sp-valor-input').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const c = parseInt(inp.value.replace(/\D/g, '') || '0', 10);
+        inp.dataset.centavos = c; inp.value = formatCurrency(c / 100);
+      });
+      inp.addEventListener('change', () => gravar(inp.dataset.chave, parseInt(inp.dataset.centavos || '0', 10) / 100, false));
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
+    });
+    alvo.querySelectorAll('.sp-padrao').forEach(btn => btn.addEventListener('click', () => gravar(btn.dataset.chave, SP_VALOR_PADRAO[btn.dataset.chave], true)));
+  }
   load();
   function load() {
+    pintarPainelSp();
     const tech = document.getElementById('f-tech').value.toLowerCase();
     const periodoEl = document.getElementById('f-periodo');
     const periodo = periodoEl ? periodoEl.value : '';
@@ -20500,6 +20622,106 @@ function renderFolhaPagamento(modo) {
 // reescrever o fechamento do técnico, que é o número oficial. O botão
 // "Refazer pelo sistema" joga o ajuste fora e volta pro calculado.
 const HOLERITE_MANUAL = {};
+// ===================== ORDENS DE SÃO PAULO — importação, valores e histórico =====================
+// Lê a planilha "Produção Litoral …" (uma tabela por técnico, com linhas de título
+// "Recurso: X / Contagem: N" no meio). Cabeçalho: Recurso | Data Execução | Status |
+// Nome do Cliente | Cidade | Tipo de Atividade | Ordem | Contrato.
+function lerOrdensSpDaPlanilha(rows) {
+  const norm = v => normalizeHeader(v);
+  const iCab = rows.findIndex(r => (r || []).some(c => norm(c) === 'recurso') && (r || []).some(c => norm(c) === 'ordem'));
+  if (iCab < 0) return { erro: 'Não achei o cabeçalho (Recurso, Data Execução, Status, Cliente, Cidade, Tipo de Atividade, Ordem, Contrato).' };
+  const cab = rows[iCab].map(norm);
+  const col = (...nomes) => cab.findIndex(c => nomes.some(n => c === n || c.startsWith(n)));
+  const iRec = col('recurso'), iData = col('data'), iSt = col('status'), iCli = col('nome do cliente', 'cliente'),
+    iCid = col('cidade'), iTipo = col('tipo de atividade', 'atividade', 'ativiadade'), iOs = col('ordem'), iCtt = col('contrato');
+  if ([iRec, iData, iSt, iTipo, iOs].some(i => i < 0)) return { erro: 'Faltam colunas na planilha (Recurso, Data, Status, Tipo de Atividade e Ordem são obrigatórias).' };
+  const porOs = new Map(); let linhas = 0;
+  rows.slice(iCab + 1).forEach(r => {
+    if (!r) return;
+    const recurso = String(r[iRec] || '').trim();
+    const os = normalizeChaveOS(String(r[iOs] ?? '').replace(/\.0+$/, ''));
+    const data = excelDateToISO(r[iData]);
+    if (!recurso || /^recurso\s*:/i.test(recurso) || !os || !data) return;   // linha de título do grupo / lixo
+    linhas++;
+    const nova = {
+      os, data, recurso, status: String(r[iSt] || '').trim(), cidade: String(r[iCid] || 'SAO PAULO').trim().toUpperCase() || 'SAO PAULO',
+      tipo_atividade: String(r[iTipo] || '').trim(), cliente: iCli >= 0 ? String(r[iCli] || '').trim() : '', contrato: iCtt >= 0 ? String(r[iCtt] ?? '').trim() : '',
+    };
+    // a mesma O.S aparece mais de uma vez (tentativa "não concluído" e depois a
+    // concluída, às vezes por outro técnico): vale a CONCLUÍDA, e a mais recente
+    const ant = porOs.get(os);
+    if (!ant || (isConcluido(nova.status) && (!isConcluido(ant.status) || nova.data >= ant.data))) porOs.set(os, nova);
+  });
+  return { ordens: [...porOs.values()], linhas };
+}
+function periodosDaFolhaQueCobrem(dataISO) {
+  return [...new Set(DB.folhaPagamento.map(r => r.periodo))].filter(per => {
+    const j = datasDoPeriodoFolha(per);
+    return j.inicio && inRange(dataISO, j.inicio, j.fim);
+  });
+}
+// Refaz Total de ordens / Valor / Total a receber GRAVADOS nas linhas do ciclo com
+// a conta atual (ordens de SP + valor de SP) e salva. Chamado depois de importar
+// ordens de SP e depois de mudar o valor de SP — a tela já recalcula sozinha ao
+// desenhar, isto é pro que fica no banco (Excel, holerite, outras telas).
+async function reaplicarOrdensNaFolha(periodo) {
+  const alteradas = [];
+  DB.folhaPagamento.forEach((l, i) => {
+    if (l.periodo !== periodo) return;
+    const apto = /apto/i.test(l.bonus || '') && !/inapto/i.test(l.bonus || '');
+    const q = quebraPorTipoDaLinha(l, apto);
+    const total = TIPOS_FOLHA.reduce((a, t) => a + (q[t.chave] || 0), 0);
+    const valor = TIPOS_FOLHA.reduce((a, t) => a + (q['v_' + t.chave] || 0), 0);
+    if (!total) return;
+    if (l.total_ordens === total && Math.abs((Number(l.valor_total_ordens) || 0) - valor) < 0.005) return;
+    const nova = { ...l, total_ordens: total, valor_total_ordens: valor };
+    nova.total_receber = totalReceberFolha(nova);
+    DB.folhaPagamento[i] = nova;
+    alteradas.push(nova);
+  });
+  const sync = alteradas.length ? await syncBatchToSupabase('folhaPagamento', alteradas) : { ok: true };
+  return { alteradas: alteradas.length, sync };
+}
+async function importarOrdensSp(ordens) {
+  const quem = currentUser ? (currentUser.nome || currentUser.login) : null, quando = new Date().toISOString();
+  const concl = ordens.filter(o => isConcluido(o.status));
+  const jaTem = osConcluidasDaProducao();
+  const repetidasNaProducao = concl.filter(o => jaTem.has(normalizeChaveOS(o.os)));
+  // reimportar o mesmo período SUBSTITUI: ordem que estava gravada naquele intervalo de
+  // datas e não veio no arquivo novo é apagada (senão ficava pagando ordem fantasma)
+  const datas = ordens.map(o => o.data).sort();
+  const noArquivo = new Set(ordens.map(o => o.os));
+  const sobrando = (DB.ordensSp || []).filter(r => r.data >= datas[0] && r.data <= datas[datas.length - 1] && !noArquivo.has(r.os)).map(r => r.os);
+  if (sobrando.length) {
+    DB.ordensSp = DB.ordensSp.filter(r => !sobrando.includes(r.os));
+    DB_INDEX.ordensSp = new Map(DB.ordensSp.map((r, i) => [r.os, i]));
+    if (supa) { try { for (let i = 0; i < sobrando.length; i += 100) await supa.from('ordens_sp').delete().in('os', sobrando.slice(i, i + 100)); } catch (e) { console.error('[ordens_sp] limpeza falhou', e); } }
+  }
+  const linhas = ordens.map(o => ({ ...o, importado_por: quem, importado_em: quando }));
+  linhas.forEach(r => { DB.ordensSp = DB.ordensSp || []; upsertRow(DB.ordensSp, DB_INDEX.ordensSp, r.os, r); });
+  const sync = await syncBatchToSupabase('ordensSp', linhas);
+  const periodos = [...new Set(ordens.flatMap(o => periodosDaFolhaQueCobrem(o.data)))];
+  let alteradas = 0;
+  for (const per of periodos) alteradas += (await reaplicarOrdensNaFolha(per)).alteradas;
+  const porTecnico = {};
+  concl.forEach(o => { porTecnico[o.recurso] = (porTecnico[o.recurso] || 0) + 1; });
+  return { total: ordens.length, concluidas: concl.length, repetidasNaProducao, novas: concl.length - repetidasNaProducao.length, porTecnico, periodos, alteradas, sobrando: sobrando.length, sync };
+}
+// Troca o valor de SP de UM tipo num ciclo (ou volta ao padrão) e guarda no histórico.
+async function salvarValorSp(periodo, chave, valor, ehPadrao) {
+  const anterior = valorSpDoPeriodo(periodo, chave);
+  if (Math.abs(anterior - valor) < 0.005) return { mudou: false };
+  const quando = new Date().toISOString();
+  const reg = {
+    chave: `${periodo}|${chave}|${Date.now()}`, periodo, tipo: chave, valor, anterior, padrao: !!ehPadrao,
+    alterado_por: currentUser ? (currentUser.nome || currentUser.login) : null, alterado_em: quando,
+  };
+  DB.valoresSpHistorico.push(reg);
+  DB_INDEX.valoresSpHistorico.set(reg.chave, DB.valoresSpHistorico.length - 1);
+  const sync = await syncBatchToSupabase('valoresSpHistorico', [reg]);
+  const r = await reaplicarOrdensNaFolha(periodo);
+  return { mudou: true, sync, alteradas: r.alteradas };
+}
 // ===================== QUEBRA POR TIPO DE SERVIÇO (quantidade + valor) =====================
 // Usada pela tabela da Folha e pelo Holerite — uma conta só, pros dois nunca
 // discordarem. Além dos 5 tipos do contrato, separa as ordens feitas FORA do
@@ -20524,8 +20746,48 @@ function quebraPorTipoVazia() {
   TIPOS_FOLHA.forEach(t => { o[t.chave] = 0; o['v_' + t.chave] = 0; });
   return o;
 }
-function quebraPorTipoDoTecnico(ordens, janela, apto) {
+// ---- ORDENS DE SÃO PAULO (02/10/2026, pedido do cliente) ----
+// A JH Litoral também faz ordem em SP e ela paga DIFERENTE da do Litoral: hoje
+// R$ 80,00 por Ativação e por Mudança de Endereço (era o `=C*80` / `=F*80` da
+// planilha da folha). O valor é POR CICLO e editável na tela da Folha, com
+// botão "Padrão" e histórico (valores_sp_historico). Reparo/Upgrade/M.Cômodo de SP
+// continuam na linha normal do tipo (não existe linha "SP" pra eles).
+const SP_VALOR_PADRAO = { ativacao_sp: 80, mudanca_endereco_sp: 80 };
+const SP_ROTULO = { ativacao_sp: 'Ativação SP', mudanca_endereco_sp: 'M.E SP' };
+function valorSpDoPeriodo(periodo, chave) {
+  let ult = null;
+  (DB.valoresSpHistorico || []).forEach(x => {
+    if (x.periodo === periodo && x.tipo === chave && (!ult || String(x.alterado_em) >= String(ult.alterado_em))) ult = x;
+  });
+  return ult ? Number(ult.valor) : SP_VALOR_PADRAO[chave];
+}
+// O.S que já estão na PRODUÇÃO como concluídas — a planilha de SP traz ordens que
+// a base já tinha (3 no ciclo 21/08–20/09, todas do Inácio em 29/08); contar as
+// duas fontes pagava a mesma ordem DUAS vezes. A O.S vale uma vez só.
+let _OS_PROD = { ref: null, n: -1, set: null };
+function osConcluidasDaProducao() {
+  if (_OS_PROD.ref !== DB.producao || _OS_PROD.n !== DB.producao.length) {
+    const set = new Set();
+    DB.producao.forEach(p => { if (p.os && isConcluido(p.status)) set.add(normalizeChaveOS(p.os)); });
+    _OS_PROD = { ref: DB.producao, n: DB.producao.length, set };
+  }
+  return _OS_PROD.set;
+}
+// Ordens de SP importadas desse técnico, no formato de uma linha da Produção
+// (cidade "SAO PAULO" cai no balde SP). Fora as que a Produção já tem.
+function ordensSpDoTecnico(tecnico) {
+  const lista = DB.ordensSp || [];
+  if (!lista.length) return [];
+  const jaTem = osConcluidasDaProducao();
+  const alvo = normalizeHeader(tecnico);
+  return lista
+    .filter(r => r.os && !jaTem.has(normalizeChaveOS(r.os)) && (normalizeHeader(r.recurso) === alvo || mesmaPessoa(r.recurso, tecnico)))
+    .map(r => ({ recurso: r.recurso, data: r.data, status: r.status, cidade: r.cidade || 'SAO PAULO', tipo_atividade: r.tipo_atividade, os: r.os, _sp: true }));
+}
+function quebraPorTipoDoTecnico(ordens, janela, apto, periodo) {
   const out = quebraPorTipoVazia();
+  const vSp = {};
+  Object.keys(SP_VALOR_PADRAO).forEach(c => { vSp[c] = periodo ? valorSpDoPeriodo(periodo, c) : SP_VALOR_PADRAO[c]; });
   ordens.forEach(p => {
     if (!isConcluido(p.status)) return;
     if (janela && janela.inicio && janela.fim && !inRange(p.data, janela.inicio, janela.fim)) return;
@@ -20541,6 +20803,7 @@ function quebraPorTipoDoTecnico(ordens, janela, apto) {
               || TIPOS_FOLHA.find(x => x.re.test(t) && !x.sp);
     if (!tipo) return;
     out[tipo.chave]++;
+    if (tipo.sp) { out['v_' + tipo.chave] += vSp[tipo.chave]; return; }   // SP: valor próprio do ciclo
     const l = linhaValorOrdem(p.tipo_atividade, p.data);
     if (l) out['v_' + tipo.chave] += apto ? l.d26 : l.normal;
   });
@@ -20591,12 +20854,18 @@ function baseBonusDaLinha(linha, mes, ordensDoTecnico) {
 function quebraPorTipoDaLinha(linha, apto, ordensDoTecnico) {
   const janela = datasDoPeriodoFolha(linha.periodo);
   const lista = ordensDoTecnico || DB.producao.filter(p => normalizeHeader(p.recurso) === normalizeHeader(linha.tecnico));
-  const prod = quebraPorTipoDoTecnico(lista, janela, apto);
+  // Produção + ordens de SP importadas (sem repetir a O.S que a Produção já tem)
+  const prod = quebraPorTipoDoTecnico(lista.concat(ordensSpDoTecnico(linha.tecnico)), janela, apto, linha.periodo);
   const f = janela.inicio ? (DB.fechamento || []).find(x => normalizeHeader(x.tecnico) === normalizeHeader(linha.tecnico)
     && x.inicio === janela.inicio && x.ate_o_dia === janela.fim && (x.total_geral || 0) > 0) : null;
   if (!f) return prod;
   const oficial = quebraPorTipoVazia();
-  const mapa = { ativacao: f.ativacao, mudanca_comodo: f.mc, mudanca_endereco: f.me, reparo: f.reparos, upgrade: f.upgrade };
+  // O RELATORIO oficial não tem linha de SP: as ordens de SP que a Produção já
+  // traz estão DENTRO das colunas Ativação/M.E dele. Passam pro balde SP (valor
+  // de SP) e saem do normal — senão a mesma ordem era paga duas vezes.
+  const soProd = quebraPorTipoDoTecnico(lista, janela, apto, linha.periodo);
+  const mapa = { ativacao: Math.max(0, (Number(f.ativacao) || 0) - soProd.ativacao_sp), mudanca_comodo: f.mc,
+    mudanca_endereco: Math.max(0, (Number(f.me) || 0) - soProd.mudanca_endereco_sp), reparo: f.reparos, upgrade: f.upgrade };
   const tabela = valoresVigentesEm(janela.fim);
   let totalOficial = 0;
   Object.entries(mapa).forEach(([chave, q]) => {
@@ -20606,6 +20875,10 @@ function quebraPorTipoDaLinha(linha, apto, ordensDoTecnico) {
     const t = TIPOS_FOLHA.find(x => x.chave === chave);
     const l = tabela.find(v => t.re.test(normalizeHeader(v.label)));
     if (l) oficial['v_' + chave] = qtd * (apto ? l.d26 : l.normal);
+  });
+  Object.keys(SP_VALOR_PADRAO).forEach(chave => {      // balde SP (Produção + importadas)
+    oficial[chave] = prod[chave]; oficial['v_' + chave] = prod['v_' + chave];
+    totalOficial += prod[chave];
   });
   const totalProd = TIPOS_FOLHA.reduce((a, t) => a + prod[t.chave], 0);
   return totalProd > totalOficial ? prod : oficial;
