@@ -9057,7 +9057,15 @@ function contarRetornosGiga(rows, inicio, fim) {
   if (iData < 0 || iInd < 0 || iExec < 0) {
     return { erro: 'Não encontrei as colunas "Data", "IND" e "Executor" nessa planilha. É o arquivo de retornos que a GIGA manda?' };
   }
-  const porTecnico = {};
+  // "Dt Exec" = data do serviço ANTERIOR (opcional). Com ela dá pra conferir a
+  // janela de garantia pelas DATAS: IFI até 15 dias, IRR até 30 (JANELA_IFI/JANELA_IRR).
+  // A coluna AGING da GIGA às vezes sai um dia a menos que a diferença de datas,
+  // e deixava passar retorno de 16 dias (IFI) e de 31 dias (IRR) — pedido do
+  // cliente em 02/10/2026: "pode tirar esses retornos dos técnicos na folha".
+  // Bate com a coluna oficial IFI-IRR da base (BASE_CONCLUIDOS): lá esses saem
+  // como "DESC" (fora da janela).
+  const iDtExec = col('Dt Exec'), iOs = col('Ordem de Serviço');
+  const porTecnico = {}, foraDaJanela = [];
   let noPeriodo = 0, fora = 0, semOfensor = 0;
   rows.slice(1).forEach(r => {
     const ind = String(r[iInd] || '').trim().toUpperCase();
@@ -9067,12 +9075,20 @@ function contarRetornosGiga(rows, inicio, fim) {
     if (inicio && fim && !inRange(dataISO, inicio, fim)) { fora++; return; }
     const ofensor = String(r[iExec] || '').trim();
     if (!ofensor) { semOfensor++; return; }
+    const anteriorISO = iDtExec >= 0 ? excelDateToISO(r[iDtExec]) : null;
+    if (anteriorISO) {
+      const dias = diasEntre(dataISO, anteriorISO);
+      if (dias > (ind === 'IFI' ? JANELA_IFI : JANELA_IRR)) {
+        foraDaJanela.push({ os: iOs >= 0 ? String(r[iOs] ?? '').trim() : '', ofensor, ind, dias });
+        return;
+      }
+    }
     noPeriodo++;
     const k = normalizeHeader(ofensor);
     if (!porTecnico[k]) porTecnico[k] = { nome: ofensor, ifi: 0, irr: 0 };
     porTecnico[k][ind === 'IFI' ? 'ifi' : 'irr']++;
   });
-  return { porTecnico, noPeriodo, fora, semOfensor };
+  return { porTecnico, noPeriodo, fora, semOfensor, foraDaJanela };
 }
 // O arquivo de retornos da GIGA traz a JH inteira — Litoral E São Paulo
 // (cliente, 01/10/2026: "vai aparecer técnicos que não são da JH Litoral").
@@ -9089,7 +9105,8 @@ function soRetornosDaLitoral(conta, periodo) {
     if (daFolha.has(k)) { porTecnico[k] = r; noPeriodo += n; }
     else { outros.push(r.nome); retornosOutros += n; }
   });
-  return { ...conta, porTecnico, noPeriodo, outros: outros.sort((a, b) => a.localeCompare(b, 'pt-BR')), retornosOutros };
+  const foraDaJanela = (conta.foraDaJanela || []).filter(x => daFolha.has(normalizeHeader(x.ofensor)));
+  return { ...conta, porTecnico, noPeriodo, foraDaJanela, outros: outros.sort((a, b) => a.localeCompare(b, 'pt-BR')), retornosOutros };
 }
 // Mesma planilha de contarRetornosGiga, mas devolve a linha INTEIRA (data,
 // cliente, O.S, tipo) em vez de só a contagem — é o que a tela Financeiro usa
@@ -19965,6 +19982,7 @@ function renderFolhaPagamento(modo) {
         if (Object.keys(bonusMes).length) partes.push(`<span style="color:var(--success)">bônus de ${formatDate(mes.inicio)} a ${formatDate(mes.fim)} recalculado</span>`);
         if (avisoBonus) partes.push(`<span style="color:var(--warn-text)">${esc(avisoBonus)}</span>`);
         if (conta.fora) partes.push(`<span style="color:var(--text-muted)">${conta.fora} fora do período (ignorados)</span>`);
+        if (conta.foraDaJanela && conta.foraDaJanela.length) partes.push(`<details style="display:inline-block;vertical-align:top"><summary style="cursor:pointer;color:var(--warn-text)">${conta.foraDaJanela.length} retorno(s) fora da janela de ${JANELA_IFI} dias (IFI) / ${JANELA_IRR} dias (IRR) NÃO descontado(s)</summary><div style="font-size:12px;color:var(--text-muted);max-width:640px;margin-top:4px">${conta.foraDaJanela.map(x => `O.S ${esc(x.os)} — ${esc(x.ofensor)} (${x.ind}, ${x.dias} dias depois do serviço anterior)`).join('<br>')}<br><i>Pela data o serviço anterior passou da garantia; a coluna AGING da GIGA contou um dia a menos.</i></div></details>`);
         if (conta.outros.length) partes.push(`<details style="display:inline-block;vertical-align:top"><summary style="cursor:pointer;color:var(--text-muted)">${conta.retornosOutros} retorno(s) de ${conta.outros.length} técnico(s) fora da JH Litoral (São Paulo) ignorado(s)</summary><div style="font-size:12px;color:var(--text-muted);max-width:640px;margin-top:4px">${esc(conta.outros.join(', '))}<br><i>Se algum desses for da Litoral, o nome no arquivo da GIGA está diferente do da folha.</i></div></details>`);
         if (supa) partes.push(r.sync && r.sync.ok !== false
           ? '<span style="color:var(--success)">salvo no Supabase</span>'
