@@ -23856,13 +23856,36 @@ function renderMonitorOlt() {
     // (mesmo nome) na PCR ou na Produção — o mais recente dos dois. Sem nome na ONU = "não identificado".
     const prodPorNome = new Map();
     DB.producao.forEach(r => { if (!r.recurso) return; const k = chaveNomeCliente(r.nome); if (!k) return; const a = prodPorNome.get(k); if (!a || String(r.data || '') > String(a.data || '')) prodPorNome.set(k, r); });
+    // IFI / IRR (03/10/2026, pedido do cliente: "coluna pra mostrar se é IFI ou IRR"): se abrirem
+    // um REPARO pra essa ONU hoje, ele vira retorno? Mesma régua do sistema (classificaRetorno):
+    // último serviço CONCLUÍDO do cliente foi Ativação/M.E há até 15 dias = IFI; Reparo há até 30
+    // dias = IRR; o ofensor é quem fez esse serviço. Histórico = Produção + PCR, pelo NOME (a ONU
+    // não traz contrato); dias contados até HOJE, como nos Chamados GIGA.
+    const hojeMo = hojeISOLocal();
+    const concluidoPorNome = new Map();
+    const guardaConcluido = (nomeCli, r) => {
+      if (!r.data || !r.recurso || !isConcluido(r.status)) return;
+      const k = chaveNomeCliente(nomeCli); if (!k) return;
+      const a = concluidoPorNome.get(k);
+      if (!a || String(r.data) > String(a.data)) concluidoPorNome.set(k, r);
+    };
+    DB.producao.forEach(r => guardaConcluido(r.nome, r));
+    DB.pcr.forEach(r => guardaConcluido(r.cliente, r));
+    const retornoDoCliente = k => {
+      const ant = k ? concluidoPorNome.get(k) : null;
+      if (!ant) return null;
+      const dias = diasEntre(hojeMo, String(ant.data).slice(0, 10));
+      const marca = classificaRetorno(ant.tipo_atividade, dias);
+      if (marca !== 'IFI' && marca !== 'IRR') return null;
+      return { marca, dias, restam: (marca === 'IFI' ? JANELA_IFI : JANELA_IRR) - dias, data: ant.data, tipo: ant.tipo_atividade, ofensor: ant.recurso };
+    };
     const itens = ordenadas.map(u => {
       const nome = u.nome || nomeDaDescricaoOnu(u.descricao);
       const k = chaveNomeCliente(nome);
       const pcr = k ? pcrPorNome.get(k) : null, prod = k ? prodPorNome.get(k) : null, giga = k ? gigaPorNome.get(k) : null;
       const ult = [pcr, prod].filter(x => x && x.recurso).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))[0] || null;
       const endereco = (pcr && pcr.endereco) || (prod && prod.endereco) || '';
-      return { u, nome, pcr, giga, ult, tecnico: ult ? ult.recurso : '', bairro: endereco ? extrairBairro(endereco) : '',
+      return { u, nome, pcr, giga, ult, retorno: retornoDoCliente(k), tecnico: ult ? ult.recurso : '', bairro: endereco ? extrairBairro(endereco) : '',
         cidade: cidadeDaOlt(oltPorId.get(u.olt_id)) };
     });
     const SITS = ['critical', 'warning', 'loss_signal', 'power_fail'];
@@ -23894,6 +23917,7 @@ function renderMonitorOlt() {
         ${metricCard('ONUs em atenção', contagem('warning'), false, { icon: icBarras, sub: 'sinal caindo' })}
         ${metricCard('Sem sinal (LoS)', contagem('loss_signal'), contagem('loss_signal') > 0, { icon: icX })}
         ${metricCard('Sem energia', contagem('power_fail'), false, { icon: icPausa })}
+        ${metricCard('Viram retorno se reparar hoje', itens.filter(x => x.retorno).length, itens.some(x => x.retorno), { icon: icChave, sub: `IFI ${itens.filter(x => x.retorno && x.retorno.marca === 'IFI').length} · IRR ${itens.filter(x => x.retorno && x.retorno.marca === 'IRR').length}` })}
         ${novas != null ? metricCard('Novas desde a leitura anterior', novas, novas > 0, { icon: icRelogio, sub: 'ONUs com problema que não estavam na anterior' }) : ''}
       </div>
       <div class="section-heading">OLTs — ${cidade ? esc(cidade) : 'cidades da JH Litoral'}</div>
@@ -23933,35 +23957,48 @@ function renderMonitorOlt() {
         <button type="button" class="btn-export-xls" id="mo-excel">⤓ Excel</button></div>
       ${!ordenadas.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma ONU nessa situação.</div></div>' : `
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="mo-tab-onus"><thead><tr>
-        <th>Situação</th><th>Sinal</th><th>Cidade</th><th>OLT</th><th>PON</th><th>ONU</th><th>Cliente (descrição na OLT)</th><th>Técnico (último atend.)</th><th>ID Int6</th>
+        <th>Situação</th><th>Sinal</th><th>Cidade</th><th>OLT</th><th>PON</th><th>ONU</th><th>Cliente (descrição na OLT)</th><th>Técnico (último atend.)</th><th>IFI / IRR</th><th>ID Int6</th>
         <th>Modelo</th><th>Na PCR</th><th>Chamado GIGA</th><th>Nova?</th><th>AutoISP</th>
       </tr></thead><tbody>
-        ${itens.map(({ u, nome, pcr, giga, tecnico, ult }) => {
+        ${itens.map(({ u, nome, pcr, giga, tecnico, ult, retorno }) => {
           const st = situacaoOnu(u.situacao);
           return `<tr><td><span class="badge ${st.cls}">${esc(st.rot)}</span></td>
             <td style="${u.situacao === 'critical' ? 'color:var(--danger);font-weight:700' : ''}">${/power_fail/.test(u.situacao) && !u.sinal ? '-' : sinalTxt(u.sinal)}</td>
             <td>${esc(cidadeDaOlt(oltPorId.get(u.olt_id)))}</td><td>${esc(u.olt)}</td><td>${esc(u.ponlink)}</td><td>${u.onu_id ?? '-'}</td>
             <td>${esc(nome || (/ONT_NO_DESCRIPTION|^\*+$/i.test(u.descricao || '') ? '' : u.descricao) || '-')}</td>
-            <td>${tecnico ? `${esc(tecnico)}<div style="font-size:11px;color:var(--text-muted)">${formatDate(ult.data)}${ult.tipo_atividade ? ' · ' + esc(ult.tipo_atividade) : ''}</div>` : '-'}</td><td>${esc(u.int6 || '-')}</td><td>${esc(u.modelo || '-')}</td>
+            <td>${tecnico ? `${esc(tecnico)}<div style="font-size:11px;color:var(--text-muted)">${formatDate(ult.data)}${ult.tipo_atividade ? ' · ' + esc(ult.tipo_atividade) : ''}</div>` : '-'}</td>
+            <td>${retorno ? `<span class="badge ${retorno.marca === 'IFI' ? 'warn' : 'amber'}">${retorno.marca}</span>
+              <div style="font-size:11px;color:var(--text-muted);white-space:nowrap">${esc(retorno.tipo || '')} ${formatDate(retorno.data)} (${retorno.dias} dia${retorno.dias === 1 ? '' : 's'})${retorno.ofensor ? ' · ofensor ' + esc(retorno.ofensor) : ''}</div>
+              <div style="font-size:11px;color:var(--text-muted)">${retorno.restam > 0 ? `sai da janela em ${retorno.restam} dia${retorno.restam === 1 ? '' : 's'}` : 'último dia da janela'}</div>` : '-'}</td><td>${esc(u.int6 || '-')}</td><td>${esc(u.modelo || '-')}</td>
             <td>${pcr ? `${formatDate(pcr.data)} · ${esc(pcr.tipo_atividade || '')} · ${esc(MAPA_STATUS_LABEL[classifyStatusGranular(pcr.status)] || pcr.status || '')}` : '-'}</td>
             <td>${giga ? `<span class="badge amber">aberto</span> ${esc(giga.protocolo || '')}` : '-'}</td>
             <td>${antes ? (antes.has(chaveOnu(u)) ? '-' : '<span class="badge laranja">nova</span>') : '-'}</td>
             <td>${u.link ? `<a href="${esc(u.link)}" target="_blank" rel="noopener noreferrer">abrir ↗</a>` : '-'}</td></tr>`;
         }).join('')}
       </tbody></table></div>`}
-      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1.5rem">"Na PCR" e "Chamado GIGA" cruzam pelo NOME do cliente na descrição da ONU (o AutoISP quase nunca traz o contrato nessa lista) — confira antes de agir. "abrir ↗" abre o cliente no AutoISP: lá a OLT consulta o equipamento na hora.</p>
+      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1.5rem">"IFI / IRR" = se abrir um reparo hoje pra essa ONU, ele conta como retorno: último serviço concluído do cliente foi Ativação/Mudança de Endereço há até ${JANELA_IFI} dias (IFI) ou Reparo há até ${JANELA_IRR} dias (IRR); o ofensor é quem fez esse serviço. "Na PCR", "Chamado GIGA" e "IFI / IRR" cruzam pelo NOME do cliente na descrição da ONU (o AutoISP quase nunca traz o contrato nessa lista) — confira antes de agir. "abrir ↗" abre o cliente no AutoISP: lá a OLT consulta o equipamento na hora.</p>
       <div class="section-heading">Mapa — ONUs com problema</div>
       <div class="panel" style="margin-bottom:1.5rem">
         <div id="mo-mapa" class="mapa-cidades"></div>
         <div class="mapa-legenda" style="margin-top:10px">
-          ${Object.entries(MONITOR_OLT_COR).map(([s, cor]) => `<span class="legend-item"><span class="legend-dot" style="background:${cor}"></span>${esc(situacaoOnu(s).rot)}</span>`).join('')}
-          <span class="legend-item" style="color:var(--text-muted)">· a cor é a pior situação do lugar; o número é a quantidade de ONUs</span>
+          ${Object.entries(MONITOR_OLT_COR).map(([s, cor]) => {
+            const qtd = itens.filter(x => x.u.situacao === s).length;
+            // caixa de seleção por situação (03/10/2026, pedido do cliente): filtra SÓ o mapa;
+            // sem id de propósito (não entra na memória de filtros da tela)
+            return `<label class="legend-item" style="cursor:pointer${qtd ? '' : ';opacity:.45'}"><input type="checkbox" class="mo-mapa-check" value="${s}" checked style="margin-right:4px"><span class="legend-dot" style="background:${cor}"></span>${esc(situacaoOnu(s).rot)} <span style="color:var(--text-muted)">(${qtd})</span></label>`;
+          }).join('')}
+          <span class="legend-item" style="color:var(--text-muted)">· marque o que aparece no mapa; a cor é a pior situação do lugar e o número é a quantidade de ONUs</span>
         </div>
         <p id="mo-mapa-nota" style="font-size:12px;color:var(--text-muted);margin:8px 0 0"></p>
       </div>`;
-    const nota = renderMapaMonitorOlt('mo-mapa', itens);
-    const elNota = document.getElementById('mo-mapa-nota');
-    if (elNota && nota) elNota.textContent = nota;
+    const desenharMapa = () => {
+      const ligadas = new Set([...body.querySelectorAll('.mo-mapa-check')].filter(c => c.checked).map(c => c.value));
+      const nota = renderMapaMonitorOlt('mo-mapa', itens.filter(x => ligadas.has(x.u.situacao)));
+      const elNota = document.getElementById('mo-mapa-nota');
+      if (elNota) elNota.textContent = nota || '';
+    };
+    body.querySelectorAll('.mo-mapa-check').forEach(c => c.addEventListener('change', desenharMapa));
+    desenharMapa();
     const btnX = document.getElementById('mo-excel');
     if (btnX) btnX.addEventListener('click', () => { const t = document.getElementById('mo-tab-onus'); if (t) exportarTabelaVisivel(t, 'monitoramento-olt-' + hojeISOLocal()); });
     ativarFiltrosDeColuna(body);
