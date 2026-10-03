@@ -23628,6 +23628,62 @@ function chaveNomeCliente(nome) {
   const n = normalizeHeader(nome).replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
   return n.split(' ').length >= 2 && n.length >= 8 ? n : '';
 }
+// Cor por situação no mapa (a pior do lugar vence: a ordem segue SITUACAO_ONU)
+const MONITOR_OLT_COR = { critical: '#dc2626', warning: '#f59e0b', loss_signal: '#7c3aed', power_fail: '#64748b', massive_loss_signal: '#be185d', massive_power_fail: '#334155' };
+// Mapa das ONUs com problema (03/10/2026). O AutoISP não tem endereço: o lugar vem do BAIRRO do
+// último atendimento ao mesmo cliente (PCR/Produção, `extrairBairro` + COORDENADAS_BAIRROS, o mesmo
+// dicionário dos outros mapas do sistema); sem bairro conhecido, a ONU entra no CENTRO da cidade da
+// OLT (marcador tracejado). Devolve o texto da nota de rodapé (quantas por bairro × por cidade).
+function renderMapaMonitorOlt(elId, itens) {
+  const el = document.getElementById(elId);
+  if (!el) return '';
+  if (el._leafletMap) { el._leafletMap.remove(); el._leafletMap = null; }
+  if (typeof L === 'undefined') { el.innerHTML = '<div class="empty">Não foi possível carregar o mapa (biblioteca bloqueada ou sem internet).</div>'; return ''; }
+  if (!itens.length) { el.innerHTML = '<div class="empty">Nenhuma ONU nessa situação.</div>'; return ''; }
+  const chaveCidade = c => normalizeHeader(c).toUpperCase();
+  let porBairro = 0, porCidade = 0, semLugar = 0;
+  const grupos = new Map();
+  itens.forEach(x => {
+    const cid = chaveCidade(x.cidade);
+    let coord = x.bairro ? COORDENADAS_BAIRROS[`${x.bairro}|${cid}`] : null, lugar = x.bairro, centro = false;
+    if (coord) porBairro++;
+    else if (COORDENADAS_CIDADES[cid]) { coord = COORDENADAS_CIDADES[cid]; lugar = x.cidade + ' (sem bairro)'; centro = true; porCidade++; }
+    else { semLugar++; return; }
+    const k = coord.join(',');
+    if (!grupos.has(k)) grupos.set(k, { coord, lugar, cidade: x.cidade, centro, itens: [] });
+    grupos.get(k).itens.push(x);
+  });
+  el.innerHTML = '';
+  const map = L.map(el, { scrollWheelZoom: true }).setView([-23.94, -46.30], 11);
+  el._leafletMap = map;
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 18,
+  }).addTo(map);
+  const lista = [...grupos.values()];
+  const maior = Math.max(...lista.map(g => g.itens.length), 1);
+  lista.sort((a, b) => a.itens.length - b.itens.length).forEach(g => {
+    const pior = g.itens.map(x => x.u.situacao).sort((a, b) => situacaoOnu(a).ordem - situacaoOnu(b).ordem)[0];
+    const cor = MONITOR_OLT_COR[pior] || '#64748b';
+    const diam = Math.round(26 + Math.sqrt(g.itens.length / maior) * 34);
+    const icone = L.divIcon({
+      className: 'mapa-cluster-icone',
+      html: `<div class="mapa-cluster-marca" style="width:${diam}px;height:${diam}px;background:${cor};${g.centro ? 'border:2px dashed #fff;' : ''}">${g.itens.length}</div>`,
+      iconSize: [diam, diam], iconAnchor: [diam / 2, diam / 2],
+    });
+    const linhas = g.itens.slice(0, 40).map(x => {
+      const st = situacaoOnu(x.u.situacao), c = MONITOR_OLT_COR[x.u.situacao] || '#64748b';
+      const sinal = x.u.sinal == null || (/power_fail/.test(x.u.situacao) && !x.u.sinal) ? '' : ` · ${x.u.sinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} dBm`;
+      return `<div class="mapa-popup-item"><div class="mapa-popup-item-linha1"><b>${esc(x.nome || 'Sem nome na OLT')}</b>
+        <span class="mapa-popup-badge" style="background:${c}22;color:${c};border-color:${c}55">${esc(st.rot)}</span></div>
+        <div class="mapa-popup-item-linha2">${esc(x.u.olt)} · PON ${esc(x.u.ponlink)} · ONU ${x.u.onu_id ?? '-'}${sinal}${x.tecnico ? ' · ' + esc(x.tecnico) : ''}</div></div>`;
+    }).join('');
+    L.marker(g.coord, { icon: icone }).addTo(map).bindPopup(
+      `<div class="mapa-popup-cabecalho"><b>${esc(g.lugar)}</b>${g.centro ? '' : ' — ' + esc(g.cidade)} · ${g.itens.length} ONU(s)</div>
+       <div class="mapa-popup-lista">${linhas}${g.itens.length > 40 ? `<div class="mapa-popup-item">… e mais ${g.itens.length - 40}</div>` : ''}</div>`,
+      { maxWidth: 320, minWidth: 240 });
+  });
+  return `${porBairro} ONU(s) no bairro do último atendimento ao cliente · ${porCidade} no centro da cidade da OLT (marcador tracejado: cliente sem endereço nas nossas bases)${semLugar ? ` · ${semLugar} sem lugar no mapa` : ''}.`;
+}
 function linkFavoritoColetorOlt() {
   const o = location.origin;
   return `javascript:(function(){if(location.hostname!=='auto.alloha.com'){alert('Abra o AutoISP (auto.alloha.com), entre com o seu login e clique de novo.');return;}var o='${o}';window.__jhJanela=window.open(o+'/?monitor-olt=1','jh_monitor_olt');var s=document.createElement('script');s.src=o+'/coletor-olt.js?v='+Date.now();s.onerror=function(){alert('Nao consegui carregar o coletor da JH. Confira a internet.');};document.head.appendChild(s);})();`;
@@ -23788,13 +23844,44 @@ function renderMonitorOlt() {
     DB.pcr.forEach(r => { const k = chaveNomeCliente(r.cliente); if (!k) return; const a = pcrPorNome.get(k); if (!a || String(r.data || '') > String(a.data || '')) pcrPorNome.set(k, r); });
     const gigaPorNome = new Map();
     (DB.chamadosGiga || []).forEach(r => { if (!chamadoGigaEmAberto(r.status)) return; const k = chaveNomeCliente(r.cliente); if (k) gigaPorNome.set(k, r); });
-    const ordenadas = onus.slice().sort((a, b) => situacaoOnu(a.situacao).ordem - situacaoOnu(b.situacao).ordem
-      || (a.sinal == null ? 1 : b.sinal == null ? -1 : a.sinal - b.sinal));
+    const falhas = olts.filter(oltComFalha);
     const porOlt = new Map();
     d.onus.forEach(u => { const m = porOlt.get(u.olt_id) || {}; m[u.situacao] = (m[u.situacao] || 0) + 1; porOlt.set(u.olt_id, m); });
     const oltsOrd = olts.slice().sort((a, b) => (oltComFalha(b) - oltComFalha(a))
       || (Object.values(porOlt.get(b.id) || {}).reduce((s, n) => s + n, 0) - Object.values(porOlt.get(a.id) || {}).reduce((s, n) => s + n, 0)));
-    const falhas = olts.filter(oltComFalha);
+    const ordenadas = onus.slice().sort((a, b) => situacaoOnu(a.situacao).ordem - situacaoOnu(b.situacao).ordem
+      || (a.sinal == null ? 1 : b.sinal == null ? -1 : a.sinal - b.sinal));
+    // Técnico e endereço (03/10/2026, pedido do cliente: "relatório por cidade, por técnico e um mapa
+    // no final"): o AutoISP não diz técnico nem endereço. Vêm do ÚLTIMO atendimento ao mesmo cliente
+    // (mesmo nome) na PCR ou na Produção — o mais recente dos dois. Sem nome na ONU = "não identificado".
+    const prodPorNome = new Map();
+    DB.producao.forEach(r => { if (!r.recurso) return; const k = chaveNomeCliente(r.nome); if (!k) return; const a = prodPorNome.get(k); if (!a || String(r.data || '') > String(a.data || '')) prodPorNome.set(k, r); });
+    const itens = ordenadas.map(u => {
+      const nome = u.nome || nomeDaDescricaoOnu(u.descricao);
+      const k = chaveNomeCliente(nome);
+      const pcr = k ? pcrPorNome.get(k) : null, prod = k ? prodPorNome.get(k) : null, giga = k ? gigaPorNome.get(k) : null;
+      const ult = [pcr, prod].filter(x => x && x.recurso).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))[0] || null;
+      const endereco = (pcr && pcr.endereco) || (prod && prod.endereco) || '';
+      return { u, nome, pcr, giga, ult, tecnico: ult ? ult.recurso : '', bairro: endereco ? extrairBairro(endereco) : '',
+        cidade: cidadeDaOlt(oltPorId.get(u.olt_id)) };
+    });
+    const SITS = ['critical', 'warning', 'loss_signal', 'power_fail'];
+    const contaSit = lista => { const c = { total: lista.length }; SITS.forEach(s => { c[s] = lista.filter(x => x.u.situacao === s).length; }); c.outras = c.total - SITS.reduce((a, s) => a + c[s], 0); return c; };
+    // por cidade (a da OLT): também as OLTs da cidade e quantas estão com falha
+    const cidadesRel = [...new Set(olts.flatMap(o => o.cidades.map(c => c.replace(/,\s*SP$/i, ''))).concat(itens.map(x => x.cidade)))]
+      .filter(c => c && c !== '-' && (!cidade || c === cidade));
+    const relCidade = cidadesRel.map(c => {
+      const daCidade = olts.filter(o => o.cidades.some(x => x.replace(/,\s*SP$/i, '') === c));
+      return { cidade: c, olts: daCidade.length, falha: daCidade.filter(oltComFalha).length, ...contaSit(itens.filter(x => x.cidade === c)) };
+    }).sort((a, b) => b.total - a.total || b.falha - a.falha);
+    const totCidade = { ...contaSit(itens), olts: olts.length, falha: falhas.length };
+    // por técnico (último atendimento conhecido do cliente)
+    const porTec = new Map();
+    itens.forEach(x => { const t = x.tecnico || ''; (porTec.get(t) || porTec.set(t, []).get(t)).push(x); });
+    const relTecnico = [...porTec.entries()].map(([t, l]) => ({ tecnico: t, cidades: [...new Set(l.map(x => x.cidade))].join(', '), ...contaSit(l) }))
+      .sort((a, b) => (a.tecnico ? 0 : 1) - (b.tecnico ? 0 : 1) || b.critical - a.critical || b.total - a.total);
+    const comTecnico = itens.filter(x => x.tecnico).length;
+    const pctTxt = (n, d) => d ? formatPct(n / d * 100, 1) : '-';
     const kindBadge = k => /^ok$/i.test(k) ? '<span class="badge ok">OK</span>' : /disabled/i.test(k) ? '<span class="badge neutral">desativado</span>'
       : k ? `<span class="badge warn">${esc(String(k).toUpperCase())}</span>` : '-';
     const sinalTxt = v => v == null ? '-' : `${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} dBm`;
@@ -23821,30 +23908,60 @@ function renderMonitorOlt() {
           <td style="${m.critical ? 'color:var(--danger);font-weight:700' : ''}">${m.critical || 0}</td><td>${m.warning || 0}</td>
           <td>${m.loss_signal || 0}</td><td>${m.power_fail || 0}</td><td>${esc(o.modelo)}</td><td>${esc(o.ip)}</td></tr>`; }).join('')}
       </tbody></table></div>
+      <div class="section-heading">Relatório por cidade</div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="mo-tab-cidade"><thead><tr>
+        <th>Cidade</th><th>OLTs</th><th>OLTs com falha</th><th>Crítico</th><th>Atenção</th><th>Sem sinal (LoS)</th><th>Sem energia</th><th>Total de ONUs</th><th>% das ONUs</th>
+      </tr></thead><tbody>
+        ${relCidade.map(c => `<tr><td class="cat-cell">${esc(c.cidade)}</td><td>${c.olts}</td>
+          <td style="${c.falha ? 'color:var(--danger);font-weight:700' : ''}">${c.falha}</td>
+          <td style="${c.critical ? 'color:var(--danger);font-weight:700' : ''}">${c.critical}</td><td>${c.warning}</td><td>${c.loss_signal}</td><td>${c.power_fail}</td>
+          <td><b>${c.total}</b></td><td>${pctTxt(c.total, totCidade.total)}</td></tr>`).join('')}
+        <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${totCidade.olts}</td><td>${totCidade.falha}</td><td>${totCidade.critical}</td><td>${totCidade.warning}</td>
+          <td>${totCidade.loss_signal}</td><td>${totCidade.power_fail}</td><td>${totCidade.total}</td><td>${totCidade.total ? '100,0%' : '-'}</td></tr>
+      </tbody></table></div>
+      <div class="section-heading">Relatório por técnico <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(último atendimento ao cliente — ${comTecnico} de ${itens.length} ONUs identificadas)</span></div>
+      ${!relTecnico.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma ONU nessa situação.</div></div>' : `
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="mo-tab-tecnico"><thead><tr>
+        <th>Técnico</th><th>Crítico</th><th>Atenção</th><th>Sem sinal (LoS)</th><th>Sem energia</th><th>Total de ONUs</th><th>Cidades</th>
+      </tr></thead><tbody>
+        ${relTecnico.map(t => `<tr><td class="cat-cell">${t.tecnico ? esc(t.tecnico) : '<span style="color:var(--text-muted)">Não identificado</span>'}</td>
+          <td style="${t.critical ? 'color:var(--danger);font-weight:700' : ''}">${t.critical}</td><td>${t.warning}</td><td>${t.loss_signal}</td><td>${t.power_fail}</td>
+          <td><b>${t.total}</b></td><td>${esc(t.cidades)}</td></tr>`).join('')}
+      </tbody></table></div>`}
+      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1.5rem">O AutoISP não informa o técnico: aqui é quem atendeu esse cliente por último (PCR ou Produção), achado pelo NOME na descrição da ONU. "Não identificado" = ONU sem nome na OLT ou cliente que não aparece nas nossas bases.</p>
       <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">ONUs para a preventiva <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(${ordenadas.length})</span>
         <button type="button" class="btn-export-xls" id="mo-excel">⤓ Excel</button></div>
       ${!ordenadas.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma ONU nessa situação.</div></div>' : `
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="mo-tab-onus"><thead><tr>
-        <th>Situação</th><th>Sinal</th><th>Cidade</th><th>OLT</th><th>PON</th><th>ONU</th><th>Cliente (descrição na OLT)</th><th>ID Int6</th>
+        <th>Situação</th><th>Sinal</th><th>Cidade</th><th>OLT</th><th>PON</th><th>ONU</th><th>Cliente (descrição na OLT)</th><th>Técnico (último atend.)</th><th>ID Int6</th>
         <th>Modelo</th><th>Na PCR</th><th>Chamado GIGA</th><th>Nova?</th><th>AutoISP</th>
       </tr></thead><tbody>
-        ${ordenadas.map(u => {
+        ${itens.map(({ u, nome, pcr, giga, tecnico, ult }) => {
           const st = situacaoOnu(u.situacao);
-          const nome = u.nome || nomeDaDescricaoOnu(u.descricao);
-          const k = chaveNomeCliente(nome);
-          const pcr = k ? pcrPorNome.get(k) : null;
-          const giga = k ? gigaPorNome.get(k) : null;
           return `<tr><td><span class="badge ${st.cls}">${esc(st.rot)}</span></td>
             <td style="${u.situacao === 'critical' ? 'color:var(--danger);font-weight:700' : ''}">${/power_fail/.test(u.situacao) && !u.sinal ? '-' : sinalTxt(u.sinal)}</td>
             <td>${esc(cidadeDaOlt(oltPorId.get(u.olt_id)))}</td><td>${esc(u.olt)}</td><td>${esc(u.ponlink)}</td><td>${u.onu_id ?? '-'}</td>
-            <td>${esc(nome || (/ONT_NO_DESCRIPTION|^\*+$/i.test(u.descricao || '') ? '' : u.descricao) || '-')}</td><td>${esc(u.int6 || '-')}</td><td>${esc(u.modelo || '-')}</td>
+            <td>${esc(nome || (/ONT_NO_DESCRIPTION|^\*+$/i.test(u.descricao || '') ? '' : u.descricao) || '-')}</td>
+            <td>${tecnico ? `${esc(tecnico)}<div style="font-size:11px;color:var(--text-muted)">${formatDate(ult.data)}${ult.tipo_atividade ? ' · ' + esc(ult.tipo_atividade) : ''}</div>` : '-'}</td><td>${esc(u.int6 || '-')}</td><td>${esc(u.modelo || '-')}</td>
             <td>${pcr ? `${formatDate(pcr.data)} · ${esc(pcr.tipo_atividade || '')} · ${esc(MAPA_STATUS_LABEL[classifyStatusGranular(pcr.status)] || pcr.status || '')}` : '-'}</td>
             <td>${giga ? `<span class="badge amber">aberto</span> ${esc(giga.protocolo || '')}` : '-'}</td>
             <td>${antes ? (antes.has(chaveOnu(u)) ? '-' : '<span class="badge laranja">nova</span>') : '-'}</td>
             <td>${u.link ? `<a href="${esc(u.link)}" target="_blank" rel="noopener noreferrer">abrir ↗</a>` : '-'}</td></tr>`;
         }).join('')}
       </tbody></table></div>`}
-      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1.5rem">"Na PCR" e "Chamado GIGA" cruzam pelo NOME do cliente na descrição da ONU (o AutoISP quase nunca traz o contrato nessa lista) — confira antes de agir. "abrir ↗" abre o cliente no AutoISP: lá a OLT consulta o equipamento na hora.</p>`;
+      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1.5rem">"Na PCR" e "Chamado GIGA" cruzam pelo NOME do cliente na descrição da ONU (o AutoISP quase nunca traz o contrato nessa lista) — confira antes de agir. "abrir ↗" abre o cliente no AutoISP: lá a OLT consulta o equipamento na hora.</p>
+      <div class="section-heading">Mapa — ONUs com problema</div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <div id="mo-mapa" class="mapa-cidades"></div>
+        <div class="mapa-legenda" style="margin-top:10px">
+          ${Object.entries(MONITOR_OLT_COR).map(([s, cor]) => `<span class="legend-item"><span class="legend-dot" style="background:${cor}"></span>${esc(situacaoOnu(s).rot)}</span>`).join('')}
+          <span class="legend-item" style="color:var(--text-muted)">· a cor é a pior situação do lugar; o número é a quantidade de ONUs</span>
+        </div>
+        <p id="mo-mapa-nota" style="font-size:12px;color:var(--text-muted);margin:8px 0 0"></p>
+      </div>`;
+    const nota = renderMapaMonitorOlt('mo-mapa', itens);
+    const elNota = document.getElementById('mo-mapa-nota');
+    if (elNota && nota) elNota.textContent = nota;
     const btnX = document.getElementById('mo-excel');
     if (btnX) btnX.addEventListener('click', () => { const t = document.getElementById('mo-tab-onus'); if (t) exportarTabelaVisivel(t, 'monitoramento-olt-' + hojeISOLocal()); });
     ativarFiltrosDeColuna(body);
