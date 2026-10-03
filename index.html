@@ -15764,8 +15764,9 @@ function renderPrazo() {
       ${montarPrazoReparoDoDia(selDiaPz ? selDiaPz.value : '', cidadesSelecionadas)}
       ${faixaDeSecao('Prazo do MÊS — Reparo (24h)',
         `${rotuloMes} · vem da planilha PRAZOS_ESCRITÓRIO (BASE DE DADOS) · só ordens CONCLUÍDAS de Reparo · ${cidadesSelecionadas.join(', ')}`, 'mes')}
-      <div class="panels-grid">
-        <div class="panel" style="display:flex;flex-direction:column"><h3>Distribuição por faixa</h3><div id="c-bucket" style="flex:1;display:flex"></div></div>
+      <div class="panels-grid" id="pz-mes-resumo">
+        <div class="panel" style="display:flex;flex-direction:column"><h3 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Distribuição por faixa
+          <button type="button" class="btn-export-img fora-da-imagem" id="pz-mes-resumo-img">🖼 Gerar imagem</button></h3><div id="c-bucket" style="flex:1;display:flex"></div></div>
         <div class="cards-grid" style="grid-template-columns:1fr;margin-bottom:0">
           ${metricCard('Total Concluído', rows.length)}
           ${metricCard('Até 24h', within24)}
@@ -15785,6 +15786,25 @@ function renderPrazo() {
       body.querySelectorAll('.pzand[data-tipo="' + tp + '"] input').forEach(inp => inp.addEventListener('change', () => pintarAndamento(tp)));
     });
     wireGerarImagemCartaoPrazo();
+    // "Gerar imagem" só do gráfico + 4 cartões do mês (02/10/2026, pedido do cliente).
+    // Sai com um título (mês e cidades), porque o recorte sozinho não diz de que período é.
+    const btnImgMes = document.getElementById('pz-mes-resumo-img');
+    if (btnImgMes) btnImgMes.addEventListener('click', () => {
+      const bloco = document.getElementById('pz-mes-resumo');
+      if (!bloco) return;
+      const largura = Math.min(body.clientWidth || 1000, 1100);
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = `position:fixed;top:0;left:-${largura + 200}px;width:${largura}px;background:var(--bg-page);padding:16px;`;
+      wrapper.innerHTML = `<div style="margin:0 0 12px"><div style="font-size:17px;font-weight:700;color:var(--text-primary)">Prazo do MÊS — Reparo (24h)</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:3px">${esc(rotuloMes)} · ${esc(cidadesSelecionadas.join(', '))}</div></div>`;
+      // duas colunas fixas (gráfico | 4 cartões), igual à tela larga: o @media da página olha a
+      // janela, não o wrapper, e numa tela estreita (celular) a imagem saía empilhada
+      const copia = bloco.cloneNode(true);
+      copia.style.display = 'grid'; copia.style.gridTemplateColumns = '1fr 1fr';
+      wrapper.appendChild(copia);
+      document.body.appendChild(wrapper);
+      capturarElementoComoImagem(wrapper, 'prazo-reparo-mes-faixas-' + hojeISOLocal(), () => wrapper.remove());
+    });
     ativarTogglesDeSecao(body); // o Filtrar refaz o HTML e o global só roda no 1º render
     ativarBotoesImagem(body);
 
