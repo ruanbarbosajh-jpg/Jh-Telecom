@@ -23464,6 +23464,39 @@ const MONITOR_OLT_PEDIDO = /[?&]monitor-olt=1(&|$)/.test(location.search);
 const MONITOR_OLT_LS = 'jh_monitor_olt_ultima';
 const MONITOR_OLT = { lista: null, cache: new Map() };
 let MONITOR_OLT_TIMER = null;
+// ---- Extensão do Chrome "JH TELECOM — Monitoramento OLT" (03/10/2026) ----
+// Pedido do cliente: "quero que o sistema faça tudo automático, sem importar arquivo, só um
+// botão de atualizar". O navegador não deixa este site usar o login do AutoISP, então a
+// extensão (pasta extensao-monitor-olt/, zip publicado em /extensao-jh-monitor-olt.zip) faz a
+// ponte: o content script `ponte.js` anuncia "jh-ext-presente" nesta página e, quando o botão
+// pede "jh-ext-coletar", o service worker lê o AutoISP com o login DESTE Chrome (host_permissions
+// auto.alloha.com) e devolve progresso/resultado por postMessage na mesma origem. A leitura passa
+// pelo mesmo `validarLeituraMonitorOlt` + `salvarLeituraMonitorOlt` do favorito/arquivo.
+const EXT_JH = { presente: false, versao: '' };
+let MONITOR_OLT_COLETANDO = null;      // promessa da coleta em andamento (um clique por vez)
+let MONITOR_OLT_AUTO_TIMER = null;
+window.addEventListener('message', ev => {
+  if (ev.source !== window || ev.origin !== location.origin || !ev.data || ev.data.tipo !== 'jh-ext-presente') return;
+  EXT_JH.presente = true; EXT_JH.versao = String(ev.data.versao || '');
+});
+function coletarPelaExtensao(aoProgresso) {
+  if (MONITOR_OLT_COLETANDO) return MONITOR_OLT_COLETANDO;
+  const id = 'c' + Date.now();
+  MONITOR_OLT_COLETANDO = new Promise(resolve => {
+    const fim = r => { window.removeEventListener('message', ouvir); clearTimeout(limite); MONITOR_OLT_COLETANDO = null; resolve(r); };
+    const ouvir = ev => {
+      if (ev.source !== window || ev.origin !== location.origin || !ev.data || ev.data.id !== id) return;
+      if (ev.data.tipo === 'jh-ext-progresso') { if (aoProgresso) aoProgresso(String(ev.data.texto || ''), Number(ev.data.pct) || 0); }
+      else if (ev.data.tipo === 'jh-ext-resultado') fim({ ok: true, dados: ev.data.dados });
+      else if (ev.data.tipo === 'jh-ext-erro') fim({ ok: false, erro: String(ev.data.erro || 'erro') });
+    };
+    // a coleta leva ~1–2 min; 6 min sem resposta = travou
+    const limite = setTimeout(() => fim({ ok: false, erro: 'A extensão não respondeu. Recarregue a página (F5) e tente de novo.' }), 6 * 60 * 1000);
+    window.addEventListener('message', ouvir);
+    window.postMessage({ tipo: 'jh-ext-coletar', id }, location.origin);
+  });
+  return MONITOR_OLT_COLETANDO;
+}
 const SITUACAO_ONU = {
   critical: { rot: 'Crítico', cls: 'warn', ordem: 1 },
   warning: { rot: 'Atenção', cls: 'amber', ordem: 2 },
@@ -23525,8 +23558,10 @@ function validarLeituraMonitorOlt(d) {
 async function salvarLeituraMonitorOlt(bruta) {
   const d = validarLeituraMonitorOlt(bruta);
   if (d.erro) return { ok: false, erro: d.erro };
+  // 1 linha por HORA no histórico: atualizar de 15 em 15 min sobrescreve a da mesma hora
+  // (senão eram ~30 leituras de ~100 KB por dia no plano gratuito de 500 MB)
   const reg = {
-    chave: d.coletado_em, coletado_em: d.coletado_em, coletado_por: pcrTravaQuem(),
+    chave: d.coletado_em.slice(0, 13), coletado_em: d.coletado_em, coletado_por: pcrTravaQuem(),
     qtd_olts: d.olts.filter(o => !/deactiv/i.test(o.modo)).length, qtd_falha: d.olts.filter(oltComFalha).length,
     qtd_onus: d.onus.length, dados: d,
   };
@@ -23540,6 +23575,11 @@ async function salvarLeituraMonitorOlt(bruta) {
     try {
       const { error } = await supa.from('monitor_olt').upsert(reg, { onConflict: 'chave' });
       if (error) aviso = error.message || 'erro';
+      // guarda só os últimos 30 dias (uma vez por sessão)
+      else if (!MONITOR_OLT.limpou) {
+        MONITOR_OLT.limpou = true;
+        supa.from('monitor_olt').delete().lt('coletado_em', new Date(Date.now() - 30 * 864e5).toISOString()).then(() => {}, () => {});
+      }
     } catch (e) { aviso = String((e && e.message) || e); }
   }
   MONITOR_OLT.avisoBanco = aviso;
@@ -23605,10 +23645,25 @@ function renderMonitorOlt() {
         <option value="preventiva">Preventiva (Crítico + Atenção)</option>
         ${Object.entries(SITUACAO_ONU).map(([k, v]) => `<option value="${k}">${v.rot}</option>`).join('')}
       </select></div>
-      <div class="field">${campoArquivo('mo-arquivo', 'Importar leitura', '.json,application/json')}</div>
+      <div class="field"><label>Atualizar sozinho</label><select id="mo-auto">
+        <option value="">Desligado</option><option value="15">A cada 15 min</option><option value="30">A cada 30 min</option><option value="60">A cada 1 hora</option>
+      </select></div>
+      <button type="button" class="btn" id="mo-atualizar">🔄 Atualizar do AutoISP</button>
+      <span id="mo-status" style="font-size:12px;color:var(--text-muted);align-self:center;max-width:360px"></span>
     </div>
+    <details class="panel" id="mo-ext" style="margin-bottom:1rem">
+      <summary style="cursor:pointer;font-weight:700" id="mo-ext-titulo">🧩 Extensão do Chrome — verificando…</summary>
+      <ol style="margin:12px 0 0;padding-left:20px;line-height:1.8;font-size:14px">
+        <li>${noSite ? '<a href="extensao-jh-monitor-olt.zip" download>⬇ Baixe a extensão (extensao-jh-monitor-olt.zip)</a>' : 'Baixe a extensão pelo endereço do site'} e <b>extraia</b> o zip numa pasta fixa (ex.: Documentos\\JH-Extensao). Não apague a pasta depois.</li>
+        <li>No Chrome, abra <b>chrome://extensions</b>, ligue o <b>Modo do desenvolvedor</b> (canto superior direito) e clique em <b>Carregar sem compactação</b> → escolha a pasta extraída.</li>
+        <li>Entre no <b>AutoISP</b> (auto.alloha.com) neste mesmo Chrome, com o seu login, e deixe logado.</li>
+        <li>Volte aqui, recarregue (F5) e clique em <b>🔄 Atualizar do AutoISP</b>. Pra atualizar sozinho, escolha o tempo em "Atualizar sozinho" (vale enquanto esta aba estiver aberta).</li>
+      </ol>
+      <p style="margin:10px 0 0;font-size:12px;color:var(--text-muted)">A extensão só LÊ o AutoISP (lista de OLTs das 6 cidades e ONUs com sinal ruim), com o login que já está no Chrome: não guarda nem lê senha, não altera nada. Funciona só no computador onde foi instalada.</p>
+    </details>
     <details class="panel" id="mo-como" style="margin-bottom:1.5rem">
-      <summary style="cursor:pointer;font-weight:700">📡 Como coletar do AutoISP (1 clique)</summary>
+      <summary style="cursor:pointer;font-weight:700">Alternativa sem extensão: favorito "📡 Coletar OLTs (JH)" ou arquivo</summary>
+      <div style="margin-top:10px">${campoArquivo('mo-arquivo', 'Importar leitura (.json)', '.json,application/json')}</div>
       <ol style="margin:12px 0 0;padding-left:20px;line-height:1.8;font-size:14px">
         <li>${noSite ? `Arraste este botão pra barra de favoritos do Chrome: <a class="btn" id="mo-favorito" href="#" style="text-decoration:none;cursor:grab;margin-left:6px">📡 Coletar OLTs (JH)</a>`
           : 'Abra o sistema pelo endereço do site (não pelo arquivo) pra gerar o botão de favorito.'}
@@ -23626,6 +23681,45 @@ function renderMonitorOlt() {
     fav.addEventListener('click', ev => { ev.preventDefault(); toast('Arraste o botão pra barra de favoritos e clique nele dentro do AutoISP.', '', 5000); });
   }
   const selLeitura = document.getElementById('mo-leitura');
+  const btnAtu = document.getElementById('mo-atualizar');
+  const status = t => { const el = document.getElementById('mo-status'); if (el) el.innerHTML = t; };
+  function pintarExtensao() {
+    const tit = document.getElementById('mo-ext-titulo'), painel = document.getElementById('mo-ext');
+    if (!tit) return;
+    tit.textContent = EXT_JH.presente ? `🧩 Extensão do Chrome instalada (versão ${EXT_JH.versao}) — como reinstalar` : '🧩 Instale a extensão do Chrome pra usar o botão "Atualizar do AutoISP"';
+    if (painel) painel.open = !EXT_JH.presente;
+  }
+  window.postMessage({ tipo: 'jh-ext-ping' }, location.origin);
+  setTimeout(pintarExtensao, 400);
+  async function atualizarDoAutoIsp(automatico) {
+    if (!EXT_JH.presente) {
+      if (!automatico) { pintarExtensao(); toast('Instale a extensão do Chrome primeiro (passo a passo na tela).', 'aviso', 5000); }
+      return;
+    }
+    if (btnAtu) btnAtu.disabled = true;
+    status('Conectando ao AutoISP…');
+    const r = await coletarPelaExtensao((texto, pct) => status(`${esc(texto)} <b>${pct}%</b>`));
+    if (btnAtu) btnAtu.disabled = false;
+    if (!r.ok) { status(`<span style="color:var(--danger)">⚠ ${esc(r.erro)}</span>`); if (!automatico) toast(r.erro, 'erro', 6000); return; }
+    const s = await salvarLeituraMonitorOlt(r.dados);
+    if (!s.ok) { status(`<span style="color:var(--danger)">⚠ ${esc(s.erro)}</span>`); return; }
+    status(`✔ Atualizado às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} — ${s.qtd} ONU(s) com problema${s.aviso ? ' · <span style="color:var(--danger)">não salvou no banco (PASSO-35)</span>' : ''}`);
+    if (document.getElementById('mo-leitura')) await montarSeletor(validarLeituraMonitorOlt(r.dados).coletado_em.slice(0, 13));
+  }
+  if (btnAtu) btnAtu.addEventListener('click', () => atualizarDoAutoIsp(false));
+  // automático: só enquanto ESTA tela está aberta (sai da tela, o timer se desliga sozinho)
+  const selAuto = document.getElementById('mo-auto');
+  function ligarAutomatico() {
+    if (MONITOR_OLT_AUTO_TIMER) { clearInterval(MONITOR_OLT_AUTO_TIMER); MONITOR_OLT_AUTO_TIMER = null; }
+    const min = parseInt(selAuto.value, 10);
+    if (!min) return;
+    MONITOR_OLT_AUTO_TIMER = setInterval(() => {
+      if (ROTA_ATUAL.nome !== 'monitorolt' || !document.getElementById('mo-auto')) { clearInterval(MONITOR_OLT_AUTO_TIMER); MONITOR_OLT_AUTO_TIMER = null; return; }
+      atualizarDoAutoIsp(true);
+    }, min * 60 * 1000);
+  }
+  selAuto.addEventListener('change', () => { ligarAutomatico(); if (selAuto.value) toast(`Vai atualizar sozinho a cada ${selAuto.value} min enquanto esta tela estiver aberta.`, 'ok', 3500); });
+  setTimeout(ligarAutomatico, 500);   // depois de restaurarFiltros devolver a escolha
   ['mo-cidade', 'mo-sit'].forEach(id => document.getElementById(id).addEventListener('change', pintar));
   selLeitura.addEventListener('change', pintar);
   document.getElementById('mo-arquivo').addEventListener('change', ev => {
@@ -23652,13 +23746,16 @@ function renderMonitorOlt() {
     if (atual && lista.some(x => x.chave === atual)) selLeitura.value = atual;
     await pintar();
   }
+  setTimeout(() => {
+    const ult = (MONITOR_OLT.lista || [])[0];
+    if (EXT_JH.presente && (!ult || Date.now() - new Date(ult.coletado_em).getTime() > 60 * 60 * 1000)) atualizarDoAutoIsp(true);
+  }, 1500);
   async function pintar() {
     const body = document.getElementById('mo-body');
     if (!body) return;
     const lista = MONITOR_OLT.lista || [];
     if (!lista.length) {
-      body.innerHTML = `<div class="panel"><div class="empty">Nenhuma leitura ainda. Siga o passo a passo "Como coletar do AutoISP" acima.${MONITOR_OLT.semTabela ? ' <br><b>Rode o sql/PASSO-35-monitor-olt.sql</b> pra guardar as leituras no banco.' : ''}</div></div>`;
-      document.getElementById('mo-como').open = true;
+      body.innerHTML = `<div class="panel"><div class="empty">Nenhuma leitura ainda. Clique em <b>🔄 Atualizar do AutoISP</b> (precisa da extensão — passo a passo acima).${MONITOR_OLT.semTabela ? ' <br><b>Rode o sql/PASSO-35-monitor-olt.sql</b> pra guardar as leituras no banco.' : ''}</div></div>`;
       return;
     }
     const chave = selLeitura.value || lista[0].chave;
