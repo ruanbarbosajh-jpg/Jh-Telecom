@@ -14,11 +14,11 @@
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='45' font-family='Arial,Helvetica,sans-serif' font-weight='800' font-size='30' fill='%23ffffff' text-anchor='middle'%3EJH%3C/text%3E%3C/svg%3E" />
 <!-- PWA (02/10/2026): "instalar como aplicativo". manifest + service worker são ARQUIVOS
      À PARTE (manifest.webmanifest, sw.js, ícones) publicados junto do index.html; abrindo
-     este HTML direto do disco (file://) eles simplesmente não existem e nada muda. -->
-<link rel="manifest" href="manifest.webmanifest" />
+     este HTML direto do disco (file://) eles simplesmente não existem e nada muda.
+     O <link rel="manifest"> e as metas "app" NÃO ficam aqui: o app é SÓ DO ANALISTA
+     (03/10/2026) e o navegador só oferece instalar quando o manifest existe na página —
+     pwaAplicarPerfil() coloca/tira esses itens conforme quem está logado. -->
 <meta name="theme-color" content="#2563eb" />
-<meta name="mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-title" content="JH Nexus" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <!-- xlsx-js-style: mesmo SheetJS 0.18.5 de sempre, só que com suporte a
@@ -4021,6 +4021,7 @@ function getFirstAllowedRoute(role) {
   return Object.keys(PAGES).find(r => podeAcessar(role, r)) || 'dashboard';
 }
 function applySidebarPermissions() {
+  pwaAplicarPerfil();   // app instalável: só o Analista (03/10/2026)
   document.querySelectorAll('.sidebar-nav a[data-route]').forEach(a => {
     a.style.display = podeAcessar(currentUser.role, a.dataset.route) ? '' : 'none';
   });
@@ -4346,6 +4347,7 @@ document.getElementById('logout-btn').addEventListener('click', async () => {
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('li-password').value = '';
   currentUser = null;
+  pwaAplicarPerfil();
   // sem login o RLS devolve lista vazia — o timer do PCR não pode continuar
   if (PCR_POLL_TIMER) { clearInterval(PCR_POLL_TIMER); PCR_POLL_TIMER = null; }
   if (AO_VIVO_TIMER) { clearInterval(AO_VIVO_TIMER); AO_VIVO_TIMER = null; }
@@ -7887,31 +7889,97 @@ function ativarFiltrosDeColuna(raiz) {
 //   toast('deu certo','ok')   -> verde
 //   toast('falhou','erro')    -> vermelho (fica até fechar)
 // ============================================================
-// ---- PWA: instalar como aplicativo + service worker (02/10/2026) ----
-// Chrome/Edge/Android: o navegador avisa (beforeinstallprompt) e o botão "📲 Instalar
-// app" do topo abre a janela de instalação. iPhone/Safari não tem esse aviso: o botão
-// aparece e ensina o caminho (Compartilhar → Adicionar à Tela de Início). Dentro do
-// app instalado (standalone) o botão some. O service worker só registra em http(s).
+// ---- PWA: instalar como aplicativo + service worker ----
+// 02/10/2026 criado; 03/10/2026 virou SÓ DO ANALISTA (pedido do cliente: "deixe o app
+// disponível somente pro analista"). Como o navegador só oferece "Instalar" quando a página
+// tem <link rel=manifest>, ele NÃO fica no HTML: pwaAplicarPerfil() injeta o manifest (e as
+// metas de app do iPhone) só quando o Analista está logado e tira quando sai/troca de perfil
+// — pros outros perfis o navegador não oferece nada. (Não dá pra impedir o "Adicionar à
+// tela inicial" manual do celular, que é um atalho comum; e quem já instalou continua com o
+// app, que abre a mesma tela de login.) O service worker (cópia das bibliotecas pra abrir
+// mais rápido) continua pra todos: não instala nada nem aparece pra ninguém.
+// O botão "📲 Instalar app" do topo fica visível sempre pro Analista (fora do app já
+// instalado): com o aviso do navegador abre a instalação direto; sem ele mostra o
+// passo a passo — o aviso demora a vir ou nem vem em alguns navegadores.
 let PWA_EVENTO_INSTALAR = null;
+const PWA_ITENS_HEAD = [
+  { tag: 'link', attrs: { rel: 'manifest', href: 'manifest.webmanifest' } },
+  { tag: 'meta', attrs: { name: 'mobile-web-app-capable', content: 'yes' } },
+  { tag: 'meta', attrs: { name: 'apple-mobile-web-app-capable', content: 'yes' } },
+];
 function pwaJaInstalado() {
   return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
 }
+function pwaEhAnalista() { return typeof currentUser !== 'undefined' && !!currentUser && currentUser.role === 'analista'; }
 function pwaAtualizarBotao() {
   const b = document.getElementById('btn-instalar');
-  if (!b) return;
-  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
-  b.hidden = pwaJaInstalado() || !(PWA_EVENTO_INSTALAR || ios);
+  if (b) b.hidden = !pwaEhAnalista() || pwaJaInstalado();
 }
-window.addEventListener('beforeinstallprompt', ev => { ev.preventDefault(); PWA_EVENTO_INSTALAR = ev; pwaAtualizarBotao(); });
+function pwaAplicarPerfil() {
+  const liberado = pwaEhAnalista();
+  PWA_ITENS_HEAD.forEach(it => {
+    const sel = it.tag + Object.entries(it.attrs).slice(0, 1).map(([k, v]) => `[${k}="${v}"]`).join('');
+    const atual = document.head.querySelector(sel);
+    if (liberado && !atual) {
+      const el = document.createElement(it.tag);
+      Object.entries(it.attrs).forEach(([k, v]) => el.setAttribute(k, v));
+      document.head.appendChild(el);
+    } else if (!liberado && atual) atual.remove();
+  });
+  if (!liberado) PWA_EVENTO_INSTALAR = null;
+  pwaAtualizarBotao();
+}
+function pwaPlataforma() {
+  const ua = navigator.userAgent || '';
+  if (/iphone|ipad|ipod/i.test(ua)) return 'ios';
+  if (/android/i.test(ua)) return 'android';
+  if (/edg\//i.test(ua)) return 'edge';
+  if (/firefox/i.test(ua)) return 'firefox';
+  return 'chrome';
+}
+// Passo a passo de instalação, de acordo com o aparelho
+function pwaMostrarAjuda() {
+  const plat = pwaPlataforma();
+  const passos = {
+    chrome: ['Clique no ícone de <b>instalar</b> no canto direito da barra de endereço (um monitor com uma seta pra baixo) e depois em <b>Instalar</b>.',
+      'Não achou o ícone? Clique nos <b>três pontinhos ⋮</b> (canto superior direito) → <b>Salvar e compartilhar</b> → <b>Instalar JH Nexus</b>.'],
+    edge: ['Clique no ícone de <b>instalar</b> no canto direito da barra de endereço e em <b>Instalar</b>.',
+      'Ou clique nos <b>três pontinhos ⋯</b> → <b>Aplicativos</b> → <b>Instalar este site como um aplicativo</b>.'],
+    android: ['No Chrome, toque nos <b>três pontinhos ⋮</b> (canto superior direito).', 'Toque em <b>Instalar app</b> (ou <b>Adicionar à tela inicial</b>) e confirme.'],
+    ios: ['Abra o sistema no <b>Safari</b> (em outro navegador não instala).', 'Toque no botão <b>Compartilhar</b> (um quadrado com uma seta pra cima).', 'Role a lista e toque em <b>Adicionar à Tela de Início</b>, depois em <b>Adicionar</b>.'],
+    firefox: ['O <b>Firefox no computador não instala</b> aplicativos. Abra o sistema no <b>Chrome</b> ou no <b>Edge</b> e siga o passo a passo de lá.'],
+  }[plat];
+  const fundo = document.createElement('div');
+  fundo.className = 'img-share-fundo';
+  fundo.setAttribute('role', 'dialog'); fundo.setAttribute('aria-modal', 'true'); fundo.setAttribute('aria-label', 'Como instalar o aplicativo');
+  fundo.innerHTML = `<div class="img-share-card pwa-ajuda">
+    <h3 style="margin:0">📲 Instalar o JH Nexus como aplicativo</h3>
+    <p style="margin:0;font-size:13px;color:var(--text-secondary)">É o <b>mesmo sistema</b>, com o mesmo login, mas abrindo numa <b>janela própria</b> (sem barra de endereço) e com um <b>ícone</b> na área de trabalho / tela inicial. Não é uma versão à parte: atualiza sozinho e continua precisando de internet pros dados.</p>
+    <ol style="margin:0;padding-left:20px;font-size:14px;line-height:1.6">${passos.map(s => `<li>${s}</li>`).join('')}</ol>
+    <p style="margin:0;font-size:12px;color:var(--text-muted)">Disponível só pro perfil Analista. Depois de instalado, este botão some dentro do aplicativo.</p>
+    <div class="img-share-botoes"><button type="button" class="btn" data-acao="fechar">Entendi</button></div></div>`;
+  const fechar = () => { fundo.remove(); document.removeEventListener('keydown', aoTeclar); };
+  const aoTeclar = ev => { if (ev.key === 'Escape') fechar(); };
+  fundo.addEventListener('click', ev => { if (ev.target === fundo || ev.target.closest('[data-acao="fechar"]')) fechar(); });
+  document.addEventListener('keydown', aoTeclar);
+  document.body.appendChild(fundo);
+}
+window.addEventListener('beforeinstallprompt', ev => {
+  if (!pwaEhAnalista()) return;                  // outro perfil: nem guarda o aviso
+  ev.preventDefault(); PWA_EVENTO_INSTALAR = ev; pwaAtualizarBotao();
+});
 window.addEventListener('appinstalled', () => { PWA_EVENTO_INSTALAR = null; pwaAtualizarBotao(); toast('Aplicativo instalado.', 'ok', 2500); });
 document.addEventListener('DOMContentLoaded', () => {
   const b = document.getElementById('btn-instalar');
   if (b) b.addEventListener('click', async () => {
+    if (!pwaEhAnalista()) return;
     if (PWA_EVENTO_INSTALAR) {
       PWA_EVENTO_INSTALAR.prompt();
-      try { await PWA_EVENTO_INSTALAR.userChoice; } catch (e) { /* recusou */ }
-      PWA_EVENTO_INSTALAR = null; pwaAtualizarBotao();
-    } else toast('No iPhone: toque em Compartilhar (□↑) e depois em "Adicionar à Tela de Início".', '', 7000);
+      let escolha = null;
+      try { escolha = await PWA_EVENTO_INSTALAR.userChoice; } catch (e) { /* sem resposta */ }
+      PWA_EVENTO_INSTALAR = null;
+      if (escolha && escolha.outcome === 'dismissed') pwaMostrarAjuda();   // fechou a janela: mostra o jeito manual
+    } else pwaMostrarAjuda();
   });
   pwaAtualizarBotao();
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
@@ -23283,7 +23351,7 @@ function renderSaude() {
     $('saude-nav').innerHTML = `<div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><tbody>
       <tr><td>Conexão com a internet</td><td>${navigator.onLine ? badge('ok', 'online') : badge('warn', 'offline')}</td></tr>
       <tr><td>Conexão com o Supabase</td><td>${supa ? badge('ok', 'configurada') : badge('warn', 'modo local (sem banco)')}</td></tr>
-      <tr><td>Aplicativo instalado (PWA)</td><td>${pwaJaInstalado() ? 'sim' : 'não (abrindo pelo navegador)'}</td></tr>
+      <tr><td>Aplicativo instalado (PWA)</td><td>${pwaJaInstalado() ? 'sim' : 'não (abrindo pelo navegador)'} ${pwaJaInstalado() ? '' : '<button type="button" class="btn-secundario" id="saude-instalar-ajuda" style="padding:4px 10px;margin-left:8px">Como instalar</button>'}</td></tr>
       <tr><td>Cópia local para abrir mais rápido (service worker)</td><td>${esc(sw)}</td></tr>
       <tr><td>Versão do cache local</td><td>${typeof CACHE_VERSAO !== 'undefined' ? CACHE_VERSAO : '-'}</td></tr>
       <tr><td>Dados lidos do banco às</td><td>${typeof textoDadosLidosEm === 'function' ? esc(String(textoDadosLidosEm()).replace(/<[^>]*>/g, '')) : '-'}</td></tr>
@@ -23309,6 +23377,7 @@ function renderSaude() {
     if (btn) btn.disabled = false;
   }
   $('saude-rodar').addEventListener('click', rodar);
+  raiz.addEventListener('click', ev => { if (ev.target.id === 'saude-instalar-ajuda') pwaMostrarAjuda(); });
   rodar();
 }
 function renderImport() {
