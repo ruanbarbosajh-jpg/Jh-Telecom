@@ -15,10 +15,11 @@
 <!-- PWA (02/10/2026): "instalar como aplicativo". manifest + service worker são ARQUIVOS
      À PARTE (manifest.webmanifest, sw.js, ícones) publicados junto do index.html; abrindo
      este HTML direto do disco (file://) eles simplesmente não existem e nada muda.
-     O <link rel="manifest"> e as metas "app" NÃO ficam aqui: o app é SÓ DO ANALISTA
-     (03/10/2026) e o navegador só oferece instalar quando o manifest existe na página —
-     pwaAplicarPerfil() coloca/tira esses itens conforme quem está logado. -->
+     Liberado pra TODOS os perfis (03/10/2026; por algumas horas foi só do Analista). -->
+<link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#2563eb" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-title" content="JH Nexus" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <!-- xlsx-js-style: mesmo SheetJS 0.18.5 de sempre, só que com suporte a
@@ -4021,7 +4022,6 @@ function getFirstAllowedRoute(role) {
   return Object.keys(PAGES).find(r => podeAcessar(role, r)) || 'dashboard';
 }
 function applySidebarPermissions() {
-  pwaAplicarPerfil();   // app instalável: só o Analista (03/10/2026)
   document.querySelectorAll('.sidebar-nav a[data-route]').forEach(a => {
     a.style.display = podeAcessar(currentUser.role, a.dataset.route) ? '' : 'none';
   });
@@ -4347,7 +4347,6 @@ document.getElementById('logout-btn').addEventListener('click', async () => {
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('li-password').value = '';
   currentUser = null;
-  pwaAplicarPerfil();
   // sem login o RLS devolve lista vazia — o timer do PCR não pode continuar
   if (PCR_POLL_TIMER) { clearInterval(PCR_POLL_TIMER); PCR_POLL_TIMER = null; }
   if (AO_VIVO_TIMER) { clearInterval(AO_VIVO_TIMER); AO_VIVO_TIMER = null; }
@@ -7890,44 +7889,19 @@ function ativarFiltrosDeColuna(raiz) {
 //   toast('falhou','erro')    -> vermelho (fica até fechar)
 // ============================================================
 // ---- PWA: instalar como aplicativo + service worker ----
-// 02/10/2026 criado; 03/10/2026 virou SÓ DO ANALISTA (pedido do cliente: "deixe o app
-// disponível somente pro analista"). Como o navegador só oferece "Instalar" quando a página
-// tem <link rel=manifest>, ele NÃO fica no HTML: pwaAplicarPerfil() injeta o manifest (e as
-// metas de app do iPhone) só quando o Analista está logado e tira quando sai/troca de perfil
-// — pros outros perfis o navegador não oferece nada. (Não dá pra impedir o "Adicionar à
-// tela inicial" manual do celular, que é um atalho comum; e quem já instalou continua com o
-// app, que abre a mesma tela de login.) O service worker (cópia das bibliotecas pra abrir
-// mais rápido) continua pra todos: não instala nada nem aparece pra ninguém.
-// O botão "📲 Instalar app" do topo fica visível sempre pro Analista (fora do app já
-// instalado): com o aviso do navegador abre a instalação direto; sem ele mostra o
-// passo a passo — o aviso demora a vir ou nem vem em alguns navegadores.
+// 02/10/2026 criado pra todos; 03/10/2026 restrito ao Analista; 03/10/2026 (mesmo dia,
+// pedido do cliente: "pode liberar para todos o instalar app") LIBERADO DE NOVO pra todos
+// os perfis — manifest e metas voltaram pro HTML fixo.
+// O botão "📲 Instalar app" do topo fica visível pra quem está logado (fora do app já
+// instalado): com o aviso do navegador abre a instalação direto; sem ele mostra o passo a
+// passo — o aviso demora a vir ou nem vem em alguns navegadores.
 let PWA_EVENTO_INSTALAR = null;
-const PWA_ITENS_HEAD = [
-  { tag: 'link', attrs: { rel: 'manifest', href: 'manifest.webmanifest' } },
-  { tag: 'meta', attrs: { name: 'mobile-web-app-capable', content: 'yes' } },
-  { tag: 'meta', attrs: { name: 'apple-mobile-web-app-capable', content: 'yes' } },
-];
 function pwaJaInstalado() {
   return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
 }
-function pwaEhAnalista() { return typeof currentUser !== 'undefined' && !!currentUser && currentUser.role === 'analista'; }
 function pwaAtualizarBotao() {
   const b = document.getElementById('btn-instalar');
-  if (b) b.hidden = !pwaEhAnalista() || pwaJaInstalado();
-}
-function pwaAplicarPerfil() {
-  const liberado = pwaEhAnalista();
-  PWA_ITENS_HEAD.forEach(it => {
-    const sel = it.tag + Object.entries(it.attrs).slice(0, 1).map(([k, v]) => `[${k}="${v}"]`).join('');
-    const atual = document.head.querySelector(sel);
-    if (liberado && !atual) {
-      const el = document.createElement(it.tag);
-      Object.entries(it.attrs).forEach(([k, v]) => el.setAttribute(k, v));
-      document.head.appendChild(el);
-    } else if (!liberado && atual) atual.remove();
-  });
-  if (!liberado) PWA_EVENTO_INSTALAR = null;
-  pwaAtualizarBotao();
+  if (b) b.hidden = pwaJaInstalado();
 }
 function pwaPlataforma() {
   const ua = navigator.userAgent || '';
@@ -7956,7 +7930,7 @@ function pwaMostrarAjuda() {
     <h3 style="margin:0">📲 Instalar o JH Nexus como aplicativo</h3>
     <p style="margin:0;font-size:13px;color:var(--text-secondary)">É o <b>mesmo sistema</b>, com o mesmo login, mas abrindo numa <b>janela própria</b> (sem barra de endereço) e com um <b>ícone</b> na área de trabalho / tela inicial. Não é uma versão à parte: atualiza sozinho e continua precisando de internet pros dados.</p>
     <ol style="margin:0;padding-left:20px;font-size:14px;line-height:1.6">${passos.map(s => `<li>${s}</li>`).join('')}</ol>
-    <p style="margin:0;font-size:12px;color:var(--text-muted)">Disponível só pro perfil Analista. Depois de instalado, este botão some dentro do aplicativo.</p>
+    <p style="margin:0;font-size:12px;color:var(--text-muted)">Depois de instalado, este botão some dentro do aplicativo.</p>
     <div class="img-share-botoes"><button type="button" class="btn" data-acao="fechar">Entendi</button></div></div>`;
   const fechar = () => { fundo.remove(); document.removeEventListener('keydown', aoTeclar); };
   const aoTeclar = ev => { if (ev.key === 'Escape') fechar(); };
@@ -7965,14 +7939,12 @@ function pwaMostrarAjuda() {
   document.body.appendChild(fundo);
 }
 window.addEventListener('beforeinstallprompt', ev => {
-  if (!pwaEhAnalista()) return;                  // outro perfil: nem guarda o aviso
   ev.preventDefault(); PWA_EVENTO_INSTALAR = ev; pwaAtualizarBotao();
 });
 window.addEventListener('appinstalled', () => { PWA_EVENTO_INSTALAR = null; pwaAtualizarBotao(); toast('Aplicativo instalado.', 'ok', 2500); });
 document.addEventListener('DOMContentLoaded', () => {
   const b = document.getElementById('btn-instalar');
   if (b) b.addEventListener('click', async () => {
-    if (!pwaEhAnalista()) return;
     if (PWA_EVENTO_INSTALAR) {
       PWA_EVENTO_INSTALAR.prompt();
       let escolha = null;
