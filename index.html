@@ -3396,7 +3396,7 @@ const ROUTE_PERMISSIONS = {
   //     04/09/2026 (pedido do cliente) — nem Matheus/Sebastião, que editavam
   //     a de técnicos, continuam vendo. Ver 'presenca' abaixo e
   //     podeAcessar (presencaescritorio tem regra própria, fora desta lista).
-  admin: ['monitorolt', 'saude', 'import', 'dashboard', 'finance', 'comparisons', 'folha',
+  admin: ['saude', 'import', 'dashboard', 'finance', 'comparisons', 'folha',
           'retornosgiga', 'relatoriofin', 'folhaescritorio', 'presenca',
           'cmpproducao', 'cmpifiirr', 'cmpprazo'],
   // RH: "no momento" (28/08/2026, pedido do cliente) só enxerga Pedágio —
@@ -3419,7 +3419,7 @@ const ROUTE_PERMISSIONS = {
   // 'dashboard' saiu do bloqueio e 'cleanup' entrou (10/09/2026, pedido do
   // cliente): RH passou a ver o Resumo Geral, mas não precisa do Clean Up
   // (mapa de limpeza de CTO é operação de campo, fora do escopo do RH).
-  rh: ['cleanup', 'relatorios', 'monitorolt', 'saude', 'import', 'retornosgiga',
+  rh: ['cleanup', 'relatorios', 'saude', 'import', 'retornosgiga',
        'comparisons', 'relatoriofin', 'presenca',
        'cmpproducao', 'cmpifiirr', 'cmpprazo'],
   // Gestão (02/09/2026, pedido do cliente): MESMO acesso do Analista, EXCETO
@@ -3461,7 +3461,7 @@ const ROUTE_PERMISSIONS = {
   // cliente) — essa mudança tinha ficado só no RH numa auditoria anterior,
   // quebrando o "sempre acompanhou" acima (achado em nova auditoria).
   // Replicado aqui pra manter o Almoxarifado espelhando o RH.
-  almox: ['cleanup', 'relatorios', 'monitorolt', 'saude', 'import', 'retornosgiga',
+  almox: ['cleanup', 'relatorios', 'saude', 'import', 'retornosgiga',
           'finance', 'folha', 'comparisons', 'relatoriofin', 'folhaescritorio', 'presenca',
           'cmpproducao', 'cmpifiirr', 'cmpprazo'],
 };
@@ -3547,9 +3547,9 @@ function podeEditarPresencaEscritorio() { return !!currentUser && (currentUser.r
 // Saíram Produção, Ofensor (resumo/indicadores IFI-IRR), Reunião Técnica e
 // Comparativo de Prazo — ficou só a lista abaixo. Rota nova nasce FECHADA.
 const ROTAS_SO_PERMITIDAS = {
-  gestao: ['inicio', 'reuniaoprazos', 'dashboard', 'fleet', 'toll', 'prazo', 'parcialdia'],
+  gestao: ['inicio', 'reuniaoprazos', 'dashboard', 'fleet', 'toll', 'prazo', 'parcialdia', 'monitorolt'],
   escritorio: ['inicio', 'cleanup', 'table', 'prazo', 'prazoativacao', 'parcialdia',
-               'pcr', 'chamadosgiga', 'ofensoresprazo', 'certificacoes'],
+               'pcr', 'chamadosgiga', 'ofensoresprazo', 'certificacoes', 'monitorolt'],
 };
 function podeAcessar(role, route) {
   // Presença (Técnicos + Escritório): oculta pra TODO MUNDO, sem exceção,
@@ -14507,6 +14507,10 @@ function renderParcialDoDia() {
     // ordem concluída/improdutiva, ou nenhuma da carteira) não pinta —
     // 0,0% de "não tem dado" não é a mesma coisa que 0,0% de "foi mal".
     const corMeta3 = (pct, ruim, bom) => pct < ruim ? 'color:var(--tab-alerta);font-weight:700' : pct > bom ? 'color:var(--tab-sucesso);font-weight:700' : 'color:#f59e0b;font-weight:700';
+    // Taxa de Conclusão e Execução da Caixa SÓ APARECEM PRO ANALISTA (05/10/2026, pedido do cliente:
+    // "as colunas de parcial do dia que têm as eficiências, visíveis somente para o analista") —
+    // nas 3 tabelas de Status Detalhado e na imagem delas. Os outros perfis veem as demais colunas.
+    const verEficiencia = ehAnalista();
     const corConclusao = l => ((l.concluido || 0) + (l.nao_concluido || 0)) > 0 ? corMeta3(conclusao(l), 55, 80) : '';
     const corExecucaoCaixa = l => (((l.concluido || 0) + (l.nao_concluido || 0) + (l.em_rota || 0) + (l.iniciado || 0) + (l.pendente || 0))) > 0 ? corMeta3(execucaoCaixa(l), 60, 80) : '';
     // Total O.S só soma cancelado quando "Mostrar cancelados" está ligado
@@ -14562,11 +14566,11 @@ function renderParcialDoDia() {
       const linhas = ordemVisivelDaTabela(tabelaId, l => l.label, linhasTodas);
       const colunas = [{ titulo: rotuloPrimeira }]
         .concat(bucketsTabela.map(b => ({ titulo: bucketLabel[b], fundo: FUNDO_BALDE_IMG[b] })))
-        .concat([{ titulo: 'Total O.S' }, { titulo: 'Taxa de Conclusão' }, { titulo: 'Execução da Caixa' }]);
+        .concat([{ titulo: 'Total O.S' }].concat(verEficiencia ? [{ titulo: 'Taxa de Conclusão' }, { titulo: 'Execução da Caixa' }] : []));
       const linhasImg = linhas.map(l => ({
-        celulas: [l.label, ...bucketsTabela.map(b => String(l[b])), String(totalVisivel(l)), formatPct(conclusao(l), 1), formatPct(execucaoCaixa(l), 1)],
+        celulas: [l.label, ...bucketsTabela.map(b => String(l[b])), String(totalVisivel(l)), ...(verEficiencia ? [formatPct(conclusao(l), 1), formatPct(execucaoCaixa(l), 1)] : [])],
       }));
-      const total = { celulas: ['TOTAL', ...bucketsTabela.map(b => String(totalLinha[b])), String(totalVisivel(totalLinha)), formatPct(conclusao(totalLinha), 1), formatPct(execucaoCaixa(totalLinha), 1)] };
+      const total = { celulas: ['TOTAL', ...bucketsTabela.map(b => String(totalLinha[b])), String(totalVisivel(totalLinha)), ...(verEficiencia ? [formatPct(conclusao(totalLinha), 1), formatPct(execucaoCaixa(totalLinha), 1)] : [])] };
       baixarTabelaComoImagem({ titulo, subtitulo: formatDate(data), colunas, linhas: linhasImg, total, nomeArquivo });
     }
 
@@ -14698,22 +14702,22 @@ function renderParcialDoDia() {
 
       <div class="section-heading">Status Detalhado por Tipo de Serviço ${btnCancelados}<button type="button" class="btn-export-img" id="pd-status-tipo-img">🖼 Gerar imagem</button></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="tab-status-tipo"><thead><tr>
-        <th>Serviços</th>${bucketsTabela.map(thStatus).join('')}<th>Total O.S</th><th style="text-align:center">Taxa de Conclusão</th><th style="text-align:center">Execução da Caixa</th>
+        <th>Serviços</th>${bucketsTabela.map(thStatus).join('')}<th>Total O.S</th>${verEficiencia ? '<th style="text-align:center">Taxa de Conclusão</th><th style="text-align:center">Execução da Caixa</th>' : ''}
       </tr></thead><tbody>
         ${statusTable.map(l=>{
-          return `<tr><td class="cat-cell">${l.label}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${totalVisivel(l)}</td><td style="text-align:center;${corConclusao(l)}">${formatPct(conclusao(l), 1)}</td><td style="text-align:center;${corExecucaoCaixa(l)}">${formatPct(execucaoCaixa(l), 1)}</td></tr>`;
+          return `<tr><td class="cat-cell">${l.label}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${totalVisivel(l)}</td>${verEficiencia ? `<td style="text-align:center;${corConclusao(l)}">${formatPct(conclusao(l), 1)}</td><td style="text-align:center;${corExecucaoCaixa(l)}">${formatPct(execucaoCaixa(l), 1)}</td>` : ''}</tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalVisivel(totalStatus)}</td><td style="text-align:center;${corConclusao(totalStatus)}">${formatPct(conclusao(totalStatus), 1)}</td><td style="text-align:center;${corExecucaoCaixa(totalStatus)}">${formatPct(execucaoCaixa(totalStatus), 1)}</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalVisivel(totalStatus)}</td>${verEficiencia ? `<td style="text-align:center;${corConclusao(totalStatus)}">${formatPct(conclusao(totalStatus), 1)}</td><td style="text-align:center;${corExecucaoCaixa(totalStatus)}">${formatPct(execucaoCaixa(totalStatus), 1)}</td>` : ''}</tr>
       </tbody></table></div>
 
       <div class="section-heading">Status Detalhado por Cidade ${btnCancelados}<button type="button" class="btn-export-img" id="pd-status-cidade-img">🖼 Gerar imagem</button></div>
       <div class="table-wrap"><table class="data-table" id="tab-status-cidade"><thead><tr>
-        <th>Cidades</th>${bucketsTabela.map(thStatus).join('')}<th>Total O.S</th><th style="text-align:center">Taxa de Conclusão</th><th style="text-align:center">Execução da Caixa</th>
+        <th>Cidades</th>${bucketsTabela.map(thStatus).join('')}<th>Total O.S</th>${verEficiencia ? '<th style="text-align:center">Taxa de Conclusão</th><th style="text-align:center">Execução da Caixa</th>' : ''}
       </tr></thead><tbody>
         ${statusPorCidadeTable.map(l=>{
-          return `<tr><td class="cat-cell">${l.label}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${totalVisivel(l)}</td><td style="text-align:center;${corConclusao(l)}">${formatPct(conclusao(l), 1)}</td><td style="text-align:center;${corExecucaoCaixa(l)}">${formatPct(execucaoCaixa(l), 1)}</td></tr>`;
+          return `<tr><td class="cat-cell">${l.label}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${totalVisivel(l)}</td>${verEficiencia ? `<td style="text-align:center;${corConclusao(l)}">${formatPct(conclusao(l), 1)}</td><td style="text-align:center;${corExecucaoCaixa(l)}">${formatPct(execucaoCaixa(l), 1)}</td>` : ''}</tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalVisivel(totalStatus)}</td><td style="text-align:center;${corConclusao(totalStatus)}">${formatPct(conclusao(totalStatus), 1)}</td><td style="text-align:center;${corExecucaoCaixa(totalStatus)}">${formatPct(execucaoCaixa(totalStatus), 1)}</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalVisivel(totalStatus)}</td>${verEficiencia ? `<td style="text-align:center;${corConclusao(totalStatus)}">${formatPct(conclusao(totalStatus), 1)}</td><td style="text-align:center;${corExecucaoCaixa(totalStatus)}">${formatPct(execucaoCaixa(totalStatus), 1)}</td>` : ''}</tr>
       </tbody></table></div>
 
       <div class="section-heading">Status Detalhado por Técnico ${btnCancelados}</div>
@@ -14723,12 +14727,12 @@ function renderParcialDoDia() {
         <button type="button" class="btn-export-img" id="pd-tec-img">🖼 Gerar imagem</button>
       </div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="tab-status-tecnico"><thead><tr>
-        <th>Técnico</th>${bucketsTabela.map(thStatus).join('')}<th>Total O.S</th><th style="text-align:center">Taxa de Conclusão</th><th style="text-align:center">Execução da Caixa</th>
+        <th>Técnico</th>${bucketsTabela.map(thStatus).join('')}<th>Total O.S</th>${verEficiencia ? '<th style="text-align:center">Taxa de Conclusão</th><th style="text-align:center">Execução da Caixa</th>' : ''}
       </tr></thead><tbody>
         ${statusPorTecnicoTable.map(l=>{
-          return `<tr><td class="cat-cell">${esc(l.label)}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${totalVisivel(l)}</td><td style="text-align:center;${corConclusao(l)}">${formatPct(conclusao(l), 1)}</td><td style="text-align:center;${corExecucaoCaixa(l)}">${formatPct(execucaoCaixa(l), 1)}</td></tr>`;
+          return `<tr><td class="cat-cell">${esc(l.label)}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${totalVisivel(l)}</td>${verEficiencia ? `<td style="text-align:center;${corConclusao(l)}">${formatPct(conclusao(l), 1)}</td><td style="text-align:center;${corExecucaoCaixa(l)}">${formatPct(execucaoCaixa(l), 1)}</td>` : ''}</tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatusTecnico[b])}">${totalStatusTecnico[b]}</td>`).join('')}<td>${totalVisivel(totalStatusTecnico)}</td><td style="text-align:center;${corConclusao(totalStatusTecnico)}">${formatPct(conclusao(totalStatusTecnico), 1)}</td><td style="text-align:center;${corExecucaoCaixa(totalStatusTecnico)}">${formatPct(execucaoCaixa(totalStatusTecnico), 1)}</td></tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatusTecnico[b])}">${totalStatusTecnico[b]}</td>`).join('')}<td>${totalVisivel(totalStatusTecnico)}</td>${verEficiencia ? `<td style="text-align:center;${corConclusao(totalStatusTecnico)}">${formatPct(conclusao(totalStatusTecnico), 1)}</td><td style="text-align:center;${corExecucaoCaixa(totalStatusTecnico)}">${formatPct(execucaoCaixa(totalStatusTecnico), 1)}</td>` : ''}</tr>
       </tbody></table></div>
 
       ${!servicosDoDia.length ? '' : `
@@ -23509,7 +23513,7 @@ const situacaoOnu = s => SITUACAO_ONU[s] || { rot: String(s || '-'), cls: 'neutr
 const oltComFalha = o => !/deactiv/i.test(o.modo || '') && /fail|never|busy|warning/i.test(o.conexao || '');
 // a janela do sistema avisa o coletor (no AutoISP) que está pronta — repete a cada 2 s até receber
 function monitorOltAvisarPronto() {
-  if (!MONITOR_OLT_PEDIDO || !window.opener || !ehAnalista() || MONITOR_OLT_TIMER) return;
+  if (!MONITOR_OLT_PEDIDO || !window.opener || !currentUser || MONITOR_OLT_TIMER) return;
   const avisar = () => { try { window.opener.postMessage({ tipo: 'jh-monitor-olt-pronto' }, MONITOR_OLT_ORIGEM); } catch (e) { /* janela fechou */ } };
   avisar();
   MONITOR_OLT_TIMER = setInterval(avisar, 2000);
@@ -23518,7 +23522,7 @@ function monitorOltAvisarPronto() {
 window.addEventListener('message', async ev => {
   if (ev.origin !== MONITOR_OLT_ORIGEM || !ev.data || ev.data.tipo !== 'jh-monitor-olt') return;
   const responder = r => { try { ev.source.postMessage({ tipo: 'jh-monitor-olt-recebido', ...r }, MONITOR_OLT_ORIGEM); } catch (e) { /* janela fechou */ } };
-  if (!ehAnalista()) { responder({ ok: false, erro: 'Entre no sistema JH com o perfil Analista e clique de novo.' }); return; }
+  if (!currentUser) { responder({ ok: false, erro: 'Entre no sistema JH (login e senha) e clique de novo.' }); return; }
   if (MONITOR_OLT_TIMER) { clearInterval(MONITOR_OLT_TIMER); MONITOR_OLT_TIMER = null; }
   const r = await salvarLeituraMonitorOlt(ev.data);
   responder(r.ok ? { ok: true, qtd: r.qtd } : { ok: false, erro: r.erro });
@@ -23690,7 +23694,6 @@ function linkFavoritoColetorOlt() {
 }
 function renderMonitorOlt() {
   const raiz = document.getElementById('content');
-  if (!ehAnalista()) { raiz.innerHTML = '<div class="panel"><div class="empty">Tela exclusiva do Analista.</div></div>'; return; }
   const noSite = /^https?:$/.test(location.protocol);
   raiz.innerHTML = `
     <div class="toolbar">
@@ -23901,7 +23904,11 @@ function renderMonitorOlt() {
     // por técnico (último atendimento conhecido do cliente)
     const porTec = new Map();
     itens.forEach(x => { const t = x.tecnico || ''; (porTec.get(t) || porTec.set(t, []).get(t)).push(x); });
-    const relTecnico = [...porTec.entries()].map(([t, l]) => ({ tecnico: t, cidades: [...new Set(l.map(x => x.cidade))].join(', '), ...contaSit(l) }))
+    const relTecnico = [...porTec.entries()].map(([t, l]) => ({ tecnico: t, cidades: [...new Set(l.map(x => x.cidade))].join(', '), ...contaSit(l),
+      // data do atendimento mais recente e os clientes (nome + data do atendimento dele), pedido do cliente 03/10/2026
+      ultima: l.map(x => x.ult && x.ult.data).filter(Boolean).sort().pop() || '',
+      clientes: l.slice().sort((a, b) => situacaoOnu(a.u.situacao).ordem - situacaoOnu(b.u.situacao).ordem)
+        .map(x => ({ nome: x.nome, data: x.ult ? x.ult.data : '', sit: x.u.situacao })) }))
       .sort((a, b) => (a.tecnico ? 0 : 1) - (b.tecnico ? 0 : 1) || b.critical - a.critical || b.total - a.total);
     const comTecnico = itens.filter(x => x.tecnico).length;
     const pctTxt = (n, d) => d ? formatPct(n / d * 100, 1) : '-';
@@ -23946,11 +23953,19 @@ function renderMonitorOlt() {
       <div class="section-heading">Relatório por técnico <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(último atendimento ao cliente — ${comTecnico} de ${itens.length} ONUs identificadas)</span></div>
       ${!relTecnico.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma ONU nessa situação.</div></div>' : `
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="mo-tab-tecnico"><thead><tr>
-        <th>Técnico</th><th>Crítico</th><th>Atenção</th><th>Sem sinal (LoS)</th><th>Sem energia</th><th>Total de ONUs</th><th>Cidades</th>
+        <th>Técnico</th><th>Crítico</th><th>Atenção</th><th>Sem sinal (LoS)</th><th>Sem energia</th><th>Total de ONUs</th><th>Cidades</th><th>Último atendimento</th><th>Clientes (data do atendimento)</th>
       </tr></thead><tbody>
         ${relTecnico.map(t => `<tr><td class="cat-cell">${t.tecnico ? esc(t.tecnico) : '<span style="color:var(--text-muted)">Não identificado</span>'}</td>
           <td style="${t.critical ? 'color:var(--danger);font-weight:700' : ''}">${t.critical}</td><td>${t.warning}</td><td>${t.loss_signal}</td><td>${t.power_fail}</td>
-          <td><b>${t.total}</b></td><td>${esc(t.cidades)}</td></tr>`).join('')}
+          <td><b>${t.total}</b></td><td>${esc(t.cidades)}</td>
+          <td>${t.ultima ? formatDate(t.ultima) : '-'}</td>
+          <td style="white-space:normal;min-width:260px;font-size:12px;line-height:1.5">${(() => {
+            const nomeados = t.clientes.filter(c => c.nome), semNome = t.clientes.length - nomeados.length;
+            const mostra = nomeados.slice(0, 8).map(c => `${esc(c.nome)}${c.data ? ` <span style="color:var(--text-muted)">· ${formatDate(c.data)}</span>` : ''}`);
+            if (nomeados.length > 8) mostra.push(`<span style="color:var(--text-muted)">… e mais ${nomeados.length - 8} cliente(s)</span>`);
+            if (semNome) mostra.push(`<span style="color:var(--text-muted)">${semNome} ONU(s) sem nome na OLT</span>`);
+            return mostra.join('<br>') || '-';
+          })()}</td></tr>`).join('')}
       </tbody></table></div>`}
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1.5rem">O AutoISP não informa o técnico: aqui é quem atendeu esse cliente por último (PCR ou Produção), achado pelo NOME na descrição da ONU. "Não identificado" = ONU sem nome na OLT ou cliente que não aparece nas nossas bases.</p>
       <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">ONUs para a preventiva <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(${ordenadas.length})</span>
@@ -23958,7 +23973,7 @@ function renderMonitorOlt() {
       ${!ordenadas.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma ONU nessa situação.</div></div>' : `
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="mo-tab-onus"><thead><tr>
         <th>Situação</th><th>Sinal</th><th>Cidade</th><th>OLT</th><th>PON</th><th>ONU</th><th>Cliente (descrição na OLT)</th><th>Técnico (último atend.)</th><th>IFI / IRR</th><th>ID Int6</th>
-        <th>Modelo</th><th>Na PCR</th><th>Chamado GIGA</th><th>Nova?</th><th>AutoISP</th>
+        <th>Modelo</th><th>Na PCR</th><th>Chamado GIGA</th><th>AutoISP</th>
       </tr></thead><tbody>
         ${itens.map(({ u, nome, pcr, giga, tecnico, ult, retorno }) => {
           const st = situacaoOnu(u.situacao);
@@ -23972,7 +23987,6 @@ function renderMonitorOlt() {
               <div style="font-size:11px;color:var(--text-muted)">${retorno.restam > 0 ? `sai da janela em ${retorno.restam} dia${retorno.restam === 1 ? '' : 's'}` : 'último dia da janela'}</div>` : '-'}</td><td>${esc(u.int6 || '-')}</td><td>${esc(u.modelo || '-')}</td>
             <td>${pcr ? `${formatDate(pcr.data)} · ${esc(pcr.tipo_atividade || '')} · ${esc(MAPA_STATUS_LABEL[classifyStatusGranular(pcr.status)] || pcr.status || '')}` : '-'}</td>
             <td>${giga ? `<span class="badge amber">aberto</span> ${esc(giga.protocolo || '')}` : '-'}</td>
-            <td>${antes ? (antes.has(chaveOnu(u)) ? '-' : '<span class="badge laranja">nova</span>') : '-'}</td>
             <td>${u.link ? `<a href="${esc(u.link)}" target="_blank" rel="noopener noreferrer">abrir ↗</a>` : '-'}</td></tr>`;
         }).join('')}
       </tbody></table></div>`}
