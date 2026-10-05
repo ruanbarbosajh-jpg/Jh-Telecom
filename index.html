@@ -8702,7 +8702,10 @@ function renderDashboard() {
     // 21/09/2026). Valor e quantidade vêm da mesma conta do Financeiro (retornos do
     // ciclo × preço da faixa do ofensor), então a tela inteira mostra UM número.
     const retDoCiclo = autoRet.info.retornos || null;
-    const qtdDoMotivo = c => c === 'desc_irr' ? (retDoCiclo ? retDoCiclo.qtdIrr : qtdIrr) : c === 'desc_ifi' ? (retDoCiclo ? retDoCiclo.qtdIfi : qtdIfi) : null;
+    // a quantidade mostrada é a MESMA que gera o valor (GIGA importada, senão sistema) × R$ 107
+    const g107 = autoRet.info.giga107 || null;
+    const qtdDoMotivo = c => g107 ? (c === 'desc_irr' ? g107.irr : c === 'desc_ifi' ? g107.ifi : null)
+      : c === 'desc_irr' ? (retDoCiclo ? retDoCiclo.qtdIrr : qtdIrr) : c === 'desc_ifi' ? (retDoCiclo ? retDoCiclo.qtdIfi : qtdIfi) : null;
     const tecnicosDoMotivo = (c, daFolha) => retDoCiclo && (c === 'desc_irr' || c === 'desc_ifi')
       ? retDoCiclo.linhas.filter(l => (c === 'desc_irr' ? l.qtdIrr : l.qtdIfi) > 0).length : daFolha;
     const descontos = CAMPOS_DESCONTO
@@ -19303,6 +19306,8 @@ function receitaDoPeriodoComFonte(rotulo, inicioISO, fimISO) {
 // todos exatos ao centavo.
 const ALIQUOTA_IMPOSTO_NOTA = 0.19;
 const FIN_CATEGORIAS_AUTO = ['Imposto Nota', 'IFI', 'IRR'];
+// Primeiro ciclo em que IFI/IRR do Dashboard valem R$ 107,00 por retorno (desconto da GIGA) — ciclo 21/08–20/09/2026.
+const GIGA107_A_PARTIR_DE = '2026-08-21';
 // IFI/IRR só dá pra calcular onde a Produção tem a classificação de retorno
 // (REPAROS OK / BASE_CONCLUIDOS): em ciclo mais antigo que essa base a conta
 // sairia R$ 0,00 e apagaria o valor real que está na planilha/cadastro.
@@ -19373,6 +19378,37 @@ function despesasAutomaticasDoPeriodo(rotulo) {
     valores['IFI'] = r.ifi; valores['IRR'] = r.irr;
     info.retornos = r;
   }
+  // IFI e IRR do Dashboard — duas regras, conforme o ciclo (pedido do cliente, 05/10/2026):
+  // (1) A PARTIR DO CICLO 21/08–20/09 (GIGA107_A_PARTIR_DE): o que a GIGA desconta da JH,
+  //     R$ 107,00 POR RETORNO (DESCONTOS_RETORNO_FIXOS.giga), NÃO o preço da faixa do técnico
+  //     (48,50/38,50/53,00/42,00 — esse segue só na Folha/holerite). Conferido em 21/08–20/09:
+  //     58 IRR × 107 = 6.206,00, exatamente o que a planilha de Comparação tem; IFI = 9 × 107 = 963,00.
+  //     Quantidade: a da GIGA quando o arquivo de retornos já foi importado no ciclo (linhas da
+  //     Folha com retorno_origem 'giga', já sem retorno fora da janela); senão a contagem do
+  //     sistema (retornos do ciclo por ofensor). Sem nenhuma contagem, cai na planilha.
+  // (2) CICLOS ANTERIORES: o histórico fica como a planilha de Comparação traz (valor em reais já
+  //     fechado com a GIGA na época, preços de faixa diferentes de 107); só sem o valor na planilha
+  //     vale o cálculo do sistema (faixa do ofensor). `info.retornos` mantém o detalhe por ofensor.
+  const daPlanilha = valoresDoComparativoFin(rotulo);
+  const dePlanilha = () => ['IFI', 'IRR'].forEach(cat => {
+    if (daPlanilha[cat] > 0) { valores[cat] = daPlanilha[cat]; (info.daPlanilha = info.daPlanilha || {})[cat] = true; }
+  });
+  if (inicio >= GIGA107_A_PARTIR_DE) {
+    const giga107 = Math.max(...DESCONTOS_RETORNO_FIXOS.map(d => d.giga));
+    const folhaGiga = (DB.folhaPagamento || []).filter(l => l.retorno_origem === 'giga' && (() => {
+      const j = datasDoPeriodoFolha(l.periodo); return j.inicio && overlaps(j.inicio, j.fim, inicio, fim);
+    })());
+    let qtdFinal = null;
+    if (folhaGiga.length) {
+      qtdFinal = { ifi: folhaGiga.reduce((a, l) => a + (Number(l.qtd_ifi) || 0), 0), irr: folhaGiga.reduce((a, l) => a + (Number(l.qtd_irr) || 0), 0), origem: 'giga' };
+    } else if (info.retornos) {
+      qtdFinal = { ifi: info.retornos.qtdIfi, irr: info.retornos.qtdIrr, origem: 'sistema' };
+    }
+    if (qtdFinal) {
+      valores['IFI'] = qtdFinal.ifi * giga107; valores['IRR'] = qtdFinal.irr * giga107;
+      info.giga107 = { ...qtdFinal, valorPorRetorno: giga107 };
+    } else dePlanilha();
+  } else dePlanilha();
   return { valores, info };
 }
 // Despesa por categoria já com o automático aplicado: calculado > cadastro >
@@ -19471,7 +19507,7 @@ function conferenciaFinanceiraHtml(periodos) {
   };
   return ruins.length
     ? `<div class="panel" style="margin:12px 0 1.5rem;border-color:var(--warn-borda);background:var(--warn-bg)">
-        <div style="font-size:13px;color:var(--warn-text)"><b>⚠ Financeiro × Comparação: ${ruins.length} de ${comPlanilha.length} ciclo(s) não batem.</b> O Dashboard usa o cálculo do sistema (receita, imposto, IFI e IRR) e o cadastro do Financeiro, completando com a planilha; onde a planilha diverge, ela é que está desatualizada ou o cálculo precisa de conferência.</div>
+        <div style="font-size:13px;color:var(--warn-text)"><b>⚠ Financeiro × Comparação: ${ruins.length} de ${comPlanilha.length} ciclo(s) não batem.</b> O Dashboard usa o cálculo do sistema (receita e imposto), o IFI e o IRR a R$ 107,00 por retorno (desconto da GIGA, a partir do ciclo 21/08–20/09; antes disso, o da planilha) e o cadastro do Financeiro, completando com a planilha; onde a planilha diverge, ela é que está desatualizada ou o cálculo precisa de conferência.</div>
         <div style="font-size:12.5px;color:var(--text-primary)">${ruins.map(linha).join('')}</div>
       </div>`
     : `<div class="panel" style="margin:12px 0 1.5rem"><div style="font-size:13px;color:var(--success)"><b>✔ Financeiro, cálculo do sistema e planilha de Comparação conferem</b> em ${comPlanilha.length} ciclo(s): despesa por categoria, imposto, IFI, IRR, total e receita das ordens.</div></div>`;
@@ -19758,6 +19794,8 @@ function renderFinance() {
       if (auto.valores[cat] === undefined) return '';
       let t = '';
       if (cat === 'Imposto Nota') t = `${formatPct(ALIQUOTA_IMPOSTO_NOTA * 100, 0)} da receita das ordens`;
+      else if (auto.info.giga107) { const g = auto.info.giga107; t = `${cat === 'IFI' ? g.ifi : g.irr} retorno(s) × ${formatCurrency(g.valorPorRetorno)} (desconto da GIGA)${g.origem === 'giga' ? '' : ' — contagem do sistema'}`; }
+      else if (auto.info.daPlanilha && auto.info.daPlanilha[cat]) t = 'valor da planilha de Comparação';
       else if (auto.info.retornos) { const r = auto.info.retornos; t = `${cat === 'IFI' ? r.qtdIfi : r.qtdIrr} retorno(s) do ciclo × preço da faixa do ofensor`; }
       return `<small class="fin-auto" style="color:var(--text-muted);font-weight:400"> · automático${t ? ' — ' + t : ''}</small>`;
     };
