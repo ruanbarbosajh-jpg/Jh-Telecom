@@ -23549,6 +23549,65 @@ function coletarPelaExtensao(aoProgresso) {
   });
   return MONITOR_OLT_COLETANDO;
 }
+// ---- Consulta pontual pela extensão (v1.1.0+, 05/10/2026) ----
+// Pedido do cliente: buscar QUALQUER assinante (nome, contrato, PPPoE, endereço, SN, Int6) — não só as
+// ONUs com sinal ruim — e ver o sinal dele. A extensão faz só GET na "Busca de Assinantes" do AutoISP
+// (/client_search/search, limitada às OLTs das 6 cidades da JH) e nos detalhes
+// (/gpon_clients/<int6>/detailed_info). Uma pergunta, uma resposta; nada é gravado no nosso banco.
+function extensaoAtende(min) {
+  const a = String(EXT_JH.versao || '0').split('.').map(n => parseInt(n, 10) || 0), b = String(min).split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) { if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); }
+  return true;
+}
+function consultarExtensao(acao, args) {
+  return new Promise(resolve => {
+    const id = 'q' + Date.now() + Math.random().toString(36).slice(2, 7);
+    const fim = r => { window.removeEventListener('message', ouvir); clearTimeout(limite); resolve(r); };
+    const ouvir = ev => {
+      if (ev.source !== window || ev.origin !== location.origin || !ev.data || ev.data.id !== id || ev.data.tipo !== 'jh-ext-consulta-resp') return;
+      fim(ev.data.ok ? { ok: true, dados: ev.data.dados } : { ok: false, erro: String(ev.data.erro || 'erro') });
+    };
+    const limite = setTimeout(() => fim({ ok: false, erro: 'A extensão não respondeu. Recarregue a página (F5) e tente de novo.' }), 90 * 1000);
+    window.addEventListener('message', ouvir);
+    window.postMessage({ tipo: 'jh-ext-consulta', id, acao, args }, location.origin);
+  });
+}
+// "há 5 min" / "há 3 h" / "há 2 dia(s)"
+function haQuantoTempo(quando) {
+  const t = quando instanceof Date ? quando.getTime() : new Date(quando).getTime();
+  if (isNaN(t)) return '';
+  const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (m < 1) return 'agora há pouco';
+  if (m < 60) return `há ${m} min`;
+  if (m < 1440) return `há ${Math.floor(m / 60)} h`;
+  return `há ${Math.floor(m / 1440)} dia(s)`;
+}
+// Cartões + dados do assinante (resultado de `detalhe` da extensão). TUDO que veio do AutoISP passa por esc().
+function htmlDetalheAssinante(d, base, naLeitura) {
+  const rx = d.sinal_rx, ok = /^ok$/i.test(d.status_onu || '');
+  const acs = d.acs_ultimo_contato ? new Date(d.acs_ultimo_contato) : null, acsOk = acs && !isNaN(acs);
+  const consultado = new Date(d.consultado_em);
+  const linhaInfo = (rot, val) => val ? `<div><span style="color:var(--text-muted)">${rot}</span> <b>${esc(val)}</b></div>` : '';
+  const local = [d.bairro, [d.cidade, d.uf].filter(Boolean).join('/')].filter(Boolean).join(' — ');
+  return `
+    <div class="stat-cards" style="margin:14px 0">
+      ${statCard(rx == null ? 'neutral' : ok ? 'green' : 'red', icBarras, 'Sinal (Rx da ONU)', rx == null ? '-' : `${rx.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} dBm`, d.status_onu ? `Status da ONU: ${esc(d.status_onu)}` : '')}
+      ${statCard(acsOk ? 'blue' : 'neutral', icRelogio, 'Última atualização do equipamento', acsOk ? esc(acs.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })) : '-', acsOk ? `último contato do equipamento com o AutoISP (ACS) · ${haQuantoTempo(acs)}` : 'o equipamento não informou')}
+      ${statCard('neutral', icRelogio, 'Consultado no AutoISP', esc(consultado.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })), 'o sinal acima é o último valor que o AutoISP tem registrado')}
+      ${naLeitura ? statCard('orange', icAviso, 'Na leitura de problemas', esc(situacaoOnu(naLeitura.situacao).rot), 'está na lista de ONUs com problema') : ''}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:6px 24px;font-size:13px;line-height:1.7">
+      ${linhaInfo('Assinante', d.nome)}${linhaInfo('Contrato', d.contrato)}${linhaInfo('Endereço', local)}${linhaInfo('PPPoE', d.pppoe)}
+      ${linhaInfo('Plano', d.plano)}${linhaInfo('OLT', base && base.olt)}${linhaInfo('PON', d.ponlink)}${linhaInfo('ONU SN', d.serial)}
+      ${linhaInfo('MAC da ONU', d.mac)}${linhaInfo('Descrição na OLT', d.descricao)}${linhaInfo('Topologia', d.topologia)}${linhaInfo('ID Int6', d.int6)}
+      ${linhaInfo('MACs aprendidos', (d.macs || []).join(' · '))}
+    </div>
+    ${d.lat != null && d.lng != null ? '<div id="mo-ass-mapa" style="height:260px;margin-top:14px;border-radius:var(--r-sm);overflow:hidden"></div>' : ''}
+    <p style="font-size:12px;color:var(--text-muted);margin:12px 0 0">
+      <a href="https://auto.alloha.com/gpon_clients/${esc(d.int6)}" target="_blank" rel="noopener noreferrer"><b>Abrir no AutoISP ↗</b></a>
+      — lá aparece o gráfico de sinal das últimas horas. Atenção: essa página do AutoISP manda a OLT/ACS consultar o equipamento (por isso o sistema não a abre sozinho).
+    </p>`;
+}
 const SITUACAO_ONU = {
   critical: { rot: 'Crítico', cls: 'warn', ordem: 1 },
   warning: { rot: 'Atenção', cls: 'amber', ordem: 2 },
@@ -23766,7 +23825,7 @@ function renderMonitorOlt() {
         <li>Entre no <b>AutoISP</b> (auto.alloha.com) neste mesmo Chrome, com o seu login, e deixe logado.</li>
         <li>Volte aqui, recarregue (F5) e clique em <b>🔄 Atualizar do AutoISP</b>. Pra atualizar sozinho, escolha o tempo em "Atualizar sozinho" (vale enquanto esta aba estiver aberta).</li>
       </ol>
-      <p style="margin:10px 0 0;font-size:12px;color:var(--text-muted)">A extensão só LÊ o AutoISP (lista de OLTs das 6 cidades e ONUs com sinal ruim), com o login que já está no Chrome: não guarda nem lê senha, não altera nada. Funciona só no computador onde foi instalada.</p>
+      <p style="margin:10px 0 0;font-size:12px;color:var(--text-muted)">A extensão só LÊ o AutoISP (lista de OLTs das 6 cidades, ONUs com sinal ruim e, na busca de assinantes, os dados do cliente que você pesquisar — sem CPF/CNPJ), com o login que já está no Chrome: não guarda nem lê senha, não altera nada. Funciona só no computador onde foi instalada. <b>Versão 1.1.0 ou mais nova</b> é necessária pra busca de assinantes (a versão aparece no título acima).</p>
     </details>
     <details class="panel" id="mo-como" style="margin-bottom:1.5rem">
       <summary style="cursor:pointer;font-weight:700">Alternativa sem extensão: favorito "📡 Coletar OLTs (JH)" ou arquivo</summary>
@@ -23781,6 +23840,22 @@ function renderMonitorOlt() {
       </ol>
       <p style="margin:10px 0 0;font-size:12px;color:var(--text-muted)">Só LEITURA: o coletor lê a lista de OLTs das 6 cidades e as ONUs com sinal ruim, não altera nada no AutoISP e não lê senhas. Não abre a página de cada cliente (ela faz a OLT consultar o equipamento).</p>
     </details>
+    <div class="panel" id="mo-busca" style="margin-bottom:1.5rem">
+      <h3>🔎 Buscar assinante <span style="font-size:12px;font-weight:400;color:var(--text-muted)">— qualquer cliente das 6 cidades, mesmo sem problema de sinal (consulta o AutoISP na hora)</span></h3>
+      <div style="display:flex;gap:10px 14px;flex-wrap:wrap;align-items:flex-end">
+        <div class="field"><label>Assinante (nome)</label><input type="text" id="mo-ass-nome" placeholder="parte do nome" autocomplete="off"></div>
+        <div class="field"><label>Contrato (ERP ID)</label><input type="text" id="mo-ass-contrato" placeholder="número do contrato" autocomplete="off"></div>
+        <div class="field"><label>PPPoE</label><input type="text" id="mo-ass-pppoe" autocomplete="off"></div>
+        <div class="field"><label>Endereço</label><input type="text" id="mo-ass-endereco" placeholder="rua, bairro…" autocomplete="off"></div>
+        <div class="field"><label>ONU SN</label><input type="text" id="mo-ass-serial" autocomplete="off"></div>
+        <div class="field"><label>ID Int6</label><input type="text" id="mo-ass-int6" autocomplete="off"></div>
+        <button type="button" class="btn" id="mo-ass-buscar">Buscar</button>
+        <button type="button" class="btn-export-xls" id="mo-ass-limpar">Limpar</button>
+      </div>
+      <div id="mo-ass-msg" style="font-size:12px;color:var(--text-muted);margin-top:10px"></div>
+      <div id="mo-ass-lista"></div>
+      <div id="mo-ass-det"></div>
+    </div>
     <div id="mo-body"><div class="panel"><div class="empty">Carregando leituras…</div></div></div>`;
   const fav = document.getElementById('mo-favorito');
   if (fav) {
@@ -23812,8 +23887,94 @@ function renderMonitorOlt() {
     if (!s.ok) { status(`<span style="color:var(--danger)">⚠ ${esc(s.erro)}</span>`); return; }
     status(`✔ Atualizado às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} — ${s.qtd} ONU(s) com problema${s.aviso ? ' · <span style="color:var(--danger)">não salvou no banco (PASSO-35)</span>' : ''}`);
     if (document.getElementById('mo-leitura')) await montarSeletor(validarLeituraMonitorOlt(r.dados).coletado_em.slice(0, 13));
+    // o assinante que está aberto na busca também é consultado de novo (sinal e último contato atuais)
+    if (typeof detalheAberto !== 'undefined' && detalheAberto && extensaoAtende('1.1.0')) abrirDetalhe(detalheAberto.int6, detalheAberto.base, false);
   }
   if (btnAtu) btnAtu.addEventListener('click', () => atualizarDoAutoIsp(false));
+  // ---- Buscar assinante (05/10/2026) ----
+  let detalheAberto = null;   // { int6, base } — o "Atualizar do AutoISP" refaz esse detalhe também
+  const msgAss = t => { const el = document.getElementById('mo-ass-msg'); if (el) el.innerHTML = t; };
+  function extensaoPronta() {
+    if (!EXT_JH.presente) { pintarExtensao(); msgAss('<span style="color:var(--danger)">Instale a extensão do Chrome primeiro (passo a passo logo acima).</span>'); return false; }
+    if (!extensaoAtende('1.1.0')) {
+      msgAss(`<span style="color:var(--danger)">Sua extensão é a versão ${esc(EXT_JH.versao || '?')} e a busca precisa da <b>1.1.0</b>: baixe o zip de novo, substitua os arquivos da pasta e clique em ⟳ (recarregar) na extensão, em chrome://extensions. Depois dê F5 aqui.</span>`);
+      const painel = document.getElementById('mo-ext'); if (painel) painel.open = true;
+      return false;
+    }
+    return true;
+  }
+  async function abrirDetalhe(int6, base, mostrarCarregando) {
+    const alvo = document.getElementById('mo-ass-det');
+    if (!alvo || !/^\d{1,12}$/.test(String(int6))) return;
+    if (mostrarCarregando) alvo.innerHTML = '<div class="empty" style="padding:1.5rem 0">Consultando o AutoISP…</div>';
+    const r = await consultarExtensao('detalhe', { int6: String(int6) });
+    if (!document.getElementById('mo-ass-det')) return;
+    if (!r.ok) { alvo.innerHTML = `<div style="margin-top:14px;color:var(--danger);font-size:13px">⚠ ${esc(r.erro)}</div>`; return; }
+    const d = r.dados;
+    detalheAberto = { int6: String(int6), base };
+    const dadosLeitura = MONITOR_OLT.atualDados;
+    const naLeitura = dadosLeitura && d.serial ? (dadosLeitura.onus || []).find(u => u.serial && u.serial === d.serial) : null;
+    alvo.innerHTML = `<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)"><div style="font-size:15px;font-weight:700">${esc(d.nome || (base && base.nome) || 'Assinante')} <span style="font-weight:400;color:var(--text-muted)">· Int6 ${esc(d.int6)}</span> <button type="button" class="btn-export-xls" id="mo-ass-atualizar-det" style="margin-left:8px">↻ Consultar de novo</button></div>${htmlDetalheAssinante(d, base, naLeitura)}</div>`;
+    const bt = document.getElementById('mo-ass-atualizar-det');
+    if (bt) bt.addEventListener('click', () => abrirDetalhe(int6, base, false));
+    if (d.lat != null && d.lng != null && typeof L !== 'undefined') {
+      const el = document.getElementById('mo-ass-mapa');
+      if (el) {
+        const mapa = L.map(el, { scrollWheelZoom: false }).setView([d.lat, d.lng], 17);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 19 }).addTo(mapa);
+        L.circleMarker([d.lat, d.lng], { radius: 9, color: '#fff', weight: 2, fillColor: '#2563eb', fillOpacity: 1 }).addTo(mapa);
+      }
+    }
+    if (mostrarCarregando) alvo.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  async function buscarAssinantes() {
+    if (!extensaoPronta()) return;
+    const f = {};
+    ['nome', 'contrato', 'pppoe', 'endereco', 'serial', 'int6'].forEach(k => { f[k] = (document.getElementById('mo-ass-' + k).value || '').trim(); });
+    if (!Object.values(f).some(Boolean)) { msgAss('Digite pelo menos um campo (nome, contrato, PPPoE, endereço, SN ou Int6).'); return; }
+    const btn = document.getElementById('mo-ass-buscar'); btn.disabled = true;
+    msgAss('Buscando no AutoISP…');
+    document.getElementById('mo-ass-lista').innerHTML = ''; document.getElementById('mo-ass-det').innerHTML = ''; detalheAberto = null;
+    const r = await consultarExtensao('buscar', f);
+    btn.disabled = false;
+    if (!document.getElementById('mo-ass-lista')) return;
+    if (!r.ok) { msgAss(`<span style="color:var(--danger)">⚠ ${esc(r.erro)}</span>`); return; }
+    const lista = Array.isArray(r.dados) ? r.dados : [];
+    MONITOR_OLT.achados = lista;
+    if (!lista.length) { msgAss('Nenhum assinante encontrado nas OLTs da JH com esses dados.'); return; }
+    msgAss(`${lista.length} assinante(s) encontrado(s)${lista.length >= 100 ? ' — <b>o AutoISP mostra no máximo 100</b>: refine a busca (mais letras do nome, ou contrato/SN)' : ''}. Clique no <b>ONU SN</b> pra ver o sinal e os dados.`);
+    document.getElementById('mo-ass-lista').innerHTML = `
+      <div class="table-wrap" style="margin-top:12px;max-height:420px;overflow:auto"><table class="data-table" id="mo-tab-assinantes"><thead><tr>
+        <th>Assinante</th><th>Contrato</th><th>Endereço</th><th>ONU SN</th><th>OLT</th><th>PON</th><th>ID Int6</th><th>PPPoE</th>
+      </tr></thead><tbody>
+        ${lista.map((x, i) => `<tr>
+          <td class="cat-cell">${esc(x.nome || '-')}</td><td>${esc(x.contrato || '-')}</td><td style="white-space:normal;min-width:180px">${esc(x.endereco || '-')}</td>
+          <td>${x.int6 ? `<a href="#" class="mo-ver-ass" data-i="${i}" title="Ver sinal e dados">${esc(x.serial || x.int6)}</a>` : esc(x.serial || '-')}</td>
+          <td>${esc(x.olt || '-')}</td><td>${esc(x.ponlink || '-')}</td><td>${esc(x.int6 || '-')}</td><td style="font-size:12px">${esc(x.pppoe || '-')}</td></tr>`).join('')}
+      </tbody></table></div>`;
+    if (lista.length === 1 && lista[0].int6) abrirDetalhe(lista[0].int6, { olt: lista[0].olt, nome: lista[0].nome }, true);
+  }
+  document.getElementById('mo-ass-buscar').addEventListener('click', buscarAssinantes);
+  document.getElementById('mo-busca').addEventListener('keydown', ev => { if (ev.key === 'Enter' && ev.target.tagName === 'INPUT') { ev.preventDefault(); buscarAssinantes(); } });
+  document.getElementById('mo-ass-limpar').addEventListener('click', () => {
+    ['nome', 'contrato', 'pppoe', 'endereco', 'serial', 'int6'].forEach(k => { document.getElementById('mo-ass-' + k).value = ''; });
+    document.getElementById('mo-ass-lista').innerHTML = ''; document.getElementById('mo-ass-det').innerHTML = ''; msgAss(''); detalheAberto = null;
+  });
+  // clique no ONU SN da busca, ou no ID Int6 da tabela de ONUs com problema
+  // (ligado nos blocos #mo-busca e #mo-body, que são recriados a cada abertura da tela — no #content
+  //  o listener se acumulava a cada visita e a consulta saía duplicada)
+  const cliqueVerAssinante = ev => {
+    const a = ev.target.closest('a.mo-ver-ass, a.mo-ver-int6');
+    if (!a) return;
+    ev.preventDefault();
+    if (!extensaoPronta()) return;
+    if (a.classList.contains('mo-ver-ass')) {
+      const x = (MONITOR_OLT.achados || [])[parseInt(a.dataset.i, 10)];
+      if (x) abrirDetalhe(x.int6, { olt: x.olt, nome: x.nome }, true);
+    } else abrirDetalhe(a.dataset.int6, { olt: a.dataset.olt || '', nome: a.dataset.nome || '' }, true);
+  };
+  document.getElementById('mo-busca').addEventListener('click', cliqueVerAssinante);
+  document.getElementById('mo-body').addEventListener('click', cliqueVerAssinante);
   // automático: só enquanto ESTA tela está aberta (sai da tela, o timer se desliga sozinho)
   const selAuto = document.getElementById('mo-auto');
   function ligarAutomatico() {
@@ -23870,6 +24031,7 @@ function renderMonitorOlt() {
     const [reg, regAnt] = await Promise.all([carregarLeituraMonitorOlt(chave), carregarLeituraMonitorOlt(lista[idx + 1] && lista[idx + 1].chave)]);
     if (!reg || !reg.dados) { body.innerHTML = '<div class="panel"><div class="empty">Não consegui abrir essa leitura.</div></div>'; return; }
     const d = reg.dados;
+    MONITOR_OLT.atualDados = d;
     // filtros
     const cidSel = document.getElementById('mo-cidade');
     const cidades = [...new Set(d.olts.flatMap(o => o.cidades.map(c => c.replace(/,\s*SP$/i, ''))))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
@@ -23964,7 +24126,7 @@ function renderMonitorOlt() {
       : k ? `<span class="badge warn">${esc(String(k).toUpperCase())}</span>` : '-';
     const sinalTxt = v => v == null ? '-' : `${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} dBm`;
     body.innerHTML = `
-      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Leitura de ${esc(new Date(reg.coletado_em).toLocaleString('pt-BR'))}${reg.coletado_por ? ' por ' + esc(reg.coletado_por) : ''} · AutoISP (Alloha)${regAnt ? ` · comparando com ${esc(new Date(regAnt.coletado_em).toLocaleString('pt-BR'))}` : ''}${desativadas ? ` · ${desativadas} OLT(s) DEACTIV fora da conta` : ''}${d.erros && d.erros.length ? ` · <span style="color:var(--warn-text)">${d.erros.length} consulta(s) falharam na coleta</span>` : ''}${MONITOR_OLT.avisoBanco ? ` · <span style="color:var(--danger)">não salvou no banco: rode o sql/PASSO-35-monitor-olt.sql</span>` : ''}</p>
+      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem"><b>Última atualização: ${esc(new Date(reg.coletado_em).toLocaleString('pt-BR'))}</b> (${haQuantoTempo(reg.coletado_em)})${reg.coletado_por ? ' por ' + esc(reg.coletado_por) : ''} · AutoISP (Alloha)${regAnt ? ` · comparando com ${esc(new Date(regAnt.coletado_em).toLocaleString('pt-BR'))}` : ''}${desativadas ? ` · ${desativadas} OLT(s) DEACTIV fora da conta` : ''}${d.erros && d.erros.length ? ` · <span style="color:var(--warn-text)">${d.erros.length} consulta(s) falharam na coleta</span>` : ''}${MONITOR_OLT.avisoBanco ? ` · <span style="color:var(--danger)">não salvou no banco: rode o sql/PASSO-35-monitor-olt.sql</span>` : ''}</p>
       <div class="cards-grid">
         ${metricCard('OLTs monitoradas', olts.length, false, { icon: icRota })}
         ${metricCard('OLTs com falha', falhas.length, falhas.length > 0, { icon: icAviso, sub: falhas.map(o => esc(o.hostname)).slice(0, 3).join(', ') })}
@@ -24032,7 +24194,7 @@ function renderMonitorOlt() {
             <td>${tecnico ? `${esc(tecnico)}<div style="font-size:11px;color:var(--text-muted)">${formatDate(ult.data)}${ult.tipo_atividade ? ' · ' + esc(ult.tipo_atividade) : ''}</div>` : '-'}</td>
             <td>${retorno ? `<span class="badge ${retorno.marca === 'IFI' ? 'warn' : 'amber'}">${retorno.marca}</span>
               <div style="font-size:11px;color:var(--text-muted);white-space:nowrap">${esc(retorno.tipo || '')} ${formatDate(retorno.data)} (${retorno.dias} dia${retorno.dias === 1 ? '' : 's'})${retorno.ofensor ? ' · ofensor ' + esc(retorno.ofensor) : ''}</div>
-              <div style="font-size:11px;color:var(--text-muted)">${retorno.restam > 0 ? `sai da janela em ${retorno.restam} dia${retorno.restam === 1 ? '' : 's'}` : 'último dia da janela'}</div>` : '-'}</td><td>${esc(u.int6 || '-')}</td><td>${esc(u.modelo || '-')}</td>
+              <div style="font-size:11px;color:var(--text-muted)">${retorno.restam > 0 ? `sai da janela em ${retorno.restam} dia${retorno.restam === 1 ? '' : 's'}` : 'último dia da janela'}</div>` : '-'}</td><td>${u.int6 ? `<a href="#" class="mo-ver-int6" data-int6="${esc(u.int6)}" data-olt="${esc(u.olt)}" data-nome="${esc(nome || '')}" title="Ver sinal e dados deste assinante">${esc(u.int6)}</a>` : '-'}</td><td>${esc(u.modelo || '-')}</td>
             <td>${pcr ? `${formatDate(pcr.data)} · ${esc(pcr.tipo_atividade || '')} · ${esc(MAPA_STATUS_LABEL[classifyStatusGranular(pcr.status)] || pcr.status || '')}` : '-'}</td>
             <td>${giga ? `<span class="badge amber">aberto</span> ${esc(giga.protocolo || '')}` : '-'}</td>
             <td>${u.link ? `<a href="${esc(u.link)}" target="_blank" rel="noopener noreferrer">abrir ↗</a>` : '-'}</td></tr>`;
