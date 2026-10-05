@@ -241,6 +241,9 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%238892ad' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   }
   select:not([style])::-ms-expand { display: none; }
+  /* a seta NUNCA se repete: qualquer regra de select que use `background:` abreviado (ex.: select.folha-edit, que fazia a seta
+     aparecer 3-4 vezes dentro do campo Frota — print do cliente 05/10/2026) zera o no-repeat; esta trava vence todas */
+  select:not([style]) { background-repeat: no-repeat !important; background-size: 11px !important; background-position: right 11px center !important; }
   :root[data-theme="light"] select:not([style]) {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%234a5470' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   }
@@ -509,7 +512,7 @@
      um retângulo claro cravado no meio da tabela escura */
   input.folha-edit, select.folha-edit {
     padding: 4px 6px; font-size: 13px; text-align: center;
-    color: var(--text-primary); background: var(--bg-page); border: 1px solid var(--border);
+    color: var(--text-primary); background-color: var(--bg-page); border: 1px solid var(--border);
     border-radius: 6px; outline: none; font-family: inherit;
   }
   input.folha-edit:focus, select.folha-edit:focus { border-color: var(--accent); }
@@ -1261,6 +1264,9 @@
   .folha-manual { color: var(--accent) !important; font-weight: 700 !important; border-color: var(--accent) !important; }
   .folha-auto { border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; }
   .folha-auto:hover { color: var(--accent); }
+  .folha-auto-aj { border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; }
+  .folha-auto-aj:hover { color: var(--accent); }
+  .folha-auto-aj[hidden] { display: none; }
   input.folha-edit-moeda.folha-sem-destaque.tem-valor { color: inherit; font-weight: 400; }
   /* card pequeno (ex.: "Última importação") vai pro canto DIREITO da barra */
   .toolbar > .stat-card--compacto { margin-left: auto; }
@@ -2662,6 +2668,9 @@ const SUPABASE_TABLES = {
   // editar colaborador"): a lista que era fixa no código (QUADRO_ESCRITORIO) vira ponto de partida e
   // cada mudança (novo, editado, excluído) fica aqui. sql/PASSO-36-folha-escritorio-quadro.sql
   folhaEscritorioQuadro: { table: 'folha_escritorio_quadro', conflict: 'pessoa' },
+  // Técnicos EXCLUÍDOS da Folha de um ciclo (05/10/2026): a folha nasce sozinha da Produção, então sem esta
+  // marca o técnico excluído voltaria na próxima importação. sql/PASSO-37-folha-ajustes-e-excluidos.sql
+  folhaPagamentoExcluidos: { table: 'folha_pagamento_excluidos', conflict: 'chave' },
   // PCR: as linhas do CSV de atividades. Diferente das outras tabelas, essas
   // linhas carregam DATAS de verdade (abertura, limite, encerramento, início) —
   // no banco viram texto ISO, então precisam voltar a ser Date ao carregar,
@@ -2999,7 +3008,7 @@ const CACHE_VERSAO = 1;
 // gratuito. Delta por `atualizado_em` + conferência de contagem continuam
 // valendo em toda entrada; só a recarga de segurança ficou mais espaçada.
 const CACHE_VALIDADE_MS = 7 * 24 * 60 * 60 * 1000;
-const TABELAS_SEM_CACHE = new Set(['pcr', 'clean_up', 'presenca_escritorio_folgas', 'chamados_giga', 'ordens_sp', 'valores_sp_historico', 'folha_historico', 'folha_escritorio_quadro']);
+const TABELAS_SEM_CACHE = new Set(['pcr', 'clean_up', 'presenca_escritorio_folgas', 'chamados_giga', 'ordens_sp', 'valores_sp_historico', 'folha_historico', 'folha_escritorio_quadro', 'folha_pagamento_excluidos']);
 
 let cacheDbPromessa = null;
 function cacheAbrir() {
@@ -3257,6 +3266,7 @@ const SCRIPT_DA_TABELA = {
   presenca_escritorio_log: 'PASSO-5', presenca_escritorio_folgas: 'PASSO-5',
   folha_escritorio: 'PASSO-18',
   folha_escritorio_quadro: 'PASSO-36',
+  folha_pagamento_excluidos: 'PASSO-37',
   chamados_giga: 'PASSO-25',
   ordens_sp: 'PASSO-31', valores_sp_historico: 'PASSO-31',
   folha_historico: 'PASSO-32',
@@ -3595,7 +3605,7 @@ function podeAcessar(role, route) {
 const DB = {
   fechamento: [], producao: [], prazo: [], folhaPagamento: [], baseDoDia: [], prazoReparoDia: [],
   frotaLinks: [], frotaTroca: [], frotaManutencao: [], frotaDesvinc: [], frotaMultas: [], frotaRevisao: [],
-  pedagio: [], financeiro: [], folhaEscritorio: [], folhaEscritorioQuadro: [], importsLog: [],
+  pedagio: [], financeiro: [], folhaEscritorio: [], folhaEscritorioQuadro: [], folhaPagamentoExcluidos: [], importsLog: [],
   // Clean Up: uma linha por limpeza de CTO já feita (coordenada + contrato +
   // O.S + técnico + portas liberadas). É o que alimenta o mapa da aba Clean Up.
   cleanUp: [],
@@ -3642,6 +3652,7 @@ const DB_INDEX = {
   frotaLinks: new Map(), frotaTroca: new Map(), frotaManutencao: new Map(), frotaDesvinc: new Map(), frotaMultas: new Map(), frotaRevisao: new Map(),
   folhaEscritorio: new Map(),
   folhaEscritorioQuadro: new Map(),
+  folhaPagamentoExcluidos: new Map(),
   pedagio: new Map(), financeiro: new Map(), pcr: new Map(), pleito: new Map(),
   cleanUp: new Map(),
   presencaTecnicos: new Map(), presenca: new Map(),
@@ -9688,6 +9699,49 @@ function diasFrotaDaLinha(linha) {
 function valorManualFolha(v) {
   return (v === null || v === undefined || v === '') ? null : Number(v);
 }
+// ---- AJUSTES MANUAIS da folha (05/10/2026, pedido do cliente: "que seja possível editar os serviços,
+// IFI, IRR, tanto bônus quanto desconto") ----
+// `linha.ajustes` (jsonb, PASSO-37) guarda SÓ o que foi digitado à mão por cima do cálculo automático:
+//   q_<tipo>   quantidade de ordens de um tipo de serviço (q_ativacao, q_reparo, ...) — o valor em R$
+//              acompanha (quantidade × tarifa da faixa APTO/INAPTO, ou o valor de SP do ciclo)
+//   qtd_ifi / qtd_irr   quantidade de retornos — o desconto acompanha (× preço da faixa do técnico)
+//   desc_ifi / desc_irr desconto em R$ digitado direto (vale por cima da quantidade)
+//   bonus      'APTO' | 'INAPTO' — vale por cima da regra dos 26 dias + indicadores
+// Chave ausente = automático. Sem isto o valor digitado era refeito pelo cálculo a cada abertura da tela.
+function ajustesDaLinha(l) {
+  let a = l && l.ajustes;
+  if (typeof a === 'string') { try { a = JSON.parse(a); } catch (e) { a = null; } }
+  return a && typeof a === 'object' ? a : {};
+}
+function ajusteFolha(l, chave) {
+  const v = ajustesDaLinha(l)[chave];
+  return v === undefined || v === null || v === '' ? null : v;
+}
+function temAjusteQuebra(l) { return TIPOS_FOLHA.some(t => ajusteFolha(l, 'q_' + t.chave) !== null); }
+function temAjusteRetorno(l) { return ['qtd_ifi', 'qtd_irr', 'desc_ifi', 'desc_irr'].some(k => ajusteFolha(l, k) !== null); }
+// Refaz o que depende dos ajustes numa linha JÁ montada (sem gravar): serviços → total/valor das ordens;
+// retornos → desconto, % e totais; desconto digitado por cima; total a receber.
+function recalcularLinhaAjustada(linha) {
+  const janela = datasDoPeriodoFolha(linha.periodo);
+  const apto = /apto/i.test(linha.bonus || '') && !/inapto/i.test(linha.bonus || '');
+  if (temAjusteQuebra(linha)) {
+    const q = quebraPorTipoDaLinha(linha, apto);
+    linha.total_ordens = TIPOS_FOLHA.reduce((a, t) => a + (q[t.chave] || 0), 0);
+    linha.valor_total_ordens = TIPOS_FOLHA.reduce((a, t) => a + (q['v_' + t.chave] || 0), 0);
+  }
+  if (ajusteFolha(linha, 'qtd_ifi') !== null) linha.qtd_ifi = Math.max(0, Number(ajusteFolha(linha, 'qtd_ifi')) || 0);
+  if (ajusteFolha(linha, 'qtd_irr') !== null) linha.qtd_irr = Math.max(0, Number(ajusteFolha(linha, 'qtd_irr')) || 0);
+  aplicarDescontoRetorno(linha, janela);
+  if (ajusteFolha(linha, 'desc_ifi') !== null) linha.desc_ifi = Math.max(0, Number(ajusteFolha(linha, 'desc_ifi')) || 0);
+  if (ajusteFolha(linha, 'desc_irr') !== null) linha.desc_irr = Math.max(0, Number(ajusteFolha(linha, 'desc_irr')) || 0);
+  linha.total_descontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(linha[c]) || 0), 0);
+  linha.total_receber = totalReceberFolha(linha);
+  linha._recalculado = true;   // % IFI/IRR agora em porcentagem (0,82 = 0,82%), não fração da planilha
+  return linha;
+}
+function folhaExcluida(tecnico, periodo) {
+  return !!(DB_INDEX.folhaPagamentoExcluidos && DB_INDEX.folhaPagamentoExcluidos.has(`${tecnico}|${periodo}`));
+}
 function aluguelDaLinha(linha) {
   if (/^jh$/i.test(normalizeHeader(linha.frota))) return 0;
   const diasFrota = diasFrotaDaLinha(linha);
@@ -9834,7 +9888,9 @@ function precoRetornoDoTecnico(tipo, linha, janela) {
 function aplicarDescontoRetorno(linha, janela) {
   linha.desc_ifi = (Number(linha.qtd_ifi) || 0) * precoRetornoDoTecnico('ifi', linha, janela);
   linha.desc_irr = (Number(linha.qtd_irr) || 0) * precoRetornoDoTecnico('irr', linha, janela);
-  const base = (janela && janela.inicio && janela.fim) ? baseDoTecnico(linha.tecnico, janela.inicio, janela.fim) : null;
+  let base = (janela && janela.inicio && janela.fim) ? baseDoTecnico(linha.tecnico, janela.inicio, janela.fim) : null;
+  // serviços ajustados à mão: a base do % acompanha (Ativação + M. Endereço / Reparo digitados)
+  if (base && temAjusteQuebra(linha)) { const qa = quebraPorTipoDaLinha(linha, true); base = { ativacao: (qa.ativacao || 0) + (qa.mudanca_endereco || 0), reparos: qa.reparo || 0 }; }
   if (base) {
     linha.ifi_pct = base.ativacao ? ((Number(linha.qtd_ifi) || 0) / base.ativacao) * 100 : 0;
     linha.irr_pct = base.reparos ? ((Number(linha.qtd_irr) || 0) / base.reparos) * 100 : 0;
@@ -9937,7 +9993,9 @@ function recalcularCampoFolha(linhaAtual, campo, valor) {
   if (campo === 'bonus') {
     const janela = datasDoPeriodoFolha(linha.periodo);
     if (janela.inicio && janela.fim) {
-      linha.valor_total_ordens = valorOrdensDoPeriodo(linha.tecnico, janela.inicio, janela.fim, valor === 'APTO');
+      linha.valor_total_ordens = temAjusteQuebra(linha)
+        ? (() => { const qb = quebraPorTipoDaLinha(linha, valor === 'APTO'); return TIPOS_FOLHA.reduce((a, t) => a + (qb['v_' + t.chave] || 0), 0); })()
+        : valorOrdensDoPeriodo(linha.tecnico, janela.inicio, janela.fim, valor === 'APTO');
       // o DESCONTO do retorno acompanha a mesma faixa (ver precoRetornoDoTecnico):
       // virar APTO sobe o valor da ordem E o valor de cada retorno. Sem isto, o
       // técnico promovido a APTO recebia pela faixa de 26 dias mas continuava
@@ -10011,14 +10069,16 @@ async function salvarLinhaFolha(linha) {
     let envio = { ...linha };
     Object.keys(envio).forEach(k => { if (k.startsWith('_')) delete envio[k]; });
     let { error } = await supa.from('folha_pagamento').upsert(envio, { onConflict: 'tecnico,periodo' });
+    const ignoradas = [];
     for (let i = 0; error && i < 5; i++) {
       const faltando = /Could not find the '([^']+)' column/.exec(error.message || '');
       if (!faltando) break;
+      ignoradas.push(faltando[1]);
       delete envio[faltando[1]];
       ({ error } = await supa.from('folha_pagamento').upsert(envio, { onConflict: 'tecnico,periodo' }));
     }
     if (error) return { ok: false, error };
-    return { ok: true };
+    return { ok: true, ignoradas };
   } catch (e) { return { ok: false, error: e }; }
 }
 // Soma o valor das ordens (o que a JH paga ao técnico) das ordens CONCLUÍDAS
@@ -10041,13 +10101,13 @@ function valorOrdensDoPeriodo(tecnico, inicio, fim, apto) {
 // zerá-los ao reprocessar um período que já tinha lançamento.
 const CAMPOS_MANUAIS_FOLHA = [
   'frota', 'dias_aluguel', 'valor_aluguel', 'dias_frota', 'emprestimo', ...CAMPOS_TODO_DESCONTO_FOLHA,
-  'frota_manual', 'dias_aluguel_manual', 'valor_aluguel_manual',
+  'frota_manual', 'dias_aluguel_manual', 'valor_aluguel_manual', 'ajustes',
   'parcela_equipamento', 'parcela_ferramentas', 'parcela_multa', 'parcela_miscelanea',
   'parcela_mecanica', 'parcela_vale', 'parcela_fiscalizacao', 'parcela_combustivel'
 ];
 // dias_frota nasce VAZIO (null), não 0: vazio = "pega da aba DESVINCULAÇÕES";
 // 0 digitado = "não usou carro da frota" (ver diasFrotaDaLinha)
-const FOLHA_CAMPO_VAZIO = c => (c === 'dias_frota' || c.endsWith('_manual')) ? null : (c === 'frota' || c.startsWith('parcela_')) ? '' : 0;
+const FOLHA_CAMPO_VAZIO = c => (c === 'dias_frota' || c === 'ajustes' || c.endsWith('_manual')) ? null : (c === 'frota' || c.startsWith('parcela_')) ? '' : 0;
 // ---- Parcelas que continuam no ciclo seguinte (01/10/2026) ----
 // Desconto parcelado ("2/3" = 2ª de 3) se repete no ciclo seguinte com o MESMO
 // valor e a parcela seguinte, até fechar ("3/3"). É o que a planilha da folha
@@ -10105,7 +10165,7 @@ function gerarPeriodoFolha(inicio, fim) {
     (porTecnico[p.recurso] = porTecnico[p.recurso] || []).push(p);
   });
   const retornos = contarRetornosPorOfensor(inicio, fim);
-  const linhas = Object.keys(porTecnico).sort((a, b) => a.localeCompare(b, 'pt-BR')).map(tecnico => {
+  const linhas = Object.keys(porTecnico).filter(t => !folhaExcluida(t, periodo)).sort((a, b) => a.localeCompare(b, 'pt-BR')).map(tecnico => {
     const ordens = porTecnico[tecnico];
     // mesma regra da Tabela de Bônus: dias trabalhados = dias DISTINTOS com
     // pelo menos 1 ordem concluída baixada nesse período
@@ -20539,6 +20599,127 @@ function painelValoresPorOrdemFolha(fimISO, periodo) {
     </p>
   </div>`;
 }
+// ===== ADICIONAR / EDITAR / EXCLUIR TÉCNICO NA FOLHA (05/10/2026) =====
+// Pedido do cliente: "coloque a opção de adicionar, editar e etc. na folha também". A folha do ciclo nasce
+// sozinha da Produção; aqui dá pra incluir quem não tem ordem (ou corrigir o nome) e tirar quem não entra.
+//   • + Técnico   — cria a linha (zerada) do técnico no ciclo escolhido; a lente da tela já preenche serviços,
+//                   retornos e bônus pela Produção se o nome bater com o da Produção
+//   • ✎ Editar    — corrige o NOME do técnico em TODOS os ciclos já salvos (ciclo fechado barra)
+//   • 🗑 Excluir   — tira a linha daquele ciclo e grava a marca em `folha_pagamento_excluidos`, senão a folha
+//                   (que nasce da Produção) traria o técnico de volta na próxima importação
+// Ciclo FECHADO nunca muda. Tudo entra no histórico de alterações da Folha.
+function criarLinhaFolhaVazia(tecnico, periodo) {
+  const j = datasDoPeriodoFolha(periodo);
+  const linha = {
+    tecnico, periodo, total_ordens: 0, valor_total_ordens: 0, dias_trab: 0, bonus: 'INAPTO', qtd_ifi: 0, qtd_irr: 0, ifi_pct: 0, irr_pct: 0,
+    frota: j.inicio ? frotaDoTecnico(tecnico, j.inicio, j.fim) : '', dias_frota: null, dias_aluguel: 0, valor_aluguel: 0, emprestimo: 0,
+    total_descontos: 0, total_receber: 0, ajustes: null,
+  };
+  CAMPOS_TODO_DESCONTO_FOLHA.forEach(c => { linha[c] = 0; });
+  ['equipamento', 'ferramentas', 'multa', 'miscelanea', 'mecanica', 'vale', 'fiscalizacao', 'combustivel'].forEach(x => { linha['parcela_' + x] = ''; });
+  return linha;
+}
+function reindexarFolhaPagamento() {
+  DB_INDEX.folhaPagamento = new Map(DB.folhaPagamento.map((r, i) => [`${r.tecnico}|${r.periodo}`, i]));
+}
+async function marcarTecnicoExcluidoFolha(tecnico, periodo, excluido) {
+  const chave = `${tecnico}|${periodo}`;
+  const i = DB_INDEX.folhaPagamentoExcluidos.get(chave);
+  if (!excluido) {
+    if (i === undefined) return { ok: true };
+    DB.folhaPagamentoExcluidos.splice(i, 1);
+    DB_INDEX.folhaPagamentoExcluidos = new Map(DB.folhaPagamentoExcluidos.map((r, k) => [r.chave, k]));
+    if (!supa) return { ok: true };
+    try { const { error } = await supa.from('folha_pagamento_excluidos').delete().eq('chave', chave); return error ? { ok: false, erro: error.message } : { ok: true }; }
+    catch (e) { return { ok: false, erro: String((e && e.message) || e) }; }
+  }
+  const row = { chave, tecnico, periodo, excluido_por: currentUser ? (currentUser.nome || currentUser.login) : null, excluido_em: new Date().toISOString() };
+  if (i === undefined) { DB_INDEX.folhaPagamentoExcluidos.set(chave, DB.folhaPagamentoExcluidos.length); DB.folhaPagamentoExcluidos.push(row); }
+  const r = await syncBatchToSupabase('folhaPagamentoExcluidos', [row]);
+  return !r || r.ok !== false ? { ok: true } : { ok: false, erro: (r.error && r.error.message) || 'erro desconhecido' };
+}
+function abrirModalTecnicoFolha(periodoSel, tecnicoExistente, aoSalvar) {
+  const periodos = [...new Set(DB.folhaPagamento.map(r => r.periodo).filter(p => p && p !== SEM_PERIODO_FOLHA))];
+  const nomes = [...new Set(DB.folhaPagamento.map(r => r.tecnico).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const m = document.getElementById('modal-tecnico');
+  const periodoPadrao = periodos.includes(periodoSel) ? periodoSel : periodos[0] || '';
+  m.querySelector('.mt-corpo').innerHTML = `
+    <h3 style="margin:0 0 4px">${tecnicoExistente ? 'Editar ' + esc(tecnicoExistente) : 'Novo técnico na folha'}</h3>
+    <p style="margin:0 0 16px;font-size:13px;color:var(--text-secondary)">${tecnicoExistente
+      ? 'Corrige o nome em <b>todos os ciclos já salvos</b>. O nome precisa ser igual ao da Produção/PCR pra o sistema achar as ordens dele. Serviços, retornos, bônus e descontos se editam direto na tabela.'
+      : 'Cria a linha do técnico no ciclo escolhido, zerada. Se o nome for igual ao da Produção, serviços, retornos e bônus já vêm do sistema.'}</p>
+    <label>Nome</label>
+    <input type="text" id="nt-nome" list="nt-nomes" autocomplete="off" value="${tecnicoExistente ? esc(tecnicoExistente) : ''}">
+    <datalist id="nt-nomes">${nomes.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+    ${tecnicoExistente ? '' : `<label>Ciclo</label>
+    <select id="nt-periodo">${periodos.map(pd => `<option value="${esc(pd)}"${pd === periodoPadrao ? ' selected' : ''}>${esc(pd)}</option>`).join('')}</select>`}
+    <p id="nt-erro" class="error-msg"></p>
+    <div class="modal-acoes">
+      <button type="button" class="btn-secundario" id="nt-cancelar">Cancelar</button>
+      <button type="button" class="btn-primario" id="nt-salvar">${tecnicoExistente ? 'Salvar' : 'Adicionar'}</button>
+    </div>`;
+  m.classList.add('active');
+  document.getElementById('nt-cancelar').addEventListener('click', fecharModalTecnico);
+  document.getElementById('nt-nome').focus();
+  const salvar = async () => {
+    const nome = document.getElementById('nt-nome').value.trim().replace(/\s+/g, ' ');
+    const erro = document.getElementById('nt-erro'), btn = document.getElementById('nt-salvar');
+    if (!nome) { erro.textContent = 'Informe o nome.'; return; }
+    const avisos = [];
+    if (!tecnicoExistente) {
+      const periodo = (document.getElementById('nt-periodo') || {}).value || '';
+      if (!periodo) { erro.textContent = 'Não há ciclo na folha pra incluir o técnico.'; return; }
+      if (folhaFechada(periodo)) { erro.textContent = 'Esse ciclo está FECHADO — reabra pra incluir.'; return; }
+      if (DB.folhaPagamento.some(r => r.periodo === periodo && normalizeHeader(r.tecnico) === normalizeHeader(nome))) { erro.textContent = 'Esse técnico já está na folha desse ciclo.'; return; }
+      btn.disabled = true; erro.style.color = ''; erro.textContent = 'Salvando…';
+      const linha = criarLinhaFolhaVazia(nome, periodo);
+      upsertRow(DB.folhaPagamento, DB_INDEX.folhaPagamento, `${nome}|${periodo}`, linha);
+      const r = await syncBatchToSupabase('folhaPagamento', [linha]);
+      if (r && r.ok === false) avisos.push((r.error && r.error.message) || 'erro');
+      const k = await marcarTecnicoExcluidoFolha(nome, periodo, false);   // se estava excluído, volta
+      if (!k.ok) avisos.push(k.erro);
+      await registrarHistoricoFolha([{ periodo, tecnico: nome, campo: 'tecnico', rotulo: 'Técnico', de: '', para: 'adicionado à folha' }]);
+    } else {
+      if (normalizeHeader(nome) === normalizeHeader(tecnicoExistente)) { fecharModalTecnico(); return; }
+      const linhas = DB.folhaPagamento.filter(r => r.tecnico === tecnicoExistente);
+      const fechado = linhas.find(r => folhaFechada(r.periodo));
+      if (fechado) { erro.textContent = `O ciclo ${fechado.periodo} está FECHADO — reabra pra renomear.`; return; }
+      if (DB.folhaPagamento.some(r => normalizeHeader(r.tecnico) === normalizeHeader(nome))) { erro.textContent = 'Já existe um técnico com esse nome na folha.'; return; }
+      btn.disabled = true; erro.style.color = ''; erro.textContent = 'Salvando…';
+      linhas.forEach(r => { r.tecnico = nome; });
+      reindexarFolhaPagamento();
+      if (supa && linhas.length) {
+        try { const { error } = await supa.from('folha_pagamento').update({ tecnico: nome }).eq('tecnico', tecnicoExistente); if (error) avisos.push(error.message); }
+        catch (e) { avisos.push(String((e && e.message) || e)); }
+      }
+      await registrarHistoricoFolha(linhas.map(r => ({ periodo: r.periodo, tecnico: nome, campo: 'tecnico', rotulo: 'Técnico', de: tecnicoExistente, para: nome })));
+    }
+    btn.disabled = false;
+    fecharModalTecnico();
+    toast(avisos.length ? 'Alterado na tela, mas não gravou no servidor: ' + avisos[0] : (tecnicoExistente ? 'Técnico renomeado.' : 'Técnico adicionado.'), avisos.length ? 'erro' : 'ok', avisos.length ? 7000 : 2500);
+    aoSalvar();
+  };
+  document.getElementById('nt-salvar').addEventListener('click', () => { salvar().catch(e => {
+    const er = document.getElementById('nt-erro'), bt = document.getElementById('nt-salvar');
+    if (bt) bt.disabled = false; if (er) er.textContent = 'Não consegui salvar: ' + String((e && e.message) || e);
+  }); });
+}
+async function excluirTecnicoFolha(tecnico, periodo, aoSalvar) {
+  if (folhaFechada(periodo)) { toast(`O ciclo ${periodo} está FECHADO — reabra pra excluir.`, 'erro', 5000); return; }
+  if (!confirm(`Excluir "${tecnico}" da Folha de ${periodo}?\n\n• A linha dele nesse ciclo é apagada (serviços, bônus, descontos e ajustes).\n• Ele NÃO volta quando a Produção for importada de novo.\n• Os outros ciclos não mudam.\n\nNão dá pra desfazer (pra trazer de volta, use + Técnico com o mesmo nome).`)) return;
+  const avisos = [];
+  DB.folhaPagamento = DB.folhaPagamento.filter(r => !(r.tecnico === tecnico && r.periodo === periodo));
+  reindexarFolhaPagamento();
+  if (supa) {
+    try { const { error } = await supa.from('folha_pagamento').delete().eq('tecnico', tecnico).eq('periodo', periodo); if (error) avisos.push(error.message); }
+    catch (e) { avisos.push(String((e && e.message) || e)); }
+  }
+  const k = await marcarTecnicoExcluidoFolha(tecnico, periodo, true);
+  if (!k.ok) avisos.push('não gravei a marca de excluído (rode o PASSO-37): ' + k.erro);
+  await registrarHistoricoFolha([{ periodo, tecnico, campo: 'tecnico', rotulo: 'Técnico', de: 'na folha', para: 'excluído' }]);
+  toast(avisos.length ? 'Excluído na tela, mas: ' + avisos[0] : `${tecnico} excluído de ${periodo}.`, avisos.length ? 'erro' : 'ok', avisos.length ? 8000 : 3000);
+  aoSalvar();
+}
 function renderFolhaPagamento(modo) {
   const soRelatorio = modo === 'relatorio';
   // metas de indicador (%) — declaradas ANTES de load(), senão o const cai na
@@ -20583,6 +20764,10 @@ function renderFolhaPagamento(modo) {
       ${periodosEsc.lista.map(p=>`<option value="${esc(p)}"${p === periodosEsc.atual ? ' selected' : ''}>${esc(p)}</option>`).join('')}
     </select></div>` : ''}
     <button class="btn" id="f-apply">Filtrar</button>
+    ${!soRelatorio && podeEditarFolhaPagamento() ? `<button class="btn" id="fp-add">+ Técnico</button>
+    <div class="field"><label>Editar / excluir</label><select id="fp-colab"><option value="">Escolha o técnico…</option></select></div>
+    <button class="btn" id="fp-editar">✎ Editar técnico</button>
+    <button class="btn" id="fp-excluir">🗑 Excluir técnico</button>` : ''}
   </div>
   ${soRelatorio ? '' : `<div class="fol-topo-grid">
     ${ehAnalista() ? `<div><div class="panel">
@@ -20595,6 +20780,18 @@ function renderFolhaPagamento(modo) {
   <div id="folha-body"></div>
   ${soRelatorio ? '' : '<div id="fol-validador" style="margin-top:1.5rem"></div>'}`;
   document.getElementById('f-apply').addEventListener('click', load);
+  // + Técnico / ✎ Editar / 🗑 Excluir (05/10/2026) — agem sobre o técnico escolhido na lista ao lado
+  const fpConfirma = () => { const m = document.getElementById('folha-edit-msg'); return !(m && /não salva/i.test(m.textContent)) || confirm('Há alterações não salvas na tabela. Se continuar, elas serão descartadas. Continuar?'); };
+  const fpEscolhido = () => {
+    const v = (document.getElementById('fp-colab') || {}).value || '';
+    if (!v) { toast('Escolha o técnico na lista ao lado.', 'aviso', 3000); return null; }
+    const i = v.lastIndexOf('|');
+    return { tecnico: v.slice(0, i), periodo: v.slice(i + 1) };
+  };
+  const fpAdd = document.getElementById('fp-add'), fpEd = document.getElementById('fp-editar'), fpEx = document.getElementById('fp-excluir');
+  if (fpAdd) fpAdd.onclick = () => { if (fpConfirma()) abrirModalTecnicoFolha((document.getElementById('f-periodo') || {}).value || '', null, load); };
+  if (fpEd) fpEd.onclick = () => { const e = fpEscolhido(); if (e && fpConfirma()) abrirModalTecnicoFolha(e.periodo, e.tecnico, load); };
+  if (fpEx) fpEx.onclick = () => { const e = fpEscolhido(); if (e && fpConfirma()) excluirTecnicoFolha(e.tecnico, e.periodo, load); };
   // msgSp: resultado da última importação de SP (o painel é redesenhado a cada
   // load()); histAberto: o histórico de alterações continua aberto entre Filtrar
   let msgSp = '', histAberto = false;
@@ -20820,6 +21017,12 @@ function renderFolhaPagamento(modo) {
     const periodo = periodoEl ? periodoEl.value : '';
     const matchPeriodo = r => !periodo || (periodo === '__sem_periodo__' ? ehSemPeriodoFolha(r.periodo) : r.periodo === periodo);
     const brutas = DB.folhaPagamento.filter(r => (!tech || (r.tecnico||'').toLowerCase().includes(tech)) && matchPeriodo(r));
+    const selFp = document.getElementById('fp-colab');
+    if (selFp) {
+      const atualFp = selFp.value, daTela = DB.folhaPagamento.filter(matchPeriodo).slice().sort((a, b) => a.tecnico.localeCompare(b.tecnico, 'pt-BR'));
+      selFp.innerHTML = '<option value="">Escolha o técnico…</option>' + daTela.map(r => `<option value="${esc(r.tecnico)}|${esc(r.periodo)}">${esc(r.tecnico)}${periodo ? '' : ' — ' + esc(r.periodo)}</option>`).join('');
+      if ([...selFp.options].some(o => o.value === atualFp)) selFp.value = atualFp;
+    }
     const body = document.getElementById('folha-body');
     if (!brutas.length) { body.innerHTML = '<div class="panel"><div class="empty">Nenhum lançamento encontrado. A folha do ciclo nasce sozinha quando a Produção é importada.</div></div>'; return; }
 
@@ -20849,6 +21052,9 @@ function renderFolhaPagamento(modo) {
     });
     const retornosDoMes = {};
     const bonusAutomatico = r => {
+      // bônus digitado à mão (ajustes.bonus) vale por cima de toda a regra
+      const bonusMan = ajusteFolha(r, 'bonus');
+      if (bonusMan) return { ...r, bonus: bonusMan, _bonusManual: true };
       // menos de 26 dias trabalhados = INAPTO, não depende de Produção nem de retorno
       if ((Number(r.dias_trab) || 0) < BONUS_DIAS_MIN) return { ...r, bonus: 'INAPTO', _bonusRecalculado: true };
       const j = datasDoPeriodoFolha(r.periodo);
@@ -20873,7 +21079,7 @@ function renderFolhaPagamento(modo) {
     const autoRetorno = janelaFolha.inicio && janelaFolha.fim
       ? contarRetornosPorOfensor(janelaFolha.inicio, janelaFolha.fim) : null;
     let quantosAuto = 0;
-    const brutasComRetorno = !autoRetorno ? linhasComBonus : linhasComBonus.map(r => {
+    const brutasComRetorno0 = !autoRetorno ? linhasComBonus : linhasComBonus.map(r => {
       // linha da GIGA: a QUANTIDADE é a da GIGA, mas o preço segue a faixa do
       // bônus do mês decidido acima — refaz o valor do desconto com ela
       if (r.retorno_origem === 'giga') return aplicarDescontoRetorno({ ...r, _recalculado: true }, janelaFolha);
@@ -20891,6 +21097,8 @@ function renderFolhaPagamento(modo) {
       quantosAuto++;
       return aplicarDescontoRetorno({ ...r, qtd_ifi: c.ifi, qtd_irr: c.irr, _retornoAuto: true, _recalculado: true }, janelaFolha);
     });
+    // retornos (quantidade / desconto) digitados à mão vencem a contagem automática e a da GIGA
+    const brutasComRetorno = brutasComRetorno0.map(r => temAjusteRetorno(r) ? recalcularLinhaAjustada({ ...r }) : r);
     // ciclo FECHADO: a linha vem da cópia guardada (não passa pela lente abaixo)
     const rows = brutasComRetorno.map(r => linhaDaFolhaFechada(r) || r);
 
@@ -20933,7 +21141,7 @@ function renderFolhaPagamento(modo) {
         const q = quebraPorTipoDaLinha(linha, apto, ordensPorTecnicoFolha[normalizeHeader(r.tecnico)] || []);
         const total = TIPOS_FOLHA.reduce((a, t) => a + (q[t.chave] || 0), 0);
         const valor = TIPOS_FOLHA.reduce((a, t) => a + (q['v_' + t.chave] || 0), 0);
-        if (total > 0) {
+        if (total > 0 || temAjusteQuebra(linha)) {
           linha.total_ordens = total;
           linha.valor_total_ordens = valor;
           linha.total_receber = totalReceberFolha(linha);
@@ -21162,6 +21370,7 @@ function renderFolhaPagamento(modo) {
     // a cada tecla fazia a página voltar pro topo e a tabela "tremer" — só o
     // botão "Descartar" (uma ação deliberada, não uma tecla) recarrega tudo.
     const pendentes = new Map();
+    let precisaRecarregar = false;   // ↺ (voltar ao automático) só se refaz pelo cálculo da tela inteira, depois de salvar
     // ---- histórico de alterações (02/10/2026) ----
     // O "de → para" de cada campo é anotado NA EDIÇÃO (o valor que estava na tela
     // antes da 1ª mudança) e vai pro histórico só quando a linha é SALVA.
@@ -21250,6 +21459,9 @@ function renderFolhaPagamento(modo) {
         if (!linha) return;
         anotar(linha, sel, linha.bonus, sel.value);
         Object.assign(linha, recalcularCampoFolha(linha, 'bonus', sel.value));
+        // o bônus escolhido vira AJUSTE (vale por cima da regra automática, inclusive depois de recarregar)
+        linha.ajustes = { ...ajustesDaLinha(linha), bonus: sel.value };
+        recalcularLinhaAjustada(linha);
         // bônus muda a faixa de preço das ordens (APTO usa o valor de 26 dias,
         // INAPTO usa o padrão) — corrige Valor Ordens e Total a Receber só
         // NESSA linha, sem recarregar a tela
@@ -21264,6 +21476,7 @@ function renderFolhaPagamento(modo) {
           const v = porTipo['v_' + span.dataset.tipo];
           span.textContent = v ? formatCurrency(v) : '-';
         });
+        refletirAjuste(tr, linha);   // desconto de IFI/IRR (faixa APTO/INAPTO), % e totais acompanham o bônus
         marcarPendente(linha, tr);
         desenharHoleriteSeAberto();
       });
@@ -21322,6 +21535,59 @@ function renderFolhaPagamento(modo) {
           l => ehValor ? formatCurrency(l.valor_aluguel) : l.dias_aluguel,
           l => `automático (${ehValor ? formatCurrency(l.valor_aluguel) : l.dias_aluguel})`);
       });
+    });
+    // ---- ajustes manuais: serviços, IFI/IRR (quantidade e desconto) e bônus (05/10/2026) ----
+    const aptoDe = l => /apto/i.test(l.bonus || '') && !/inapto/i.test(l.bonus || '');
+    const valorAtualAj = (linha, chave) => {
+      if (chave.startsWith('q_')) return quebraPorTipoDaLinha(linha, aptoDe(linha))[chave.slice(2)] || 0;
+      if (chave === 'bonus') return linha.bonus;
+      if (chave.startsWith('desc_')) return formatCurrency(Number(linha[chave]) || 0);
+      return linha[chave] ?? 0;
+    };
+    const refletirAjuste = (tr, linha) => {
+      const q = quebraPorTipoDaLinha(linha, aptoDe(linha));
+      const set = (sel, txt) => { const el = tr.querySelector(sel); if (el) el.textContent = txt; };
+      set('.folha-total-ordens', linha.total_ordens);
+      tr.querySelectorAll('.folha-valor-tipo[data-tipo]').forEach(span => { const v = q['v_' + span.dataset.tipo]; span.textContent = v ? formatCurrency(v) : '-'; });
+      set('.folha-valor-ordens', formatCurrency(linha.valor_total_ordens));
+      tr.querySelectorAll('input[data-ajuste]').forEach(inp => {
+        const k = inp.dataset.ajuste, v = k.startsWith('q_') ? (q[k.slice(2)] || 0) : linha[k];
+        if (inp.classList.contains('folha-edit-aj-moeda')) { const c = Math.round((Number(v) || 0) * 100); inp.dataset.centavos = c; inp.value = formatCurrency(c / 100); }
+        else if (document.activeElement !== inp) inp.value = v ?? 0;
+        inp.classList.toggle('folha-manual', ajusteFolha(linha, k) !== null);
+      });
+      tr.querySelectorAll('button.folha-auto-aj').forEach(b => { b.hidden = ajusteFolha(linha, b.dataset.ajuste) === null; });
+      const bs = tr.querySelector('select[data-campo="bonus"]');
+      if (bs) { bs.value = /apto/i.test(linha.bonus || '') && !/inapto/i.test(linha.bonus || '') ? 'APTO' : 'INAPTO'; bs.classList.toggle('folha-manual', ajusteFolha(linha, 'bonus') !== null); bs.style.color = bs.value === 'APTO' ? 'var(--success)' : 'var(--danger)'; }
+      [['.folha-pct-ifi', linha.ifi_pct, IFI_TARGET], ['.folha-pct-irr', linha.irr_pct, IRR_TARGET]].forEach(([sel, v0, meta]) => {
+        const el = tr.querySelector(sel); if (!el) return;
+        const v = pct(v0, linha); el.textContent = formatPct(v, 2); el.className = el.className.replace(/\b(ok|warn)\b/g, '') + ' ' + (v <= meta ? 'ok' : 'warn');
+      });
+      refletirAluguel(tr, linha);   // total de descontos e total a receber
+    };
+    const aplicarAjuste = (el, chave, valor) => {
+      const linha = linhaDoCampo(el);
+      if (!linha) return;
+      const de = valorAtualAj(linha, chave);
+      linha.ajustes = { ...ajustesDaLinha(linha) };
+      if (valor === null) { delete linha.ajustes[chave]; precisaRecarregar = true; } else linha.ajustes[chave] = valor;
+      if (!Object.keys(linha.ajustes).length) linha.ajustes = null;
+      recalcularLinhaAjustada(linha);
+      anotar(linha, el, de, valor === null ? 'automático' : (chave.startsWith('desc_') ? formatCurrency(valor) : valor));
+      const tr = el.closest('tr');
+      refletirAjuste(tr, linha);
+      marcarPendente(linha, tr);
+      desenharHoleriteSeAberto();
+    };
+    document.querySelectorAll('input.folha-edit[data-ajuste]:not(.folha-edit-aj-moeda)').forEach(inp => {
+      inp.addEventListener('change', () => { const v = Math.max(0, parseInt(inp.value, 10) || 0); inp.value = v; aplicarAjuste(inp, inp.dataset.ajuste, v); });
+    });
+    document.querySelectorAll('input.folha-edit-aj-moeda').forEach(inp => {
+      inp.addEventListener('input', () => formatarMoedaInput(inp));
+      inp.addEventListener('change', () => aplicarAjuste(inp, inp.dataset.ajuste, (parseInt(inp.dataset.centavos || '0', 10)) / 100));
+    });
+    document.querySelectorAll('button.folha-auto-aj').forEach(btn => {
+      btn.addEventListener('click', () => aplicarAjuste(btn, btn.dataset.ajuste, null));
     });
     // "Parcela X" — texto livre, não mexe em nenhum total (só marca pendente).
     document.querySelectorAll('input.folha-edit-parcela').forEach(inp => {
@@ -21404,6 +21670,12 @@ function renderFolhaPagamento(modo) {
         // mas não deixa passar batido.
         exportacaoPendente = true;
         atualizarAvisoExport();
+        // o ajuste só some de verdade (volta ao cálculo automático) refazendo a tela com o que acabou de ser salvo
+        if (precisaRecarregar) { precisaRecarregar = false; load(); toast('Ajuste removido: valor automático refeito.', 'ok', 2500); }
+      }
+      // coluna 'ajustes' ainda não existe no banco: o ajuste valeu na tela mas NÃO ficou guardado
+      if (resultados.some(x => x.r && x.r.ignoradas && x.r.ignoradas.includes('ajustes') && ajustesDaLinha(x.linha) && Object.keys(ajustesDaLinha(x.linha)).length)) {
+        toast('Atenção: o banco ainda não tem a coluna de ajustes (rode o PASSO-37). Os ajustes digitados NÃO ficaram guardados.', 'erro', 9000);
       }
     });
     if (btnDescartar) btnDescartar.addEventListener('click', () => {
@@ -21758,6 +22030,24 @@ function baseBonusDaLinha(linha, mes, ordensDoTecnico) {
   return baseProducaoDoTecnico(linha.tecnico, mes.inicio, mes.fim, ordensDoTecnico);
 }
 function quebraPorTipoDaLinha(linha, apto, ordensDoTecnico) {
+  const q = quebraPorTipoDaLinhaAuto(linha, apto, ordensDoTecnico);
+  if (linha._quebraFechada || !temAjusteQuebra(linha)) return q;
+  // quantidades digitadas à mão (ajustes.q_<tipo>) por cima do cálculo; o valor acompanha
+  const out = { ...q };
+  const janela = datasDoPeriodoFolha(linha.periodo);
+  const tabela = valoresVigentesEm(janela.fim);
+  TIPOS_FOLHA.forEach(t => {
+    const n = ajusteFolha(linha, 'q_' + t.chave);
+    if (n === null) return;
+    const qtd = Math.max(0, Number(n) || 0);
+    out[t.chave] = qtd;
+    if (t.sp) { out['v_' + t.chave] = qtd * valorSpDoPeriodo(linha.periodo, t.chave); return; }
+    const l = tabela.find(v => t.re.test(normalizeHeader(v.label)));
+    out['v_' + t.chave] = l ? qtd * (apto ? l.d26 : l.normal) : 0;
+  });
+  return out;
+}
+function quebraPorTipoDaLinhaAuto(linha, apto, ordensDoTecnico) {
   if (linha._quebraFechada) return linha._quebraFechada;   // ciclo fechado: números como foram pagos
   const janela = datasDoPeriodoFolha(linha.periodo);
   const lista = ordensDoTecnico || DB.producao.filter(p => normalizeHeader(p.recurso) === normalizeHeader(linha.tecnico));
@@ -22078,6 +22368,21 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
   // Frota / Dias Aluguel / Valor Aluguel editáveis (02/10/2026): vazio = automático.
   // ↺ volta pro automático; a opção "(auto)" da Frota mostra a frota da tabela de Frota.
   const FROTAS_FOLHA = ['PRÓPRIO', 'PRÓPRIO NOVO', 'JH'];
+  // AJUSTES MANUAIS (05/10/2026): serviços, retornos (quantidade/desconto) e bônus digitados à mão.
+  // ↺ tira o ajuste e volta ao cálculo automático (depois de salvar).
+  const botaoAjuste = (r, chave) => `<button type="button" class="folha-auto-aj" data-ajuste="${chave}" data-campo="aj_${chave}" ${attrsChave(r)}
+    title="Voltar ao automático"${ajusteFolha(r, chave) === null ? ' hidden' : ''}>↺</button>`;
+  const inputQtdAj = (r, chave, valor) => podePagamento(r)
+    ? `<span style="white-space:nowrap"><input type="number" class="folha-edit${ajusteFolha(r, chave) !== null ? ' folha-manual' : ''}" step="1" min="0"
+        data-campo="aj_${chave}" data-ajuste="${chave}" ${attrsChave(r)} value="${valor || 0}" style="width:60px" title="Digite pra ajustar à mão; ↺ volta ao automático">${botaoAjuste(r, chave)}</span>`
+    : String(valor || 0);
+  const inputMoedaAj = (r, chave, valor) => {
+    if (!podePagamento(r)) return money(valor);
+    const c = Math.round((Number(valor) || 0) * 100);
+    return `<span style="white-space:nowrap"><input type="text" inputmode="decimal" class="folha-edit folha-edit-aj-moeda${ajusteFolha(r, chave) !== null ? ' folha-manual' : ''}"
+      data-campo="aj_${chave}" data-ajuste="${chave}" ${attrsChave(r)} data-centavos="${c}" value="${formatCurrency(c / 100)}" style="width:110px;text-align:right"
+      title="Digite pra ajustar à mão; ↺ volta ao automático">${botaoAjuste(r, chave)}</span>`;
+  };
   const botaoAuto = (r, campo) => `<button type="button" class="folha-auto" data-campo="${campo}" ${attrsChave(r)}
     title="Voltar ao automático"${valorManualFolha(r[campo]) === null ? ' hidden' : ''}>↺</button>`;
   const selectFrota = r => {
@@ -22100,14 +22405,14 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
       return j.inicio ? esc(r.periodo) + (r._fechada ? ' <span title="Ciclo fechado">🔒</span>' : '')
         : `<span title="Este período não tem data no nome, então a quebra por tipo de serviço não tem como ser calculada." style="color:var(--warn-text)">${esc(r.periodo || '(sem período)')} ⚠</span>`;
     }],
-    ['Total Ordens', r=>r.total_ordens],
+    ['Total Ordens', r=>`<span class="folha-total-ordens">${r.total_ordens}</span>`],
     // Primeiro TODAS as quantidades, depois TODOS os valores (pedido do
     // cliente 03/09/2026). Intercalado — quantidade, valor, quantidade,
     // valor — obrigava a pular de coluna em coluna pra somar as ordens, e as
     // duas leituras que o cliente faz são separadas: "quantas ordens ele fez"
     // e "quanto isso deu". Agora cada leitura é um bloco contínuo, e ainda
     // casa com a cor: quantidade no cinza da produção, valor no azul.
-    ...TIPOS_FOLHA.map(t => [t.rot, r => contagemPorTipoNoPeriodo(r)[t.chave]]),
+    ...TIPOS_FOLHA.map(t => [t.rot, r => inputQtdAj(r, 'q_' + t.chave, contagemPorTipoNoPeriodo(r)[t.chave])]),
     ...TIPOS_FOLHA.map(t => ['Valor ' + t.rot, r => {
       const v = contagemPorTipoNoPeriodo(r)['v_' + t.chave];
       // data-tipo é o gancho que o troca-de-bônus usa pra recalcular só essa
@@ -22136,14 +22441,14 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
       // cor no PRÓPRIO <select> (não só num badge ao lado) — verde quando a
       // opção marcada é APTO, vermelho quando é INAPTO. Atualizada nas duas
       // pontas: aqui no primeiro render, e no JS a cada troca (wireFolhaEdicao).
-      ? `<select class="folha-edit" data-campo="bonus" ${attrsChave(r)} style="color:${/apto/i.test(r.bonus)&&!/inapto/i.test(r.bonus)?'var(--success)':'var(--danger)'};font-weight:700">
+      ? `<span style="white-space:nowrap"><select class="folha-edit${ajusteFolha(r, 'bonus') !== null ? ' folha-manual' : ''}" data-campo="bonus" ${attrsChave(r)} style="color:${/apto/i.test(r.bonus)&&!/inapto/i.test(r.bonus)?'var(--success)':'var(--danger)'};font-weight:700">
           <option value="APTO"${/apto/i.test(r.bonus)&&!/inapto/i.test(r.bonus)?' selected':''}>APTO</option>
           <option value="INAPTO"${/inapto/i.test(r.bonus)?' selected':''}>INAPTO</option>
-        </select>`
+        </select>${botaoAjuste(r, 'bonus')}</span>`
       : `<span class="badge ${/apto/i.test(r.bonus)&&!/inapto/i.test(r.bonus)?'ok':'warn'}">${r.bonus||'-'}</span>`],
-    ['Qtd IFI', r=>r.qtd_ifi], ['Qtd IRR', r=>r.qtd_irr],
-    ['% IFI', r=>`<span class="badge ${pct(r.ifi_pct, r)<=IFI_TARGET?'ok':'warn'}">${formatPct(pct(r.ifi_pct, r), 2)}</span>`],
-    ['% IRR', r=>`<span class="badge ${pct(r.irr_pct, r)<=IRR_TARGET?'ok':'warn'}">${formatPct(pct(r.irr_pct, r), 2)}</span>`],
+    ['Qtd IFI', r=>inputQtdAj(r, 'qtd_ifi', r.qtd_ifi)], ['Qtd IRR', r=>inputQtdAj(r, 'qtd_irr', r.qtd_irr)],
+    ['% IFI', r=>`<span class="badge folha-pct-ifi ${pct(r.ifi_pct, r)<=IFI_TARGET?'ok':'warn'}">${formatPct(pct(r.ifi_pct, r), 2)}</span>`],
+    ['% IRR', r=>`<span class="badge folha-pct-irr ${pct(r.irr_pct, r)<=IRR_TARGET?'ok':'warn'}">${formatPct(pct(r.irr_pct, r), 2)}</span>`],
     // Cruza o que a planilha da FOLHA diz sobre o carro do técnico com o que
     // o cadastro de verdade da Frota (aba FROTA LITORAL) diz — mesma função
     // que o Dashboard já usa (frotaDoTecnico: fechamento do ciclo, senão
@@ -22177,7 +22482,7 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
         style="width:110px;text-align:right${ehJh && v > 0 ? ';border-color:var(--danger)' : ''}"${ehJh && v > 0 ? ' title="Carro da empresa — não deveria ter aluguel"' : ''}>${botaoAuto(r, 'valor_aluguel_manual')}</span>`;
     }],
     ['Empréstimo', r => podePagamento(r) ? inputMoeda(r, 'emprestimo', r.emprestimo) : money(r.emprestimo)],
-    ['Desc. IFI', r=>money(r.desc_ifi)], ['Desc. IRR', r=>money(r.desc_irr)],
+    ['Desc. IFI', r=>inputMoedaAj(r, 'desc_ifi', r.desc_ifi)], ['Desc. IRR', r=>inputMoedaAj(r, 'desc_irr', r.desc_irr)],
     ['Desc. Equipamento', r => podeMaterial(r) ? inputMoeda(r, 'desc_equipamento', r.desc_equipamento) : money(r.desc_equipamento)],
     ['Desc. Multa', r => podeMaterial(r) ? inputMoeda(r, 'desc_multa', r.desc_multa) : money(r.desc_multa)],
     ['Desc. Miscelânea', r => podeMaterial(r) ? inputMoeda(r, 'desc_miscelanea', r.desc_miscelanea) : money(r.desc_miscelanea)],
@@ -23479,7 +23784,7 @@ const ARQUIVOS_IMPORT = [
 // Tudo é leitura; o único botão que "faz" algo é o do backup (que só baixa).
 const BACKUP_TABELAS = [
   'base_do_dia', 'chamados_giga', 'clean_up', 'comparativo_financeiro', 'fechamento', 'financeiro',
-  'folha_escritorio', 'folha_escritorio_quadro', 'folha_fechamentos', 'folha_historico', 'folha_pagamento', 'frota_desvinc', 'frota_links',
+  'folha_escritorio', 'folha_escritorio_quadro', 'folha_pagamento_excluidos', 'folha_fechamentos', 'folha_historico', 'folha_pagamento', 'frota_desvinc', 'frota_links',
   'frota_manutencao', 'frota_multas', 'frota_revisao', 'frota_troca', 'imports_log', 'monitor_olt', 'ordens_sp', 'pcr', 'pcr_mo',
   'pedagio', 'perfis', 'pleito', 'prazo', 'prazo_reparo_dia', 'presenca', 'presenca_escritorio',
   'presenca_escritorio_folgas', 'presenca_escritorio_log', 'presenca_escritorio_pessoas', 'presenca_log',
@@ -23501,6 +23806,8 @@ const SAUDE_CHECAGENS_SQL = [
   { passo: 'PASSO-34', rotulo: 'Fechamento do ciclo da Folha', tabela: 'folha_fechamentos' },
   { passo: 'PASSO-35', rotulo: 'Monitoramento OLT (leituras do AutoISP)', tabela: 'monitor_olt' },
   { passo: 'PASSO-36', rotulo: 'Quadro editável de colaboradores do escritório', tabela: 'folha_escritorio_quadro' },
+  { passo: 'PASSO-37', rotulo: 'Ajustes manuais da Folha dos técnicos', tabela: 'folha_pagamento', coluna: 'ajustes' },
+  { passo: 'PASSO-37', rotulo: 'Técnicos excluídos da Folha', tabela: 'folha_pagamento_excluidos' },
 ];
 function saudeNaoExiste(erro) {
   const m = String((erro && (erro.message || erro.details)) || '');
