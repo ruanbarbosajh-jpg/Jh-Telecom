@@ -23839,6 +23839,7 @@ const SAUDE_CHECAGENS_SQL = [
   { passo: 'PASSO-38', rotulo: 'Coletor do AutoISP — andamento das ONUs', tabela: 'monitor_olt_onus' },
   { passo: 'PASSO-38', rotulo: 'Coletor do AutoISP — fechamento do dia', tabela: 'monitor_olt_dia' },
   { passo: 'PASSO-38', rotulo: 'Coletor do AutoISP — clientes acompanhados', tabela: 'monitor_olt_acompanhar' },
+  { passo: 'PASSO-39', rotulo: 'Clientes da JH com o sinal real (Monitoramento OLT)', tabela: 'monitor_olt_clientes' },
   { passo: 'PASSO-36', rotulo: 'Quadro editável de colaboradores do escritório', tabela: 'folha_escritorio_quadro' },
   { passo: 'PASSO-37', rotulo: 'Ajustes manuais da Folha dos técnicos', tabela: 'folha_pagamento', coluna: 'ajustes' },
   { passo: 'PASSO-37', rotulo: 'Técnicos excluídos da Folha', tabela: 'folha_pagamento_excluidos' },
@@ -24214,6 +24215,7 @@ const SITUACAO_ONU = {
   power_fail: { rot: 'Sem energia', cls: 'neutral', ordem: 4 },
   massive_loss_signal: { rot: 'LoS em massa', cls: 'roxo', ordem: 5 },
   massive_power_fail: { rot: 'Energia em massa', cls: 'roxo', ordem: 6 },
+  down: { rot: 'Offline', cls: 'neutral', ordem: 7 },
 };
 const situacaoOnu = s => SITUACAO_ONU[s] || { rot: String(s || '-'), cls: 'neutral', ordem: 9 };
 const oltComFalha = o => !/deactiv/i.test(o.modo || '') && /fail|never|busy|warning/i.test(o.conexao || '');
@@ -24339,7 +24341,7 @@ function chaveNomeCliente(nome) {
   return n.split(' ').length >= 2 && n.length >= 8 ? n : '';
 }
 // Cor por situação no mapa (a pior do lugar vence: a ordem segue SITUACAO_ONU)
-const MONITOR_OLT_COR = { critical: '#dc2626', warning: '#f59e0b', loss_signal: '#7c3aed', power_fail: '#64748b', massive_loss_signal: '#be185d', massive_power_fail: '#334155' };
+const MONITOR_OLT_COR = { critical: '#dc2626', warning: '#f59e0b', loss_signal: '#7c3aed', power_fail: '#64748b', massive_loss_signal: '#be185d', massive_power_fail: '#334155', down: '#475569' };
 // Mapa das ONUs com problema (03/10/2026). O AutoISP não tem endereço: o lugar vem do BAIRRO do
 // último atendimento ao mesmo cliente (PCR/Produção, `extrairBairro` + COORDENADAS_BAIRROS, o mesmo
 // dicionário dos outros mapas do sistema); sem bairro conhecido, a ONU entra no CENTRO da cidade da
@@ -24471,6 +24473,144 @@ async function exportarDiaMonitorOlt(dia) {
   try { await supa.from('monitor_olt_dia').update({ exportado_em: new Date().toISOString(), exportado_por: pcrTravaQuem() }).eq('dia', dia); } catch (e) { /* o arquivo já foi baixado */ }
   return true;
 }
+// ---- CLIENTES DA JH com o sinal REAL (05/10/2026, v2 do Monitoramento OLT) ----
+// Achado do dia: a lista "ONUs" do AutoISP é um pool de ONUs SEM contrato ("orphan": 395 de 403 na coleta, inclusive TODAS as
+// críticas e em atenção). O cliente ativo tem OUTRO registro e o sinal real mora nele (/gpon_clients/<id>/detailed_info). Por isso
+// um cliente "LoS" aqui aparecia OK quando abrido no AutoISP. A função da nuvem agora (a) separa órfã × cliente e usa o sinal do
+// registro real, e (b) consulta no AutoISP, por CONTRATO, todo cliente que a JH atendeu nos últimos 60 dias (Produção + PCR) e
+// guarda em `monitor_olt_clientes` (PASSO-39). Aqui só se lê e se cruza com os atendimentos (frequência), tudo no navegador.
+async function carregarClientesMonitorOlt() {
+  if (!supa) return [];
+  const out = [];
+  try {
+    for (let ini = 0; ini < 12000; ini += 1000) {
+      const { data, error } = await supa.from('monitor_olt_clientes')
+        .select('contrato,nome,olt,ponlink,cidade,bairro,estado,sinal,status,acs_ultimo_contato,checado_em,mudanca,mudou_em,anterior_sinal')
+        .eq('estado', 'active').order('contrato').range(ini, ini + 999);
+      if (error || !Array.isArray(data)) break;
+      out.push(...data);
+      if (data.length < 1000) break;
+    }
+  } catch (e) { /* sem rede / sem tabela */ }
+  return out;
+}
+// 1 linha por contrato: quantos atendimentos CONCLUÍDOS (1 por O.S) a JH fez em 30 e 60 dias, quantos foram reparo e o último
+function atendimentosPorContrato() {
+  const hoje = hojeISOLocal();
+  const at = new Map(), vistos = new Set(), universo = new Set();
+  const ler = r => {
+    const c = String(r.contrato || '').trim();
+    if (!/^\d{5,9}$/.test(c) || !r.data) return;
+    const dia = String(r.data).slice(0, 10), idade = diasEntre(hoje, dia);
+    if (idade < 0 || idade > 60) return;
+    universo.add(c);
+    if (!isConcluido(r.status)) return;
+    const chave = (r.os && !/^0+$/.test(String(r.os))) ? 'os:' + r.os : 'x:' + c + '|' + dia + '|' + r.tipo_atividade;
+    if (vistos.has(chave)) return;
+    vistos.add(chave);
+    const a = at.get(c) || { atend30: 0, atend60: 0, reparos60: 0, ultimo: '', tipo: '' };
+    a.atend60++;
+    if (idade <= 30) a.atend30++;
+    if (ehServicoReparo(r.tipo_atividade)) a.reparos60++;
+    if (dia > a.ultimo) { a.ultimo = dia; a.tipo = r.tipo_atividade || ''; }
+    at.set(c, a);
+  };
+  DB.producao.forEach(ler);
+  DB.pcr.forEach(ler);
+  return { at, universo };
+}
+const MO_GRUPO_SINAL = st => /^ok$/i.test(st || '') ? 'ok' : st === 'warning' ? 'atencao' : st === 'critical' ? 'critico' : 'semsinal';
+const MO_ROTULO_GRUPO = { critico: 'Crítico', atencao: 'Atenção', semsinal: 'Sem sinal / energia / offline', ok: 'OK' };
+function pintarClientesMonitorOlt(box, cli, st) {
+  if (!box) return;
+  if (!cli.length) {
+    box.innerHTML = `<div class="section-heading">🩺 Clientes atendidos pela JH — sinal real (preventiva)</div>
+      <div class="panel" style="margin-bottom:1.5rem"><div class="empty">Ainda não há clientes consultados. ${st ? 'A varredura roda sozinha (minutos 10 e 40 de cada hora) e também no botão <b>Atualizar</b>.' : 'Rode o <b>sql/PASSO-39-clientes-monitorados-autoisp.sql</b> e publique a função <b>autoisp</b> atualizada (ver CLAUDE.md).'}</div></div>`;
+    return;
+  }
+  const { at, universo } = atendimentosPorContrato();
+  const linhas = cli.map(c => ({ ...c, ...(at.get(c.contrato) || { atend30: 0, atend60: 0, reparos60: 0, ultimo: '', tipo: '' }), grupo: MO_GRUPO_SINAL(c.status) }));
+  const consultados = new Set(cli.map(c => c.contrato));
+  const semConsulta = [...universo].filter(c => !consultados.has(c)).length;
+  const faixa = n => n >= 3 ? '3+' : String(n);
+  const FAIXAS = ['0', '1', '2', '3+'];
+  const ruim = l => l.grupo !== 'ok';
+  // comparativo: sinal × frequência de atendimento
+  const matriz = {};
+  Object.keys(MO_ROTULO_GRUPO).forEach(g => { matriz[g] = { '0': 0, '1': 0, '2': 0, '3+': 0 }; });
+  linhas.forEach(l => { matriz[l.grupo][faixa(l.atend60)]++; });
+  const totFaixa = f => Object.keys(MO_ROTULO_GRUPO).reduce((a, g) => a + matriz[g][f], 0);
+  const ruinsFaixa = f => ['critico', 'atencao', 'semsinal'].reduce((a, g) => a + matriz[g][f], 0);
+  const pct = (n, d) => d ? formatPct(n / d * 100, 1) : '-';
+  const recorr = linhas.filter(l => l.atend60 >= 2), demais = linhas.filter(l => l.atend60 < 2);
+  const n = g => linhas.filter(l => l.grupo === g).length;
+  const sinalTxt = v => v == null ? '-' : `${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} dBm`;
+  const ult = linhas.map(l => l.checado_em).filter(Boolean).sort().pop();
+  box.innerHTML = `
+    <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">🩺 Clientes atendidos pela JH — sinal real (preventiva)
+      <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(contratos da Produção e da PCR nos últimos 60 dias, consultados no AutoISP pelo contrato${ult ? ' · última consulta ' + esc(new Date(ult).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })) : ''})</span></div>
+    <div class="stat-cards" style="margin-bottom:12px">
+      ${statCard('blue', icPessoas, 'Clientes consultados', linhas.length.toLocaleString('pt-BR'), semConsulta ? `${semConsulta.toLocaleString('pt-BR')} contrato(s) ainda sem consulta (próximas coletas ou fora das OLTs da JH)` : 'todos os contratos atendidos em 60 dias')}
+      ${statCard('red', icAviso, 'Crítico', n('critico'), 'sinal muito baixo — preventiva urgente')}
+      ${statCard('orange', icBarras, 'Atenção', n('atencao'), 'sinal caindo — preventiva')}
+      ${statCard('neutral', icX, 'Sem sinal / energia / offline', n('semsinal'), 'último status que o AutoISP tem')}
+      ${statCard('purple', icChave, 'Recorrentes com sinal ruim', recorr.filter(ruim).length, `${pct(recorr.filter(ruim).length, recorr.length)} dos que atendemos 2+ vezes (demais: ${pct(demais.filter(ruim).length, demais.length)})`)}
+    </div>
+    <div class="panel" style="margin-bottom:12px">
+      <h3 style="margin:0 0 8px">Comparativo: sinal × quantas vezes atendemos o cliente <span style="font-size:12px;font-weight:400;color:var(--text-muted)">(atendimentos concluídos nos últimos 60 dias)</span></h3>
+      <div class="table-wrap"><table class="data-table" data-sem-ordenar="1" id="mo-tab-matriz"><thead><tr><th>Sinal do cliente</th><th>0 atend.</th><th>1 atend.</th><th>2 atend.</th><th>3+ atend.</th><th>Total</th></tr></thead><tbody>
+        ${Object.keys(MO_ROTULO_GRUPO).map(g => `<tr><td class="cat-cell">${MO_ROTULO_GRUPO[g]}</td>${FAIXAS.map(f => `<td>${matriz[g][f]}</td>`).join('')}<td><b>${FAIXAS.reduce((a, f) => a + matriz[g][f], 0)}</b></td></tr>`).join('')}
+        <tr class="total-row"><td class="cat-cell">% com sinal ruim (atenção + crítico + sem sinal)</td>${FAIXAS.map(f => `<td>${pct(ruinsFaixa(f), totFaixa(f))}</td>`).join('')}<td>${pct(linhas.filter(ruim).length, linhas.length)}</td></tr>
+      </tbody></table></div>
+      <p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">Lê assim: se a % de sinal ruim sobe nas colunas da direita, os clientes que mais precisam de atendimento são justamente os de sinal ruim — dá pra resolver na raiz (rede/ONU) em vez de abrir outro reparo.</p>
+    </div>
+    <div class="toolbar" style="margin-bottom:10px">
+      <div class="field"><label>Sinal</label><select id="mo-cli-sit">
+        <option value="preventiva">Preventiva (Crítico + Atenção)</option><option value="ruim">Todo sinal ruim (inclui sem sinal)</option>
+        <option value="critico">Só Crítico</option><option value="atencao">Só Atenção</option><option value="semsinal">Sem sinal / energia / offline</option><option value="ok">OK</option><option value="todos">Todos</option></select></div>
+      <div class="field"><label>Atendimentos (60 dias)</label><select id="mo-cli-freq">
+        <option value="todos">Todos</option><option value="2">2 ou mais</option><option value="3">3 ou mais</option><option value="r2">2 ou mais reparos</option></select></div>
+      <div class="field"><label>Cidade</label><select id="mo-cli-cidade"><option value="">Todas</option>${[...new Set(linhas.map(l => l.cidade).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR')).map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select></div>
+      <button type="button" class="btn-export-xls" id="mo-cli-excel">⤓ Excel (todos os filtrados)</button>
+      <span id="mo-cli-resumo" style="font-size:12px;color:var(--text-muted);align-self:center"></span>
+    </div>
+    <div id="mo-cli-tabela"></div>`;
+  const sel = id => document.getElementById(id).value;
+  const filtrar = () => {
+    const sit = sel('mo-cli-sit'), fq = sel('mo-cli-freq'), cid = sel('mo-cli-cidade');
+    return linhas.filter(l => (sit === 'todos' || (sit === 'preventiva' ? (l.grupo === 'critico' || l.grupo === 'atencao') : sit === 'ruim' ? ruim(l) : l.grupo === sit))
+      && (fq === 'todos' || (fq === '2' && l.atend60 >= 2) || (fq === '3' && l.atend60 >= 3) || (fq === 'r2' && l.reparos60 >= 2))
+      && (!cid || l.cidade === cid))
+      .sort((a, b) => ['critico', 'atencao', 'semsinal', 'ok'].indexOf(a.grupo) - ['critico', 'atencao', 'semsinal', 'ok'].indexOf(b.grupo)
+        || b.atend60 - a.atend60 || (a.sinal == null ? 1 : b.sinal == null ? -1 : a.sinal - b.sinal));
+  };
+  const GR_BADGE = { critico: 'warn', atencao: 'amber', semsinal: 'neutral', ok: 'ok' };
+  const desenhar = () => {
+    const lista = filtrar(), corte = 300, mostrar = lista.slice(0, corte);
+    document.getElementById('mo-cli-resumo').textContent = `${lista.length.toLocaleString('pt-BR')} cliente(s)`;
+    document.getElementById('mo-cli-tabela').innerHTML = !lista.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhum cliente nesse filtro.</div></div>' : `
+      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:560px;overflow:auto"><table class="data-table" id="mo-cli-tab"><thead><tr>
+        <th>Sinal</th><th>Rx</th><th>Cliente</th><th>Contrato</th><th>Cidade / bairro</th><th>OLT / PON</th><th>Atend. 30 d</th><th>Atend. 60 d</th><th>Reparos 60 d</th><th>Último atendimento</th><th>Último contato do equipamento</th><th>Mudança</th></tr></thead><tbody>
+        ${mostrar.map(l => `<tr><td><span class="badge ${GR_BADGE[l.grupo]}">${esc(l.status === 'warning' ? 'Atenção' : l.status === 'critical' ? 'Crítico' : l.status === 'loss_signal' ? 'Sem sinal (LoS)' : l.status === 'power_fail' ? 'Sem energia' : l.status === 'down' ? 'Offline' : (l.status || '-'))}</span></td>
+          <td style="${l.grupo === 'critico' ? 'color:var(--danger);font-weight:700' : ''}">${sinalTxt(l.sinal)}</td><td class="cat-cell">${esc(l.nome || '-')}</td><td>${esc(l.contrato)}</td>
+          <td>${esc(l.cidade || '-')}${l.bairro ? `<div style="font-size:11px;color:var(--text-muted)">${esc(l.bairro)}</div>` : ''}</td><td>${esc(l.olt || '-')}<div style="font-size:11px;color:var(--text-muted)">PON ${esc(l.ponlink || '-')}</div></td>
+          <td>${l.atend30}</td><td${l.atend60 >= 3 ? ' style="font-weight:700;color:var(--danger)"' : ''}>${l.atend60}</td><td>${l.reparos60}</td>
+          <td>${l.ultimo ? `${formatDate(l.ultimo)}<div style="font-size:11px;color:var(--text-muted)">${esc(l.tipo)}</div>` : '-'}</td>
+          <td>${l.acs_ultimo_contato ? `${esc(new Date(l.acs_ultimo_contato).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}<div style="font-size:11px;color:var(--text-muted)">${haQuantoTempo(l.acs_ultimo_contato)}</div>` : '-'}</td>
+          <td style="font-size:12px">${l.mudanca ? `${esc(l.mudanca)}<div style="font-size:11px;color:var(--text-muted)">${l.mudou_em ? esc(new Date(l.mudou_em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })) : ''}</div>` : '-'}</td></tr>`).join('')}
+      </tbody></table></div>${lista.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${lista.length.toLocaleString('pt-BR')} — o Excel leva todos os filtrados.</p>` : ''}`;
+    ativarFiltrosDeColuna(document.getElementById('mo-cli-tabela'));
+  };
+  ['mo-cli-sit', 'mo-cli-freq', 'mo-cli-cidade'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
+  document.getElementById('mo-cli-excel').addEventListener('click', () => {
+    const lista = filtrar();
+    exportarQuadroPresenca('monitor-olt-clientes-' + hojeISOLocal(),
+      ['Sinal', 'Rx (dBm)', 'Cliente', 'Contrato', 'Cidade', 'Bairro', 'OLT', 'PON', 'Atend. 30 d', 'Atend. 60 d', 'Reparos 60 d', 'Último atendimento', 'Tipo do último', 'Último contato do equipamento', 'Mudança'],
+      lista.map(l => [MO_ROTULO_GRUPO[l.grupo] + (l.status && l.grupo === 'semsinal' ? ' (' + l.status + ')' : ''), l.sinal, l.nome || '', l.contrato, l.cidade || '', l.bairro || '', l.olt || '', l.ponlink || '', l.atend30, l.atend60, l.reparos60,
+        l.ultimo ? formatDate(l.ultimo) : '', l.tipo || '', l.acs_ultimo_contato ? new Date(l.acs_ultimo_contato).toLocaleString('pt-BR') : '', l.mudanca || '']), 'Clientes');
+  });
+  desenhar();
+}
 function linkFavoritoColetorOlt() {
   const o = location.origin;
   return `javascript:(function(){if(location.hostname!=='auto.alloha.com'){alert('Abra o AutoISP (auto.alloha.com), entre com o seu login e clique de novo.');return;}var o='${o}';window.__jhJanela=window.open(o+'/?monitor-olt=1','jh_monitor_olt');var s=document.createElement('script');s.src=o+'/coletor-olt.js?v='+Date.now();s.onerror=function(){alert('Nao consegui carregar o coletor da JH. Confira a internet.');};document.head.appendChild(s);})();`;
@@ -24489,6 +24629,7 @@ function renderMonitorOlt() {
         <option value="preventiva">Preventiva (Crítico + Atenção)</option>
         ${Object.entries(SITUACAO_ONU).map(([k, v]) => `<option value="${k}">${v.rot}</option>`).join('')}
       </select></div>
+      <div class="field"><label>ONUs sem contrato (órfãs)</label><select id="mo-orfas"><option value="0">Ocultar</option><option value="1">Mostrar</option></select></div>
       <div class="field"><label>Atualizar sozinho</label><select id="mo-auto">
         <option value="">Desligado</option><option value="15">A cada 15 min</option><option value="30">A cada 30 min</option><option value="60">A cada 1 hora</option>
       </select></div>
@@ -24572,7 +24713,11 @@ function renderMonitorOlt() {
       if (btnAtu) btnAtu.disabled = false;
       if (rn.ok) {
         const ev = rn.eventos || {};
-        status(`✔ Coletado às ${fmtHora(Date.now())} — ${rn.onus} ONU(s) com problema · ${ev.novas || 0} nova(s) · ${ev.normalizadas || 0} normalizada(s)`);
+        status('☁ Lista lida. Agora consultando os clientes atendidos pela JH… (mais 1–2 min)');
+        if (btnAtu) btnAtu.disabled = true;
+        const rc = await chamarColetorNuvem({ acao: 'clientes' });
+        if (btnAtu) btnAtu.disabled = false;
+        status(`✔ Coletado às ${fmtHora(Date.now())} — ${rn.onus} ONU(s) na lista (${(rn.classificacao && rn.classificacao.divergentes) || 0} com cliente OK) · ${ev.novas || 0} nova(s) · ${ev.normalizadas || 0} normalizada(s)${rc.ok ? ` · ${rc.consultados} cliente(s) consultado(s), ${rc.ruins} em atenção/crítico` : (rc.ocupado ? '' : ` · <span style="color:var(--danger)">clientes: ${esc(rc.erro || 'falhou')}</span>`)}`);
         await atualizarStatusColetor();
         await recarregarTudo(rn.chave);
         return;
@@ -24709,7 +24854,7 @@ function renderMonitorOlt() {
   }
   selAuto.addEventListener('change', () => { ligarAutomatico(); if (selAuto.value) toast(`Vai atualizar sozinho a cada ${selAuto.value} min enquanto esta tela estiver aberta.`, 'ok', 3500); });
   setTimeout(ligarAutomatico, 500);   // depois de restaurarFiltros devolver a escolha
-  ['mo-cidade', 'mo-sit'].forEach(id => document.getElementById(id).addEventListener('change', pintar));
+  ['mo-cidade', 'mo-sit', 'mo-orfas'].forEach(id => document.getElementById(id).addEventListener('change', pintar));
   selLeitura.addEventListener('change', pintar);
   document.getElementById('mo-arquivo').addEventListener('change', ev => {
     const f = ev.target.files && ev.target.files[0];
@@ -24763,6 +24908,8 @@ function renderMonitorOlt() {
     if (st.ok === false && st.mensagem) linhas.push(`<span style="color:var(--danger)">⚠ ${esc(st.mensagem)}</span>`);
     if (atrasada && st.ok !== false) linhas.push(`<span style="color:#b45309">⚠ O coletor não rodou há ${haQuantoTempo(ult).replace('há ', '')} — confira o agendador (Saúde do Sistema).</span>`);
     if (st.ok && ev && (ev.novas != null)) linhas.push(`Na última coleta: <b>${ev.novas}</b> nova(s) · <b>${ev.reabertas}</b> reaberta(s) · <b>${ev.normalizadas}</b> normalizada(s) · <b>${ev.pioraram}</b> piorou(aram) · <b>${ev.melhoraram}</b> melhorou(aram) · <b>${ev.em_aberto}</b> em aberto no total`);
+    const cr = st.clientes_resumo;
+    if (cr && st.clientes_ultima) linhas.push(`Varredura de clientes: <b>${esc(fmtDH(st.clientes_ultima))}</b> (${haQuantoTempo(st.clientes_ultima)}) — ${cr.consultados || 0} consultado(s) · ${cr.ativos || 0} ativos · <b>${(cr.ruins || 0)}</b> em atenção/crítico · ${cr.sem_sinal || 0} sem sinal · ${cr.fora || 0} fora das OLTs da JH${cr.pendentes > (cr.consultados || 0) ? ` · ${cr.pendentes - (cr.consultados || 0)} na fila` : ''}`);
     const precisa = !st.tem_sessao || st.sessao_ok === false;
     el.innerHTML = caixa(cor, selo, `<div style="font-size:13px;line-height:1.8;margin-top:6px">${linhas.join('<br>')}</div><div id="mo-novaleitura"></div>`,
       btnSessao(precisa ? '📤 Enviar sessão do AutoISP' : '🔁 Renovar sessão'));
@@ -24812,7 +24959,7 @@ function renderMonitorOlt() {
   async function pintarExtras() {
     const alvo = document.getElementById('mo-extra');
     if (!alvo || !supa) return;
-    const [and, acomp, pend] = await Promise.all([carregarAndamentoOnus(), carregarAcompanhados(), carregarDiasPendentesMonitorOlt(),
+    const [and, acomp, pend, cli] = await Promise.all([carregarAndamentoOnus(), carregarAcompanhados(), carregarDiasPendentesMonitorOlt(), carregarClientesMonitorOlt(),
       MONITOR_OLT.status === undefined ? atualizarStatusColetor() : null]);
     if (!document.getElementById('mo-extra')) return;
     // aviso de exportação do dia anterior
@@ -24860,7 +25007,8 @@ function renderMonitorOlt() {
         ${statCard('neutral', icBarras, 'Normalizadas em 7 dias', normais.length, 'confirmadas pelo sinal do cliente')}
       </div>
       <div id="mo-and-tabela"></div>` : '';
-    alvo.innerHTML = secAcomp + secMud + secAnd;
+    alvo.innerHTML = '<div id="mo-clientes"></div>' + secAcomp + secMud + secAnd;
+    pintarClientesMonitorOlt(document.getElementById('mo-clientes'), cli, MONITOR_OLT.status);
     // tabela do andamento (o filtro só refaz esta parte)
     const pintarAnd = () => {
       const box = document.getElementById('mo-and-tabela'); if (!box) return;
@@ -24961,7 +25109,9 @@ function renderMonitorOlt() {
     const oltNaCidade = o => !cidade || (o && o.cidades.some(c => c.replace(/,\s*SP$/i, '') === cidade));
     const olts = d.olts.filter(o => !/deactiv/i.test(o.modo) && oltNaCidade(o));
     const desativadas = d.olts.filter(o => /deactiv/i.test(o.modo)).length;
-    let onus = d.onus.filter(u => oltNaCidade(oltPorId.get(u.olt_id)));
+    const orfasLig = document.getElementById('mo-orfas').value === '1';
+    const onusTodas = d.onus.filter(u => orfasLig || u.estado !== 'orphan');   // ONU sem contrato não é cliente: oculta por padrão
+    let onus = onusTodas.filter(u => oltNaCidade(oltPorId.get(u.olt_id)));
     const contagem = s => onus.filter(u => u.situacao === s).length;
     if (sit === 'preventiva') onus = onus.filter(u => u.situacao === 'critical' || u.situacao === 'warning');
     else if (sit) onus = onus.filter(u => u.situacao === sit);
@@ -24974,9 +25124,14 @@ function renderMonitorOlt() {
     DB.pcr.forEach(r => { const k = chaveNomeCliente(r.cliente); if (!k) return; const a = pcrPorNome.get(k); if (!a || String(r.data || '') > String(a.data || '')) pcrPorNome.set(k, r); });
     const gigaPorNome = new Map();
     (DB.chamadosGiga || []).forEach(r => { if (!chamadoGigaEmAberto(r.status)) return; const k = chaveNomeCliente(r.cliente); if (k) gigaPorNome.set(k, r); });
+    const pcrPorContrato = new Map(), prodPorContrato = new Map(), gigaPorContrato = new Map();
+    const maisRecente = (mapa, c, r) => { if (!c) return; const a = mapa.get(c); if (!a || String(r.data || '') > String(a.data || '')) mapa.set(c, r); };
+    DB.pcr.forEach(r => maisRecente(pcrPorContrato, String(r.contrato || '').trim(), r));
+    DB.producao.forEach(r => { if (r.recurso) maisRecente(prodPorContrato, String(r.contrato || '').trim(), r); });
+    (DB.chamadosGiga || []).forEach(r => { if (chamadoGigaEmAberto(r.status)) gigaPorContrato.set(String(r.contrato || '').trim(), r); });
     const falhas = olts.filter(oltComFalha);
     const porOlt = new Map();
-    d.onus.forEach(u => { const m = porOlt.get(u.olt_id) || {}; m[u.situacao] = (m[u.situacao] || 0) + 1; porOlt.set(u.olt_id, m); });
+    onusTodas.forEach(u => { const m = porOlt.get(u.olt_id) || {}; m[u.situacao] = (m[u.situacao] || 0) + 1; porOlt.set(u.olt_id, m); });
     const oltsOrd = olts.slice().sort((a, b) => (oltComFalha(b) - oltComFalha(a))
       || (Object.values(porOlt.get(b.id) || {}).reduce((s, n) => s + n, 0) - Object.values(porOlt.get(a.id) || {}).reduce((s, n) => s + n, 0)));
     const ordenadas = onus.slice().sort((a, b) => situacaoOnu(a.situacao).ordem - situacaoOnu(b.situacao).ordem
@@ -24992,17 +25147,19 @@ function renderMonitorOlt() {
     // dias = IRR; o ofensor é quem fez esse serviço. Histórico = Produção + PCR, pelo NOME (a ONU
     // não traz contrato); dias contados até HOJE, como nos Chamados GIGA.
     const hojeMo = hojeISOLocal();
-    const concluidoPorNome = new Map();
+    const concluidoPorNome = new Map(), concluidoPorContrato = new Map();
     const guardaConcluido = (nomeCli, r) => {
       if (!r.data || !r.recurso || !isConcluido(r.status)) return;
+      const ctt = String(r.contrato || '').trim();
+      if (ctt) { const ac = concluidoPorContrato.get(ctt); if (!ac || String(r.data) > String(ac.data)) concluidoPorContrato.set(ctt, r); }
       const k = chaveNomeCliente(nomeCli); if (!k) return;
       const a = concluidoPorNome.get(k);
       if (!a || String(r.data) > String(a.data)) concluidoPorNome.set(k, r);
     };
     DB.producao.forEach(r => guardaConcluido(r.nome, r));
     DB.pcr.forEach(r => guardaConcluido(r.cliente, r));
-    const retornoDoCliente = k => {
-      const ant = k ? concluidoPorNome.get(k) : null;
+    const retornoDoCliente = (k, ctt) => {
+      const ant = (ctt && concluidoPorContrato.get(ctt)) || (k ? concluidoPorNome.get(k) : null);
       if (!ant) return null;
       const dias = diasEntre(hojeMo, String(ant.data).slice(0, 10));
       const marca = classificaRetorno(ant.tipo_atividade, dias);
@@ -25012,10 +25169,11 @@ function renderMonitorOlt() {
     const itens = ordenadas.map(u => {
       const nome = u.nome || nomeDaDescricaoOnu(u.descricao);
       const k = chaveNomeCliente(nome);
-      const pcr = k ? pcrPorNome.get(k) : null, prod = k ? prodPorNome.get(k) : null, giga = k ? gigaPorNome.get(k) : null;
+      const kc = u.contrato || '';   // contrato (vem do AutoISP quando a ONU é de um cliente ativo) vale mais que o nome
+      const pcr = (kc && pcrPorContrato.get(kc)) || (k ? pcrPorNome.get(k) : null), prod = (kc && prodPorContrato.get(kc)) || (k ? prodPorNome.get(k) : null), giga = (kc && gigaPorContrato.get(kc)) || (k ? gigaPorNome.get(k) : null);
       const ult = [pcr, prod].filter(x => x && x.recurso).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))[0] || null;
       const endereco = (pcr && pcr.endereco) || (prod && prod.endereco) || '';
-      return { u, nome, pcr, giga, ult, retorno: retornoDoCliente(k), tecnico: ult ? ult.recurso : '', bairro: endereco ? extrairBairro(endereco) : '',
+      return { u, nome, pcr, giga, ult, retorno: retornoDoCliente(k, u.contrato), tecnico: ult ? ult.recurso : '', bairro: endereco ? extrairBairro(endereco) : '',
         cidade: cidadeDaOlt(oltPorId.get(u.olt_id)) };
     });
     const SITS = ['critical', 'warning', 'loss_signal', 'power_fail'];
@@ -25053,6 +25211,8 @@ function renderMonitorOlt() {
         ${metricCard('Sem energia', contagem('power_fail'), false, { icon: icPausa })}
         ${metricCard('Viram retorno se reparar hoje', itens.filter(x => x.retorno).length, itens.some(x => x.retorno), { icon: icChave, sub: `IFI ${itens.filter(x => x.retorno && x.retorno.marca === 'IFI').length} · IRR ${itens.filter(x => x.retorno && x.retorno.marca === 'IRR').length}` })}
         ${novas != null ? metricCard('Novas desde a leitura anterior', novas, novas > 0, { icon: icRelogio, sub: 'ONUs com problema que não estavam na anterior' }) : ''}
+        ${d.orfas != null ? metricCard('ONUs sem contrato (órfãs)', d.orfas || 0, false, { icon: icPasta, sub: orfasLig ? 'aparecendo nas tabelas' : 'ocultas — equipamento sem cliente vinculado' }) : ''}
+        ${d.resolvidos_ok ? metricCard('Lista dizia problema, cliente OK', d.resolvidos_ok, false, { icon: icOk, sub: 'sinal normal no registro do contrato' }) : ''}
       </div>
       <div class="section-heading">OLTs — ${cidade ? esc(cidade) : 'cidades da JH Litoral'}</div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="mo-tab-olts"><thead><tr>
@@ -25107,7 +25267,7 @@ function renderMonitorOlt() {
           return `<tr><td><span class="badge ${st.cls}">${esc(st.rot)}</span></td>
             <td style="${u.situacao === 'critical' ? 'color:var(--danger);font-weight:700' : ''}">${/power_fail/.test(u.situacao) && !u.sinal ? '-' : sinalTxt(u.sinal)}</td>
             <td>${esc(cidadeDaOlt(oltPorId.get(u.olt_id)))}</td><td>${esc(u.olt)}</td><td>${esc(u.ponlink)}</td><td>${u.onu_id ?? '-'}</td>
-            <td>${esc(nome || (/ONT_NO_DESCRIPTION|^\*+$/i.test(u.descricao || '') ? '' : u.descricao) || '-')}</td>
+            <td>${esc(nome || (/ONT_NO_DESCRIPTION|^\*+$/i.test(u.descricao || '') ? '' : u.descricao) || (u.estado === 'orphan' ? 'ONU sem contrato' : '-'))}${u.contrato ? `<div style="font-size:11px;color:var(--text-muted)">contrato ${esc(u.contrato)}${u.bairro ? ' · ' + esc(u.bairro) : ''}</div>` : ''}</td>
             <td>${tecnico ? `${esc(tecnico)}<div style="font-size:11px;color:var(--text-muted)">${formatDate(ult.data)}${ult.tipo_atividade ? ' · ' + esc(ult.tipo_atividade) : ''}</div>` : '-'}</td>
             <td>${retorno ? `<span class="badge ${retorno.marca === 'IFI' ? 'warn' : 'amber'}">${retorno.marca}</span>
               <div style="font-size:11px;color:var(--text-muted);white-space:nowrap">${esc(retorno.tipo || '')} ${formatDate(retorno.data)} (${retorno.dias} dia${retorno.dias === 1 ? '' : 's'})${retorno.ofensor ? ' · ofensor ' + esc(retorno.ofensor) : ''}</div>
