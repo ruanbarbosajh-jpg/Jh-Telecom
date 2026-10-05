@@ -22540,7 +22540,10 @@ function renderFolhaEscritorio() {
     </select></div>
     <div class="field"><label>Colaborador</label><input type="text" id="fe-nome" placeholder="Nome"></div>
     <button class="btn" id="fe-filtrar">Filtrar</button>
-    ${podeEditarFolhaEscritorio() ? '<button class="btn" id="fe-add">+ Colaborador</button>' : ''}
+    ${podeEditarFolhaEscritorio() ? `<button class="btn" id="fe-add">+ Colaborador</button>
+    <div class="field"><label>Editar / excluir</label><select id="fe-colab"><option value="">Escolha o colaborador…</option></select></div>
+    <button class="btn" id="fe-editar">✎ Editar colaborador</button>
+    <button class="btn" id="fe-excluir">🗑 Excluir colaborador</button>` : ''}
   </div>
   <p style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">
     Salário, dias e lançamentos são editáveis. Líquido, Proventos, Descontos e A Receber
@@ -22553,6 +22556,15 @@ function renderFolhaEscritorio() {
   const confirmaDescartar = () => { const msg = document.getElementById('fe-msg'); return !(msg && /não salvas/i.test(msg.textContent)) || confirm('Há alterações não salvas na tabela. Se continuar, elas serão descartadas. Continuar?'); };
   const addBtn = document.getElementById('fe-add');
   if (addBtn) addBtn.onclick = () => { if (confirmaDescartar()) abrirModalColaboradorEscritorio(document.getElementById('fe-periodo').value, null, load); };
+  // editar / excluir agem sobre o colaborador escolhido na lista, do lado do "+ Colaborador" (pedido do cliente, 05/10/2026)
+  const colabEscolhido = () => {
+    const nome = (document.getElementById('fe-colab') || {}).value || '';
+    if (!nome) toast('Escolha o colaborador na lista ao lado.', 'aviso', 3000);
+    return nome;
+  };
+  const btnEditar = document.getElementById('fe-editar'), btnExcluir = document.getElementById('fe-excluir');
+  if (btnEditar) btnEditar.onclick = () => { const n = colabEscolhido(); if (n && confirmaDescartar()) abrirModalColaboradorEscritorio(document.getElementById('fe-periodo').value, n, load); };
+  if (btnExcluir) btnExcluir.onclick = () => { const n = colabEscolhido(); if (n && confirmaDescartar()) excluirColaboradorEscritorio(document.getElementById('fe-periodo').value, n, load); };
   load();
 
   function load() {
@@ -22603,15 +22615,16 @@ function renderFolhaEscritorio() {
       </div>
       <div class="section-heading">Folha do Escritório<span class="sec-nota">${esc(periodo)}</span></div>
       <div class="table-wrap caixa-tabela-fixa rolagem-inteira-na-imagem" style="margin-bottom:1.5rem"><table class="data-table tab-col1-fixa">
-        <thead><tr>${cols.map((c, i) => `<th${classeCol(i)}>${c[0]}</th>`).join('')}${pode ? '<th class="fora-da-imagem" data-sem-ordenar="1"></th>' : ''}</tr></thead>
-        <tbody>${linhas.map(l => `<tr data-linha="${esc(l.pessoa)}">${cols.map((c, i) => `<td${classeCol(i)}>${c[1](l)}</td>`).join('')}${pode ? `<td class="fora-da-imagem" style="white-space:nowrap"><button type="button" class="btn-icon" data-fe-editar="${esc(l.pessoa)}" title="Editar colaborador" aria-label="Editar ${esc(l.pessoa)}">✎</button> <button type="button" class="btn-icon" data-fe-excluir="${esc(l.pessoa)}" title="Excluir colaborador" aria-label="Excluir ${esc(l.pessoa)}">🗑</button></td>` : ''}</tr>`).join('')}
+        <thead><tr>${cols.map((c, i) => `<th${classeCol(i)}>${c[0]}</th>`).join('')}</tr></thead>
+        <tbody>${linhas.map(l => `<tr data-linha="${esc(l.pessoa)}">${cols.map((c, i) => `<td${classeCol(i)}>${c[1](l)}</td>`).join('')}</tr>`).join('')}
           <tr class="total-row">${cols.map((c, i) => {
             const campo = { 'Líquido':'liquido', 'PROVENTOS':'proventos', 'DESCONTOS':'descontos', 'A RECEBER':'total_receber' }[c[0]];
             return `<td${classeCol(i)}>${i === 0 ? linhas.length + ' colaborador(es)' : (campo ? money(tot(campo)) : '')}</td>`;
-          }).join('')}${pode ? '<td class="fora-da-imagem"></td>' : ''}</tr>
+          }).join('')}</tr>
         </tbody></table></div>
       ${pode ? `<div class="fin-salvar-barra">
         <button class="btn" id="fe-salvar">Salvar alterações</button>
+        <button class="btn-secundario" id="fe-descartar" disabled>Descartar alterações</button>
         <span id="fe-msg" style="font-size:13px;color:var(--text-muted)"></span>
       </div>` : ''}
       <div class="section-heading">Holerite<span class="sec-nota">no formato que vai pra assinatura</span></div>
@@ -22629,15 +22642,13 @@ function renderFolhaEscritorio() {
       </div>
       <div id="hol-area"></div>`;
 
-    // ---- editar / excluir colaborador ----
-    document.getElementById('fe-body').onclick = ev => {
-      const ed = ev.target.closest('[data-fe-editar]'), ex = ev.target.closest('[data-fe-excluir]');
-      if (!ed && !ex) return;
-      if (!confirmaDescartar()) return;
-      const per = document.getElementById('fe-periodo').value;
-      if (ed) abrirModalColaboradorEscritorio(per, ed.dataset.feEditar, load);
-      else excluirColaboradorEscritorio(per, ex.dataset.feExcluir, load);
-    };
+    // lista de quem pode ser editado/excluído (todos do período, mesmo com o filtro de nome ligado)
+    const selColab = document.getElementById('fe-colab');
+    if (selColab) {
+      const atualColab = selColab.value;
+      selColab.innerHTML = '<option value="">Escolha o colaborador…</option>' + linhasFolhaEscritorio(periodo).map(l => `<option value="${esc(l.pessoa)}">${esc(l.pessoa)}</option>`).join('');
+      if ([...selColab.options].some(o => o.value === atualColab)) selColab.value = atualColab;
+    }
     // ---- edição ----
     const acha = p => linhas.find(l => l.pessoa === p);
     const refazLinha = l => {
@@ -22651,6 +22662,7 @@ function renderFolhaEscritorio() {
       if (p('.fe-receber'))   p('.fe-receber').textContent = money(l.total_receber);
       const msg = document.getElementById('fe-msg');
       if (msg) msg.innerHTML = '<span style="color:var(--warn-text)">Há alterações não salvas.</span>';
+      const bd = document.getElementById('fe-descartar'); if (bd) bd.disabled = false;
       desenharHolerite();
     };
     document.querySelectorAll('#fe-body input.folha-edit-moeda').forEach(el => {
@@ -22671,6 +22683,13 @@ function renderFolhaEscritorio() {
         refazLinha(l);
       });
     });
+    // Descartar: as edições vivem só nas linhas da tela (o banco/DB só muda no Salvar), então refazer a tela volta tudo ao último salvo
+    const btnDesc = document.getElementById('fe-descartar');
+    if (btnDesc) btnDesc.addEventListener('click', () => {
+      if (!confirm('Descartar as alterações não salvas e voltar ao que está salvo?')) return;
+      load();
+      toast('Alterações descartadas.', 'ok', 1800);
+    });
     const btn = document.getElementById('fe-salvar');
     if (btn) btn.addEventListener('click', async () => {
       const msg = document.getElementById('fe-msg');
@@ -22684,6 +22703,7 @@ function renderFolhaEscritorio() {
         return;
       }
       msg.innerHTML = `<span style="color:var(--success)">Salvo em ${esc(periodo)}.</span>`;
+      const bd = document.getElementById('fe-descartar'); if (bd) bd.disabled = true;
       toast('Folha do escritório salva.', 'ok', 2000);
     });
 
