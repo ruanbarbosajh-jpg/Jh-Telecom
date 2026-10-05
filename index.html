@@ -2658,6 +2658,10 @@ const SUPABASE_TABLES = {
   // Nao cabe na folha_pagamento: la a linha e um tecnico com ordens e retorno,
   // aqui e salario mensal, VT, ferias e INSS.
   folhaEscritorio: { table: 'folha_escritorio',   conflict: 'pessoa,periodo' },
+  // Quadro de colaboradores do escritório EDITÁVEL (05/10/2026, pedido do cliente: "opção de excluir e
+  // editar colaborador"): a lista que era fixa no código (QUADRO_ESCRITORIO) vira ponto de partida e
+  // cada mudança (novo, editado, excluído) fica aqui. sql/PASSO-36-folha-escritorio-quadro.sql
+  folhaEscritorioQuadro: { table: 'folha_escritorio_quadro', conflict: 'pessoa' },
   // PCR: as linhas do CSV de atividades. Diferente das outras tabelas, essas
   // linhas carregam DATAS de verdade (abertura, limite, encerramento, início) —
   // no banco viram texto ISO, então precisam voltar a ser Date ao carregar,
@@ -2995,7 +2999,7 @@ const CACHE_VERSAO = 1;
 // gratuito. Delta por `atualizado_em` + conferência de contagem continuam
 // valendo em toda entrada; só a recarga de segurança ficou mais espaçada.
 const CACHE_VALIDADE_MS = 7 * 24 * 60 * 60 * 1000;
-const TABELAS_SEM_CACHE = new Set(['pcr', 'clean_up', 'presenca_escritorio_folgas', 'chamados_giga', 'ordens_sp', 'valores_sp_historico', 'folha_historico']);
+const TABELAS_SEM_CACHE = new Set(['pcr', 'clean_up', 'presenca_escritorio_folgas', 'chamados_giga', 'ordens_sp', 'valores_sp_historico', 'folha_historico', 'folha_escritorio_quadro']);
 
 let cacheDbPromessa = null;
 function cacheAbrir() {
@@ -3252,6 +3256,7 @@ const SCRIPT_DA_TABELA = {
   presenca_escritorio_pessoas: 'PASSO-5', presenca_escritorio: 'PASSO-5',
   presenca_escritorio_log: 'PASSO-5', presenca_escritorio_folgas: 'PASSO-5',
   folha_escritorio: 'PASSO-18',
+  folha_escritorio_quadro: 'PASSO-36',
   chamados_giga: 'PASSO-25',
   ordens_sp: 'PASSO-31', valores_sp_historico: 'PASSO-31',
   folha_historico: 'PASSO-32',
@@ -3588,7 +3593,7 @@ function podeAcessar(role, route) {
 const DB = {
   fechamento: [], producao: [], prazo: [], folhaPagamento: [], baseDoDia: [], prazoReparoDia: [],
   frotaLinks: [], frotaTroca: [], frotaManutencao: [], frotaDesvinc: [], frotaMultas: [], frotaRevisao: [],
-  pedagio: [], financeiro: [], folhaEscritorio: [], importsLog: [],
+  pedagio: [], financeiro: [], folhaEscritorio: [], folhaEscritorioQuadro: [], importsLog: [],
   // Clean Up: uma linha por limpeza de CTO já feita (coordenada + contrato +
   // O.S + técnico + portas liberadas). É o que alimenta o mapa da aba Clean Up.
   cleanUp: [],
@@ -3634,6 +3639,7 @@ const DB_INDEX = {
   producao: new Map(), fechamento: new Map(), prazo: new Map(), folhaPagamento: new Map(), baseDoDia: new Map(), prazoReparoDia: new Map(),
   frotaLinks: new Map(), frotaTroca: new Map(), frotaManutencao: new Map(), frotaDesvinc: new Map(), frotaMultas: new Map(), frotaRevisao: new Map(),
   folhaEscritorio: new Map(),
+  folhaEscritorioQuadro: new Map(),
   pedagio: new Map(), financeiro: new Map(), pcr: new Map(), pleito: new Map(),
   cleanUp: new Map(),
   presencaTecnicos: new Map(), presenca: new Map(),
@@ -20495,6 +20501,42 @@ function renderCmpPrazo() {
 // A conta é a mesma nos dois casos (mesmo filtro, mesmo período, mesmo
 // recálculo de retorno) — só muda o que vai pra tela, pra não existirem duas
 // versões do mesmo número em telas diferentes.
+// Painel "Valores por ordem" no topo da Folha dos técnicos (05/10/2026, pedido do cliente: "coloque na
+// folha de pagamento dos técnicos os valores por ordem, 26 dias, normal etc"). É só REFERÊNCIA de preço:
+// mostra a tabela de contrato (VALORES_ORDENS_HISTORICO) que vale no FIM do período escolhido — a mesma
+// que a folha usa pra calcular o valor das ordens e o desconto de IFI/IRR (valoresVigentesEm). Nada aqui
+// é digitado; o valor de São Paulo é o do painel "Valor por ordem de São Paulo" (editável por ciclo).
+function painelValoresPorOrdemFolha(fimISO, periodo) {
+  const tabela = valoresVigentesEm(fimISO);
+  let desde = '';
+  for (const v of VALORES_ORDENS_HISTORICO) { if (fimISO && v.vigenciaDesde <= fimISO) desde = v.vigenciaDesde; }
+  if (desde && desde < '2001-01-01') desde = '';
+  const moeda = v => formatCurrency(v);
+  const achar = re => tabela.find(v => re.test(normalizeHeader(v.label)));
+  const ativ = achar(/ativa/), rep = achar(/reparo/);
+  const linhasDesc = [
+    { rot: 'Desconto de IFI (retorno de ativação / M. endereço)', giga: DESCONTOS_RETORNO_FIXOS[0].giga, normal: ativ ? ativ.normal : DESCONTOS_RETORNO_FIXOS[0].tecnico, d26: ativ ? ativ.d26 : DESCONTOS_RETORNO_FIXOS[0].tecnico },
+    { rot: 'Desconto de IRR (retorno de reparo)', giga: DESCONTOS_RETORNO_FIXOS[1].giga, normal: rep ? rep.normal : DESCONTOS_RETORNO_FIXOS[1].tecnico, d26: rep ? rep.d26 : DESCONTOS_RETORNO_FIXOS[1].tecnico },
+  ];
+  const sp = periodo && typeof valorSpDoPeriodo === 'function' ? [
+    { rot: 'Ativação — São Paulo', v: valorSpDoPeriodo(periodo, 'ativacao_sp') },
+    { rot: 'Mudança de Endereço — São Paulo', v: valorSpDoPeriodo(periodo, 'mudanca_endereco_sp') },
+  ] : [];
+  return `<div class="panel" style="margin-bottom:1.5rem">
+    <h3>Valores por ordem<span style="font-size:12px;font-weight:400;color:var(--text-muted)"> — tabela de contrato${desde ? ' em vigor desde ' + formatDate(desde) : ''}${periodo ? ' · ' + esc(periodo) : ''}</span></h3>
+    <div class="table-wrap"><table class="data-table"><thead><tr>
+      <th>Tipo de serviço</th><th>GIGA paga à JH</th><th>Técnico — normal</th><th>Técnico — 26 dias ou mais (APTO)</th>
+    </tr></thead><tbody>
+      ${tabela.map(v => `<tr><td class="cat-cell">${esc(v.label)}</td><td>${moeda(v.giga)}</td><td>${moeda(v.normal)}</td><td>${moeda(v.d26)}</td></tr>`).join('')}
+      ${linhasDesc.map(d => `<tr><td class="cat-cell" style="color:var(--danger)">${esc(d.rot)}</td><td style="color:var(--danger)">−${moeda(d.giga)}</td><td style="color:var(--danger)">−${moeda(d.normal)}</td><td style="color:var(--danger)">−${moeda(d.d26)}</td></tr>`).join('')}
+      ${sp.map(x => `<tr><td class="cat-cell">${esc(x.rot)}</td><td>-</td><td colspan="2" style="text-align:center">${moeda(x.v)} <span style="color:var(--text-muted);font-size:12px">(valor único, editável no painel de São Paulo)</span></td></tr>`).join('')}
+    </tbody></table></div>
+    <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;line-height:1.5">
+      <b>Normal</b> = o que a JH paga ao técnico por ordem concluída. <b>26 dias</b> = tarifa do técnico <b>APTO</b>: 26 dias ou mais trabalhados <u>e</u> IFI ≤ ${formatPct(2.5, 2)} <u>e</u> IRR ≤ ${formatPct(4.5, 2)}; quem não atinge recebe a tarifa normal.
+      Nos descontos, a coluna <b>GIGA</b> é o que a GIGA desconta da JH por retorno e as outras duas são o que sai do técnico (pela faixa dele).
+    </p>
+  </div>`;
+}
 function renderFolhaPagamento(modo) {
   const soRelatorio = modo === 'relatorio';
   // metas de indicador (%) — declaradas ANTES de load(), senão o const cai na
@@ -21008,6 +21050,7 @@ function renderFolhaPagamento(modo) {
       <div class="panel" style="margin-bottom:1.5rem"><h3>Descontos por tipo (equipe)</h3><div id="c-desc"></div></div>`;
 
     body.innerHTML = soRelatorio ? blocoRelatorio + blocoRelatorioEscritorio : `
+      ${painelValoresPorOrdemFolha(janelaFolha.fim, periodo || (brutas[0] && brutas[0].periodo) || '')}
       <div id="folha-fechamento"></div>
       <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">Folha de Pagamento completa
         <button type="button" class="btn-export-xls" id="folha-export-xls">⤓ Excel da folha</button>
@@ -22287,11 +22330,11 @@ function isoLocalDe(d) {
 function linhasFolhaEscritorio(periodo) {
   const salvas = (DB.folhaEscritorio || []).filter(r => r.periodo === periodo);
   const porNome = new Map(salvas.map(r => [normalizeHeader(r.pessoa), r]));
-  const out = QUADRO_ESCRITORIO.map(q => {
+  const out = quadroEscritorioDoPeriodo(periodo).map(q => {
     const achada = porNome.get(normalizeHeader(q.pessoa));
     if (achada) { porNome.delete(normalizeHeader(q.pessoa)); return recalcularLinhaEscritorio({ ...achada }); }
     return recalcularLinhaEscritorio({
-      pessoa: q.pessoa, periodo, cargo: q.cargo, operacao: 'Casa Cliente',
+      pessoa: q.pessoa, periodo, cargo: q.cargo, operacao: q.operacao || 'Casa Cliente',
       salario_base: q.salario, dias_trab: diasDecorridosNoPeriodoEscritorio(periodo), vt: q.vt || 0,
     });
   });
@@ -22309,6 +22352,184 @@ async function salvarFolhaEscritorio(linhas) {
   return { ok: !r || r.ok !== false, resultado: r };
 }
 
+// ===== QUADRO EDITÁVEL DE COLABORADORES DO ESCRITÓRIO (05/10/2026) =====
+// Pedido do cliente: "coloque opção de excluir e editar colaborador". A lista QUADRO_ESCRITORIO é só o
+// PONTO DE PARTIDA (quem já estava no fechamento do cliente); o que o usuário muda fica em
+// `folha_escritorio_quadro` (1 linha por pessoa):
+//   • cargo / salario / vt  — padrão de quem ainda não tem linha salva no período
+//   • ativo=false           — nunca mais entra por padrão (usado quando a pessoa foi RENOMEADA)
+//   • inicio / fim (ISO)    — vigência: pessoa nova só entra a partir do período em que foi cadastrada;
+//                             excluída sai do período escolhido em diante, os anteriores ficam como estavam
+// Linha SALVA de um período sempre vence o quadro (é o que foi pago).
+function diaAnteriorISO(iso) {
+  const [a, m, d] = String(iso).slice(0, 10).split('-').map(Number);
+  return isoLocalDe(new Date(a, m - 1, d - 1));
+}
+function quadroEscritorioDoPeriodo(periodo) {
+  const { inicio, fim } = datasDoPeriodoFolha(periodo);
+  const ov = new Map((DB.folhaEscritorioQuadro || []).map(r => [normalizeHeader(r.pessoa), r]));
+  const vigente = o => {
+    if (o.ativo === false) return false;
+    const ini = o.inicio ? String(o.inicio).slice(0, 10) : '', f = o.fim ? String(o.fim).slice(0, 10) : '';
+    if (ini && fim && ini > fim) return false;
+    if (f && inicio && f < inicio) return false;
+    return true;
+  };
+  const dePessoa = (base, o) => ({
+    pessoa: (o && o.pessoa) || base.pessoa, cargo: (o && o.cargo) || base.cargo || '',
+    salario: o && o.salario != null && o.salario !== '' ? Number(o.salario) : Number(base.salario) || 0,
+    vt: o && o.vt != null && o.vt !== '' ? Number(o.vt) : Number(base.vt) || 0,
+    operacao: (o && o.operacao) || 'Casa Cliente',
+  });
+  const lista = [];
+  QUADRO_ESCRITORIO.forEach(q => {
+    const o = ov.get(normalizeHeader(q.pessoa));
+    if (!o) { lista.push(dePessoa(q, null)); return; }
+    ov.delete(normalizeHeader(q.pessoa));
+    if (vigente(o)) lista.push(dePessoa(q, o));
+  });
+  ov.forEach(o => { if (vigente(o)) lista.push(dePessoa({ pessoa: o.pessoa }, o)); });
+  return lista;
+}
+function reindexarFolhaEscritorio() {
+  DB_INDEX.folhaEscritorio = new Map(DB.folhaEscritorio.map((r, i) => [`${r.pessoa}|${r.periodo}`, i]));
+}
+async function gravarQuadroEscritorio(rows) {
+  const quem = currentUser ? (currentUser.nome || currentUser.login) : null, agora = new Date().toISOString();
+  rows.forEach(r => {
+    r.atualizado_em = agora; r.atualizado_por = quem;
+    const i = DB_INDEX.folhaEscritorioQuadro.get(r.pessoa);
+    if (i === undefined) { DB_INDEX.folhaEscritorioQuadro.set(r.pessoa, DB.folhaEscritorioQuadro.length); DB.folhaEscritorioQuadro.push({ ...r }); }
+    else DB.folhaEscritorioQuadro[i] = { ...r };
+  });
+  const res = await syncBatchToSupabase('folhaEscritorioQuadro', rows);
+  return !res || res.ok !== false ? { ok: true } : { ok: false, erro: (res.error && res.error.message) || 'erro desconhecido' };
+}
+// o que o quadro tem hoje dessa pessoa (ou o padrão fixo do código)
+function baseQuadroEscritorio(nome) {
+  const i = DB_INDEX.folhaEscritorioQuadro.get(nome);
+  if (i !== undefined) return { ...DB.folhaEscritorioQuadro[i] };
+  const q = QUADRO_ESCRITORIO.find(x => normalizeHeader(x.pessoa) === normalizeHeader(nome));
+  return q ? { pessoa: q.pessoa, cargo: q.cargo, salario: q.salario, vt: q.vt || 0, operacao: 'Casa Cliente', ativo: true, inicio: null, fim: null, origem: 'fixo' } : null;
+}
+async function renomearLinhasFolhaEscritorio(antigo, novo) {
+  const afetadas = DB.folhaEscritorio.filter(r => r.pessoa === antigo);
+  afetadas.forEach(r => { r.pessoa = novo; });
+  reindexarFolhaEscritorio();
+  if (!supa || !afetadas.length) return { ok: true };
+  try {
+    const { error } = await supa.from('folha_escritorio').update({ pessoa: novo }).eq('pessoa', antigo);
+    return error ? { ok: false, erro: error.message } : { ok: true };
+  } catch (e) { return { ok: false, erro: String((e && e.message) || e) }; }
+}
+async function excluirLinhasFolhaEscritorio(pessoa, periodos) {
+  if (!periodos.length) return { ok: true };
+  DB.folhaEscritorio = DB.folhaEscritorio.filter(r => !(r.pessoa === pessoa && periodos.includes(r.periodo)));
+  reindexarFolhaEscritorio();
+  if (!supa) return { ok: true };
+  try {
+    const { error } = await supa.from('folha_escritorio').delete().eq('pessoa', pessoa).in('periodo', periodos);
+    return error ? { ok: false, erro: error.message } : { ok: true };
+  } catch (e) { return { ok: false, erro: String((e && e.message) || e) }; }
+}
+// Serve pra cadastrar (sem nome) e pra editar (com o nome de quem já está na folha).
+function abrirModalColaboradorEscritorio(periodo, nomeExistente, aoSalvar) {
+  const linha = nomeExistente ? linhasFolhaEscritorio(periodo).find(l => l.pessoa === nomeExistente) : null;
+  const { inicio: inicioPeriodo } = datasDoPeriodoFolha(periodo);
+  const cargos = [...new Set([...QUADRO_ESCRITORIO.map(q => q.cargo), ...(DB.folhaEscritorioQuadro || []).map(q => q.cargo)].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const m = document.getElementById('modal-tecnico');
+  m.querySelector('.mt-corpo').innerHTML = `
+    <h3 style="margin:0 0 4px">${linha ? 'Editar ' + esc(linha.pessoa) : 'Novo colaborador'}</h3>
+    <p style="margin:0 0 16px;font-size:13px;color:var(--text-secondary)">${linha
+      ? `Cargo, salário base e transporte (VT) passam a ser o padrão dessa pessoa e já valem em <b>${esc(periodo)}</b>. Mudar o nome corrige também a folha dos períodos já salvos.`
+      : `Entra na Folha do Escritório a partir de <b>${esc(periodo)}</b> (os períodos anteriores não mudam).`}</p>
+    <label>Nome</label>
+    <input type="text" id="nc-nome" autocomplete="off" value="${linha ? esc(linha.pessoa) : ''}">
+    <label>Cargo</label>
+    <input type="text" id="nc-cargo" list="nc-cargos" autocomplete="off" value="${linha ? esc(linha.cargo || '') : ''}">
+    <datalist id="nc-cargos">${cargos.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+    <label>Salário base (R$)</label>
+    <input type="number" id="nc-salario" step="0.01" min="0" value="${linha ? Number(linha.salario_base) || 0 : ''}">
+    <label>Transporte / VT (R$)</label>
+    <input type="number" id="nc-vt" step="0.01" min="0" value="${linha ? Number(linha.vt) || 0 : '275.60'}">
+    <p id="nc-erro" class="error-msg"></p>
+    <div class="modal-acoes">
+      <button type="button" class="btn-secundario" id="nc-cancelar">Cancelar</button>
+      <button type="button" class="btn-primario" id="nc-salvar">${linha ? 'Salvar' : 'Adicionar'}</button>
+    </div>`;
+  m.classList.add('active');
+  document.getElementById('nc-cancelar').addEventListener('click', fecharModalTecnico);
+  document.getElementById('nc-nome').focus();
+  document.getElementById('nc-salvar').addEventListener('click', async () => { try { await salvarColaborador(); } catch (e) {
+    const er = document.getElementById('nc-erro'), bt = document.getElementById('nc-salvar');
+    if (bt) bt.disabled = false; if (er) er.textContent = 'Não consegui salvar: ' + String((e && e.message) || e);
+  } });
+  async function salvarColaborador() {
+    const nome = document.getElementById('nc-nome').value.trim().replace(/\s+/g, ' ');
+    const cargo = document.getElementById('nc-cargo').value.trim();
+    const salario = Number(document.getElementById('nc-salario').value), vt = Number(document.getElementById('nc-vt').value || 0);
+    const erro = document.getElementById('nc-erro'), btn = document.getElementById('nc-salvar');
+    if (!nome) { erro.textContent = 'Informe o nome.'; return; }
+    if (!isFinite(salario) || salario < 0 || document.getElementById('nc-salario').value === '') { erro.textContent = 'Informe o salário base (pode ser 0).'; return; }
+    if (!isFinite(vt) || vt < 0) { erro.textContent = 'O transporte não pode ser negativo.'; return; }
+    const trocouNome = linha && normalizeHeader(nome) !== normalizeHeader(linha.pessoa);
+    if (!linha || trocouNome) {
+      const jaTem = quadroEscritorioDoPeriodo(periodo).some(q => normalizeHeader(q.pessoa) === normalizeHeader(nome))
+        || DB.folhaEscritorio.some(r => normalizeHeader(r.pessoa) === normalizeHeader(nome));
+      if (jaTem) { erro.textContent = 'Já existe um colaborador com esse nome.'; return; }
+    }
+    btn.disabled = true; erro.style.color = ''; erro.textContent = 'Salvando…';
+    const avisos = [];
+    if (!linha) {
+      const g = await gravarQuadroEscritorio([{ pessoa: nome, cargo, salario, vt, operacao: 'Casa Cliente', ativo: true, inicio: inicioPeriodo, fim: null, origem: 'novo' }]);
+      if (!g.ok) avisos.push(g.erro);
+    } else {
+      const base = baseQuadroEscritorio(linha.pessoa) || { pessoa: linha.pessoa, operacao: linha.operacao || 'Casa Cliente', ativo: true, inicio: null, fim: null, origem: 'fixo' };
+      const novoBase = { ...base, pessoa: nome, cargo, salario, vt, ativo: true };
+      const lote = [novoBase];
+      if (trocouNome) lote.push({ ...base, ativo: false });   // o nome antigo nunca mais volta por padrão
+      const g = await gravarQuadroEscritorio(lote);
+      if (!g.ok) avisos.push(g.erro);
+      if (trocouNome) {
+        const r = await renomearLinhasFolhaEscritorio(linha.pessoa, nome);
+        if (!r.ok) avisos.push('não consegui renomear a folha já salva: ' + r.erro);
+      }
+      // a linha SALVA do período (se houver) acompanha o que foi editado
+      const idx = DB_INDEX.folhaEscritorio.get(`${nome}|${periodo}`);
+      if (idx !== undefined) {
+        const l = DB.folhaEscritorio[idx];
+        l.cargo = cargo; l.salario_base = salario; l.vt = vt;
+        recalcularLinhaEscritorio(l);
+        const r = await salvarFolhaEscritorio([{ ...l }]);
+        if (!r.ok) avisos.push('não consegui atualizar a folha salva do período');
+      }
+    }
+    btn.disabled = false;
+    fecharModalTecnico();
+    toast(avisos.length ? 'Alterado na tela, mas não gravou no servidor (rode o PASSO-36?): ' + avisos[0] : (linha ? 'Colaborador atualizado.' : 'Colaborador adicionado.'), avisos.length ? 'erro' : 'ok', avisos.length ? 7000 : 2500);
+    aoSalvar();
+  }
+}
+async function excluirColaboradorEscritorio(periodo, nome, aoSalvar) {
+  const { inicio: inicioPeriodo } = datasDoPeriodoFolha(periodo);
+  const periodosAfetados = [...new Set(DB.folhaEscritorio.filter(r => r.pessoa === nome).map(r => r.periodo))]
+    .filter(p => { const j = datasDoPeriodoFolha(p); return j.inicio && j.inicio >= inicioPeriodo; });
+  const texto = `Excluir "${nome}" da Folha do Escritório de ${periodo} em diante?\n\n`
+    + `• Ele sai desta folha e das seguintes${periodosAfetados.length ? ` (${periodosAfetados.length} período(s) já salvo(s) a partir daqui serão apagados)` : ''}.\n`
+    + `• Os períodos ANTERIORES já salvos continuam como estão.\n\nNão dá pra desfazer.`;
+  if (!confirm(texto)) return;
+  const base = baseQuadroEscritorio(nome) || { pessoa: nome, operacao: 'Casa Cliente', origem: 'fixo' };
+  const fim = diaAnteriorISO(inicioPeriodo);
+  const linhaQuadro = { ...base, fim, ativo: !(base.inicio && String(base.inicio).slice(0, 10) > fim) };
+  const avisos = [];
+  const g = await gravarQuadroEscritorio([linhaQuadro]);
+  if (!g.ok) avisos.push(g.erro);
+  const r = await excluirLinhasFolhaEscritorio(nome, periodosAfetados);
+  if (!r.ok) avisos.push('não consegui apagar a folha salva: ' + r.erro);
+  toast(avisos.length ? 'Excluído na tela, mas não gravou no servidor (rode o PASSO-36?): ' + avisos[0] : `${nome} excluído a partir de ${periodo}.`, avisos.length ? 'erro' : 'ok', avisos.length ? 7000 : 3000);
+  aoSalvar();
+}
+
 function renderFolhaEscritorio() {
   const { lista, atual } = periodosFolhaEscritorio();
   document.getElementById('content').innerHTML = `<div class="toolbar toolbar-fixa">
@@ -22317,6 +22538,7 @@ function renderFolhaEscritorio() {
     </select></div>
     <div class="field"><label>Colaborador</label><input type="text" id="fe-nome" placeholder="Nome"></div>
     <button class="btn" id="fe-filtrar">Filtrar</button>
+    ${podeEditarFolhaEscritorio() ? '<button class="btn" id="fe-add">+ Colaborador</button>' : ''}
   </div>
   <p style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">
     Salário, dias e lançamentos são editáveis. Líquido, Proventos, Descontos e A Receber
@@ -22325,6 +22547,10 @@ function renderFolhaEscritorio() {
   <div id="fe-body"></div>`;
   document.getElementById('fe-filtrar').addEventListener('click', load);
   document.getElementById('fe-periodo').addEventListener('change', load);
+  // sair da tela com alteração não salva descartaria o que a pessoa digitou: avisa antes de abrir o cadastro/edição
+  const confirmaDescartar = () => { const msg = document.getElementById('fe-msg'); return !(msg && /não salvas/i.test(msg.textContent)) || confirm('Há alterações não salvas na tabela. Se continuar, elas serão descartadas. Continuar?'); };
+  const addBtn = document.getElementById('fe-add');
+  if (addBtn) addBtn.onclick = () => { if (confirmaDescartar()) abrirModalColaboradorEscritorio(document.getElementById('fe-periodo').value, null, load); };
   load();
 
   function load() {
@@ -22375,12 +22601,12 @@ function renderFolhaEscritorio() {
       </div>
       <div class="section-heading">Folha do Escritório<span class="sec-nota">${esc(periodo)}</span></div>
       <div class="table-wrap caixa-tabela-fixa rolagem-inteira-na-imagem" style="margin-bottom:1.5rem"><table class="data-table tab-col1-fixa">
-        <thead><tr>${cols.map((c, i) => `<th${classeCol(i)}>${c[0]}</th>`).join('')}</tr></thead>
-        <tbody>${linhas.map(l => `<tr data-linha="${esc(l.pessoa)}">${cols.map((c, i) => `<td${classeCol(i)}>${c[1](l)}</td>`).join('')}</tr>`).join('')}
+        <thead><tr>${cols.map((c, i) => `<th${classeCol(i)}>${c[0]}</th>`).join('')}${pode ? '<th class="fora-da-imagem" data-sem-ordenar="1"></th>' : ''}</tr></thead>
+        <tbody>${linhas.map(l => `<tr data-linha="${esc(l.pessoa)}">${cols.map((c, i) => `<td${classeCol(i)}>${c[1](l)}</td>`).join('')}${pode ? `<td class="fora-da-imagem" style="white-space:nowrap"><button type="button" class="btn-icon" data-fe-editar="${esc(l.pessoa)}" title="Editar colaborador" aria-label="Editar ${esc(l.pessoa)}">✎</button> <button type="button" class="btn-icon" data-fe-excluir="${esc(l.pessoa)}" title="Excluir colaborador" aria-label="Excluir ${esc(l.pessoa)}">🗑</button></td>` : ''}</tr>`).join('')}
           <tr class="total-row">${cols.map((c, i) => {
             const campo = { 'Líquido':'liquido', 'PROVENTOS':'proventos', 'DESCONTOS':'descontos', 'A RECEBER':'total_receber' }[c[0]];
             return `<td${classeCol(i)}>${i === 0 ? linhas.length + ' colaborador(es)' : (campo ? money(tot(campo)) : '')}</td>`;
-          }).join('')}</tr>
+          }).join('')}${pode ? '<td class="fora-da-imagem"></td>' : ''}</tr>
         </tbody></table></div>
       ${pode ? `<div class="fin-salvar-barra">
         <button class="btn" id="fe-salvar">Salvar alterações</button>
@@ -22401,6 +22627,15 @@ function renderFolhaEscritorio() {
       </div>
       <div id="hol-area"></div>`;
 
+    // ---- editar / excluir colaborador ----
+    document.getElementById('fe-body').onclick = ev => {
+      const ed = ev.target.closest('[data-fe-editar]'), ex = ev.target.closest('[data-fe-excluir]');
+      if (!ed && !ex) return;
+      if (!confirmaDescartar()) return;
+      const per = document.getElementById('fe-periodo').value;
+      if (ed) abrirModalColaboradorEscritorio(per, ed.dataset.feEditar, load);
+      else excluirColaboradorEscritorio(per, ex.dataset.feExcluir, load);
+    };
     // ---- edição ----
     const acha = p => linhas.find(l => l.pessoa === p);
     const refazLinha = l => {
@@ -23222,7 +23457,7 @@ const ARQUIVOS_IMPORT = [
 // Tudo é leitura; o único botão que "faz" algo é o do backup (que só baixa).
 const BACKUP_TABELAS = [
   'base_do_dia', 'chamados_giga', 'clean_up', 'comparativo_financeiro', 'fechamento', 'financeiro',
-  'folha_escritorio', 'folha_fechamentos', 'folha_historico', 'folha_pagamento', 'frota_desvinc', 'frota_links',
+  'folha_escritorio', 'folha_escritorio_quadro', 'folha_fechamentos', 'folha_historico', 'folha_pagamento', 'frota_desvinc', 'frota_links',
   'frota_manutencao', 'frota_multas', 'frota_revisao', 'frota_troca', 'imports_log', 'monitor_olt', 'ordens_sp', 'pcr', 'pcr_mo',
   'pedagio', 'perfis', 'pleito', 'prazo', 'prazo_reparo_dia', 'presenca', 'presenca_escritorio',
   'presenca_escritorio_folgas', 'presenca_escritorio_log', 'presenca_escritorio_pessoas', 'presenca_log',
@@ -23243,6 +23478,7 @@ const SAUDE_CHECAGENS_SQL = [
   { passo: 'PASSO-33', rotulo: 'Trava da importação da PCR', rpc: 'pcr_trava_status', args: { p_token: 'saude' } },
   { passo: 'PASSO-34', rotulo: 'Fechamento do ciclo da Folha', tabela: 'folha_fechamentos' },
   { passo: 'PASSO-35', rotulo: 'Monitoramento OLT (leituras do AutoISP)', tabela: 'monitor_olt' },
+  { passo: 'PASSO-36', rotulo: 'Quadro editável de colaboradores do escritório', tabela: 'folha_escritorio_quadro' },
 ];
 function saudeNaoExiste(erro) {
   const m = String((erro && (erro.message || erro.details)) || '');
