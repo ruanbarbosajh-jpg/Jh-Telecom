@@ -3452,7 +3452,10 @@ const ROUTE_PERMISSIONS = {
   // (mapa de limpeza de CTO é operação de campo, fora do escopo do RH).
   // 05/10/2026 (pedido do cliente: "libere o Relatório do Financeiro pro RH"): 'relatoriofin' saiu
   // do bloqueio do RH. O Almoxarifado continua com ele bloqueado (segue "tudo do RH, MENOS o Financeiro").
-  rh: ['cleanup', 'relatorios', 'saude', 'import', 'retornosgiga',
+  // 05/10/2026 (pedido do cliente: "quem teria acesso seria somente os super, coor, analista"): o Monitoramento OLT
+  // voltou a ser fechado — só admin (Supervisor/Coordenador) e analista. Gestão/Escritório saíram da lista de
+  // permissão e RH/Almoxarifado entram no bloqueio (revertendo o "libere para todos" de 05/10/2026 de manhã).
+  rh: ['cleanup', 'relatorios', 'saude', 'import', 'retornosgiga', 'monitorolt',
        'comparisons', 'presenca',
        'cmpproducao', 'cmpifiirr', 'cmpprazo'],
   // Gestão (02/09/2026, pedido do cliente): MESMO acesso do Analista, EXCETO
@@ -3494,7 +3497,7 @@ const ROUTE_PERMISSIONS = {
   // cliente) — essa mudança tinha ficado só no RH numa auditoria anterior,
   // quebrando o "sempre acompanhou" acima (achado em nova auditoria).
   // Replicado aqui pra manter o Almoxarifado espelhando o RH.
-  almox: ['cleanup', 'relatorios', 'saude', 'import', 'retornosgiga',
+  almox: ['cleanup', 'relatorios', 'saude', 'import', 'retornosgiga', 'monitorolt',
           'finance', 'folha', 'comparisons', 'relatoriofin', 'folhaescritorio', 'presenca',
           'cmpproducao', 'cmpifiirr', 'cmpprazo'],
 };
@@ -3509,6 +3512,8 @@ function perfilValido(role) { return PERFIS_CONHECIDOS.includes(role) ? role : '
 // Para os outros perfis isso só polui a tela com uma instrução que eles não têm
 // como executar.
 function ehAnalista() { return !!currentUser && currentUser.role === 'analista'; }
+// Monitoramento OLT (coletor do AutoISP): só Supervisor/Coordenador (perfil admin) e Analista (05/10/2026)
+function podeMonitorOlt() { return !!currentUser && ['admin', 'analista'].includes(currentUser.role); }
 // Quem pode corrigir a M.O na PCR: todo mundo menos o Escritório, que é perfil
 // de consulta. O valor fica salvo no Supabase e vale para todos, então não
 // pode ser mexido por quem só acompanha.
@@ -3580,9 +3585,9 @@ function podeEditarPresencaEscritorio() { return !!currentUser && (currentUser.r
 // Saíram Produção, Ofensor (resumo/indicadores IFI-IRR), Reunião Técnica e
 // Comparativo de Prazo — ficou só a lista abaixo. Rota nova nasce FECHADA.
 const ROTAS_SO_PERMITIDAS = {
-  gestao: ['inicio', 'reuniaoprazos', 'dashboard', 'fleet', 'toll', 'prazo', 'parcialdia', 'monitorolt'],
+  gestao: ['inicio', 'reuniaoprazos', 'dashboard', 'fleet', 'toll', 'prazo', 'parcialdia'],
   escritorio: ['inicio', 'cleanup', 'table', 'prazo', 'prazoativacao', 'parcialdia',
-               'pcr', 'chamadosgiga', 'ofensoresprazo', 'certificacoes', 'monitorolt'],
+               'pcr', 'chamadosgiga', 'ofensoresprazo', 'certificacoes'],
 };
 function podeAcessar(role, route) {
   // Presença (Técnicos + Escritório): oculta pra TODO MUNDO, sem exceção,
@@ -23810,7 +23815,7 @@ const ARQUIVOS_IMPORT = [
 const BACKUP_TABELAS = [
   'base_do_dia', 'chamados_giga', 'clean_up', 'comparativo_financeiro', 'fechamento', 'financeiro',
   'folha_escritorio', 'folha_escritorio_quadro', 'folha_pagamento_excluidos', 'folha_fechamentos', 'folha_historico', 'folha_pagamento', 'frota_desvinc', 'frota_links',
-  'frota_manutencao', 'frota_multas', 'frota_revisao', 'frota_troca', 'imports_log', 'monitor_olt', 'ordens_sp', 'pcr', 'pcr_mo',
+  'frota_manutencao', 'frota_multas', 'frota_revisao', 'frota_troca', 'imports_log', 'monitor_olt', 'monitor_olt_acompanhar', 'monitor_olt_dia', 'ordens_sp', 'pcr', 'pcr_mo',
   'pedagio', 'perfis', 'pleito', 'prazo', 'prazo_reparo_dia', 'presenca', 'presenca_escritorio',
   'presenca_escritorio_folgas', 'presenca_escritorio_log', 'presenca_escritorio_pessoas', 'presenca_log',
   'presenca_tecnicos', 'producao', 'valores_ordens', 'valores_sp_historico',
@@ -23830,6 +23835,10 @@ const SAUDE_CHECAGENS_SQL = [
   { passo: 'PASSO-33', rotulo: 'Trava da importação da PCR', rpc: 'pcr_trava_status', args: { p_token: 'saude' } },
   { passo: 'PASSO-34', rotulo: 'Fechamento do ciclo da Folha', tabela: 'folha_fechamentos' },
   { passo: 'PASSO-35', rotulo: 'Monitoramento OLT (leituras do AutoISP)', tabela: 'monitor_olt' },
+  { passo: 'PASSO-38', rotulo: 'Coletor do AutoISP — status', tabela: 'monitor_olt_status' },
+  { passo: 'PASSO-38', rotulo: 'Coletor do AutoISP — andamento das ONUs', tabela: 'monitor_olt_onus' },
+  { passo: 'PASSO-38', rotulo: 'Coletor do AutoISP — fechamento do dia', tabela: 'monitor_olt_dia' },
+  { passo: 'PASSO-38', rotulo: 'Coletor do AutoISP — clientes acompanhados', tabela: 'monitor_olt_acompanhar' },
   { passo: 'PASSO-36', rotulo: 'Quadro editável de colaboradores do escritório', tabela: 'folha_escritorio_quadro' },
   { passo: 'PASSO-37', rotulo: 'Ajustes manuais da Folha dos técnicos', tabela: 'folha_pagamento', coluna: 'ajustes' },
   { passo: 'PASSO-37', rotulo: 'Técnicos excluídos da Folha', tabela: 'folha_pagamento_excluidos' },
@@ -24210,7 +24219,7 @@ const situacaoOnu = s => SITUACAO_ONU[s] || { rot: String(s || '-'), cls: 'neutr
 const oltComFalha = o => !/deactiv/i.test(o.modo || '') && /fail|never|busy|warning/i.test(o.conexao || '');
 // a janela do sistema avisa o coletor (no AutoISP) que está pronta — repete a cada 2 s até receber
 function monitorOltAvisarPronto() {
-  if (!MONITOR_OLT_PEDIDO || !window.opener || !currentUser || MONITOR_OLT_TIMER) return;
+  if (!MONITOR_OLT_PEDIDO || !window.opener || !podeMonitorOlt() || MONITOR_OLT_TIMER) return;
   const avisar = () => { try { window.opener.postMessage({ tipo: 'jh-monitor-olt-pronto' }, MONITOR_OLT_ORIGEM); } catch (e) { /* janela fechou */ } };
   avisar();
   MONITOR_OLT_TIMER = setInterval(avisar, 2000);
@@ -24219,7 +24228,7 @@ function monitorOltAvisarPronto() {
 window.addEventListener('message', async ev => {
   if (ev.origin !== MONITOR_OLT_ORIGEM || !ev.data || ev.data.tipo !== 'jh-monitor-olt') return;
   const responder = r => { try { ev.source.postMessage({ tipo: 'jh-monitor-olt-recebido', ...r }, MONITOR_OLT_ORIGEM); } catch (e) { /* janela fechou */ } };
-  if (!currentUser) { responder({ ok: false, erro: 'Entre no sistema JH (login e senha) e clique de novo.' }); return; }
+  if (!podeMonitorOlt()) { responder({ ok: false, erro: 'Entre no sistema JH como Supervisor, Coordenador ou Analista e clique de novo.' }); return; }
   if (MONITOR_OLT_TIMER) { clearInterval(MONITOR_OLT_TIMER); MONITOR_OLT_TIMER = null; }
   const r = await salvarLeituraMonitorOlt(ev.data);
   responder(r.ok ? { ok: true, qtd: r.qtd } : { ok: false, erro: r.erro });
@@ -24292,7 +24301,7 @@ async function carregarListaMonitorOlt() {
   if (supa) {
     try {
       const { data, error } = await supa.from('monitor_olt').select('chave,coletado_em,coletado_por,qtd_olts,qtd_falha,qtd_onus')
-        .order('coletado_em', { ascending: false }).limit(90);
+        .order('coletado_em', { ascending: false }).limit(200);
       if (!error && Array.isArray(data)) { lista = data; MONITOR_OLT.listaDoBanco = true; MONITOR_OLT.semTabela = false; }
       else if (error) MONITOR_OLT.semTabela = /does not exist|Could not find|PGRST205|42P01/i.test(error.message || '');
     } catch (e) { /* sem rede */ }
@@ -24385,13 +24394,92 @@ function renderMapaMonitorOlt(elId, itens) {
   });
   return `${porBairro} ONU(s) no bairro do último atendimento ao cliente · ${porCidade} no centro da cidade da OLT (marcador tracejado: cliente sem endereço nas nossas bases)${semLugar ? ` · ${semLugar} sem lugar no mapa` : ''}.`;
 }
+// ---- COLETOR NA NUVEM (05/10/2026) ----
+// Pedido do cliente: "quero esse site aberto 24 h, atualizando de 30 em 30 min, sem PC ligado". Quem lê o AutoISP agora
+// é a Edge Function "autoisp" do Supabase (supabase/functions/autoisp/index.ts), chamada pelo pg_cron a cada 30 min e
+// pelo botão "Atualizar". Só LÊ o AutoISP (GET), com a sessão que o Supervisor/Coordenador/Analista enviou pelo botão
+// "Enviar sessão" (a extensão 1.2.0 lê os cookies do Chrome). A sessão fica numa tabela que nenhum navegador lê.
+// Tabelas (PASSO-38): monitor_olt_status (1 linha), monitor_olt_onus (andamento por ONU), monitor_olt_acompanhar
+// (clientes marcados) e monitor_olt_dia (fechamento do dia, com controle de exportação).
+let MONITOR_OLT_STATUS_TIMER = null;
+async function chamarColetorNuvem(corpo) {
+  if (!supa || !supa.functions) return { ok: false, erro: 'Sem conexão com o Supabase.' };
+  try {
+    const { data, error } = await supa.functions.invoke('autoisp', { body: corpo });
+    if (error) {
+      let det = null;
+      try { det = error.context && typeof error.context.json === 'function' ? await error.context.json() : null; } catch (e) { /* sem corpo */ }
+      const st = error.context && error.context.status;
+      return { ok: false, naoImplantada: st === 404, erro: (det && det.erro) || (st === 404 ? 'A função "autoisp" ainda não foi publicada no Supabase.' : (error.message || 'erro')) };
+    }
+    return data || { ok: false, erro: 'Resposta vazia do coletor.' };
+  } catch (e) { return { ok: false, erro: String((e && e.message) || e) }; }
+}
+async function carregarStatusColetor() {
+  if (!supa) return null;
+  try {
+    const { data, error } = await supa.from('monitor_olt_status').select('*').eq('id', 1).maybeSingle();
+    return error ? null : (data || null);
+  } catch (e) { return null; }
+}
+async function carregarAndamentoOnus() {
+  if (!supa) return [];
+  try {
+    const desde = new Date(Date.now() - 7 * 864e5).toISOString();
+    const { data, error } = await supa.from('monitor_olt_onus').select('*')
+      .or(`normalizada_em.is.null,normalizada_em.gte.${desde}`).order('primeira_vez', { ascending: false }).limit(1500);
+    return !error && Array.isArray(data) ? data : [];
+  } catch (e) { return []; }
+}
+async function carregarAcompanhados() {
+  if (!supa) return [];
+  try {
+    const { data, error } = await supa.from('monitor_olt_acompanhar').select('*').order('criado_em', { ascending: false }).limit(200);
+    return !error && Array.isArray(data) ? data : [];
+  } catch (e) { return []; }
+}
+// dias fechados (ontem pra trás) que ninguém exportou ainda
+async function carregarDiasPendentesMonitorOlt() {
+  if (!supa) return [];
+  try {
+    const { data, error } = await supa.from('monitor_olt_dia').select('dia,coletado_em,qtd_olts,qtd_falha,qtd_onus,resumo,exportado_em')
+      .is('exportado_em', null).lt('dia', hojeISOLocal()).order('dia', { ascending: false }).limit(10);
+    return !error && Array.isArray(data) ? data : [];
+  } catch (e) { return []; }
+}
+async function exportarDiaMonitorOlt(dia) {
+  if (typeof XLSX === 'undefined' || !XLSX.utils) { toast('A biblioteca de Excel não carregou — confira a internet.', 'erro', 5000); return false; }
+  const { data, error } = await supa.from('monitor_olt_dia').select('*').eq('dia', dia).maybeSingle();
+  if (error || !data) { toast('Não achei o fechamento desse dia.', 'erro', 5000); return false; }
+  const d = data.dados;
+  if (!d) { toast('Esse dia tem mais de 60 dias e ficou só com o resumo (os dados ONU a ONU saem depois disso).', 'aviso', 6000); return false; }
+  const oltPorId = new Map((d.olts || []).map(o => [o.id, o]));
+  const cid = o => (o && o.cidades && o.cidades[0] ? o.cidades[0].replace(/,\s*SP$/i, '') : '');
+  const wb = XLSX.utils.book_new();
+  const dados = (d.onus || []).slice().sort((a, b) => situacaoOnu(a.situacao).ordem - situacaoOnu(b.situacao).ordem || (a.sinal == null ? 1 : b.sinal == null ? -1 : a.sinal - b.sinal));
+  const resumo = [['Dia', dia], ['Última leitura do dia', new Date(data.coletado_em).toLocaleString('pt-BR')], ['OLTs monitoradas', data.qtd_olts], ['OLTs com falha', data.qtd_falha], ['ONUs com problema', data.qtd_onus]]
+    .concat(Object.entries(SITUACAO_ONU).map(([k, v]) => [v.rot, dados.filter(o => o.situacao === k).length]));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumo), 'Resumo');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Situação', 'Sinal (dBm)', 'Cidade', 'OLT', 'PON', 'ONU', 'Cliente (descrição na OLT)', 'ID Int6', 'ONU SN', 'Modelo']]
+    .concat(dados.map(o => [situacaoOnu(o.situacao).rot, o.sinal, cid(oltPorId.get(o.olt_id)), o.olt, o.ponlink, o.onu_id, o.nome || nomeDaDescricaoOnu(o.descricao) || o.descricao || '', o.int6 || '', o.serial, o.modelo]))), 'ONUs com problema');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['OLT', 'Cidades', 'Conexão', 'Monitoramento', 'Auditoria', 'Clientes', 'Modelo', 'IP', 'Modo', 'Última config lida']]
+    .concat((d.olts || []).map(o => [o.hostname, (o.cidades || []).join(', '), o.conexao, o.monitoramento, o.auditoria, o.clientes, o.modelo, o.ip, o.modo, o.ultima_config]))), 'OLTs');
+  const and = await carregarAndamentoOnus();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Cliente', 'OLT', 'PON', 'Situação', 'Sinal', 'Em problema desde', 'Normalizada em', 'Sinal ao normalizar', 'Status ao normalizar', 'Ocorrências']]
+    .concat(and.map(x => [x.nome || '', x.olt, x.ponlink, situacaoOnu(x.situacao).rot, x.sinal, x.primeira_vez ? new Date(x.primeira_vez).toLocaleString('pt-BR') : '', x.normalizada_em ? new Date(x.normalizada_em).toLocaleString('pt-BR') : 'em aberto', x.sinal_normalizado, x.status_normalizado || '', x.ocorrencias]))), 'Andamento (situação atual)');
+  XLSX.writeFile(wb, `monitor-olt-${dia}.xlsx`);
+  try { await supa.from('monitor_olt_dia').update({ exportado_em: new Date().toISOString(), exportado_por: pcrTravaQuem() }).eq('dia', dia); } catch (e) { /* o arquivo já foi baixado */ }
+  return true;
+}
 function linkFavoritoColetorOlt() {
   const o = location.origin;
   return `javascript:(function(){if(location.hostname!=='auto.alloha.com'){alert('Abra o AutoISP (auto.alloha.com), entre com o seu login e clique de novo.');return;}var o='${o}';window.__jhJanela=window.open(o+'/?monitor-olt=1','jh_monitor_olt');var s=document.createElement('script');s.src=o+'/coletor-olt.js?v='+Date.now();s.onerror=function(){alert('Nao consegui carregar o coletor da JH. Confira a internet.');};document.head.appendChild(s);})();`;
 }
 function renderMonitorOlt() {
   const raiz = document.getElementById('content');
+  if (!podeMonitorOlt()) { raiz.innerHTML = '<div class="panel"><div class="empty">Esta tela é só do Supervisor, do Coordenador e do Analista.</div></div>'; return; }
   const noSite = /^https?:$/.test(location.protocol);
+  MONITOR_OLT.status = undefined;
   raiz.innerHTML = `
     <div class="toolbar">
       <div class="field"><label>Leitura</label><select id="mo-leitura"><option value="">Carregando…</option></select></div>
@@ -24407,6 +24495,17 @@ function renderMonitorOlt() {
       <button type="button" class="btn" id="mo-atualizar">🔄 Atualizar do AutoISP</button>
       <span id="mo-status" style="font-size:12px;color:var(--text-muted);align-self:center;max-width:360px"></span>
     </div>
+    <div id="mo-dia-aviso"></div>
+    <div id="mo-coletor-wrap" style="margin-bottom:1rem">
+      <div id="mo-coletor"></div>
+      <div id="mo-sessao-msg" style="font-size:13px;margin:8px 2px 0"></div>
+      <details style="margin-top:8px" id="mo-colar">
+        <summary style="cursor:pointer;font-size:13px;color:var(--text-muted)">Sem a extensão? Colar o login do AutoISP manualmente</summary>
+        <div style="font-size:12px;color:var(--text-muted);margin:8px 0">No Chrome, com o AutoISP aberto e logado: <b>F12 → Aplicativo (Application) → Cookies → auto.alloha.com</b> — copie os cookies como <code>nome=valor; nome2=valor2</code> (todos os da lista, principalmente <code>_s6core_session</code> e <code>remember_user_token</code>) e cole abaixo. Eles vão só pro Supabase do sistema JH e ficam numa tabela que nenhum navegador lê.</div>
+        <textarea id="mo-colar-txt" rows="3" style="width:100%;font-family:monospace;font-size:12px" placeholder="_s6core_session=...; remember_user_token=..." autocomplete="off" spellcheck="false"></textarea>
+        <button type="button" class="btn-export-xls" id="mo-colar-ok" style="margin-top:6px">Enviar cookies colados</button>
+      </details>
+    </div>
     <details class="panel" id="mo-ext" style="margin-bottom:1rem">
       <summary style="cursor:pointer;font-weight:700" id="mo-ext-titulo">🧩 Extensão do Chrome — verificando…</summary>
       <ol style="margin:12px 0 0;padding-left:20px;line-height:1.8;font-size:14px">
@@ -24414,6 +24513,7 @@ function renderMonitorOlt() {
         <li>No Chrome, abra <b>chrome://extensions</b>, ligue o <b>Modo do desenvolvedor</b> (canto superior direito) e clique em <b>Carregar sem compactação</b> → escolha a pasta extraída.</li>
         <li>Entre no <b>AutoISP</b> (auto.alloha.com) neste mesmo Chrome, com o seu login, e deixe logado.</li>
         <li>Volte aqui, recarregue (F5) e clique em <b>🔄 Atualizar do AutoISP</b>. Pra atualizar sozinho, escolha o tempo em "Atualizar sozinho" (vale enquanto esta aba estiver aberta).</li>
+        <li><b>Coletor 24 h na nuvem:</b> com a extensão <b>1.2.0</b>, clique em <b>📤 Enviar sessão do AutoISP</b> no painel "Coletor automático" (acima). O sistema passa a ler o AutoISP sozinho de 30 em 30 minutos, mesmo com seu computador desligado.</li>
       </ol>
       <p style="margin:10px 0 0;font-size:12px;color:var(--text-muted)">A extensão só LÊ o AutoISP (lista de OLTs das 6 cidades, ONUs com sinal ruim e, na busca de assinantes, os dados do cliente que você pesquisar — sem CPF/CNPJ), com o login que já está no Chrome: não guarda nem lê senha, não altera nada. Funciona só no computador onde foi instalada. <b>Versão 1.1.0 ou mais nova</b> é necessária pra busca de assinantes (a versão aparece no título acima).</p>
     </details>
@@ -24446,6 +24546,7 @@ function renderMonitorOlt() {
       <div id="mo-ass-lista"></div>
       <div id="mo-ass-det"></div>
     </div>
+    <div id="mo-extra"></div>
     <div id="mo-body"><div class="panel"><div class="empty">Carregando leituras…</div></div></div>`;
   const fav = document.getElementById('mo-favorito');
   if (fav) {
@@ -24464,6 +24565,23 @@ function renderMonitorOlt() {
   window.postMessage({ tipo: 'jh-ext-ping' }, location.origin);
   setTimeout(pintarExtensao, 400);
   async function atualizarDoAutoIsp(automatico) {
+    if (nuvemSaudavel() && !automatico) {
+      if (btnAtu) btnAtu.disabled = true;
+      status('☁ Coletando na nuvem… leva cerca de 1 minuto; pode continuar usando o sistema.');
+      const rn = await chamarColetorNuvem({ acao: 'coletar' });
+      if (btnAtu) btnAtu.disabled = false;
+      if (rn.ok) {
+        const ev = rn.eventos || {};
+        status(`✔ Coletado às ${fmtHora(Date.now())} — ${rn.onus} ONU(s) com problema · ${ev.novas || 0} nova(s) · ${ev.normalizadas || 0} normalizada(s)`);
+        await atualizarStatusColetor();
+        await recarregarTudo(rn.chave);
+        return;
+      }
+      if (rn.ocupado) { status('⏳ ' + esc(rn.erro)); return; }
+      await atualizarStatusColetor();       // sessão expirada etc. aparece no painel
+      if (!EXT_JH.presente) { status(`<span style="color:var(--danger)">⚠ ${esc(rn.erro)}</span>`); toast(rn.erro, 'erro', 6000); return; }
+      status(`Coletor da nuvem falhou (${esc(rn.erro)}) — tentando pela extensão…`);
+    }
     if (!EXT_JH.presente) {
       if (!automatico) { pintarExtensao(); toast('Instale a extensão do Chrome primeiro (passo a passo na tela).', 'aviso', 5000); }
       return;
@@ -24504,9 +24622,22 @@ function renderMonitorOlt() {
     detalheAberto = { int6: String(int6), base };
     const dadosLeitura = MONITOR_OLT.atualDados;
     const naLeitura = dadosLeitura && d.serial ? (dadosLeitura.onus || []).find(u => u.serial && u.serial === d.serial) : null;
-    alvo.innerHTML = `<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)"><div style="font-size:15px;font-weight:700">${esc(d.nome || (base && base.nome) || 'Assinante')} <span style="font-weight:400;color:var(--text-muted)">· Int6 ${esc(d.int6)}</span> <button type="button" class="btn-export-xls" id="mo-ass-atualizar-det" style="margin-left:8px">↻ Consultar de novo</button></div>${htmlDetalheAssinante(d, base, naLeitura)}</div>`;
+    alvo.innerHTML = `<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)"><div style="font-size:15px;font-weight:700">${esc(d.nome || (base && base.nome) || 'Assinante')} <span style="font-weight:400;color:var(--text-muted)">· Int6 ${esc(d.int6)}</span> <button type="button" class="btn-export-xls" id="mo-ass-atualizar-det" style="margin-left:8px">↻ Consultar de novo</button> <button type="button" class="btn-export-xls" id="mo-ass-acompanhar" style="margin-left:6px" title="O coletor consulta o sinal deste cliente a cada 30 minutos e avisa quando mudar">👁 Acompanhar este cliente</button></div>${htmlDetalheAssinante(d, base, naLeitura)}</div>`;
     const bt = document.getElementById('mo-ass-atualizar-det');
     if (bt) bt.addEventListener('click', () => abrirDetalhe(int6, base, false));
+    const ba = document.getElementById('mo-ass-acompanhar');
+    if (ba) ba.addEventListener('click', async () => {
+      if (!supa) { toast('Sem conexão com o Supabase.', 'erro'); return; }
+      ba.disabled = true;
+      const { error } = await supa.from('monitor_olt_acompanhar').upsert({
+        int6: String(d.int6), nome: d.nome || (base && base.nome) || '', contrato: d.contrato || '', serial: d.serial || '', olt: (base && base.olt) || '',
+        criado_por: pcrTravaQuem(), sinal: d.sinal_rx, status: d.status_onu || '', acs_ultimo_contato: d.acs_ultimo_contato || null, consultado_em: d.consultado_em, erro: null,
+      }, { onConflict: 'int6' });
+      if (error) { ba.disabled = false; toast(saudeNaoExiste(error) ? 'Rode o sql/PASSO-38 no Supabase pra acompanhar clientes.' : (error.message || 'erro'), 'erro', 6000); return; }
+      toast('Cliente em acompanhamento: o coletor confere o sinal dele a cada 30 minutos.', 'ok', 4000);
+      ba.textContent = '✔ Em acompanhamento';
+      pintarExtras();
+    });
     if (d.lat != null && d.lng != null && typeof L !== 'undefined') {
       const el = document.getElementById('mo-ass-mapa');
       if (el) {
@@ -24595,6 +24726,201 @@ function renderMonitorOlt() {
     leitor.readAsText(f, 'utf-8');
     ev.target.value = '';
   });
+  // ===== COLETOR NA NUVEM: painel de status, andamento, mudanças, acompanhados e exportação do dia =====
+  const fmtHora = q => new Date(q).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const fmtDH = q => new Date(q).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const nuvemSaudavel = () => { const st = MONITOR_OLT.status; return !!(st && st.tem_sessao && st.sessao_ok !== false); };
+  const proximaColeta = () => { const d = new Date(); d.setSeconds(0, 0); if (d.getMinutes() < 30) d.setMinutes(30); else { d.setMinutes(0); d.setHours(d.getHours() + 1); } return d; };
+  function pintarColetor() {
+    const el = document.getElementById('mo-coletor');
+    if (!el) return;
+    const st = MONITOR_OLT.status;
+    if (st === undefined) { el.innerHTML = ''; return; }
+    const caixa = (cor, titulo, corpo, botao) => `<div class="panel" style="border-left:4px solid ${cor};padding:12px 16px">
+      <div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center"><b>☁ Coletor automático do AutoISP</b>${titulo}${botao || ''}</div>${corpo}</div>`;
+    const btnSessao = txt => `<button type="button" class="btn" id="mo-enviar-sessao" style="margin-left:auto">${txt}</button>`;
+    if (!st) {
+      el.innerHTML = caixa('var(--text-muted)', '<span class="badge neutral">não configurado</span>',
+        '<div style="font-size:13px;margin-top:8px;color:var(--text-secondary)">O coletor 24 h ainda não foi instalado neste banco: rode <b>sql/PASSO-38-coletor-autoisp-nuvem.sql</b> no Supabase e publique a função <b>autoisp</b> (passo a passo no CLAUDE.md). Até lá, o botão "Atualizar" usa a extensão do Chrome.</div>');
+      return;
+    }
+    const agora = Date.now();
+    const rodandoAgora = st.executando_desde && agora - new Date(st.executando_desde).getTime() < 4 * 60e3;
+    const ult = st.ultima_execucao ? new Date(st.ultima_execucao) : null;
+    const atrasada = ult && agora - ult.getTime() > 75 * 60e3;
+    let cor = 'var(--success)', selo = '<span class="badge ok">funcionando</span>';
+    if (!st.tem_sessao) { cor = 'var(--danger)'; selo = '<span class="badge warn">sem sessão do AutoISP</span>'; }
+    else if (st.sessao_ok === false) { cor = 'var(--danger)'; selo = '<span class="badge warn">sessão expirada</span>'; }
+    else if (!ult) { cor = 'var(--text-muted)'; selo = '<span class="badge neutral">aguardando a 1ª coleta</span>'; }
+    else if (st.ok === false) { cor = '#f59e0b'; selo = '<span class="badge amber">última coleta falhou</span>'; }
+    else if (atrasada) { cor = '#f59e0b'; selo = '<span class="badge amber">atrasado</span>'; }
+    if (rodandoAgora) selo += ' <span class="badge neutral">⏳ coletando agora…</span>';
+    const ev = st.eventos || {};
+    const linhas = [];
+    linhas.push(`Última coleta: <b>${ult ? esc(fmtDH(ult)) : '—'}</b>${ult ? ` (${haQuantoTempo(ult)})` : ''}${st.origem ? ` · ${st.origem === 'cron' ? 'automática' : 'pedida por ' + esc(st.disparado_por || 'alguém')}` : ''}${st.duracao_ms ? ` · ${Math.round(st.duracao_ms / 1000)} s` : ''} · próxima ≈ <b>${fmtHora(proximaColeta())}</b>`);
+    if (st.ultima_leitura && st.ultima_leitura !== st.ultima_execucao) linhas.push(`Última leitura gravada: ${esc(fmtDH(st.ultima_leitura))}`);
+    if (st.tem_sessao) linhas.push(`Sessão do AutoISP: ${st.sessao_ok === false ? '<b style="color:var(--danger)">expirada</b>' : '✔ ativa'}${st.sessao_atualizada_em ? ` (enviada ${esc(fmtDH(st.sessao_atualizada_em))})` : ''}`);
+    if (st.ok === false && st.mensagem) linhas.push(`<span style="color:var(--danger)">⚠ ${esc(st.mensagem)}</span>`);
+    if (atrasada && st.ok !== false) linhas.push(`<span style="color:#b45309">⚠ O coletor não rodou há ${haQuantoTempo(ult).replace('há ', '')} — confira o agendador (Saúde do Sistema).</span>`);
+    if (st.ok && ev && (ev.novas != null)) linhas.push(`Na última coleta: <b>${ev.novas}</b> nova(s) · <b>${ev.reabertas}</b> reaberta(s) · <b>${ev.normalizadas}</b> normalizada(s) · <b>${ev.pioraram}</b> piorou(aram) · <b>${ev.melhoraram}</b> melhorou(aram) · <b>${ev.em_aberto}</b> em aberto no total`);
+    const precisa = !st.tem_sessao || st.sessao_ok === false;
+    el.innerHTML = caixa(cor, selo, `<div style="font-size:13px;line-height:1.8;margin-top:6px">${linhas.join('<br>')}</div><div id="mo-novaleitura"></div>`,
+      btnSessao(precisa ? '📤 Enviar sessão do AutoISP' : '🔁 Renovar sessão'));
+    const campoAuto = document.getElementById('mo-auto');
+    if (campoAuto && campoAuto.closest('.field')) campoAuto.closest('.field').style.display = nuvemSaudavel() ? 'none' : '';
+  }
+  async function atualizarStatusColetor() {
+    MONITOR_OLT.status = await carregarStatusColetor();
+    pintarColetor();
+    const topo = (MONITOR_OLT.lista || [])[0], st = MONITOR_OLT.status, aviso = document.getElementById('mo-novaleitura');
+    if (aviso && st && st.ultima_leitura && topo && new Date(st.ultima_leitura).getTime() > new Date(topo.coletado_em).getTime() + 1000) {
+      aviso.innerHTML = `<div style="margin-top:8px"><a href="#" id="mo-ver-nova" style="font-weight:700">🔔 Nova leitura às ${esc(fmtHora(st.ultima_leitura))} — clique pra ver</a> <span style="font-size:12px;color:var(--text-muted)">(a tela não muda sozinha pra não atrapalhar você)</span></div>`;
+    }
+  }
+  async function recarregarTudo(escolher) {
+    MONITOR_OLT.lista = null; MONITOR_OLT.listaDoBanco = false;
+    if (escolher === '__novo__') { const l = await carregarListaMonitorOlt(); escolher = l[0] && l[0].chave; }
+    await montarSeletor(escolher);
+    await pintarExtras();
+    await atualizarStatusColetor();       // o aviso "nova leitura" some: a tela já está na mais recente
+  }
+  async function enviarSessao(textoCookies) {
+    const msg = t => { const e = document.getElementById('mo-sessao-msg'); if (e) e.innerHTML = t; };
+    let cookies = textoCookies || null;
+    if (!cookies) {
+      if (!EXT_JH.presente) { pintarExtensao(); const pe = document.getElementById('mo-ext'); if (pe) pe.open = true; msg('<span style="color:var(--danger)">⚠ Instale a extensão do Chrome (passo a passo logo abaixo) ou use "Colar o login do AutoISP manualmente".</span>'); return; }
+      if (!extensaoAtende('1.2.0')) {
+        const pe = document.getElementById('mo-ext'); if (pe) pe.open = true;
+        msg(`<span style="color:var(--danger)">⚠ Sua extensão é a versão ${esc(EXT_JH.versao || '?')} e o envio da sessão precisa da <b>1.2.0</b>: baixe o zip de novo, substitua os arquivos da pasta e clique em ⟳ (recarregar) na extensão, em chrome://extensions. Depois dê F5 aqui.</span>`);
+        return;
+      }
+      msg('Lendo o login do AutoISP neste Chrome…');
+      const r = await consultarExtensao('sessao', {});
+      if (!r.ok) { msg(`<span style="color:var(--danger)">⚠ ${esc(r.erro)}</span>`); return; }
+      cookies = r.dados.cookies;
+    }
+    msg('Enviando pro sistema e testando se o AutoISP aceita…');
+    const r2 = await chamarColetorNuvem({ acao: 'salvar_sessao', cookies });
+    if (!r2.ok) { msg(`<span style="color:var(--danger)">⚠ ${esc(r2.erro || 'não foi possível guardar a sessão')}</span>`); await atualizarStatusColetor(); return; }
+    msg(`✔ Sessão guardada (${r2.cookies} cookies) e aceita pelo AutoISP (${r2.olts_nas_cidades} OLTs nas cidades da JH). Coletando agora…`);
+    await atualizarStatusColetor();
+    // a função já aceitou a sessão: vale mesmo que o status do banco ainda não tenha refletido
+    if (MONITOR_OLT.status) { MONITOR_OLT.status.tem_sessao = true; MONITOR_OLT.status.sessao_ok = true; pintarColetor(); }
+    atualizarDoAutoIsp(false);
+  }
+  // ---- andamento / mudanças / acompanhados / exportação do dia ----
+  async function pintarExtras() {
+    const alvo = document.getElementById('mo-extra');
+    if (!alvo || !supa) return;
+    const [and, acomp, pend] = await Promise.all([carregarAndamentoOnus(), carregarAcompanhados(), carregarDiasPendentesMonitorOlt(),
+      MONITOR_OLT.status === undefined ? atualizarStatusColetor() : null]);
+    if (!document.getElementById('mo-extra')) return;
+    // aviso de exportação do dia anterior
+    const av = document.getElementById('mo-dia-aviso');
+    if (av) {
+      av.innerHTML = pend.length ? `<div class="panel" style="margin-bottom:1rem;border-left:4px solid var(--danger);padding:12px 16px">
+        <b style="color:var(--danger)">📅 Falta exportar os dados ${pend.length > 1 ? 'dos dias anteriores' : 'de ontem'}</b>
+        <span style="font-size:13px;color:var(--text-secondary)"> — o sistema guarda o fechamento de cada dia; a exportação em Excel precisa ser feita todo início de dia.</span>
+        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px">${pend.map(p => `<button type="button" class="btn mo-exportar-dia" data-dia="${esc(p.dia)}">⤓ Exportar ${esc(formatDate(p.dia))} <span style="font-weight:400;opacity:.85">· ${p.qtd_onus} ONUs · ${p.qtd_falha} OLT(s) com falha</span></button>`).join('')}</div></div>` : '';
+      if (pend.length && !MONITOR_OLT.avisouDia) { MONITOR_OLT.avisouDia = true; toast('Falta exportar os dados do dia anterior (aviso no topo da tela).', 'aviso', 6000); }
+    }
+    const st = MONITOR_OLT.status;
+    const agora = Date.now();
+    const abertas = and.filter(x => !x.normalizada_em), normais = and.filter(x => x.normalizada_em);
+    const ultLeit = st && st.ultima_leitura ? new Date(st.ultima_leitura).getTime() : 0;
+    const diasAberta = x => (agora - new Date(x.primeira_vez).getTime()) / 864e5;
+    const norm24 = normais.filter(x => agora - new Date(x.normalizada_em).getTime() < 864e5).length;
+    const sinalTxt = v => v == null ? '-' : `${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} dBm`;
+    const TIPO_EV = { nova: ['warn', 'Nova'], reaberta: ['warn', 'Reaberta'], normalizada: ['ok', 'Normalizada'], piorou: ['warn', 'Piorou'], melhorou: ['ok', 'Melhorou'] };
+    const evs = (st && st.eventos && st.eventos.lista) || [];
+    const secMud = st && st.eventos ? `
+      <div class="section-heading">Mudanças na última coleta ${st.ultima_leitura ? `<span style="font-size:12px;font-weight:500;color:var(--text-muted)">(${esc(fmtDH(st.ultima_leitura))} — comparada com a anterior)</span>` : ''}</div>
+      ${evs.length ? `<div class="table-wrap" style="margin-bottom:1.5rem;max-height:340px;overflow:auto"><table class="data-table" id="mo-tab-mudancas"><thead><tr><th>Mudança</th><th>Cliente (descrição na OLT)</th><th>OLT</th><th>PON</th><th>De</th><th>Para</th><th>Sinal</th></tr></thead><tbody>
+        ${evs.map(e => { const t = TIPO_EV[e.tipo] || ['neutral', e.tipo]; return `<tr><td><span class="badge ${t[0]}">${esc(t[1])}</span></td><td class="cat-cell">${esc(e.nome || '-')}</td><td>${esc(e.olt || '-')}</td><td>${esc(e.ponlink || '-')}</td>
+          <td>${e.de ? esc(SITUACAO_ONU[e.de] ? situacaoOnu(e.de).rot : e.de) : '-'}</td><td>${e.para ? esc(situacaoOnu(e.para).rot) : '-'}</td>
+          <td>${e.sinal_antes != null ? sinalTxt(e.sinal_antes) + ' → ' : ''}${sinalTxt(e.sinal)}</td></tr>`; }).join('')}</tbody></table></div>`
+        : '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma mudança desde a leitura anterior.</div></div>'}` : '';
+    const secAcomp = acomp.length ? `
+      <div class="section-heading">👁 Clientes acompanhados <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(o coletor confere o sinal de cada um a cada 30 minutos)</span></div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="mo-tab-acomp"><thead><tr><th>Cliente</th><th>Int6</th><th>Sinal</th><th>Status</th><th>Último contato do equipamento</th><th>Última mudança</th><th>Consultado</th><th></th></tr></thead><tbody>
+        ${acomp.map(a => `<tr><td class="cat-cell">${esc(a.nome || '-')}</td><td><a href="#" class="mo-ver-int6" data-int6="${esc(a.int6)}" data-olt="${esc(a.olt || '')}" data-nome="${esc(a.nome || '')}">${esc(a.int6)}</a></td>
+          <td style="${a.status && !/^ok$/i.test(a.status) ? 'color:var(--danger);font-weight:700' : ''}">${sinalTxt(a.sinal)}</td><td>${a.status ? (/^ok$/i.test(a.status) ? '<span class="badge ok">OK</span>' : `<span class="badge warn">${esc(a.status)}</span>`) : '-'}</td>
+          <td>${a.acs_ultimo_contato ? esc(fmtDH(a.acs_ultimo_contato)) : '-'}</td>
+          <td>${a.mudanca ? `${esc(a.mudanca)} <span style="font-size:11px;color:var(--text-muted)">${a.mudou_em ? esc(fmtDH(a.mudou_em)) : ''}${a.anterior_sinal != null ? ' · antes ' + sinalTxt(a.anterior_sinal) : ''}</span>` : '<span style="color:var(--text-muted)">sem mudança</span>'}</td>
+          <td>${a.erro ? `<span style="color:var(--danger)">${esc(a.erro)}</span>` : (a.consultado_em ? esc(fmtDH(a.consultado_em)) : 'aguardando a próxima coleta')}</td>
+          <td><button type="button" class="btn-export-xls mo-acomp-rem" data-int6="${esc(a.int6)}">Parar</button></td></tr>`).join('')}</tbody></table></div>` : '';
+    const secAnd = and.length ? `
+      <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">Andamento das ONUs com problema <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(desde quando está com problema e se já normalizou — normalizadas dos últimos 7 dias)</span>
+        <select id="mo-and-filtro" class="topn-select"><option value="abertas">Em aberto</option><option value="normalizadas">Normalizadas</option><option value="reabertas">Reabertas</option><option value="todas">Todas</option></select>
+        <button type="button" class="btn-export-xls" id="mo-and-excel">⤓ Excel</button></div>
+      <div class="stat-cards" style="margin-bottom:12px">
+        ${statCard('red', icAviso, 'Em aberto', abertas.length, 'ONUs com problema agora')}
+        ${statCard('orange', icRelogio, 'Abertas há mais de 3 dias', abertas.filter(x => diasAberta(x) > 3).length, 'vale uma ação de campo')}
+        ${statCard('green', icOk, 'Normalizadas em 24 h', norm24, 'saíram da lista de problemas')}
+        ${statCard('neutral', icBarras, 'Normalizadas em 7 dias', normais.length, 'confirmadas pelo sinal do cliente')}
+      </div>
+      <div id="mo-and-tabela"></div>` : '';
+    alvo.innerHTML = secAcomp + secMud + secAnd;
+    // tabela do andamento (o filtro só refaz esta parte)
+    const pintarAnd = () => {
+      const box = document.getElementById('mo-and-tabela'); if (!box) return;
+      const f = (document.getElementById('mo-and-filtro') || {}).value || 'abertas';
+      let lista = f === 'abertas' ? abertas : f === 'normalizadas' ? normais : f === 'reabertas' ? and.filter(x => (x.ocorrencias || 1) > 1) : and;
+      lista = lista.slice().sort((a, b) => (a.normalizada_em ? 1 : 0) - (b.normalizada_em ? 1 : 0)
+        || (a.normalizada_em ? new Date(b.normalizada_em) - new Date(a.normalizada_em) : new Date(a.primeira_vez) - new Date(b.primeira_vez)));
+      const corte = 300, mostrar = lista.slice(0, corte);
+      box.innerHTML = !lista.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nada nessa situação.</div></div>' : `
+        <div class="table-wrap" style="margin-bottom:1.5rem;max-height:520px;overflow:auto"><table class="data-table" id="mo-tab-andamento"><thead><tr>
+          <th>Status</th><th>Situação atual</th><th>Sinal</th><th>Cliente (descrição na OLT)</th><th>OLT</th><th>PON</th><th>Em problema desde</th><th>Dias</th><th>Ocorrências</th><th>Normalizou</th><th>ID Int6</th></tr></thead><tbody>
+          ${mostrar.map(x => {
+            const saiu = !x.normalizada_em && ultLeit && x.ultima_vez_problema && ultLeit - new Date(x.ultima_vez_problema).getTime() > 40 * 60e3;
+            const stat = x.normalizada_em ? '<span class="badge ok">Normalizada</span>' : saiu ? '<span class="badge neutral">saiu da lista — conferindo</span>' : '<span class="badge warn">Em aberto</span>';
+            const dias = x.normalizada_em ? (new Date(x.normalizada_em) - new Date(x.primeira_vez)) / 864e5 : diasAberta(x);
+            return `<tr><td>${stat}</td><td>${esc(situacaoOnu(x.situacao).rot)}</td><td>${sinalTxt(x.sinal)}</td><td class="cat-cell">${esc(x.nome || '-')}</td><td>${esc(x.olt || '-')}</td><td>${esc(x.ponlink || '-')}</td>
+              <td>${x.primeira_vez ? esc(fmtDH(x.primeira_vez)) : '-'}</td><td>${dias.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</td>
+              <td>${x.ocorrencias || 1}${(x.ocorrencias || 1) > 1 ? ' <span class="badge amber">reincidente</span>' : ''}</td>
+              <td>${x.normalizada_em ? `${esc(fmtDH(x.normalizada_em))}<div style="font-size:11px;color:var(--text-muted)">${x.sinal_normalizado != null ? sinalTxt(x.sinal_normalizado) : ''}${x.status_normalizado ? ' · ' + esc(x.status_normalizado) : ''}</div>` : '-'}</td>
+              <td>${x.int6 ? `<a href="#" class="mo-ver-int6" data-int6="${esc(x.int6)}" data-olt="${esc(x.olt || '')}" data-nome="${esc(x.nome || '')}">${esc(x.int6)}</a>` : '-'}</td></tr>`; }).join('')}
+        </tbody></table></div>${lista.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${lista.length} — use o Excel pra ver todas.</p>` : ''}`;
+      ativarFiltrosDeColuna(box);
+    };
+    const sf = document.getElementById('mo-and-filtro'); if (sf) sf.addEventListener('change', pintarAnd);
+    const bx = document.getElementById('mo-and-excel'); if (bx) bx.addEventListener('click', () => { const t = document.getElementById('mo-tab-andamento'); if (t) exportarTabelaVisivel(t, 'monitor-olt-andamento-' + hojeISOLocal()); });
+    pintarAnd();
+    ativarFiltrosDeColuna(alvo);
+  }
+  // cliques do painel do coletor (o painel é refeito a cada minuto, por isso delegação no contêiner fixo)
+  document.getElementById('mo-coletor-wrap').addEventListener('click', ev => {
+    if (ev.target.closest('#mo-enviar-sessao')) { enviarSessao(null); return; }
+    if (ev.target.closest('#mo-colar-ok')) {
+      const t = (document.getElementById('mo-colar-txt').value || '').trim();
+      if (!t) { toast('Cole os cookies primeiro.', 'aviso'); return; }
+      enviarSessao(t).then(() => { const x = document.getElementById('mo-colar-txt'); if (x) x.value = ''; });
+      return;
+    }
+    const nova = ev.target.closest('#mo-ver-nova');
+    if (nova) { ev.preventDefault(); recarregarTudo('__novo__'); }
+  });
+  document.getElementById('mo-dia-aviso').addEventListener('click', async ev => {
+    const b = ev.target.closest('.mo-exportar-dia'); if (!b) return;
+    b.disabled = true;
+    const ok = await exportarDiaMonitorOlt(b.dataset.dia);
+    if (ok) { toast('Exportado — o aviso some depois que o arquivo é baixado.', 'ok', 4000); await pintarExtras(); } else b.disabled = false;
+  });
+  document.getElementById('mo-extra').addEventListener('click', async ev => {
+    const r = ev.target.closest('.mo-acomp-rem');
+    if (!r) return;
+    if (!confirm('Parar de acompanhar este cliente?')) return;
+    try { await supa.from('monitor_olt_acompanhar').delete().eq('int6', r.dataset.int6); } catch (e) { /* segue */ }
+    pintarExtras();
+  });
+  document.getElementById('mo-extra').addEventListener('click', cliqueVerAssinante);
+  // status a cada minuto enquanto a tela está aberta
+  if (MONITOR_OLT_STATUS_TIMER) clearInterval(MONITOR_OLT_STATUS_TIMER);
+  MONITOR_OLT_STATUS_TIMER = setInterval(() => {
+    if (ROTA_ATUAL.nome !== 'monitorolt' || !document.getElementById('mo-coletor')) { clearInterval(MONITOR_OLT_STATUS_TIMER); MONITOR_OLT_STATUS_TIMER = null; return; }
+    atualizarStatusColetor();
+  }, 60 * 1000);
   async function montarSeletor(escolher) {
     const lista = await carregarListaMonitorOlt();
     const atual = escolher || selLeitura.value;
@@ -24606,8 +24932,9 @@ function renderMonitorOlt() {
   }
   setTimeout(() => {
     const ult = (MONITOR_OLT.lista || [])[0];
-    if (EXT_JH.presente && (!ult || Date.now() - new Date(ult.coletado_em).getTime() > 60 * 60 * 1000)) atualizarDoAutoIsp(true);
-  }, 1500);
+    // com o coletor da nuvem funcionando, não precisa coletar daqui; sem ele, vale o jeito antigo (extensão)
+    if (MONITOR_OLT.status !== undefined && !nuvemSaudavel() && EXT_JH.presente && (!ult || Date.now() - new Date(ult.coletado_em).getTime() > 60 * 60 * 1000)) atualizarDoAutoIsp(true);
+  }, 2500);
   async function pintar() {
     const body = document.getElementById('mo-body');
     if (!body) return;
@@ -24819,7 +25146,8 @@ function renderMonitorOlt() {
     ativarTogglesDeSecao(body);
     ativarBotoesImagem(body);
   }
-  montarSeletor();
+  montarSeletor().then(() => atualizarStatusColetor());
+  pintarExtras();
 }
 function renderImport() {
   document.getElementById('content').innerHTML = `
