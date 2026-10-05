@@ -243,7 +243,8 @@
   select:not([style])::-ms-expand { display: none; }
   /* a seta NUNCA se repete: qualquer regra de select que use `background:` abreviado (ex.: select.folha-edit, que fazia a seta
      aparecer 3-4 vezes dentro do campo Frota — print do cliente 05/10/2026) zera o no-repeat; esta trava vence todas */
-  select:not([style]) { background-repeat: no-repeat !important; background-size: 11px !important; background-position: right 11px center !important; }
+  select:not([style]) { background-repeat: no-repeat !important; background-size: 11px !important; }
+  select.folha-edit:not([style]) { background-position: right 7px center !important; }
   :root[data-theme="light"] select:not([style]) {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%234a5470' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   }
@@ -516,7 +517,7 @@
     border-radius: 6px; outline: none; font-family: inherit;
   }
   input.folha-edit:focus, select.folha-edit:focus { border-color: var(--accent); }
-  select.folha-edit { text-align: left; padding: 4px 4px; }
+  select.folha-edit { text-align: left; padding: 4px 22px 4px 6px; }   /* 22px à direita: a seta não encosta no texto (ex.: PRÓPRIO NOVO (auto)) */
   /* desconto de material — só fica em laranja/amarelo quando TEM valor (a
      classe .tem-valor é ligada/desligada no JS a cada dígito digitado);
      em R$ 0,00 fica com a cor neutra de sempre, pra não acender alerta à toa.
@@ -1262,6 +1263,13 @@
   .fol-sp-desc-rot { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
   /* Folha: campo ajustado à mão (frota, dias e valor do aluguel) e o ↺ que volta ao automático */
   .folha-manual { color: var(--accent) !important; font-weight: 700 !important; border-color: var(--accent) !important; }
+  /* LINHA MARCADA na Folha dos técnicos (05/10/2026, pedido do cliente: "quando eu clicar em um técnico na tabela a linha
+     fique marcada, mas não mude a cor de nada — só preencha a linha com uma cor; marcar e desmarcar"): só o FUNDO muda,
+     a cor do texto e dos números continua a de sempre. !important porque cada bloco de coluna tem o fundo próprio. */
+  /* cor SÓLIDA (mistura com o fundo do cartão): a coluna do nome é fixa ao rolar pro lado e não pode ficar transparente */
+  :root { --linha-marcada: color-mix(in srgb, #facc15 34%, var(--card-bg)); }
+  table.data-table tbody tr.linha-marcada > td { background-color: var(--linha-marcada) !important; }
+  table.data-table#folha-tab tbody tr[data-tr-chave] { cursor: pointer; }
   .folha-auto { border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; }
   .folha-auto:hover { color: var(--accent); }
   .folha-auto-aj { border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; }
@@ -21280,10 +21288,18 @@ function renderFolhaPagamento(modo) {
       <div class="section-heading">Holerite<span class="sec-nota">extrato de serviços do técnico, no formato que vai pra assinatura</span></div>
       <div class="panel" style="margin-bottom:1.5rem">
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:6px">
-          <div class="field" style="margin:0"><label>Técnico</label><select id="hol-tecnico">
-            <option value="__todos__">— Todos os técnicos (${ranking.length}) —</option>
-            ${ranking.map(r => `<option value="${esc(r.tecnico)}|${esc(r.periodo)}">${esc(r.tecnico)}</option>`).join('')}
-          </select></div>
+          <div class="field" style="margin:0"><label>Técnico(s) <span style="font-weight:400;color:var(--text-muted)">— marque um ou vários</span></label>
+            <div class="multiselect" id="hol-ms">
+              <button type="button" class="multiselect-toggle" id="hol-ms-toggle"></button>
+              <div class="multiselect-panel" id="hol-ms-panel" style="max-height:340px;overflow:auto">
+                <div class="multiselect-actions">
+                  <button type="button" data-action="all">Todos os técnicos</button>
+                  <button type="button" data-action="none">Nenhum</button>
+                </div>
+                ${ranking.map(r => `<label class="multiselect-item"><input type="checkbox" value="${esc(r.tecnico)}|${esc(r.periodo)}" checked> ${esc(r.tecnico)}${periodo ? '' : ' <small style="color:var(--text-muted)">· ' + esc(r.periodo) + '</small>'}</label>`).join('')}
+              </div>
+            </div>
+          </div>
           <div class="field" style="margin:0"><label>Quantos mostrar</label>
             <input type="number" id="hol-quantos" min="1" max="${ranking.length}" value="${ranking.length}" style="width:90px">
           </div>
@@ -21309,48 +21325,55 @@ function renderFolhaPagamento(modo) {
       }
     }
 
+    // ---- marcar / desmarcar linha (clique numa célula que não seja campo de edição) ----
+    const tabFolhaMarca = document.getElementById('folha-tab');
+    if (tabFolhaMarca) tabFolhaMarca.addEventListener('click', ev => {
+      if (ev.target.closest('input, select, textarea, button, a, label, option')) return;   // editar um campo não marca a linha
+      const tr = ev.target.closest('tr[data-tr-chave]');
+      if (!tr) return;
+      const k = tr.dataset.trChave;
+      if (FOLHA_LINHAS_MARCADAS.has(k)) FOLHA_LINHAS_MARCADAS.delete(k); else FOLHA_LINHAS_MARCADAS.add(k);
+      tr.classList.toggle('linha-marcada', FOLHA_LINHAS_MARCADAS.has(k));
+    });
     // ---- Holerite (extrato de serviços) ----
-    const selHol = document.getElementById('hol-tecnico');
+    const selHol = document.getElementById('hol-ms');
     const inpQuantos = document.getElementById('hol-quantos');
     // "Todos" monta a pilha inteira de holerites; escolher um técnico mostra
     // só o dele. O campo "Quantos mostrar" corta a pilha — serve pra imprimir
     // um lote de cada vez em vez dos 30 de uma vez.
+    const holEscolhidos = () => {
+      const marc = new Set(getMultiSelectValues('hol-ms'));
+      return ranking.filter(r => marc.has(`${r.tecnico}|${r.periodo}`));
+    };
     const desenharHolerite = () => {
-      if (!selHol || !selHol.value) return;
+      if (!selHol) return;
       const area = document.getElementById('hol-area');
-      if (selHol.value === '__todos__') {
-        const n = Math.max(1, Math.min(ranking.length, parseInt(inpQuantos.value, 10) || ranking.length));
-        const lista = ranking.slice(0, n);
-        area.innerHTML = lista.map(l => holeriteTecnicoHTML(l)).join('');
-        // cada holerite edita o seu: o wiring é por bloco, não pela tela toda
-        area.querySelectorAll('.holerite').forEach((el, i) => {
-          ligarEdicaoHolerite(lista[i].tecnico, lista[i].periodo, desenharHolerite, el);
-        });
-        return;
-      }
-      const [tec, per] = selHol.value.split('|');
-      const linha = ranking.find(r => r.tecnico === tec && r.periodo === per);
-      area.innerHTML = linha ? holeriteTecnicoHTML(linha) : '';
-      ligarEdicaoHolerite(tec, per, desenharHolerite, area);
+      const escolhidos = holEscolhidos();
+      if (!escolhidos.length) { area.innerHTML = '<div class="panel"><div class="empty">Marque pelo menos um técnico na lista acima.</div></div>'; return; }
+      const n = Math.max(1, Math.min(escolhidos.length, parseInt(inpQuantos.value, 10) || escolhidos.length));
+      const lista = escolhidos.slice(0, n);
+      area.innerHTML = lista.map(l => holeriteTecnicoHTML(l)).join('');
+      // cada holerite edita o seu: o wiring é por bloco, não pela tela toda
+      area.querySelectorAll('.holerite').forEach((el, i) => {
+        ligarEdicaoHolerite(lista[i].tecnico, lista[i].periodo, desenharHolerite, el);
+      });
     };
     if (inpQuantos) inpQuantos.addEventListener('change', desenharHolerite);
     if (selHol) {
-      selHol.addEventListener('change', desenharHolerite);
+      wireMultiSelectField('hol-ms', { noun: 'técnico(s)', allLabel: 'Todos os técnicos' }, desenharHolerite);
       desenharHolerite();
       const btnRefazer = document.getElementById('hol-refazer');
       if (btnRefazer) btnRefazer.addEventListener('click', () => {
-        delete HOLERITE_MANUAL[selHol.value.replace('|', '|')];
+        holEscolhidos().forEach(l => { delete HOLERITE_MANUAL[`${l.tecnico}|${l.periodo}`]; });
         desenharHolerite();
         toast('Holerite refeito pelos números do sistema.', 'ok', 2000);
       });
       document.getElementById('hol-img').addEventListener('click', () => {
-        // "Todos" captura a pilha inteira num PNG só; um técnico, só o dele
-        const alvo = selHol.value === '__todos__'
-          ? document.getElementById('hol-area')
-          : document.querySelector('#hol-area .holerite');
-        if (!alvo) return;
-        const nome = selHol.value === '__todos__' ? 'holerites-' + hojeISOLocal()
-          : 'holerite-' + normalizeHeader(selHol.value.split('|')[0]).replace(/[^a-z0-9]+/g, '-');
+        // a pilha dos escolhidos vira um PNG só
+        const alvo = document.getElementById('hol-area');
+        if (!alvo || !alvo.querySelector('.holerite')) return;
+        const esc1 = holEscolhidos();
+        const nome = esc1.length === 1 ? 'holerite-' + normalizeHeader(esc1[0].tecnico).replace(/[^a-z0-9]+/g, '-') : 'holerites-' + hojeISOLocal();
         capturarElementoComoImagem(alvo, nome);
       });
       document.getElementById('hol-print').addEventListener('click', () => window.print());
@@ -22276,6 +22299,8 @@ function holeriteTecnicoHTML(linha) {
   </div>`;
 }
 
+// linhas marcadas (tecnico|periodo) — fica de pé enquanto a página estiver aberta, mesmo depois de Filtrar/Salvar
+const FOLHA_LINHAS_MARCADAS = new Set();
 function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
   if (!rows.length) return '<div class="empty">Sem dados.</div>';
   const money = v => formatCurrency(v);
@@ -22529,7 +22554,7 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
   // comprimento completo"): sem a caixa de rolagem vertical — a página rola, só a
   // lateral rola na própria tabela (a coluna do nome continua fixa à esquerda).
   return `<div class="table-wrap rolagem-inteira-na-imagem"><table class="data-table tab-col1-fixa" id="folha-tab"><thead><tr>${cols.map((c,i)=>`<th${classeCol(i)}>${c[0]}</th>`).join('')}</tr></thead><tbody>
-    ${rows.map(r=>`<tr>${cols.map((c,i)=>`<td${classeCol(i)}>${c[1](r) ?? ''}</td>`).join('')}</tr>`).join('')}
+    ${rows.map(r=>`<tr data-tr-chave="${esc(r.tecnico)}|${esc(r.periodo)}"${FOLHA_LINHAS_MARCADAS.has(r.tecnico + '|' + r.periodo) ? ' class="linha-marcada"' : ''}>${cols.map((c,i)=>`<td${classeCol(i)}>${c[1](r) ?? ''}</td>`).join('')}</tr>`).join('')}
   </tbody></table></div>`;
 }
 
