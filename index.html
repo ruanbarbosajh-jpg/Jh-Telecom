@@ -2383,8 +2383,11 @@
      16px (Folha/Financeiro/M.O têm célula estreita e o número cortaria). */
   @media (max-width: 640px), (hover: none) and (pointer: coarse) {
     input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=hidden]):not([type=file]),
-    select, textarea { font-size: 16px; }
-    table input, table select, table textarea { font-size: 13px; }
+    select, textarea { font-size: 16px !important; }
+    /* !important: regras como `.toolbar select`/`.field select` (mais específicas) deixavam
+       13 px em selects de filtro (PCR, Produção, Ofensores, Monitoramento) e o iPhone dava
+       zoom ao tocar — achado na auditoria de 06/10/2026. Dentro de tabela continua 13 px. */
+    table input, table select, table textarea { font-size: 13px !important; }
     .secao-toggle, .btn-mini, .btn-export-img, .btn-export-xls { min-height: 40px; }
     .btn-icon { width: 36px; height: 36px; }
     .topn-select { min-height: 38px; }
@@ -5101,6 +5104,25 @@ function normalizeHeader(str) {
     _NORM_CACHE.set(str, r);
   }
   return r;
+}
+// Memória de UMA TAREFA do navegador: guarda uma conta pesada só enquanto a tela
+// atual está sendo montada e apaga tudo na tarefa seguinte (setTimeout 0) — outro
+// clique, importação ou edição recalcula do zero, então nunca serve dado velho.
+// Por quê (auditoria de 06/10/2026, dados reais: 43 mil ordens): o Dashboard levava
+// 3,4 s pra abrir — chamava despesasAutomaticasDoPeriodo 27× pros MESMOS ciclos e
+// baseDoTecnico 72×, cada uma varrendo a Produção inteira (4,4 milhões de isConcluido).
+// Só use em função que NÃO muda dado e cujo resultado quem chama só LÊ.
+const MEMO_TAREFA = new Map();
+let memoTarefaAgendada = false;
+function memoDaTarefa(chave, calcular) {
+  if (MEMO_TAREFA.has(chave)) return MEMO_TAREFA.get(chave);
+  const v = calcular();
+  MEMO_TAREFA.set(chave, v);
+  if (!memoTarefaAgendada) {
+    memoTarefaAgendada = true;
+    setTimeout(() => { MEMO_TAREFA.clear(); memoTarefaAgendada = false; }, 0);
+  }
+  return v;
 }
 function excelDateToISO(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -10014,8 +10036,19 @@ function baseDoTecnico(tecnico, ini, fim) {
     return { ativacao: (f.ativacao || 0) + (f.me || 0), reparos: f.reparos || 0 };
   }
   let ativacao = 0, reparos = 0;
-  DB.producao.forEach(p => {
-    if (!isConcluido(p.status) || !mesmo(p.recurso)) return;
+  // ordens concluídas agrupadas por técnico, montadas UMA vez por tarefa (ver memoDaTarefa):
+  // antes cada chamada varria a Produção inteira — 72 chamadas no Dashboard
+  const porTecnico = memoDaTarefa('prodConcluidaPorTecnico|' + DB.producao.length, () => {
+    const m = new Map();
+    DB.producao.forEach(p => {
+      if (!isConcluido(p.status)) return;
+      const k = normalizeHeader(p.recurso);
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(p);
+    });
+    return m;
+  });
+  (porTecnico.get(normalizeHeader(tecnico)) || []).forEach(p => {
     if (ini && fim && !inRange(p.data, ini, fim)) return;
     if (ehBaseDoIfi(p.tipo_atividade)) ativacao++;
     else if (ehServicoReparo(p.tipo_atividade)) reparos++;
@@ -19483,8 +19516,8 @@ const GIGA107_A_PARTIR_DE = '2026-08-21';
 // (REPAROS OK / BASE_CONCLUIDOS): em ciclo mais antigo que essa base a conta
 // sairia R$ 0,00 e apagaria o valor real que está na planilha/cadastro.
 function temCoberturaRetornos(inicioISO, fimISO) {
-  return DB.producao.some(p => p.data && inRange(p.data, inicioISO, fimISO)
-    && ['IFI', 'IRR', 'DESC'].includes(String(p.ifi_irr || '').trim().toUpperCase()));
+  return memoDaTarefa('cobRet|' + inicioISO + '|' + fimISO + '|' + DB.producao.length, () => DB.producao.some(p => p.data && inRange(p.data, inicioISO, fimISO)
+    && ['IFI', 'IRR', 'DESC'].includes(String(p.ifi_irr || '').trim().toUpperCase())));
 }
 // Desconto de retorno do período: cada retorno IFI/IRR baixado entre inicio e
 // fim (contarRetornosPorOfensor — o ofensor responde, não quem fez o retorno)
@@ -19535,7 +19568,12 @@ function retornosDoPeriodoFin(inicioISO, fimISO) {
 }
 // Só as categorias que o sistema consegue calcular DESSE período; o resto fica
 // de fora (cai no cadastro/planilha).
+// Guardada por tarefa (memoDaTarefa): o Dashboard pedia o mesmo ciclo até 27× por tela.
+// Quem chama só LÊ o resultado (conferido nos 7 usos em 06/10/2026).
 function despesasAutomaticasDoPeriodo(rotulo) {
+  return memoDaTarefa('despAuto|' + rotulo, () => despesasAutomaticasDoPeriodoCalc(rotulo));
+}
+function despesasAutomaticasDoPeriodoCalc(rotulo) {
   const { inicio, fim } = datasDoPeriodoFolha(rotulo);
   const valores = {}, info = {};
   if (!inicio || !fim) return { valores, info };
