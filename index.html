@@ -24948,7 +24948,13 @@ function moCoordBairro(bairro, cidade) {
   }
   return _MO_COORD_BAIRRO.get(moChaveCid(bairro) + '|' + moChaveCid(cidade)) || null;
 }
-const moBadgeRetorno = r => r ? `<span class="badge ${r.marca === 'IFI' ? 'warn' : 'amber'}">${r.marca}</span><div style="font-size:11px;color:var(--text-muted);white-space:nowrap">${r.restam > 0 ? `sai da janela em ${r.restam} d` : 'último dia da janela'}</div>` : '-';
+// RISCO de virar retorno (06/10/2026, pedido do cliente: no mapa "IRR" parecia que o cliente JÁ era IRR): o cliente só vira
+// IFI/IRR SE ABRIR um chamado de reparo enquanto o último serviço concluído ainda está na janela (IFI: ativação/M.E. há até 15 dias;
+// IRR: reparo há até 30 dias). `restam` = dias que faltam pra sair da janela; depois disso o chamado dele já NÃO vira retorno.
+const moAteQuando = restam => { const d = new Date(); d.setDate(d.getDate() + Math.max(0, restam || 0)); return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0'); };
+const moPrazoRisco = r => !r ? '' : r.restam > 0 ? `faltam ${r.restam} dia${r.restam === 1 ? '' : 's'} (até ${moAteQuando(r.restam)})` : 'último dia da janela (hoje)';
+const moRiscoCurto = r => !r ? '' : `Risco de ${r.marca} · ${r.restam > 0 ? 'faltam ' + r.restam + ' d' : 'último dia'}`;
+const moBadgeRetorno = r => r ? `<span class="badge ${r.marca === 'IFI' ? 'warn' : 'amber'}" title="Se este cliente abrir um chamado de reparo agora, ele conta como ${r.marca}">Risco de ${r.marca}</span><div style="font-size:11px;color:var(--text-muted);white-space:nowrap">${moPrazoRisco(r)}</div>` : '-';
 
 // histórico de sinal de UM cliente (janela): gráfico + tabela dia a dia + alterações
 async function abrirHistoricoClienteMonitorOlt(contrato, nome) {
@@ -25027,7 +25033,7 @@ function renderMapaClientesMonitorOlt(elId, lista) {
     return `<div class="mapa-popup-cabecalho"><b>${esc(g.lugar || '-')}</b>${g.tipo === 'exato' && g.cidade ? ' — ' + esc(g.cidade) : ''} · ${g.itens.length} cliente(s)</div>
       <div class="mapa-popup-lista">${ord.slice(0, 40).map(x => { const c = moCorSit(x.status); return `<div class="mapa-popup-item"><div class="mapa-popup-item-linha1"><b>${esc(x.nome || 'Cliente')}</b>
         <span class="mapa-popup-badge" style="background:${c}22;color:${c};border-color:${c}55">${esc(moStatusTxt(x.status))}</span></div>
-        <div class="mapa-popup-item-linha2">contrato ${esc(x.contrato)} · ${moSinal(x.sinal)} · ${esc(x.olt || '')} PON ${esc(x.ponlink || '-')}${x.retorno ? ' · <b>' + x.retorno.marca + '</b>' : ''}</div>
+        <div class="mapa-popup-item-linha2">contrato ${esc(x.contrato)} · ${moSinal(x.sinal)} · ${esc(x.olt || '')} PON ${esc(x.ponlink || '-')}${x.retorno ? ' · <b title="Se abrir chamado de reparo agora, conta como ' + x.retorno.marca + '. Hoje ainda NÃO é retorno.">' + moRiscoCurto(x.retorno) + '</b>' : ''}</div>
         ${moLinkAutoIsp(x.gpon_id)}</div>`; }).join('')}
       ${ord.length > 40 ? `<div class="mapa-popup-item">… e mais ${ord.length - 40}</div>` : ''}</div>`;
   };
@@ -25421,16 +25427,17 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
       ${statCard('red', icAviso, 'Crítico', n('critico'), 'sinal muito baixo — preventiva urgente')}
       ${statCard('orange', icBarras, 'Atenção', n('atencao'), 'sinal caindo — preventiva')}
       ${statCard('neutral', icX, 'Sem sinal / energia / offline', n('semsinal'), 'último status que o AutoISP tem')}
-      ${statCard('red', icChave, 'Viram retorno se reparar hoje', comRetorno.length, `com sinal ruim · IFI ${comRetorno.filter(l => l.retorno.marca === 'IFI').length} · IRR ${comRetorno.filter(l => l.retorno.marca === 'IRR').length}`)}
+      ${statCard('red', icChave, 'Risco de virar IFI / IRR', comRetorno.length, `clientes com sinal ruim que, SE ABRIREM chamado de reparo hoje, contam como retorno: IFI ${comRetorno.filter(l => l.retorno.marca === 'IFI').length} (ativação/M.E. há até ${JANELA_IFI} dias) · IRR ${comRetorno.filter(l => l.retorno.marca === 'IRR').length} (reparo há até ${JANELA_IRR} dias)`)}
       ${statCard('purple', icRelogio, 'Recorrentes com sinal ruim', recorr.filter(ruim).length, `${pct(recorr.filter(ruim).length, recorr.length)} dos que atendemos 2+ vezes (demais: ${pct(demais.filter(ruim).length, demais.length)})`)}
     </div>
     <div class="panel" style="margin-bottom:1.5rem">
-      <h3 style="margin:0 0 8px">Comparativo: sinal × quantas vezes atendemos o cliente <span style="font-size:12px;font-weight:400;color:var(--text-muted)">(atendimentos concluídos nos últimos 90 dias)</span></h3>
-      <div class="table-wrap"><table class="data-table" data-sem-ordenar="1" id="mo-tab-matriz"><thead><tr><th>Sinal do cliente</th><th>0 atend.</th><th>1 atend.</th><th>2 atend.</th><th>3+ atend.</th><th>Total</th></tr></thead><tbody>
+      <h3 style="margin:0 0 8px">Comparativo: sinal do cliente × quantos atendimentos concluídos ele teve <span style="font-size:12px;font-weight:400;color:var(--text-muted)">(últimos 90 dias · cada número é uma quantidade de clientes)</span></h3>
+      <div class="table-wrap"><table class="data-table" data-sem-ordenar="1" id="mo-tab-matriz"><thead><tr><th>Sinal do cliente</th><th title="Contrato que aparece na Produção/PCR dos últimos 90 dias mas NÃO teve nenhum serviço concluído (só visita não concluída, cancelada ou ainda aberta)">Nenhum concluído</th><th>1 atendimento</th><th>2 atendimentos</th><th>3 ou mais</th><th>Total de clientes</th></tr></thead><tbody>
         ${Object.keys(MO_ROTULO_GRUPO).map(g => `<tr><td class="cat-cell">${MO_ROTULO_GRUPO[g]}</td>${FAIXAS.map(f => `<td>${matriz[g][f]}</td>`).join('')}<td><b>${FAIXAS.reduce((a, f) => a + matriz[g][f], 0)}</b></td></tr>`).join('')}
-        <tr class="total-row"><td class="cat-cell">% com sinal ruim (atenção + crítico + sem sinal)</td>${FAIXAS.map(f => `<td>${pct(ruinsFaixa(f), totFaixa(f))}</td>`).join('')}<td>${pct(linhas.filter(ruim).length, linhas.length)}</td></tr>
+        <tr><td class="cat-cell"><b>Total de clientes do grupo</b></td>${FAIXAS.map(f => `<td><b>${totFaixa(f)}</b></td>`).join('')}<td><b>${linhas.length}</b></td></tr>
+        <tr class="total-row"><td class="cat-cell">% do grupo com sinal ruim (atenção + crítico + sem sinal)</td>${FAIXAS.map(f => `<td>${pct(ruinsFaixa(f), totFaixa(f))}</td>`).join('')}<td>${pct(linhas.filter(ruim).length, linhas.length)}</td></tr>
       </tbody></table></div>
-      <p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">Cada coluna é um grupo de clientes pela quantidade de atendimentos concluídos em 90 dias ("0 atend." = contrato que só teve visita não concluída/cancelada no período). A última linha diz quantos % daquele grupo estão com sinal ruim. Se a % sobe da esquerda pra direita, o cliente que mais chama técnico é justamente o de sinal ruim — vale resolver a rede/ONU antes do próximo reparo (e antes de virar IFI/IRR).</p>
+      <p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">Como ler: cada coluna é um grupo de clientes, separados pela quantidade de serviços CONCLUÍDOS que a JH fez neles nos últimos 90 dias. <b>Nenhum concluído</b> = o contrato aparece na Produção/PCR mas só teve visita não concluída, cancelada ou ainda em aberto. A última linha diz quantos % de cada grupo estão com sinal ruim: se a % sobe da esquerda pra direita, o cliente que mais chama técnico é justamente o de sinal ruim — vale resolver a rede/ONU antes do próximo reparo (e antes de virar IFI/IRR).</p>
     </div>
     <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">📋 Lista de clientes para a preventiva <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(os mesmos filtros valem pro mapa logo abaixo)</span></div>
     <div class="toolbar" style="margin-bottom:10px">
@@ -25439,15 +25446,16 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
         <option value="critico">Só Crítico</option><option value="atencao">Só Atenção</option><option value="semsinal">Sem sinal / energia / offline</option><option value="ok">OK</option><option value="todos">Todos</option></select></div>
       <div class="field"><label>Atendimentos (90 dias)</label><select id="mo-cli-freq">
         <option value="todos">Todos</option><option value="2">2 ou mais</option><option value="3">3 ou mais</option><option value="r2">2 ou mais reparos</option></select></div>
-      <div class="field"><label>IFI / IRR</label><select id="mo-cli-ret"><option value="">Todos</option><option value="ret">Viram retorno (IFI ou IRR)</option><option value="IFI">Só IFI</option><option value="IRR">Só IRR</option></select></div>
+      <div class="field"><label>Risco de IFI / IRR</label><select id="mo-cli-ret"><option value="">Todos</option><option value="ret">Risco de virar retorno (IFI ou IRR)</option><option value="IFI">Só risco de IFI</option><option value="IRR">Só risco de IRR</option></select></div>
       ${moMulti('mo-cli-cidade', 'Cidade', [...new Set(linhas.map(l => l.cidade).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR')), null, 'Todas as cidades')}
       <div class="field"><label>Bairro</label><span id="mo-cli-bairro-wrap"></span></div>
       <div class="field"><label>Dado do equipamento</label><select id="mo-cli-vel"><option value="">Todos</option><option value="novo">Atualizado (até 24 h)</option><option value="velho">Velho (mais de 24 h)</option><option value="muito">Muito velho (mais de 3 dias)</option><option value="sem">Sem leitura registrada</option></select></div>
       <button type="button" class="btn-export-xls" id="mo-cli-excel">⤓ Excel (todos os filtrados)</button>
       <span id="mo-cli-resumo" style="font-size:12px;color:var(--text-muted);align-self:center"></span>
     </div>
+    <div class="stat-cards" id="mo-cli-cards" style="margin-bottom:12px"></div>
     <div id="mo-cli-tabela"></div>
-    <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1.5rem">"IFI / IRR" = se abrir um reparo hoje pra esse cliente, ele conta como retorno: o último serviço concluído foi Ativação/Mudança de Endereço há até ${JANELA_IFI} dias (IFI) ou Reparo há até ${JANELA_IRR} dias (IRR) — o ofensor é o técnico desse serviço. É o cliente que mais vale a preventiva.</p>
+    <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1.5rem"><b>Risco de IFI / IRR</b>: o cliente <b>ainda não é</b> retorno — ele só vira se ABRIR um chamado de reparo enquanto o último serviço concluído está dentro da janela: Ativação/Mudança de Endereço há até ${JANELA_IFI} dias (<b>risco de IFI</b>) ou Reparo há até ${JANELA_IRR} dias (<b>risco de IRR</b>). Abaixo do selo aparece quantos dias faltam pra sair da janela (e a data); passou o prazo, o chamado dele já não conta. O ofensor é o técnico daquele serviço — por isso é o cliente que mais vale a preventiva.</p>
     <div class="section-heading">🗺 Mapa — clientes da JH <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(mesmos filtros da lista acima · a cor é a pior situação do lugar · clique pra ver os clientes)</span></div>
     <div class="panel" style="margin-bottom:1.5rem">
       <div class="toolbar" style="margin-bottom:10px;box-shadow:none">
@@ -25491,9 +25499,20 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
   const desenhar = () => {
     const lista = filtrar(), corte = 1000, mostrar = lista.slice(0, corte);
     document.getElementById('mo-cli-resumo').textContent = `${lista.length.toLocaleString('pt-BR')} cliente(s)`;
+    // cartões da lista filtrada: risco de IFI, risco de IRR e primeira/última atualização do sinal (refresh_em = "Atualizado em")
+    const rIfi = lista.filter(l => l.retorno && l.retorno.marca === 'IFI'), rIrr = lista.filter(l => l.retorno && l.retorno.marca === 'IRR');
+    const maisUrgente = arr => arr.length ? Math.min(...arr.map(l => l.retorno.restam)) : null;
+    const urg = arr => { const m = maisUrgente(arr); return m == null ? 'nenhum cliente nesse filtro' : `o mais urgente: ${m > 0 ? 'faltam ' + m + ' d (até ' + moAteQuando(m) + ')' : 'último dia da janela'}`; };
+    const atu = lista.map(l => l.refresh_em).filter(Boolean).sort();
+    const primeira = atu[0], ultima = atu[atu.length - 1];
+    document.getElementById('mo-cli-cards').innerHTML =
+      statCard('red', icChave, 'Risco de IFI', rIfi.length.toLocaleString('pt-BR'), `se abrirem chamado hoje · ativação/M.E. há até ${JANELA_IFI} dias · ${urg(rIfi)}`)
+      + statCard('orange', icChave, 'Risco de IRR', rIrr.length.toLocaleString('pt-BR'), `se abrirem chamado hoje · reparo há até ${JANELA_IRR} dias · ${urg(rIrr)}`)
+      + statCard('blue', icRelogio, 'Primeira atualização', primeira ? moDH(primeira) : '-', primeira ? `sinal mais antigo da lista (${haQuantoTempo(primeira)}) · ${atu.length.toLocaleString('pt-BR')} de ${lista.length.toLocaleString('pt-BR')} clientes com leitura` : 'nenhum cliente da lista foi atualizado pelo sistema ainda')
+      + statCard('purple', icRelogio, 'Última atualização', ultima ? moDH(ultima) : '-', ultima ? `sinal mais recente da lista (${haQuantoTempo(ultima)})` : 'ainda sem leitura');
     document.getElementById('mo-cli-tabela').innerHTML = !lista.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhum cliente nesse filtro.</div></div>' : `
-      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="mo-cli-tab"><thead><tr>
-        <th>Sinal</th><th>Rx</th><th>vs ontem</th><th>Cliente</th><th>Contrato</th><th>IFI / IRR</th><th>Cidade / bairro</th><th>OLT / PON</th><th>Atend. 30 d</th><th>Atend. 90 d</th><th>Reparos 90 d</th><th>Último atendimento</th><th>Atualizado em (sinal) · contato do roteador</th></tr></thead><tbody>
+      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(1100px,150vh);overflow:auto"><table class="data-table" id="mo-cli-tab"><thead><tr>
+        <th>Sinal</th><th>Rx</th><th>vs ontem</th><th>Cliente</th><th>Contrato</th><th>Risco de IFI / IRR</th><th>Cidade / bairro</th><th>OLT / PON</th><th>Atend. 30 d</th><th>Atend. 90 d</th><th>Reparos 90 d</th><th>Último atendimento</th><th>Atualizado em (sinal) · contato do roteador</th></tr></thead><tbody>
         ${mostrar.map(l => `<tr><td><span class="badge ${GR_BADGE[l.grupo]}">${esc(moStatusTxt(l.status))}</span></td>
           <td style="${l.grupo === 'critico' ? 'color:var(--danger);font-weight:700' : ''}">${moSinal(l.sinal)}</td><td>${moVar(dOntem(l))}</td><td class="cat-cell">${moLinkHist(l.contrato, l.nome)}</td><td>${moLinkContrato(l.contrato, l.gpon_id, l.olt, l.nome)}</td>
           <td>${moBadgeRetorno(l.retorno)}</td>
@@ -26193,11 +26212,11 @@ function pintarTecnicoPreventivaMonitorOlt(box, linhas) {
     const sub = document.getElementById('mo-tec-sub');
     if (sub) sub.textContent = `(técnico = quem atendeu o contrato por último no período; ${ident.toLocaleString('pt-BR')} cliente(s) atendidos nos últimos ${N} dias)`;
     document.getElementById('mo-tec-tabela').innerHTML = !rows.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhum cliente monitorado foi atendido nesse período.</div></div>' : `
-      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="mo-tab-tec-prev"><thead><tr>
+      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(1100px,150vh);overflow:auto"><table class="data-table" id="mo-tab-tec-prev"><thead><tr>
         <th>Técnico</th><th>Clientes</th><th>Crítico</th><th>Atenção</th><th>Sem sinal</th><th>% sinal ruim</th><th>Atend. ${N} d</th><th>Clientes com sinal ruim (contrato · sinal)</th></tr></thead><tbody>
         ${rows.map(r => `<tr><td class="cat-cell">${esc(r.tecnico)}<div><a href="#" class="mo-tec-ver" data-t="${esc(r.tecnico)}" style="font-size:11px">ver os ${r.total} contratos</a></div></td>
           <td>${r.total}</td><td style="${r.critico ? 'color:var(--danger);font-weight:700' : ''}">${r.critico}</td><td>${r.atencao}</td><td>${r.semsinal}</td><td>${pct(r.critico + r.atencao + r.semsinal, r.total)}</td><td>${r.atend}</td>
-          <td style="white-space:normal;min-width:300px;font-size:12px;line-height:1.55">${r.ruins.slice(0, 6).map(x => `<b>${esc(x.nome || 'Cliente')}</b> · contrato ${moLinkContrato(x.contrato, x.gpon_id, x.olt, x.nome)} <span style="color:var(--text-muted)">· ${esc(moStatusTxt(x.status))} ${moSinal(x.sinal)}${x.retorno ? ' · <b>' + x.retorno.marca + '</b>' : ''}${x.atendN ? ' · ' + x.atendN + ' atend.' : ''}</span>`).join('<br>') || '<span style="color:var(--text-muted)">nenhum</span>'}${r.ruins.length > 6 ? `<br><a href="#" class="mo-tec-ver" data-t="${esc(r.tecnico)}">… e mais ${r.ruins.length - 6}</a>` : ''}</td></tr>`).join('')}
+          <td style="white-space:normal;min-width:300px;font-size:12px;line-height:1.55">${r.ruins.slice(0, 6).map(x => `<b>${esc(x.nome || 'Cliente')}</b> · contrato ${moLinkContrato(x.contrato, x.gpon_id, x.olt, x.nome)} <span style="color:var(--text-muted)">· ${esc(moStatusTxt(x.status))} ${moSinal(x.sinal)}${x.retorno ? ' · <b>' + moRiscoCurto(x.retorno) + '</b>' : ''}${x.atendN ? ' · ' + x.atendN + ' atend.' : ''}</span>`).join('<br>') || '<span style="color:var(--text-muted)">nenhum</span>'}${r.ruins.length > 6 ? `<br><a href="#" class="mo-tec-ver" data-t="${esc(r.tecnico)}">… e mais ${r.ruins.length - 6}</a>` : ''}</td></tr>`).join('')}
       </tbody></table></div>`;
     ativarFiltrosDeColuna(document.getElementById('mo-tec-tabela'));
   };
