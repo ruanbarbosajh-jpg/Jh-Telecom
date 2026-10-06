@@ -24730,7 +24730,7 @@ async function carregarClientesMonitorOlt() {
   };
   try {
     // lat/lng (coordenada do cliente, pro mapa) vêm do PASSO-41; sem ele a coluna não existe e a leitura volta sem elas
-    return (await ler(campos + ',lat,lng')) || (await ler(campos)) || [];
+    return ((await ler(campos + ',lat,lng')) || (await ler(campos)) || []).filter(c => moCidadeDasSeis(c.cidade));
   } catch (e) { return []; /* sem rede / sem tabela */ }
 }
 // contratos atendidos que o AutoISP NÃO devolveu como cliente ativo (não achado / cancelado / órfão): a lista fica visível pra conferir
@@ -24841,6 +24841,10 @@ const moRank = st => /^ok$/i.test(st || '') ? 0 : st === 'warning' ? 1 : st === 
 // pior primeiro na hora de ordenar/colorir: crítico, atenção, LoS, sem energia, offline… e OK por último
 const moOrdemSit = st => /^ok$/i.test(st || '') ? 99 : situacaoOnu(st).ordem;
 const moCorSit = st => /^ok$/i.test(st || '') ? '#16a34a' : (MONITOR_OLT_COR[st] || '#64748b');
+// SÓ as 6 cidades da JH (pedido do cliente, 06/10/2026): Guarujá, Bertioga, Cubatão, Santos, São Vicente e Praia Grande. As OLTs também atendem
+// Mongaguá, São Paulo, São Sebastião…: esses clientes não entram em nenhuma tela do Monitoramento (cidade desconhecida passa).
+const MO_CIDADES_SEIS = ['GUARUJA', 'BERTIOGA', 'CUBATAO', 'SANTOS', 'SAO VICENTE', 'PRAIA GRANDE'];
+const moCidadeDasSeis = c => !c || MO_CIDADES_SEIS.includes(moChaveCid(c));
 const moChaveCid = c => normalizeHeader(String(c || '').replace(/,\s*SP$/i, '')).toUpperCase();
 const moBadgeRetorno = r => r ? `<span class="badge ${r.marca === 'IFI' ? 'warn' : 'amber'}">${r.marca}</span><div style="font-size:11px;color:var(--text-muted);white-space:nowrap">${r.restam > 0 ? `sai da janela em ${r.restam} d` : 'último dia da janela'}</div>` : '-';
 
@@ -25196,8 +25200,8 @@ async function carregarLinhasBaseMonitorOlt() {
       out.push(...(data || []));
       if (!data || data.length < 1000) break;
     }
-  } catch (e) { return out.length ? out : null; }
-  return out;
+  } catch (e) { return out.length ? out.filter(l => moCidadeDasSeis(l.cidade)) : null; }
+  return out.filter(l => moCidadeDasSeis(l.cidade));
 }
 function pintarBaseForaJhMonitorOlt(box) {
   if (!box) return;
@@ -25979,7 +25983,7 @@ function renderMonitorOlt() {
     const d = reg.dados;
     MONITOR_OLT.atualDados = d;
     const semCid = c => String(c || '').replace(/,\s*SP$/i, '');
-    const cidades = [...new Set(d.olts.filter(o => !/deactiv/i.test(o.modo)).flatMap(o => (o.cidades || []).map(semCid)))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    const cidades = [...new Set(d.olts.filter(o => !/deactiv/i.test(o.modo)).flatMap(o => (o.cidades || []).map(semCid)))].filter(moCidadeDasSeis).sort((a, b) => a.localeCompare(b, 'pt-BR'));
     montarCidadesTopo(cidades);
     const cidSet = MONITOR_OLT.cidadesSel();
     const oltNaCidade = o => !cidSet || (o && (o.cidades || []).some(c => cidSet.has(moChaveCid(semCid(c)))));
