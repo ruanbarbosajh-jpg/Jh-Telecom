@@ -5106,7 +5106,8 @@ function normalizeHeader(str) {
   return r;
 }
 // Memória de UMA TAREFA do navegador: guarda uma conta pesada só enquanto a tela
-// atual está sendo montada e apaga tudo na tarefa seguinte (setTimeout 0) — outro
+// atual está sendo montada (código síncrono) e apaga tudo logo depois (queueMicrotask —
+// não setTimeout, que o Chrome atrasa até 1 min em aba de segundo plano) — outro
 // clique, importação ou edição recalcula do zero, então nunca serve dado velho.
 // Por quê (auditoria de 06/10/2026, dados reais: 43 mil ordens): o Dashboard levava
 // 3,4 s pra abrir — chamava despesasAutomaticasDoPeriodo 27× pros MESMOS ciclos e
@@ -5120,7 +5121,7 @@ function memoDaTarefa(chave, calcular) {
   MEMO_TAREFA.set(chave, v);
   if (!memoTarefaAgendada) {
     memoTarefaAgendada = true;
-    setTimeout(() => { MEMO_TAREFA.clear(); memoTarefaAgendada = false; }, 0);
+    queueMicrotask(() => { MEMO_TAREFA.clear(); memoTarefaAgendada = false; });
   }
   return v;
 }
@@ -6077,11 +6078,15 @@ const CORES_CIDADES = {
 // paleta categórica, atribuída por ORDEM ALFABÉTICA de todo o cadastro (não
 // pela seleção do filtro nem pelo ranking do período) — assim a cor de uma
 // cidade continua estável entre filtros diferentes, igual às 6 fixas.
+// Guardada por tarefa (memoDaTarefa): o Dashboard chamava 2× e cada uma varria a Produção
+// inteira (~0,1 s cada com 43 mil ordens). Devolve cópia.
 function construirCoresCidades() {
-  const extras = [...new Set(DB.producao.map(p => String(p.cidade || '').trim().toUpperCase()).filter(c => c && !CORES_CIDADES[c]))].sort();
-  const mapa = { ...CORES_CIDADES };
-  extras.forEach((c, i) => { mapa[c] = corCategorica(6 + i); });
-  return mapa;
+  return { ...memoDaTarefa('coresCidades|' + DB.producao.length, () => {
+    const extras = [...new Set(DB.producao.map(p => String(p.cidade || '').trim().toUpperCase()).filter(c => c && !CORES_CIDADES[c]))].sort();
+    const mapa = { ...CORES_CIDADES };
+    extras.forEach((c, i) => { mapa[c] = corCategorica(6 + i); });
+    return mapa;
+  }) };
 }
 function corDaCidade(cidade) { return CORES_CIDADES[String(cidade || '').toUpperCase()] || '#94a3b8'; }
 // Mistura uma cor hex com branco — fração 0 devolve a cor original, fração 1
@@ -9421,15 +9426,28 @@ function ofensorDaLinha(p) {
 // quem fez o serviço anterior e, portanto, responde pelo retorno. Confirmado
 // contra a planilha RELATORIO: a contagem por ofensor bate técnico a técnico
 // com as colunas "Qtd. IRR" e "Qtd. IFI" do fechamento.
+// Retornos IFI/IRR concluídos com ofensor, na ordem da Produção — separados UMA vez por
+// tarefa (memoDaTarefa): contarRetornosPorOfensor é chamada várias vezes por tela
+// (8× no Dashboard), cada uma varria as 43 mil ordens. O objeto `conta` continua novo a
+// cada chamada (quem chama pode mexer nele).
+function retornosConcluidosDaProducao() {
+  return memoDaTarefa('retConcl|' + DB.producao.length, () => DB.producao.filter(p => {
+    const tipo = (p.ifi_irr || '').trim().toUpperCase();
+    return (tipo === 'IFI' || tipo === 'IRR') && isConcluido(p.status) && (p.ofensor || '').trim();
+  }));
+}
+// Ordens CONCLUÍDAS de TÉCNICO (ehRecursoTecnico) com data, na ordem da Produção — a base
+// de fechamentoSintetico, ordensEValoresDoPeriodo e dos dias de retornosDoPeriodoFin,
+// montada uma vez por tarefa (o filtro por período continua em cada função).
+function producaoConcluidaDeTecnico() {
+  return memoDaTarefa('prodConclTec|' + DB.producao.length, () => DB.producao.filter(p => p.data && isConcluido(p.status) && ehRecursoTecnico(p.recurso)));
+}
 function contarRetornosPorOfensor(inicio, fim) {
   const conta = {};
-  DB.producao.forEach(p => {
+  retornosConcluidosDaProducao().forEach(p => {
     const tipo = (p.ifi_irr || '').trim().toUpperCase();
-    if (tipo !== 'IFI' && tipo !== 'IRR') return;
-    if (!isConcluido(p.status)) return;
     if (inicio && fim && !inRange(p.data, inicio, fim)) return;
     const t = (p.ofensor || '').trim();
-    if (!t) return;
     if (!conta[t]) conta[t] = { ifi: 0, irr: 0 };
     conta[t][tipo === 'IFI' ? 'ifi' : 'irr']++;
   });
@@ -19399,8 +19417,8 @@ function fechamentoSintetico(inicio, fim) {
   const vigentes = valoresVigentesEm(fim);
   const campoDe = { 'Ativação': 'ativacao', 'Reparo': 'reparos', 'Mudança de Endereço': 'me', 'Mudança de Cômodo': 'mc', 'Upgrade/Downgrade': 'upgrade' };
   const porTec = new Map();
-  DB.producao.forEach(p => {
-    if (!p.data || !isConcluido(p.status) || !inRange(p.data, inicio, fim) || !ehRecursoTecnico(p.recurso)) return;
+  producaoConcluidaDeTecnico().forEach(p => {
+    if (!inRange(p.data, inicio, fim)) return;
     const nome = String(p.recurso).trim();
     if (!porTec.has(nome)) porTec.set(nome, { ativacao: 0, mc: 0, me: 0, reparos: 0, upgrade: 0, dias: new Set() });
     const o = porTec.get(nome);
@@ -19451,8 +19469,8 @@ function ordensEValoresDoPeriodo(inicioISO, fimISO) {
   const vigentes = valoresVigentesEm(fimISO);
   const contagem = new Map(vigentes.map(v => [v.label, 0]));
   let semTipo = 0;
-  DB.producao.forEach(p => {
-    if (!p.data || !isConcluido(p.status) || !inRange(p.data, inicioISO, fimISO) || !ehRecursoTecnico(p.recurso)) return;
+  producaoConcluidaDeTecnico().forEach(p => {
+    if (!inRange(p.data, inicioISO, fimISO)) return;
     const t = normalizeHeader(p.tipo_atividade);
     const linha = vigentes.find(v => v.re.test(t));
     if (!linha) { semTipo++; return; }
@@ -19533,8 +19551,8 @@ function retornosDoPeriodoFin(inicioISO, fimISO) {
   // Dias trabalhados de cada técnico no ciclo (dias distintos com ordem concluída)
   // — entra na regra do APTO pra quem ainda não tem linha na Folha do ciclo.
   const dias = new Map();
-  DB.producao.forEach(p => {
-    if (!p.data || !isConcluido(p.status) || !inRange(p.data, inicioISO, fimISO) || !ehRecursoTecnico(p.recurso)) return;
+  producaoConcluidaDeTecnico().forEach(p => {
+    if (!inRange(p.data, inicioISO, fimISO)) return;
     const k = normalizeHeader(p.recurso);
     if (!dias.has(k)) dias.set(k, new Set());
     dias.get(k).add(p.data);
@@ -22101,11 +22119,15 @@ function osConcluidasDaProducao() {
 function ordensSpDoTecnico(tecnico) {
   const lista = DB.ordensSp || [];
   if (!lista.length) return [];
-  const jaTem = osConcluidasDaProducao();
-  const alvo = normalizeHeader(tecnico);
-  return lista
-    .filter(r => r.os && !jaTem.has(normalizeChaveOS(r.os)) && (normalizeHeader(r.recurso) === alvo || mesmaPessoa(r.recurso, tecnico)))
-    .map(r => ({ recurso: r.recurso, data: r.data, status: r.status, cidade: r.cidade || 'SAO PAULO', tipo_atividade: r.tipo_atividade, os: r.os, _sp: true }));
+  // guardada por tarefa (memoDaTarefa): a Folha pedia o mesmo técnico 4× por tela e cada
+  // vez rodava mesmaPessoa em toda a planilha de SP; devolve cópia (quem chama pode mexer)
+  return memoDaTarefa('ordensSp|' + normalizeHeader(tecnico) + '|' + lista.length + '|' + DB.producao.length, () => {
+    const jaTem = osConcluidasDaProducao();
+    const alvo = normalizeHeader(tecnico);
+    return lista
+      .filter(r => r.os && !jaTem.has(normalizeChaveOS(r.os)) && (normalizeHeader(r.recurso) === alvo || mesmaPessoa(r.recurso, tecnico)))
+      .map(r => ({ recurso: r.recurso, data: r.data, status: r.status, cidade: r.cidade || 'SAO PAULO', tipo_atividade: r.tipo_atividade, os: r.os, _sp: true }));
+  }).slice();
 }
 function quebraPorTipoDoTecnico(ordens, janela, apto, periodo) {
   const out = quebraPorTipoVazia();
@@ -22193,10 +22215,26 @@ function quebraPorTipoDaLinha(linha, apto, ordensDoTecnico) {
   });
   return out;
 }
+// Guardada por tarefa (memoDaTarefa, auditoria de 06/10/2026): a Folha pedia a mesma quebra
+// 4× por técnico (tabela, holerite, bônus, troca de faixa) = 144 contas por tela, ~0,9 s.
+// Devolve CÓPIA (objeto plano de números) — quem chama pode mexer sem estragar a guardada.
+// A lista `ordensDoTecnico`, quando vem, é a Produção do técnico (mesmo conteúdo da busca
+// padrão); o tamanho dela entra na chave por segurança.
 function quebraPorTipoDaLinhaAuto(linha, apto, ordensDoTecnico) {
   if (linha._quebraFechada) return linha._quebraFechada;   // ciclo fechado: números como foram pagos
+  const chave = ['quebraAuto', normalizeHeader(linha.tecnico), linha.periodo, apto ? 1 : 0, ordensDoTecnico ? ordensDoTecnico.length : '-',
+    DB.producao.length, (DB.ordensSp || []).length, (DB.fechamento || []).length].join('|');
+  return { ...memoDaTarefa(chave, () => quebraPorTipoDaLinhaAutoCalc(linha, apto, ordensDoTecnico)) };
+}
+function quebraPorTipoDaLinhaAutoCalc(linha, apto, ordensDoTecnico) {
   const janela = datasDoPeriodoFolha(linha.periodo);
-  const lista = ordensDoTecnico || DB.producao.filter(p => normalizeHeader(p.recurso) === normalizeHeader(linha.tecnico));
+  // Produção do técnico: índice por técnico montado uma vez por tarefa (antes, cada
+  // chamada sem lista filtrava as 43 mil ordens com normalizeHeader)
+  const lista = ordensDoTecnico || (memoDaTarefa('prodPorTecTodos|' + DB.producao.length, () => {
+    const m = new Map();
+    DB.producao.forEach(p => { const k = normalizeHeader(p.recurso); if (!m.has(k)) m.set(k, []); m.get(k).push(p); });
+    return m;
+  }).get(normalizeHeader(linha.tecnico)) || []);
   // Produção + ordens de SP importadas (sem repetir a O.S que a Produção já tem)
   const importadas = ordensSpDoTecnico(linha.tecnico);
   const prod = quebraPorTipoDoTecnico(lista.concat(importadas), janela, apto, linha.periodo);
@@ -23962,6 +24000,7 @@ const SAUDE_CHECAGENS_SQL = [
   { passo: 'PASSO-40', rotulo: 'Alterações de sinal dos clientes', tabela: 'monitor_olt_alteracoes' },
   { passo: 'PASSO-41', rotulo: 'Coordenada do cliente (mapa da preventiva)', tabela: 'monitor_olt_clientes', coluna: 'lat,lng' },
   { passo: 'PASSO-41', rotulo: 'Resumos do relatório mensal do Monitoramento', rpc: 'monitor_olt_status_no_dia', args: { p_dia: '2026-10-05' } },
+  { passo: 'PASSO-45', rotulo: 'Monitoramento trancado no banco (só quem vê a tela)', rpc: 'pode_monitor_olt', args: {} },
   { passo: 'PASSO-40', rotulo: 'Sinal de ontem na linha do cliente', tabela: 'monitor_olt_clientes', coluna: 'sinal_ontem,status_ontem,ontem_dia,busca_em' },
   { passo: 'PASSO-36', rotulo: 'Quadro editável de colaboradores do escritório', tabela: 'folha_escritorio_quadro' },
   { passo: 'PASSO-37', rotulo: 'Ajustes manuais da Folha dos técnicos', tabela: 'folha_pagamento', coluna: 'ajustes' },
@@ -24480,7 +24519,7 @@ function renderMapaMonitorOlt(elId, itens) {
   const grupos = new Map();
   itens.forEach(x => {
     const cid = chaveCidade(x.cidade);
-    let coord = x.bairro ? COORDENADAS_BAIRROS[`${x.bairro}|${cid}`] : null, lugar = x.bairro, centro = false;
+    let coord = moCoordBairro(x.bairro, cid), lugar = x.bairro, centro = false;
     if (coord) porBairro++;
     else if (COORDENADAS_CIDADES[cid]) { coord = COORDENADAS_CIDADES[cid]; lugar = x.cidade + ' (sem bairro)'; centro = true; porCidade++; }
     else { semLugar++; return; }
@@ -24768,7 +24807,7 @@ async function carregarClientesMonitorOlt() {
   };
   try {
     // lat/lng (coordenada do cliente, pro mapa) vêm do PASSO-41; sem ele a coluna não existe e a leitura volta sem elas
-    return ((await ler(campos + ',lat,lng')) || (await ler(campos)) || []).filter(c => moCidadeDasSeis(c.cidade));
+    return ((await ler(campos + ',lat,lng')) || (await ler(campos)) || []).filter(c => moCidadeDasSeis(c.cidade)).map(moPadronizarLocal);
   } catch (e) { return []; /* sem rede / sem tabela */ }
 }
 // contratos atendidos que o AutoISP NÃO devolveu como cliente ativo (não achado / cancelado / órfão): a lista fica visível pra conferir
@@ -24800,7 +24839,7 @@ async function carregarAlteracoesDesde(desdeIso, ateIso, tipo) {
       if (data.length < 1000) break;
     }
   } catch (e) { /* sem rede */ }
-  return out;
+  return out.map(moPadronizarLocal);
 }
 // chama uma função do banco (PASSO-41) página por página — o PostgREST corta em 1000 linhas
 async function rpcPaginado(nome, args, max) {
@@ -24884,6 +24923,28 @@ const moCorSit = st => /^ok$/i.test(st || '') ? '#16a34a' : (MONITOR_OLT_COR[st]
 const MO_CIDADES_SEIS = ['GUARUJA', 'BERTIOGA', 'CUBATAO', 'SANTOS', 'SAO VICENTE', 'PRAIA GRANDE'];
 const moCidadeDasSeis = c => !c || MO_CIDADES_SEIS.includes(moChaveCid(c));
 const moChaveCid = c => normalizeHeader(String(c || '').replace(/,\s*SP$/i, '')).toUpperCase();
+// Cidade e bairro numa grafia só (06/10/2026, auditoria): o banco traz o mesmo lugar de dois
+// jeitos — "GUARUJA" (AutoISP) e "Guaruja" (contratos da Produção/PCR), "VILA ALICE (VICENTE DE
+// CARVALHO)" e "VILA ALICE VICENTE DE CARVALHO", com espaço sobrando — e o filtro de cidade
+// mostrava 11 opções pras 6 cidades (15 bairros repetidos). Tudo vira a chave em MAIÚSCULAS sem
+// acento/parênteses (a forma que já predominava). Aplicada na LEITURA (carregar*MonitorOlt).
+function moPadronizarLocal(l) {
+  if (!l) return l;
+  if (l.cidade) l.cidade = moChaveCid(l.cidade) || l.cidade;
+  if (l.bairro) l.bairro = moChaveCid(l.bairro) || l.bairro;
+  return l;
+}
+// coordenada do bairro tolerante à grafia (COORDENADAS_BAIRROS tem 6 chaves com parênteses —
+// "VILA ALICE (VICENTE DE CARVALHO)" —, que a chave padronizada, sem parênteses, não acharia)
+let _MO_COORD_BAIRRO = null;
+function moCoordBairro(bairro, cidade) {
+  if (!bairro) return null;
+  if (!_MO_COORD_BAIRRO) {
+    _MO_COORD_BAIRRO = new Map();
+    Object.entries(COORDENADAS_BAIRROS).forEach(([k, v]) => { const [b, c] = k.split('|'); _MO_COORD_BAIRRO.set(moChaveCid(b) + '|' + moChaveCid(c), v); });
+  }
+  return _MO_COORD_BAIRRO.get(moChaveCid(bairro) + '|' + moChaveCid(cidade)) || null;
+}
 const moBadgeRetorno = r => r ? `<span class="badge ${r.marca === 'IFI' ? 'warn' : 'amber'}">${r.marca}</span><div style="font-size:11px;color:var(--text-muted);white-space:nowrap">${r.restam > 0 ? `sai da janela em ${r.restam} d` : 'último dia da janela'}</div>` : '-';
 
 // histórico de sinal de UM cliente (janela): gráfico + tabela dia a dia + alterações
@@ -24943,7 +25004,7 @@ function renderMapaClientesMonitorOlt(elId, lista) {
     if (l.lat != null && isFinite(lat) && isFinite(lng) && lat !== 0) { coord = [Math.round(lat * 1000) / 1000, Math.round(lng * 1000) / 1000]; lugar = l.bairro || l.cidade || ''; exato++; }
     else {
       const cid = moChaveCid(l.cidade), b = moChaveCid(l.bairro);
-      const cb = b ? COORDENADAS_BAIRROS[`${b}|${cid}`] : null;
+      const cb = moCoordBairro(b, cid);
       if (cb) { coord = cb; lugar = l.bairro; tipo = 'bairro'; porBairro++; }
       else if (COORDENADAS_CIDADES[cid]) { coord = COORDENADAS_CIDADES[cid]; lugar = (l.cidade || '') + ' (sem endereço)'; tipo = 'cidade'; porCidade++; }
       else { semLugar++; return; }
@@ -25238,8 +25299,8 @@ async function carregarLinhasBaseMonitorOlt() {
       out.push(...(data || []));
       if (!data || data.length < 1000) break;
     }
-  } catch (e) { return out.length ? out.filter(l => moCidadeDasSeis(l.cidade)) : null; }
-  return out.filter(l => moCidadeDasSeis(l.cidade));
+  } catch (e) { return out.length ? out.filter(l => moCidadeDasSeis(l.cidade)).map(moPadronizarLocal) : null; }
+  return out.filter(l => moCidadeDasSeis(l.cidade)).map(moPadronizarLocal);
 }
 function pintarBaseForaJhMonitorOlt(box) {
   if (!box) return;
