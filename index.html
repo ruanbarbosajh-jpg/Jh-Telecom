@@ -25102,7 +25102,7 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
     <div class="section-heading">🗺 Mapa — clientes da JH <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(mesmos filtros da lista acima · a cor é a pior situação do lugar · clique pra ver os clientes)</span></div>
     <div class="panel" style="margin-bottom:1.5rem">
       <div id="mo-cli-mapa" class="mapa-cidades"></div>
-      <div class="mapa-legenda" style="margin-top:10px">${['critical', 'warning', 'loss_signal', 'power_fail', 'down', 'OK'].map(s => `<span class="legend-item"><span class="legend-dot" style="background:${moCorSit(s)}"></span>${esc(moStatusTxt(s))}</span>`).join('')}</div>
+      <div class="mapa-legenda" id="mo-cli-legenda" style="margin-top:10px"></div>
       <p id="mo-cli-mapa-nota" style="font-size:12px;color:var(--text-muted);margin:8px 0 0"></p>
     </div>
     ${(semCliente || []).length ? (() => {
@@ -25142,9 +25142,28 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
           <td>${l.acs_ultimo_contato ? `${esc(moDH(l.acs_ultimo_contato))}<div style="font-size:11px;color:var(--text-muted)">${haQuantoTempo(l.acs_ultimo_contato)}</div>` : '-'}</td></tr>`).join('')}
       </tbody></table></div>${lista.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${lista.length.toLocaleString('pt-BR')} na tabela — o mapa e o Excel levam todos os filtrados.</p>` : ''}`;
     ativarFiltrosDeColuna(document.getElementById('mo-cli-tabela'));
-    const nota = renderMapaClientesMonitorOlt('mo-cli-mapa', lista);
-    const elN = document.getElementById('mo-cli-mapa-nota'); if (elN) elN.textContent = nota || '';
+    desenharMapa(lista);
   };
+  // caixas de seleção por situação no mapa (06/10/2026, pedido do cliente): marcam/desmarcam SÓ o que aparece no mapa (a lista não muda);
+  // a contagem de cada situação segue os filtros da lista; o estado marcado fica em `ligadas` e sobrevive a trocar de filtro.
+  const SIT_MAPA = ['critical', 'warning', 'loss_signal', 'power_fail', 'down', 'OK'];
+  const ligadas = new Set(SIT_MAPA);
+  const sitMapa = l => /^ok$/i.test(l.status || '') ? 'OK' : l.status;
+  function desenharMapa(lista) {
+    const cont = {}; lista.forEach(l => { const k = sitMapa(l); cont[k] = (cont[k] || 0) + 1; });
+    const leg = document.getElementById('mo-cli-legenda');
+    if (leg) leg.innerHTML = SIT_MAPA.map(k => `<label class="legend-item" style="cursor:pointer${cont[k] ? '' : ';opacity:.45'}"><input type="checkbox" class="mo-cli-mapa-check" value="${k}"${ligadas.has(k) ? ' checked' : ''} style="margin-right:4px"><span class="legend-dot" style="background:${moCorSit(k)}"></span>${esc(moStatusTxt(k))} <span style="color:var(--text-muted)">(${(cont[k] || 0).toLocaleString('pt-BR')})</span></label>`).join('')
+      + '<span class="legend-item" style="color:var(--text-muted)">· marque o que aparece no mapa (a lista não muda)</span>';
+    // situação fora das 6 conhecidas aparece sempre (não tem caixa)
+    const visiveis = lista.filter(l => { const k = sitMapa(l); return !SIT_MAPA.includes(k) || ligadas.has(k); });
+    const nota = renderMapaClientesMonitorOlt('mo-cli-mapa', visiveis);
+    const elN = document.getElementById('mo-cli-mapa-nota'); if (elN) elN.textContent = nota || '';
+  }
+  document.getElementById('mo-cli-legenda').addEventListener('change', ev => {
+    const c = ev.target.closest('.mo-cli-mapa-check'); if (!c) return;
+    if (c.checked) ligadas.add(c.value); else ligadas.delete(c.value);
+    desenharMapa(filtrar());
+  });
   ['mo-cli-sit', 'mo-cli-freq', 'mo-cli-ret', 'mo-cli-cidade'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
   document.getElementById('mo-cli-excel').addEventListener('click', () => {
     const lista = filtrar();
