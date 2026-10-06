@@ -24697,7 +24697,7 @@ function abrirModalRelatorioDiaMonitorOlt(pend, aoTerminar) {
 // A tela é o bloco "1 · PREVENTIVA" do Monitoramento OLT; o relatório do MÊS fica na aba "Relatório do Monitoramento" (renderRelMonitorOlt).
 async function carregarClientesMonitorOlt() {
   if (!supa) return [];
-  const campos = 'contrato,gpon_id,nome,olt,ponlink,cidade,bairro,estado,sinal,status,acs_ultimo_contato,checado_em,mudanca,mudou_em,anterior_sinal,sinal_ontem,status_ontem,ontem_dia';
+  const campos = 'contrato,gpon_id,nome,olt,ponlink,cidade,bairro,estado,sinal,status,acs_ultimo_contato,checado_em,mudanca,mudou_em,anterior_sinal,sinal_ontem,status_ontem,ontem_dia,refresh_em';
   const ler = async sel => {
     const out = [];
     for (let ini = 0; ini < 12000; ini += 1000) {
@@ -25207,7 +25207,7 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
       <div class="field"><label>IFI / IRR</label><select id="mo-cli-ret"><option value="">Todos</option><option value="ret">Viram retorno (IFI ou IRR)</option><option value="IFI">Só IFI</option><option value="IRR">Só IRR</option></select></div>
       ${moMulti('mo-cli-cidade', 'Cidade', [...new Set(linhas.map(l => l.cidade).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR')), null, 'Todas as cidades')}
       <div class="field"><label>Bairro</label><span id="mo-cli-bairro-wrap"></span></div>
-      <div class="field"><label>Dado do equipamento</label><select id="mo-cli-vel"><option value="">Todos</option><option value="novo">Atualizado (até 24 h)</option><option value="velho">Velho (mais de 24 h)</option><option value="muito">Muito velho (mais de 3 dias)</option><option value="sem">Sem contato registrado</option></select></div>
+      <div class="field"><label>Dado do equipamento</label><select id="mo-cli-vel"><option value="">Todos</option><option value="novo">Atualizado (até 24 h)</option><option value="velho">Velho (mais de 24 h)</option><option value="muito">Muito velho (mais de 3 dias)</option><option value="sem">Sem leitura registrada</option></select></div>
       <button type="button" class="btn-export-xls" id="mo-cli-excel">⤓ Excel (todos os filtrados)</button>
       <span id="mo-cli-resumo" style="font-size:12px;color:var(--text-muted);align-self:center"></span>
     </div>
@@ -25237,7 +25237,7 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
     })() : ''}`;
   const sel = id => document.getElementById(id).value;
   // idade do último contato do equipamento com o AutoISP, em horas (null = sem registro) — quanto mais velho, menos o sinal mostrado vale
-  const idadeH = l => l.acs_ultimo_contato ? (Date.now() - new Date(l.acs_ultimo_contato).getTime()) / 36e5 : null;
+  const idadeH = l => { const q = l.refresh_em || l.acs_ultimo_contato; return q ? (Date.now() - new Date(q).getTime()) / 36e5 : null; };
   const filtrar = () => {
     const sit = sel('mo-cli-sit'), fq = sel('mo-cli-freq'), cidSet = moFiltro('mo-cli-cidade'), baiSet = moFiltro('mo-cli-bairro'), rt = sel('mo-cli-ret'), vel = sel('mo-cli-vel');
     return linhas.filter(l => (sit === 'todos' || (sit === 'preventiva' ? (l.grupo === 'critico' || l.grupo === 'atencao') : sit === 'ruim' ? ruim(l) : l.grupo === sit))
@@ -25255,14 +25255,14 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
     document.getElementById('mo-cli-resumo').textContent = `${lista.length.toLocaleString('pt-BR')} cliente(s)`;
     document.getElementById('mo-cli-tabela').innerHTML = !lista.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhum cliente nesse filtro.</div></div>' : `
       <div class="table-wrap" style="margin-bottom:1.5rem;max-height:560px;overflow:auto"><table class="data-table" id="mo-cli-tab"><thead><tr>
-        <th>Sinal</th><th>Rx</th><th>vs ontem</th><th>Cliente</th><th>Contrato</th><th>IFI / IRR</th><th>Cidade / bairro</th><th>OLT / PON</th><th>Atend. 30 d</th><th>Atend. 90 d</th><th>Reparos 90 d</th><th>Último atendimento</th><th>Último contato do equipamento</th></tr></thead><tbody>
+        <th>Sinal</th><th>Rx</th><th>vs ontem</th><th>Cliente</th><th>Contrato</th><th>IFI / IRR</th><th>Cidade / bairro</th><th>OLT / PON</th><th>Atend. 30 d</th><th>Atend. 90 d</th><th>Reparos 90 d</th><th>Último atendimento</th><th>Sinal lido em · contato do equipamento</th></tr></thead><tbody>
         ${mostrar.map(l => `<tr><td><span class="badge ${GR_BADGE[l.grupo]}">${esc(moStatusTxt(l.status))}</span></td>
           <td style="${l.grupo === 'critico' ? 'color:var(--danger);font-weight:700' : ''}">${moSinal(l.sinal)}</td><td>${moVar(dOntem(l))}</td><td class="cat-cell">${moLinkHist(l.contrato, l.nome)}</td><td>${moLinkContrato(l.contrato, l.gpon_id, l.olt, l.nome)}</td>
           <td>${moBadgeRetorno(l.retorno)}</td>
           <td>${esc(l.cidade || '-')}${l.bairro ? `<div style="font-size:11px;color:var(--text-muted)">${esc(l.bairro)}</div>` : ''}</td><td>${esc(l.olt || '-')}<div style="font-size:11px;color:var(--text-muted)">PON ${esc(l.ponlink || '-')}</div></td>
           <td>${l.atend30}</td><td${l.atend90 >= 3 ? ' style="font-weight:700;color:var(--danger)"' : ''}>${l.atend90}</td><td>${l.reparos90}</td>
           <td>${l.ultimo ? `${formatDate(l.ultimo)}<div style="font-size:11px;color:var(--text-muted)">${esc(l.tipo)}${l.tecnico ? ' · ' + esc(l.tecnico) : ''}</div>` : '-'}</td>
-          <td>${l.acs_ultimo_contato ? `${esc(moDH(l.acs_ultimo_contato))}<div style="font-size:11px;color:var(--text-muted)">${haQuantoTempo(l.acs_ultimo_contato)}</div>${idadeH(l) > 72 ? '<span class="badge warn" title="O equipamento não fala com o AutoISP há mais de 3 dias: o sinal mostrado é antigo">dado muito velho</span>' : idadeH(l) > 24 ? '<span class="badge amber" title="O equipamento não fala com o AutoISP há mais de 24 horas: o sinal mostrado pode estar desatualizado">dado velho</span>' : ''}` : '<span class="badge neutral">sem contato</span>'}</td></tr>`).join('')}
+          <td>${l.refresh_em ? `<div title="A OLT foi mandada ler o sinal desta ONU nesse horário">⚡ ${esc(moDH(l.refresh_em))} <span style="font-size:11px;color:var(--text-muted)">(${haQuantoTempo(l.refresh_em)})</span></div>` : ''}${l.acs_ultimo_contato ? `<div style="font-size:11px;color:var(--text-muted)">contato: ${esc(moDH(l.acs_ultimo_contato))} (${haQuantoTempo(l.acs_ultimo_contato)})</div>` : ''}${idadeH(l) == null ? '<span class="badge neutral">sem leitura</span>' : idadeH(l) > 72 ? '<span class="badge warn" title="O sinal desta ONU não é lido há mais de 3 dias">dado muito velho</span>' : idadeH(l) > 24 ? '<span class="badge amber" title="O sinal desta ONU não é lido há mais de 24 horas">dado velho</span>' : ''}</td></tr>`).join('')}
       </tbody></table></div>${lista.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${lista.length.toLocaleString('pt-BR')} na tabela — o mapa e o Excel levam todos os filtrados.</p>` : ''}`;
     ativarFiltrosDeColuna(document.getElementById('mo-cli-tabela'));
     desenharMapa(lista);
@@ -25663,7 +25663,10 @@ function renderMonitorOlt() {
     if (st.atualizar_ativo != null) {
       linhas.push(`Atualização do sinal das ONUs (6 em 6 h): <b style="color:${st.atualizar_ativo ? 'var(--success)' : 'var(--text-muted)'}">${st.atualizar_ativo ? 'ligada' : 'desligada'}</b>${st.atualizar_mensagem ? ' — ' + esc(st.atualizar_mensagem) : ''}`
         + (ar ? ` · última rodada ${esc(fmtDH(st.atualizar_ultima))}: <b>${(ar.atualizados || 0).toLocaleString('pt-BR')}</b> atualizada(s)${ar.erros ? `, ${ar.erros} erro(s)` : ''} · faltam <b>${(ar.restam || 0).toLocaleString('pt-BR')}</b> nesta janela de 6 h (de ${(ar.total_ativos || 0).toLocaleString('pt-BR')} clientes)` : '')
-        + ` <button type="button" class="btn-export-xls" id="mo-atu-toggle" style="margin-left:8px">${st.atualizar_ativo ? 'Desligar' : 'Ligar'}</button>`);
+        + (st.atualizar_inicio_em && !st.atualizar_ativo ? ` · <b>agendada pra ${esc(fmtDH(st.atualizar_inicio_em))}</b>` : '')
+        + (st.atualizar_ativo ? ` <button type="button" class="btn-export-xls" id="mo-atu-toggle" style="margin-left:8px">Desligar</button>`
+          : (st.atualizar_inicio_em ? ` <button type="button" class="btn-export-xls" id="mo-atu-toggle" style="margin-left:8px">Cancelar agendamento</button>`
+            : ` <button type="button" class="btn-export-xls" id="mo-atu-toggle" style="margin-left:8px">Ligar agora</button> <button type="button" class="btn-export-xls" id="mo-atu-agendar" style="margin-left:4px" title="Liga sozinha à meia-noite (00h de Brasília), com o computador desligado">Ligar às 00h</button>`)));
     }
     const precisa = !st.tem_sessao || st.sessao_ok === false;
     if (precisa) { const cfg = document.getElementById('mo-config'); if (cfg) cfg.style.display = ''; }
@@ -25747,8 +25750,14 @@ function renderMonitorOlt() {
       enviarSessao(t).then(() => { const x = document.getElementById('mo-colar-txt'); if (x) x.value = ''; });
       return;
     }
+    if (ev.target.closest('#mo-atu-agendar')) {
+      if (!confirm('Ligar a atualização automática às 00h (meia-noite de Brasília)?\n\nEla liga sozinha no servidor, mesmo com o seu computador desligado, e passa a mandar a OLT ler o sinal de cada cliente em lotes pequenos, de 10 em 10 minutos, cobrindo todos a cada 6 horas (00h, 06h, 12h, 18h). Para sozinha se o AutoISP começar a dar erro.')) return;
+      const b = new Date(Date.now() - 3 * 3600e3), meiaNoite = new Date(Date.UTC(b.getUTCFullYear(), b.getUTCMonth(), b.getUTCDate() + 1) + 3 * 3600e3);
+      chamarColetorNuvem({ acao: 'atualizar_config', ativo: false, iniciar_em: meiaNoite.toISOString() }).then(async r => { if (!r.ok) toast(r.erro || 'não consegui agendar', 'erro', 5000); else toast('Agendada: liga sozinha à meia-noite.', 'ok', 4000); await atualizarStatusColetor(); });
+      return;
+    }
     if (ev.target.closest('#mo-atu-toggle')) {
-      const lig = !(MONITOR_OLT.status && MONITOR_OLT.status.atualizar_ativo);
+      const lig = !(MONITOR_OLT.status && (MONITOR_OLT.status.atualizar_ativo || MONITOR_OLT.status.atualizar_inicio_em));
       const ok = !lig || confirm('Ligar a atualização automática?\n\nO sistema vai mandar a OLT ler o sinal de cada cliente (o mesmo do botão Atualizar do AutoISP), em lotes pequenos, de 10 em 10 minutos, até cobrir todos a cada 6 horas (00h, 06h, 12h, 18h). Para sozinha se o AutoISP começar a dar erro.');
       if (!ok) return;
       chamarColetorNuvem({ acao: 'atualizar_config', ativo: lig }).then(async r => { if (!r.ok) toast(r.erro || 'não consegui mudar', 'erro', 5000); else toast(lig ? 'Atualização automática ligada.' : 'Atualização automática desligada.', 'ok', 3500); await atualizarStatusColetor(); });
