@@ -487,6 +487,12 @@
   /* nome do técnico nos rankings do Relatório Operacional: cor do texto (não azul), mas clicável — sublinha ao passar o mouse */
   .link-os-tec { color: inherit; text-decoration: none; cursor: pointer; }
   .link-os-tec:hover { text-decoration: underline; }
+  /* Monitoramento OLT: contrato/Int6 clicável (abre o sinal e os dados do assinante) e nome clicável (histórico de sinal). O azul padrão do
+     navegador sumia no tema escuro (06/10/2026). Tokens = contraste bom nos dois temas. */
+  a.mo-ver-int6, a.mo-ver-ass { color: var(--accent); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+  a.mo-hist, a.mo-tec-ver { color: inherit; text-decoration: none; cursor: pointer; }
+  a.mo-hist:hover { text-decoration: underline; }
+  a.mo-tec-ver { color: var(--accent); }
   input.mo-edit {
     width: 62px; padding: 4px 6px; font-size: 13px; font-weight: 700; text-align: center;
     color: #c084fc; background: var(--bg-page); border: 1px solid var(--border); border-radius: 6px; outline: none;
@@ -24571,7 +24577,9 @@ const moSinal = v => v == null ? '-' : `${Number(v).toLocaleString('pt-BR', { mi
 const moVar = d => d == null ? '-' : `<b style="color:${d <= -1 ? 'var(--danger)' : d >= 1 ? 'var(--success)' : 'var(--text-muted)'}">${d > 0 ? '+' : ''}${d.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} dB</b>`;
 const moLinkHist = (c, nome) => `<a href="#" class="mo-hist" data-c="${esc(c)}" data-n="${esc(nome || '')}" title="Ver o histórico de sinal deste cliente">${esc(nome || c)}</a>`;
 // link do Int6 — o MESMO de antes (abre o sinal e os dados do assinante, pela extensão); gpon_id = id do registro do contrato no AutoISP
-const moLinkInt6 = (id, olt, nome) => id ? `<a href="#" class="mo-ver-int6" data-int6="${esc(id)}" data-olt="${esc(olt || '')}" data-nome="${esc(nome || '')}" title="Ver sinal e dados deste assinante">${esc(id)}</a>` : '-';
+const moLinkInt6 = (id, olt, nome, rotulo) => id ? `<a href="#" class="mo-ver-int6" data-int6="${esc(id)}" data-olt="${esc(olt || '')}" data-nome="${esc(nome || '')}" title="Ver sinal e dados deste assinante (Int6 ${esc(id)})">${esc(rotulo != null ? rotulo : id)}</a>` : (rotulo != null ? esc(rotulo) : '-');
+// o CONTRATO é o link (06/10/2026, pedido do cliente: "coloque o link no contrato para o int6")
+const moLinkContrato = (contrato, gpon, olt, nome) => moLinkInt6(gpon, olt, nome, contrato);
 // ordem de gravidade: OK 0 · Atenção 1 · Crítico 2 · sem sinal/energia/offline 3
 const moRank = st => /^ok$/i.test(st || '') ? 0 : st === 'warning' ? 1 : st === 'critical' ? 2 : 3;
 
@@ -24642,8 +24650,8 @@ function pintarHojeOntemMonitorOlt(box, linhas) {
     const l = lista(), corte = 300;
     document.getElementById('mo-ho-resumo').textContent = `${l.length.toLocaleString('pt-BR')} cliente(s)`;
     document.getElementById('mo-ho-tabela').innerHTML = !l.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhum cliente nesse filtro (ou ainda não há base de ontem).</div></div>' : `
-      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:480px;overflow:auto"><table class="data-table" id="mo-ho-tab"><thead><tr><th>Cliente</th><th>ID Int6</th><th>Contrato</th><th>Cidade</th><th>OLT / PON</th><th>Ontem</th><th>Hoje</th><th>Variação</th><th>Atend. 90 d</th></tr></thead><tbody>
-      ${l.slice(0, corte).map(x => `<tr><td class="cat-cell">${moLinkHist(x.contrato, x.nome)}</td><td>${moLinkInt6(x.gpon_id, x.olt, x.nome)}</td><td>${esc(x.contrato)}</td><td>${esc(x.cidade || '-')}</td><td>${esc(x.olt || '-')}<div style="font-size:11px;color:var(--text-muted)">PON ${esc(x.ponlink || '-')}</div></td>
+      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:480px;overflow:auto"><table class="data-table" id="mo-ho-tab"><thead><tr><th>Cliente</th><th>Contrato</th><th>Cidade</th><th>OLT / PON</th><th>Ontem</th><th>Hoje</th><th>Variação</th><th>Atend. 90 d</th></tr></thead><tbody>
+      ${l.slice(0, corte).map(x => `<tr><td class="cat-cell">${moLinkHist(x.contrato, x.nome)}</td><td>${moLinkContrato(x.contrato, x.gpon_id, x.olt, x.nome)}</td><td>${esc(x.cidade || '-')}</td><td>${esc(x.olt || '-')}<div style="font-size:11px;color:var(--text-muted)">PON ${esc(x.ponlink || '-')}</div></td>
         <td>${moSinal(x.sinal_ontem)}<div style="font-size:11px;color:var(--text-muted)">${esc(moStatusTxt(x.status_ontem))} · ${esc(formatDate(x.ontem_dia))}</div></td>
         <td>${moSinal(x.sinal)}<div style="font-size:11px;color:var(--text-muted)">${esc(moStatusTxt(x.status))} · ${esc(moDH(x.checado_em))}</div></td><td>${moVar(x.dS)}</td><td>${x.atend90}</td></tr>`).join('')}
       </tbody></table></div>${l.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${l.length.toLocaleString('pt-BR')} — o Excel leva todos.</p>` : ''}`;
@@ -24677,9 +24685,9 @@ function pintarAlteracoesMonitorOlt(box, alt, at, gpon) {
       ${statCard('orange', icBarras, 'Pioraram', n('piorou'), 'piora de situação ou queda de 1,5 dB ou mais')}
       ${statCard('blue', icRelogio, 'Melhoraram', n('melhorou'), 'melhora de situação ou subida de 1,5 dB ou mais')}</div>`;
     document.getElementById('mo-al-tabela').innerHTML = !l.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma alteração nesse período.</div></div>' : `
-      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:480px;overflow:auto"><table class="data-table" id="mo-al-tab"><thead><tr><th>Quando</th><th>Alteração</th><th>Cliente</th><th>ID Int6</th><th>Contrato</th><th>Cidade</th><th>OLT / PON</th><th>Situação</th><th>Sinal</th><th>Atend. 90 d</th></tr></thead><tbody>
+      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:480px;overflow:auto"><table class="data-table" id="mo-al-tab"><thead><tr><th>Quando</th><th>Alteração</th><th>Cliente</th><th>Contrato</th><th>Cidade</th><th>OLT / PON</th><th>Situação</th><th>Sinal</th><th>Atend. 90 d</th></tr></thead><tbody>
       ${l.slice(0, corte).map(a => { const r = ROT[a.tipo] || ['neutral', a.tipo]; const d = a.de_sinal != null && a.para_sinal != null && Number(a.de_sinal) !== 0 && Number(a.para_sinal) !== 0 ? Number(a.para_sinal) - Number(a.de_sinal) : null;
-        return `<tr><td>${esc(moDH(a.quando))}</td><td><span class="badge ${r[0]}">${esc(r[1])}</span></td><td class="cat-cell">${moLinkHist(a.contrato, a.nome)}</td><td>${moLinkInt6(gpon.get(a.contrato), a.olt, a.nome)}</td><td>${esc(a.contrato)}</td><td>${esc(a.cidade || '-')}</td><td>${esc(a.olt || '-')}<div style="font-size:11px;color:var(--text-muted)">PON ${esc(a.ponlink || '-')}</div></td>
+        return `<tr><td>${esc(moDH(a.quando))}</td><td><span class="badge ${r[0]}">${esc(r[1])}</span></td><td class="cat-cell">${moLinkHist(a.contrato, a.nome)}</td><td>${moLinkContrato(a.contrato, gpon.get(a.contrato), a.olt, a.nome)}</td><td>${esc(a.cidade || '-')}</td><td>${esc(a.olt || '-')}<div style="font-size:11px;color:var(--text-muted)">PON ${esc(a.ponlink || '-')}</div></td>
         <td>${esc(moStatusTxt(a.de_status))} → <b>${esc(moStatusTxt(a.para_status))}</b></td><td>${moSinal(a.de_sinal)} → ${moSinal(a.para_sinal)} ${d != null ? '<div>' + moVar(d) + '</div>' : ''}</td><td>${(at.get(a.contrato) || {}).atend90 || 0}</td></tr>`; }).join('')}
       </tbody></table></div>${l.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${l.length} — o Excel leva todas.</p>` : ''}`;
     ativarFiltrosDeColuna(document.getElementById('mo-al-tabela'));
@@ -24770,9 +24778,9 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
     document.getElementById('mo-cli-resumo').textContent = `${lista.length.toLocaleString('pt-BR')} cliente(s)`;
     document.getElementById('mo-cli-tabela').innerHTML = !lista.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhum cliente nesse filtro.</div></div>' : `
       <div class="table-wrap" style="margin-bottom:1.5rem;max-height:560px;overflow:auto"><table class="data-table" id="mo-cli-tab"><thead><tr>
-        <th>Sinal</th><th>Rx</th><th>vs ontem</th><th>Cliente</th><th>ID Int6</th><th>Contrato</th><th>Cidade / bairro</th><th>OLT / PON</th><th>Atend. 30 d</th><th>Atend. 90 d</th><th>Reparos 90 d</th><th>Último atendimento</th><th>Último contato do equipamento</th><th>Mudança</th></tr></thead><tbody>
+        <th>Sinal</th><th>Rx</th><th>vs ontem</th><th>Cliente</th><th>Contrato</th><th>Cidade / bairro</th><th>OLT / PON</th><th>Atend. 30 d</th><th>Atend. 90 d</th><th>Reparos 90 d</th><th>Último atendimento</th><th>Último contato do equipamento</th><th>Mudança</th></tr></thead><tbody>
         ${mostrar.map(l => `<tr><td><span class="badge ${GR_BADGE[l.grupo]}">${esc(moStatusTxt(l.status))}</span></td>
-          <td style="${l.grupo === 'critico' ? 'color:var(--danger);font-weight:700' : ''}">${moSinal(l.sinal)}</td><td>${moVar(dOntem(l))}</td><td class="cat-cell">${moLinkHist(l.contrato, l.nome)}</td><td>${moLinkInt6(l.gpon_id, l.olt, l.nome)}</td><td>${esc(l.contrato)}</td>
+          <td style="${l.grupo === 'critico' ? 'color:var(--danger);font-weight:700' : ''}">${moSinal(l.sinal)}</td><td>${moVar(dOntem(l))}</td><td class="cat-cell">${moLinkHist(l.contrato, l.nome)}</td><td>${moLinkContrato(l.contrato, l.gpon_id, l.olt, l.nome)}</td>
           <td>${esc(l.cidade || '-')}${l.bairro ? `<div style="font-size:11px;color:var(--text-muted)">${esc(l.bairro)}</div>` : ''}</td><td>${esc(l.olt || '-')}<div style="font-size:11px;color:var(--text-muted)">PON ${esc(l.ponlink || '-')}</div></td>
           <td>${l.atend30}</td><td${l.atend90 >= 3 ? ' style="font-weight:700;color:var(--danger)"' : ''}>${l.atend90}</td><td>${l.reparos90}</td>
           <td>${l.ultimo ? `${formatDate(l.ultimo)}<div style="font-size:11px;color:var(--text-muted)">${esc(l.tipo)}</div>` : '-'}</td>
@@ -25457,7 +25465,7 @@ function renderMonitorOlt() {
       <div class="section-heading">Relatório por técnico <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(último atendimento ao cliente — ${comTecnico} de ${itens.length} ONUs identificadas)</span></div>
       ${!relTecnico.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma ONU nessa situação.</div></div>' : `
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="mo-tab-tecnico"><thead><tr>
-        <th>Técnico</th><th>Crítico</th><th>Atenção</th><th>Sem sinal (LoS)</th><th>Sem energia</th><th>Total de ONUs</th><th>Cidades</th><th>Último atendimento</th><th>Clientes (contrato · Int6 · situação · atendimento)</th>
+        <th>Técnico</th><th>Crítico</th><th>Atenção</th><th>Sem sinal (LoS)</th><th>Sem energia</th><th>Total de ONUs</th><th>Cidades</th><th>Último atendimento</th><th>Clientes (contrato · situação · atendimento)</th>
       </tr></thead><tbody>
         ${relTecnico.map(t => `<tr><td class="cat-cell">${t.tecnico ? esc(t.tecnico) : '<span style="color:var(--text-muted)">Não identificado</span>'}</td>
           <td style="${t.critical ? 'color:var(--danger);font-weight:700' : ''}">${t.critical}</td><td>${t.warning}</td><td>${t.loss_signal}</td><td>${t.power_fail}</td>
@@ -25465,7 +25473,7 @@ function renderMonitorOlt() {
           <td>${t.ultima ? formatDate(t.ultima) : '-'}</td>
           <td style="white-space:normal;min-width:260px;font-size:12px;line-height:1.5">${(() => {
             const nomeados = t.clientes.filter(c => c.nome || c.contrato), semNome = t.clientes.length - nomeados.length;
-            const mostra = nomeados.slice(0, 8).map(c => `<b>${esc(c.nome || 'Cliente')}</b> · contrato ${esc(c.contrato || '-')}${c.int6 ? ' · Int6 ' + moLinkInt6(c.int6, c.olt, c.nome) : ''} <span style="color:var(--text-muted)">· ${esc(situacaoOnu(c.sit).rot)}${c.sinal != null && c.sinal !== 0 ? ' ' + sinalTxt(c.sinal) : ''}${c.data ? ' · atendido em ' + formatDate(c.data) : ''}</span>`);
+            const mostra = nomeados.slice(0, 8).map(c => `<b>${esc(c.nome || 'Cliente')}</b> · contrato ${c.int6 ? moLinkInt6(c.int6, c.olt, c.nome, c.contrato || c.int6) : esc(c.contrato || '-')} <span style="color:var(--text-muted)">· ${esc(situacaoOnu(c.sit).rot)}${c.sinal != null && c.sinal !== 0 ? ' ' + sinalTxt(c.sinal) : ''}${c.data ? ' · atendido em ' + formatDate(c.data) : ''}</span>`);
             if (nomeados.length > 8) mostra.push(`<span style="color:var(--text-muted)">… e mais ${nomeados.length - 8} cliente(s) (o Excel leva todos)</span>`);
             if (semNome) mostra.push(`<span style="color:var(--text-muted)">${semNome} ONU(s) sem nome nem contrato</span>`);
             return mostra.join('<br>') || '-';
@@ -25552,10 +25560,10 @@ function pintarTecnicoPreventivaMonitorOlt(box, linhas) {
     <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">👷 Relatório por técnico — preventiva <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(técnico = quem atendeu o contrato por último; ${identificados.toLocaleString('pt-BR')} de ${linhas.length.toLocaleString('pt-BR')} clientes identificados)</span>
       <button type="button" class="btn-export-xls" id="mo-tec-excel">⤓ Excel (todos os contratos)</button></div>
     <div class="table-wrap" style="margin-bottom:1.5rem;max-height:520px;overflow:auto"><table class="data-table" id="mo-tab-tec-prev"><thead><tr>
-      <th>Técnico</th><th>Clientes</th><th>Crítico</th><th>Atenção</th><th>Sem sinal</th><th>% sinal ruim</th><th>Atend. 90 d</th><th>Clientes com sinal ruim (contrato · Int6 · sinal)</th></tr></thead><tbody>
+      <th>Técnico</th><th>Clientes</th><th>Crítico</th><th>Atenção</th><th>Sem sinal</th><th>% sinal ruim</th><th>Atend. 90 d</th><th>Clientes com sinal ruim (contrato · sinal)</th></tr></thead><tbody>
       ${rows.map(r => `<tr><td class="cat-cell">${r.tecnico ? esc(r.tecnico) : '<span style="color:var(--text-muted)">Não identificado</span>'}<div><a href="#" class="mo-tec-ver" data-t="${esc(r.tecnico)}" style="font-size:11px">ver os ${r.total} contratos</a></div></td>
         <td>${r.total}</td><td style="${r.critico ? 'color:var(--danger);font-weight:700' : ''}">${r.critico}</td><td>${r.atencao}</td><td>${r.semsinal}</td><td>${pct(r.critico + r.atencao + r.semsinal, r.total)}</td><td>${r.atend}</td>
-        <td style="white-space:normal;min-width:300px;font-size:12px;line-height:1.55">${r.ruins.slice(0, 6).map(x => `<b>${esc(x.nome || 'Cliente')}</b> · contrato ${esc(x.contrato)} · Int6 ${moLinkInt6(x.gpon_id, x.olt, x.nome)} <span style="color:var(--text-muted)">· ${esc(moStatusTxt(x.status))} ${moSinal(x.sinal)}${x.atend90 ? ' · ' + x.atend90 + ' atend.' : ''}</span>`).join('<br>') || '<span style="color:var(--text-muted)">nenhum</span>'}${r.ruins.length > 6 ? `<br><a href="#" class="mo-tec-ver" data-t="${esc(r.tecnico)}">… e mais ${r.ruins.length - 6}</a>` : ''}</td></tr>`).join('')}
+        <td style="white-space:normal;min-width:300px;font-size:12px;line-height:1.55">${r.ruins.slice(0, 6).map(x => `<b>${esc(x.nome || 'Cliente')}</b> · contrato ${moLinkContrato(x.contrato, x.gpon_id, x.olt, x.nome)} <span style="color:var(--text-muted)">· ${esc(moStatusTxt(x.status))} ${moSinal(x.sinal)}${x.atend90 ? ' · ' + x.atend90 + ' atend.' : ''}</span>`).join('<br>') || '<span style="color:var(--text-muted)">nenhum</span>'}${r.ruins.length > 6 ? `<br><a href="#" class="mo-tec-ver" data-t="${esc(r.tecnico)}">… e mais ${r.ruins.length - 6}</a>` : ''}</td></tr>`).join('')}
     </tbody></table></div>`;
   ativarFiltrosDeColuna(box);
   document.getElementById('mo-tec-excel').addEventListener('click', () => {
