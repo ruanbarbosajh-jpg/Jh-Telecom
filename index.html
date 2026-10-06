@@ -25916,21 +25916,40 @@ function renderRelMonitorOlt() {
     const tot = t => altR.filter(r => r.tipo === t).reduce((a, r) => a + Number(r.qtd || 0), 0);
     const melhoraBarras = lista => lista.map(g => ({ ...g, bom: g.voltou + g.melhorou })).filter(g => g.bom > 0).sort((a, b) => b.bom - a.bom).slice(0, 10)
       .map(g => ({ label: g.nome || '-', value: g.bom, display: `${g.bom} (voltou ${g.voltou} · melhorou ${g.melhorou})`, color: '#16a34a' }));
-    // chamados de reparo por mês (Produção + PCR, 1 por O.S) — todos e só dos clientes monitorados
+    // chamados de reparo por mês (Produção + PCR) — todos e só dos clientes monitorados.
+    // 1 chamado = 1 O.S + 1 data/hora de ABERTURA: a revisita da mesma abertura (remanejamento, improdutiva e volta, a mesma O.S nas
+    // duas bases) conta 1; se o cliente abre OUTRO chamado na mesma O.S (abertura diferente), conta de novo (06/10/2026, pedido do cliente).
+    // O.S sem abertura gravada conta 1 (a menos que a mesma O.S já tenha abertura em outra linha).
     const monit = new Set(D.cli.map(c => c.contrato));
     const mesesAsc = meses.slice().reverse();
     const rep = new Map(mesesAsc.map(m => [m, { total: 0, monit: 0, concl: 0, improd: 0, canc: 0 }]));
-    const vistos = new Set();
+    const minutoAbertura = a => {
+      if (!a) return '';
+      if (a instanceof Date) return isNaN(a) ? '' : isoLocalDe(a) + ' ' + String(a.getHours()).padStart(2, '0') + ':' + String(a.getMinutes()).padStart(2, '0');
+      const mm = String(a).match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/);
+      return mm ? mm[1] + ' ' + mm[2] + ':' + mm[3] : '';
+    };
+    const porOs = new Map();
     [DB.producao, DB.pcr].forEach(base => base.forEach(r => {
       if (!r.data || !ehServicoReparo(r.tipo_atividade) || !okCid(r.cidade)) return;
       const k = r.os && !/^0+$/.test(String(r.os)) ? String(r.os) : null;
-      if (!k || vistos.has(k)) return;
-      vistos.add(k);
-      const g = rep.get(String(r.data).slice(0, 7)); if (!g) return;
-      g.total++; if (monit.has(String(r.contrato || '').trim())) g.monit++;
-      const b = classifyStatusGranular(r.status);
-      if (b === 'concluido') g.concl++; else if (b === 'cancelado') g.canc++; else if (b === 'nao_concluido') g.improd++;
+      if (!k) return;
+      const ab = minutoAbertura(r.abertura), dia = String(r.data).slice(0, 10);
+      const g = porOs.get(k) || porOs.set(k, new Map()).get(k);
+      const c = g.get(ab);   // ab '' = linha sem abertura
+      if (!c) g.set(ab, { primeiro: dia, ultimo: dia, r });
+      else { if (dia < c.primeiro) c.primeiro = dia; if (dia >= c.ultimo) { c.ultimo = dia; c.r = r; } }
     }));
+    porOs.forEach(g => {
+      const chamados = [...g.entries()].filter(([ab]) => ab);
+      const lista = chamados.length ? chamados.map(x => x[1]) : [g.get('')];
+      lista.forEach(c => {
+        const gm = rep.get(c.primeiro.slice(0, 7)); if (!gm) return;
+        gm.total++; if (monit.has(String(c.r.contrato || '').trim())) gm.monit++;
+        const b = classifyStatusGranular(c.r.status);
+        if (b === 'concluido') gm.concl++; else if (b === 'cancelado') gm.canc++; else if (b === 'nao_concluido') gm.improd++;
+      });
+    });
     const repMes = rep.get(mes) || { total: 0 }, iMes = mesesAsc.indexOf(mes), repAnt = iMes > 0 ? rep.get(mesesAsc[iMes - 1]) : null;
     const varRep = repAnt && repAnt.total ? (repMes.total - repAnt.total) / repAnt.total * 100 : null;
     // tempo do sinal ruim até abrir chamado: 1º "saiu do normal" do contrato no mês → 1º reparo aberto depois disso (até 30 dias)
@@ -25985,7 +26004,7 @@ function renderRelMonitorOlt() {
         <div class="panel"><h3 style="margin:0 0 10px">Mais clientes com sinal ruim</h3><div id="rmm-end-ruim"></div></div>
         <div class="panel"><h3 style="margin:0 0 10px">Mais clientes com sinal bom</h3><div id="rmm-end-bom"></div></div>
       </div>
-      <div class="section-heading">📉 Chamados de reparo por mês <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(Produção + PCR, 1 por O.S — se o número cai, a preventiva está evitando chamado)</span></div>
+      <div class="section-heading">📉 Chamados de reparo por mês <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(Produção + PCR, 1 por chamado aberto — se o número cai, a preventiva está evitando chamado)</span></div>
       <div class="panel" style="margin-bottom:1.5rem"><div id="rmm-graf-rep"></div>
         <div class="table-wrap" style="margin-top:12px"><table class="data-table" data-sem-ordenar="1"><thead><tr><th>Mês</th><th>Reparos abertos</th><th>De clientes monitorados</th><th>Concluídos</th><th>Improdutivos</th><th>Cancelados</th><th>vs mês anterior</th></tr></thead><tbody>
           ${mesesAsc.map((m, i) => { const g = rep.get(m), ant = i ? rep.get(mesesAsc[i - 1]) : null; const v = ant && ant.total ? (g.total - ant.total) / ant.total * 100 : null;
