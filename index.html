@@ -489,6 +489,23 @@
   .link-os-tec:hover { text-decoration: underline; }
   /* Monitoramento OLT: contrato/Int6 clicável (abre o sinal e os dados do assinante) e nome clicável (histórico de sinal). O azul padrão do
      navegador sumia no tema escuro (06/10/2026). Tokens = contraste bom nos dois temas. */
+  /* Monitoramento OLT (06/10/2026): cartões com caixa de seleção e a lista com setas do relatório mensal */
+  .mo-al-card { position: relative; cursor: pointer; }
+  .mo-al-card.sel { box-shadow: 0 0 0 2px var(--accent); }
+  .mo-al-chk { position: absolute; top: 10px; right: 12px; display: flex; z-index: 2; cursor: pointer; }
+  .mo-al-chk input { width: 18px; height: 18px; cursor: pointer; accent-color: var(--accent); }
+  .seta-lista { display: flex; flex-direction: column; gap: 8px; }
+  .seta-linha { display: grid; grid-template-columns: minmax(150px, 44%) minmax(30px, 1fr) auto; align-items: center; gap: 12px; padding: 9px 14px;
+    border-radius: 10px; border-left: 4px solid var(--cor); background: color-mix(in srgb, var(--cor) 7%, var(--card-bg)); }
+  .seta-nome { font-weight: 700; overflow-wrap: anywhere; line-height: 1.25; }
+  .seta-caminho { display: flex; align-items: center; min-width: 0; }
+  .seta-trilho { position: relative; height: 3px; border-radius: 2px; min-width: 14px;
+    background: repeating-linear-gradient(90deg, var(--cor) 0 8px, transparent 8px 12px); }
+  .seta-trilho::after { content: ''; position: absolute; right: -7px; top: -5px; border-left: 10px solid var(--cor); border-top: 6.5px solid transparent; border-bottom: 6.5px solid transparent; }
+  .seta-valor { font-weight: 800; padding: 3px 14px; border-radius: 999px; white-space: nowrap; text-align: right;
+    color: var(--cor); background: color-mix(in srgb, var(--cor) 15%, transparent); }
+  .seta-valor small { display: block; font-weight: 500; font-size: 11px; color: var(--text-muted); }
+  @media (max-width: 640px) { .seta-linha { grid-template-columns: minmax(80px, 36%) minmax(20px, 1fr) auto; gap: 8px; padding: 8px 10px; } }
   a.mo-ver-int6, a.mo-ver-ass { color: var(--accent); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
   a.mo-hist, a.mo-tec-ver { color: inherit; text-decoration: none; cursor: pointer; }
   a.mo-hist:hover { text-decoration: underline; }
@@ -5986,6 +6003,20 @@ function trendChart(elId, series, opts = {}) {
     };
     svgEl.addEventListener('mousemove', ev => posicionar(ev.clientX));
     svgEl.addEventListener('mouseleave', () => { tooltipEl.style.display = 'none'; hoverLine.style.display = 'none'; });
+    // opts.onPonto(idx, serieIdx): clique no gráfico devolve o ponto mais próximo no eixo X e a série mais próxima no eixo Y
+    // (Monitoramento OLT: abre o detalhe dos clientes daquele dia/hora)
+    if (opts.onPonto) {
+      svgEl.style.cursor = 'pointer';
+      svgEl.addEventListener('click', ev => {
+        const rect = svgEl.getBoundingClientRect();
+        const svgX = ((ev.clientX - rect.left) / rect.width) * W, svgY = ((ev.clientY - rect.top) / rect.height) * H;
+        let idx = 0, md = Infinity;
+        for (let i = 0; i < n; i++) { const d = Math.abs(x(i) - svgX); if (d < md) { md = d; idx = i; } }
+        let si = 0, mdy = Infinity;
+        comValores.forEach((se, k) => { const d = Math.abs(y(se.points[idx].value) - svgY); if (d < mdy) { mdy = d; si = k; } });
+        opts.onPonto(idx, si);
+      });
+    }
   }
 }
 // Coordenadas do CENTRO de cada cidade do contrato (fonte: IBGE/IGC, conferido
@@ -24939,87 +24970,171 @@ function pintarHojeOntemMonitorOlt(box, linhas, passado) {
   desenhar();
 }
 
-// clientes que mudaram de sinal (saíram do normal, voltaram, pioraram, melhoraram), com filtro de período e gráfico
-function pintarAlteracoesMonitorOlt(box, altHoje, at, gpon) {
+// ---- caixas de seleção (várias cidades / bairros / meses) do Monitoramento OLT (06/10/2026) ----
+// Usa o componente multiselect do sistema. As opções vão escapadas (esc) no HTML e o navegador devolve o texto original no value.
+const moMulti = (id, label, opcoes, marcadas, todas) => multiSelectField(id, label, opcoes.map(esc), { preset: marcadas && marcadas.size ? [...marcadas].map(esc) : undefined, allLabel: todas || 'Todas', noneLabel: 'Nenhuma', emptyMsg: 'Sem opções' });
+const moMultiLigar = (id, noun, todas, aoMudar) => wireMultiSelectField(id, { noun, allLabel: todas }, aoMudar);
+// Set com os valores marcados, ou null quando TODOS estão marcados (= sem filtro) ou o campo não existe
+function moFiltro(id) {
+  const panel = document.getElementById(id + '-panel'); if (!panel) return null;
+  const caixas = [...panel.querySelectorAll('input[type=checkbox]')]; if (!caixas.length) return null;
+  const on = caixas.filter(c => c.checked);
+  return on.length === caixas.length ? null : new Set(on.map(c => c.value));
+}
+// ao reconstruir uma caixa de seleção com opções novas: preserva só o que o usuário DESMARCOU (opção nova nasce marcada). undefined = todas.
+function moPreset(id, novas) {
+  const panel = document.getElementById(id + '-panel'); if (!panel) return undefined;
+  const desm = new Set([...panel.querySelectorAll('input[type=checkbox]')].filter(c => !c.checked).map(c => c.value));
+  if (!desm.size) return undefined;
+  const m = novas.filter(o => !desm.has(o));
+  return m.length ? m.map(esc) : undefined;
+}
+// filtro de cidade do TOPO da tela do Monitoramento (vale pra PREVENTIVA e pra GERAL); sem tela aberta = sem filtro
+function moNaCidadeTopo(cidade) { const cs = MONITOR_OLT.cidadesSel ? MONITOR_OLT.cidadesSel() : null; return !cs || cs.has(moChaveCid(cidade)); }
+// lista com setas (relatório mensal): "Guarujá ──▶ 163". itens: [{ nome, valor, valorTxt?, sub?, cor }]
+function listaSetas(elId, itens) {
+  const el = document.getElementById(elId); if (!el) return;
+  if (!itens.length) { el.innerHTML = '<div class="empty">Nada nesse mês.</div>'; return; }
+  const max = Math.max(...itens.map(i => i.valor), 1);
+  el.innerHTML = `<div class="seta-lista">${itens.map(i => `<div class="seta-linha" style="--cor:${i.cor}"><span class="seta-nome" title="${esc(i.nome)}">${esc(i.nome)}</span>
+    <span class="seta-caminho"><span class="seta-trilho" style="width:${Math.max(8, Math.round(i.valor / max * 94))}%"></span></span>
+    <span class="seta-valor">${i.valorTxt != null ? esc(i.valorTxt) : Number(i.valor).toLocaleString('pt-BR')}${i.sub ? `<small>${esc(i.sub)}</small>` : ''}</span></div>`).join('')}</div>`;
+}
+
+// clientes que mudaram de sinal (saíram do normal, voltaram, pioraram, melhoraram): cartões com caixa de seleção, gráfico clicável e detalhe
+// (06/10/2026, pedido do cliente: "caixa de seleção nos status; ao clicar num ponto do gráfico ou nos status, uma tabelinha embaixo com as ONUs,
+//  cards de totais, cidades e bairros"). cliMap: contrato → linha do cliente (Int6, bairro).
+function pintarAlteracoesMonitorOlt(box, altHoje, at, cliMap) {
   if (!box) return;
-  gpon = gpon || new Map();
-  box.innerHTML = `
-    <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">⚡ Clientes com alteração de sinal <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(a cada consulta, quem saiu do normal, voltou, piorou ou melhorou)</span>
-      <select id="mo-al-per" class="topn-select"><option value="hoje">Hoje</option>${MO_PERIODOS.slice().reverse().map(([v, r]) => `<option value="${v}">${r}</option>`).join('')}</select>
-      <select id="mo-al-tipo" class="topn-select"><option value="">Todas as alterações</option><option value="saiu_do_normal">Saíram do normal</option><option value="voltou_ao_normal">Voltaram ao normal</option><option value="piorou">Pioraram</option><option value="melhorou">Melhoraram</option></select>
-      <button type="button" class="btn-export-xls" id="mo-al-excel">⤓ Excel</button></div>
-    <div id="mo-al-cards"></div><div id="mo-al-tabela"></div>
-    <div class="panel" style="margin-bottom:1.5rem">
-      <h3 style="margin:0 0 8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">📈 Alterações no período <span id="mo-al-graf-sub" style="font-size:12px;font-weight:400;color:var(--text-muted)"></span>
-        <select id="mo-al-graf-cid" class="topn-select"><option value="">Todas as cidades</option></select></h3>
-      <div id="mo-al-graf"></div>
-    </div>`;
+  cliMap = cliMap || new Map();
+  const TIPOS = ['saiu_do_normal', 'voltou_ao_normal', 'piorou', 'melhorou'];
   const ROT = { saiu_do_normal: ['warn', 'Saiu do normal'], voltou_ao_normal: ['ok', 'Voltou ao normal'], piorou: ['amber', 'Piorou'], melhorou: ['ok', 'Melhorou'] };
   const COR_T = { saiu_do_normal: '#dc2626', voltou_ao_normal: '#16a34a', piorou: '#f59e0b', melhorou: '#2563eb' };
+  box.innerHTML = `
+    <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">⚡ Clientes com alteração de sinal <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(marque as situações que quer ver · clique num cartão ou num ponto do gráfico pra ver os clientes)</span>
+      <select id="mo-al-per" class="topn-select"><option value="hoje">Hoje</option>${MO_PERIODOS.slice().reverse().map(([v, r]) => `<option value="${v}">${r}</option>`).join('')}</select>
+      <button type="button" class="btn-export-xls" id="mo-al-excel">⤓ Excel</button></div>
+    <div id="mo-al-cards"></div>
+    <div class="panel" style="margin-bottom:1.5rem">
+      <h3 style="margin:0 0 8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">📈 Alterações no período <span id="mo-al-graf-sub" style="font-size:12px;font-weight:400;color:var(--text-muted)"></span>
+        <span id="mo-al-cid-campo" style="display:inline-block;min-width:190px"></span></h3>
+      <div id="mo-al-graf"></div>
+    </div>
+    <div id="mo-al-det"></div>
+    <div id="mo-al-tabela"></div>`;
   const cache = {};
-  let dados = altHoje, per = 'hoje';
-  const lista = () => { const t = document.getElementById('mo-al-tipo').value; return dados.filter(a => !t || a.tipo === t); };
-  const desenhar = () => {
-    const l = lista(), n = t => dados.filter(a => a.tipo === t).length, corte = 300;
+  let dados = altHoje, per = 'hoje', sel = null;
+  const on = new Set(TIPOS);
+  const pt = (a, b) => a.localeCompare(b, 'pt-BR');
+  const diaDe = a => isoLocalDe(new Date(a.quando));
+  const chaveDe = a => per === 'hoje' ? 'h' + String(new Date(a.quando).getHours()).padStart(2, '0') : diaDe(a);
+  const base = () => { const cs = moFiltro('mo-al-cid'); return dados.filter(a => moNaCidadeTopo(a.cidade) && (!cs || cs.has(a.cidade || ''))); };
+  const periodoTxt = () => per === 'hoje' ? 'hoje' : MO_PERIODOS.find(p => p[0] === per)[1].toLowerCase();
+  const bairroDe = a => (cliMap.get(a.contrato) || {}).bairro || '';
+  const linhaCsv = a => [moDH(a.quando), (ROT[a.tipo] || [0, a.tipo])[1], a.nome || '', (cliMap.get(a.contrato) || {}).gpon_id || '', a.contrato, a.cidade || '', bairroDe(a), a.olt || '', a.ponlink || '', moStatusTxt(a.de_status), moStatusTxt(a.para_status), a.de_sinal, a.para_sinal, (at.get(a.contrato) || {}).atend90 || 0];
+  const CAB = ['Quando', 'Alteração', 'Cliente', 'ID Int6', 'Contrato', 'Cidade', 'Bairro', 'OLT', 'PON', 'Situação anterior', 'Situação nova', 'Sinal anterior', 'Sinal novo', 'Atend. 90 d'];
+  function montarCidades() {
+    const cids = [...new Set(dados.filter(a => moNaCidadeTopo(a.cidade)).map(a => a.cidade || '').filter(Boolean))].sort(pt);
+    const marc = moPreset('mo-al-cid', cids);
+    document.getElementById('mo-al-cid-campo').innerHTML = multiSelectInner('mo-al-cid', cids.map(esc), { preset: marc, allLabel: 'Todas as cidades', noneLabel: 'Nenhuma', emptyMsg: 'Sem cidades' });
+    moMultiLigar('mo-al-cid', 'cidade(s)', 'Todas as cidades', () => { desenhar(); desenharGrafico(); desenharDetalhe(); });
+  }
+  function desenharCartoes() {
+    const b = base(), n = t => b.filter(a => a.tipo === t).length;
     document.getElementById('mo-al-cards').innerHTML = `<div class="stat-cards" style="margin-bottom:12px">
       ${statCard('red', icAviso, 'Saíram do normal', n('saiu_do_normal'), 'estavam OK e passaram a atenção/crítico/sem sinal')}
       ${statCard('green', icOk, 'Voltaram ao normal', n('voltou_ao_normal'), 'normalizaram')}
       ${statCard('orange', icBarras, 'Pioraram', n('piorou'), 'piora de situação ou queda de 1,5 dB ou mais')}
       ${statCard('blue', icRelogio, 'Melhoraram', n('melhorou'), 'melhora de situação ou subida de 1,5 dB ou mais')}</div>`;
+    document.querySelectorAll('#mo-al-cards .stat-card').forEach((c, i) => {
+      const t = TIPOS[i]; c.dataset.t = t; c.classList.add('mo-al-card'); c.classList.toggle('sel', !!sel && sel.tipo === t);
+      c.insertAdjacentHTML('afterbegin', `<label class="mo-al-chk" title="Mostrar no gráfico e na tabela"><input type="checkbox" data-t="${t}"${on.has(t) ? ' checked' : ''}></label>`);
+    });
+  }
+  const lista = () => base().filter(a => on.has(a.tipo));
+  function desenhar() {
+    desenharCartoes();
+    const l = lista(), corte = 300;
     document.getElementById('mo-al-tabela').innerHTML = !l.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma alteração nesse período.</div></div>' : `
       <div class="table-wrap" style="margin-bottom:1.5rem;max-height:480px;overflow:auto"><table class="data-table" id="mo-al-tab"><thead><tr><th>Quando</th><th>Alteração</th><th>Cliente</th><th>Contrato</th><th>Cidade</th><th>OLT / PON</th><th>Situação</th><th>Sinal</th><th>Atend. 90 d</th></tr></thead><tbody>
       ${l.slice(0, corte).map(a => { const r = ROT[a.tipo] || ['neutral', a.tipo]; const d = a.de_sinal != null && a.para_sinal != null && Number(a.de_sinal) !== 0 && Number(a.para_sinal) !== 0 ? Number(a.para_sinal) - Number(a.de_sinal) : null;
-        return `<tr><td>${esc(moDH(a.quando))}</td><td><span class="badge ${r[0]}">${esc(r[1])}</span></td><td class="cat-cell">${moLinkHist(a.contrato, a.nome)}</td><td>${moLinkContrato(a.contrato, gpon.get(a.contrato), a.olt, a.nome)}</td><td>${esc(a.cidade || '-')}</td><td>${esc(a.olt || '-')}<div style="font-size:11px;color:var(--text-muted)">PON ${esc(a.ponlink || '-')}</div></td>
+        return `<tr><td>${esc(moDH(a.quando))}</td><td><span class="badge ${r[0]}">${esc(r[1])}</span></td><td class="cat-cell">${moLinkHist(a.contrato, a.nome)}</td><td>${moLinkContrato(a.contrato, (cliMap.get(a.contrato) || {}).gpon_id, a.olt, a.nome)}</td><td>${esc(a.cidade || '-')}</td><td>${esc(a.olt || '-')}<div style="font-size:11px;color:var(--text-muted)">PON ${esc(a.ponlink || '-')}</div></td>
         <td>${esc(moStatusTxt(a.de_status))} → <b>${esc(moStatusTxt(a.para_status))}</b></td><td>${moSinal(a.de_sinal)} → ${moSinal(a.para_sinal)} ${d != null ? '<div>' + moVar(d) + '</div>' : ''}</td><td>${(at.get(a.contrato) || {}).atend90 || 0}</td></tr>`; }).join('')}
       </tbody></table></div>${l.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${l.length.toLocaleString('pt-BR')} — o Excel leva todas.</p>` : ''}`;
     ativarFiltrosDeColuna(document.getElementById('mo-al-tabela'));
-  };
-  // gráfico: hoje = por hora (das linhas carregadas); período = por dia (resumo agrupado no banco, PASSO-41)
-  async function desenharGrafico() {
+  }
+  // gráfico: hoje = por hora; período = por dia (tudo a partir das alterações já carregadas pra tabela)
+  function desenharGrafico() {
     const el = document.getElementById('mo-al-graf'); if (!el) return;
-    const selC = document.getElementById('mo-al-graf-cid'), cid = selC.value;
-    const tipos = Object.keys(ROT);
-    let labels = [], valor, fonte;
+    let keys = [], labels = [];
     if (per === 'hoje') {
       const horas = Array.from({ length: new Date().getHours() + 1 }, (_, h) => h);
-      labels = horas.map(h => String(h).padStart(2, '0') + 'h');
-      const cont = {};
-      dados.forEach(a => { if (cid && moChaveCid(a.cidade) !== cid) return; const k = a.tipo + '|' + new Date(a.quando).getHours(); cont[k] = (cont[k] || 0) + 1; });
-      valor = (t, i) => cont[t + '|' + horas[i]] || 0;
-      fonte = dados;
+      keys = horas.map(h => 'h' + String(h).padStart(2, '0')); labels = horas.map(h => String(h).padStart(2, '0') + 'h');
     } else {
-      let linhasR = cache['r' + per];
-      if (!linhasR) {
-        try { linhasR = await rpcPaginado('monitor_olt_alteracoes_resumo', { p_desde: inicioPeriodoMonitorOlt(per).toISOString(), p_ate: new Date(Date.now() + 60000).toISOString(), p_por_olt: false }); }
-        catch (e) {   // sem o PASSO-41: agrega as linhas já carregadas
-          const agg = {};
-          dados.forEach(a => { const k = isoLocalDe(new Date(a.quando)) + '|' + (a.cidade || '') + '|' + a.tipo; agg[k] = (agg[k] || 0) + 1; });
-          linhasR = Object.entries(agg).map(([k, q]) => { const [dia, cidade, tipo] = k.split('|'); return { dia, cidade, tipo, qtd: q }; });
-        }
-        cache['r' + per] = linhasR;
-      }
       const ini = inicioPeriodoMonitorOlt(per); ini.setHours(0, 0, 0, 0);
-      const dias = [];
-      for (const d = new Date(ini); d <= new Date(); d.setDate(d.getDate() + 1)) dias.push(isoLocalDe(d));
-      labels = dias.map(d => d.slice(8, 10) + '/' + d.slice(5, 7));
-      const cont = {};
-      linhasR.forEach(r => { if (cid && moChaveCid(r.cidade) !== cid) return; const k = r.tipo + '|' + String(r.dia).slice(0, 10); cont[k] = (cont[k] || 0) + Number(r.qtd || 0); });
-      valor = (t, i) => cont[t + '|' + dias[i]] || 0;
-      fonte = linhasR;
+      for (const d = new Date(ini); d <= new Date(); d.setDate(d.getDate() + 1)) keys.push(isoLocalDe(d));
+      labels = keys.map(d => d.slice(8, 10) + '/' + d.slice(5, 7));
     }
-    const nomeCid = new Map();
-    fonte.forEach(r => { const k = moChaveCid(r.cidade); if (k && !nomeCid.has(k)) nomeCid.set(k, String(r.cidade).replace(/,\s*SP$/i, '')); });
-    const cids = [...nomeCid.keys()].sort();
-    selC.innerHTML = '<option value="">Todas as cidades</option>' + cids.map(k => `<option value="${esc(k)}">${esc(nomeCid.get(k))}</option>`).join('');
-    if (cids.includes(cid)) selC.value = cid;
+    const cont = {};
+    base().forEach(a => { const k = a.tipo + '|' + chaveDe(a); cont[k] = (cont[k] || 0) + 1; });
+    const tipos = TIPOS.filter(t => on.has(t));
     const sub = document.getElementById('mo-al-graf-sub');
-    if (sub) sub.textContent = per === 'hoje' ? '(hoje, por hora)' : `(por dia, ${MO_PERIODOS.find(p => p[0] === per)[1].toLowerCase()})`;
-    trendChart('mo-al-graf', tipos.map(t => ({ name: ROT[t][1], color: COR_T[t], semArea: true, points: labels.map((l, i) => ({ label: l, value: valor(t, i) })) })), { maxLabels: 15, expandir: true });
+    if (sub) sub.textContent = `(${per === 'hoje' ? 'hoje, por hora' : 'por dia, ' + periodoTxt()} · clique num ponto pra ver os clientes)`;
+    if (!tipos.length) { el.innerHTML = '<div class="empty">Marque ao menos uma situação nos cartões acima.</div>'; return; }
+    trendChart('mo-al-graf', tipos.map(t => ({ name: ROT[t][1], color: COR_T[t], semArea: true, points: keys.map((k, i) => ({ label: labels[i], value: cont[t + '|' + k] || 0 })) })),
+      { maxLabels: 15, expandir: true, onPonto: (idx, si) => { sel = { tipo: tipos[si], chave: keys[idx], label: labels[idx] }; desenharCartoes(); desenharDetalhe(true); } });
   }
-  document.getElementById('mo-al-tipo').addEventListener('change', desenhar);
-  document.getElementById('mo-al-graf-cid').addEventListener('change', desenharGrafico);
+  // detalhe do que foi clicado: cartões de totais, por cidade, por bairro e a tabela dos clientes/ONUs
+  function desenharDetalhe(rolar) {
+    const el = document.getElementById('mo-al-det'); if (!el) return;
+    if (!sel) { el.innerHTML = ''; return; }
+    let rows = base().filter(a => sel.tipo ? a.tipo === sel.tipo : on.has(a.tipo));
+    if (sel.chave) rows = rows.filter(a => chaveDe(a) === sel.chave);
+    const titulo = `${sel.tipo ? ROT[sel.tipo][1] : 'Situações marcadas'} · ${sel.label || periodoTxt()}`;
+    const distintos = f => new Set(rows.map(f).filter(Boolean));
+    const porCid = new Map(), porBai = new Map();
+    const somar = (m, k, a, extra) => { const g = m.get(k) || { nome: k, clientes: new Set(), extra }; g.clientes.add(a.contrato); m.set(k, g); };
+    rows.forEach(a => { somar(porCid, a.cidade || 'Sem cidade', a); somar(porBai, bairroDe(a) || 'Sem bairro', a, a.cidade || ''); });
+    const tabelinha = (m, comCid) => `<div class="table-wrap" style="max-height:260px;overflow:auto"><table class="data-table" data-sem-ordenar="1"><thead><tr><th>${comCid ? 'Bairro' : 'Cidade'}</th>${comCid ? '<th>Cidade</th>' : ''}<th>Clientes</th></tr></thead><tbody>
+      ${[...m.values()].sort((a, b) => b.clientes.size - a.clientes.size).slice(0, 30).map(g => `<tr><td class="cat-cell">${esc(g.nome)}</td>${comCid ? `<td>${esc(g.extra || '-')}</td>` : ''}<td><b>${g.clientes.size}</b></td></tr>`).join('')}</tbody></table></div>`;
+    const corte = 100;
+    el.innerHTML = `<div class="panel" style="margin-bottom:1.5rem;border-left:4px solid ${sel.tipo ? COR_T[sel.tipo] : 'var(--accent)'}">
+      <h3 style="margin:0 0 10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">🔎 Detalhe — ${esc(titulo)}
+        <button type="button" class="btn-export-xls" id="mo-al-det-excel">⤓ Excel</button><button type="button" class="btn-export-xls" id="mo-al-det-fechar">✕ Fechar</button></h3>
+      <div class="stat-cards" style="margin-bottom:12px">
+        ${statCard('blue', icPessoas, 'Clientes', distintos(a => a.contrato).size.toLocaleString('pt-BR'), `${rows.length.toLocaleString('pt-BR')} alteração(ões)`)}
+        ${statCard('purple', icBarras, 'Cidades', distintos(a => a.cidade).size, 'com cliente nessa seleção')}
+        ${statCard('orange', icPasta, 'Bairros', distintos(bairroDe).size, 'bairros distintos')}
+        ${statCard('neutral', icRota, 'OLTs', distintos(a => a.olt).size, 'OLTs envolvidas')}
+      </div>
+      ${rows.length ? `<div class="panels-grid" style="margin-bottom:12px"><div><div style="font-weight:700;margin:0 0 6px">Por cidade</div>${tabelinha(porCid, false)}</div><div><div style="font-weight:700;margin:0 0 6px">Por bairro</div>${tabelinha(porBai, true)}</div></div>
+      <div class="table-wrap" style="max-height:380px;overflow:auto"><table class="data-table" id="mo-al-det-tab"><thead><tr><th>Quando</th><th>Alteração</th><th>Cliente</th><th>Contrato</th><th>Cidade / bairro</th><th>OLT / PON</th><th>Sinal</th></tr></thead><tbody>
+        ${rows.slice(0, corte).map(a => { const r = ROT[a.tipo] || ['neutral', a.tipo];
+          return `<tr><td>${esc(moDH(a.quando))}</td><td><span class="badge ${r[0]}">${esc(r[1])}</span></td><td class="cat-cell">${moLinkHist(a.contrato, a.nome)}</td><td>${moLinkContrato(a.contrato, (cliMap.get(a.contrato) || {}).gpon_id, a.olt, a.nome)}</td>
+          <td>${esc(a.cidade || '-')}${bairroDe(a) ? `<div style="font-size:11px;color:var(--text-muted)">${esc(bairroDe(a))}</div>` : ''}</td><td>${esc(a.olt || '-')}<div style="font-size:11px;color:var(--text-muted)">PON ${esc(a.ponlink || '-')}</div></td>
+          <td>${moSinal(a.de_sinal)} → ${moSinal(a.para_sinal)}</td></tr>`; }).join('')}</tbody></table></div>${rows.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:6px 0 0">Mostrando ${corte} de ${rows.length.toLocaleString('pt-BR')} — o Excel leva todos.</p>` : ''}` : '<div class="empty">Nenhuma alteração nessa seleção.</div>'}
+    </div>`;
+    document.getElementById('mo-al-det-fechar').addEventListener('click', () => { sel = null; desenharCartoes(); desenharDetalhe(); });
+    document.getElementById('mo-al-det-excel').addEventListener('click', () => exportarQuadroPresenca('monitor-olt-detalhe-alteracoes-' + hojeISOLocal(), CAB, rows.map(linhaCsv), 'Detalhe'));
+    ativarFiltrosDeColuna(el);
+    if (rolar) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  const cartoes = document.getElementById('mo-al-cards');
+  cartoes.addEventListener('change', ev => {
+    const c = ev.target.closest('input[data-t]'); if (!c) return;
+    if (c.checked) on.add(c.dataset.t); else { on.delete(c.dataset.t); if (sel && sel.tipo === c.dataset.t) sel = null; }
+    desenhar(); desenharGrafico(); desenharDetalhe();
+  });
+  cartoes.addEventListener('click', ev => {
+    if (ev.target.closest('.mo-al-chk')) return;
+    const c = ev.target.closest('.mo-al-card'); if (!c) return;
+    const t = c.dataset.t;
+    sel = sel && sel.tipo === t && !sel.chave ? null : { tipo: t, chave: null, label: '' };
+    if (sel) on.add(t);
+    desenhar(); desenharGrafico(); desenharDetalhe(!!sel);
+  });
   document.getElementById('mo-al-per').addEventListener('change', async ev => {
-    per = ev.target.value;
+    per = ev.target.value; sel = null;
     if (per === 'hoje') dados = altHoje;
     else {
       if (!cache['l' + per]) {
@@ -25031,13 +25146,10 @@ function pintarAlteracoesMonitorOlt(box, altHoje, at, gpon) {
       }
       dados = cache['l' + per];
     }
-    desenhar(); desenharGrafico();
+    montarCidades(); desenhar(); desenharGrafico(); desenharDetalhe();
   });
-  document.getElementById('mo-al-excel').addEventListener('click', () => exportarQuadroPresenca('monitor-olt-alteracoes-' + hojeISOLocal(),
-    ['Quando', 'Alteração', 'Cliente', 'ID Int6', 'Contrato', 'Cidade', 'OLT', 'PON', 'Situação anterior', 'Situação nova', 'Sinal anterior', 'Sinal novo', 'Atend. 90 d'],
-    lista().map(a => [moDH(a.quando), (ROT[a.tipo] || [0, a.tipo])[1], a.nome || '', gpon.get(a.contrato) || '', a.contrato, a.cidade || '', a.olt || '', a.ponlink || '', moStatusTxt(a.de_status), moStatusTxt(a.para_status), a.de_sinal, a.para_sinal, (at.get(a.contrato) || {}).atend90 || 0]), 'Alterações'));
-  desenhar();
-  desenharGrafico();
+  document.getElementById('mo-al-excel').addEventListener('click', () => exportarQuadroPresenca('monitor-olt-alteracoes-' + hojeISOLocal(), CAB, lista().map(linhaCsv), 'Alterações'));
+  montarCidades(); desenhar(); desenharGrafico();
 }
 
 // PREVENTIVA: cartões, comparativo sinal × atendimentos, LISTA de clientes (com IFI/IRR) e o MAPA embaixo dela.
@@ -25093,7 +25205,9 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
       <div class="field"><label>Atendimentos (90 dias)</label><select id="mo-cli-freq">
         <option value="todos">Todos</option><option value="2">2 ou mais</option><option value="3">3 ou mais</option><option value="r2">2 ou mais reparos</option></select></div>
       <div class="field"><label>IFI / IRR</label><select id="mo-cli-ret"><option value="">Todos</option><option value="ret">Viram retorno (IFI ou IRR)</option><option value="IFI">Só IFI</option><option value="IRR">Só IRR</option></select></div>
-      <div class="field"><label>Cidade</label><select id="mo-cli-cidade"><option value="">Todas</option>${[...new Set(linhas.map(l => l.cidade).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR')).map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select></div>
+      ${moMulti('mo-cli-cidade', 'Cidade', [...new Set(linhas.map(l => l.cidade).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR')), null, 'Todas as cidades')}
+      <div class="field"><label>Bairro</label><span id="mo-cli-bairro-wrap"></span></div>
+      <div class="field"><label>Dado do equipamento</label><select id="mo-cli-vel"><option value="">Todos</option><option value="novo">Atualizado (até 24 h)</option><option value="velho">Velho (mais de 24 h)</option><option value="muito">Muito velho (mais de 3 dias)</option><option value="sem">Sem contato registrado</option></select></div>
       <button type="button" class="btn-export-xls" id="mo-cli-excel">⤓ Excel (todos os filtrados)</button>
       <span id="mo-cli-resumo" style="font-size:12px;color:var(--text-muted);align-self:center"></span>
     </div>
@@ -25101,6 +25215,12 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
     <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1.5rem">"IFI / IRR" = se abrir um reparo hoje pra esse cliente, ele conta como retorno: o último serviço concluído foi Ativação/Mudança de Endereço há até ${JANELA_IFI} dias (IFI) ou Reparo há até ${JANELA_IRR} dias (IRR) — o ofensor é o técnico desse serviço. É o cliente que mais vale a preventiva.</p>
     <div class="section-heading">🗺 Mapa — clientes da JH <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(mesmos filtros da lista acima · a cor é a pior situação do lugar · clique pra ver os clientes)</span></div>
     <div class="panel" style="margin-bottom:1.5rem">
+      <div class="toolbar" style="margin-bottom:10px;box-shadow:none">
+        <div class="field"><label>Situação em (data)</label><input type="date" data-mo="mapa-data" min="2026-10-05" max="${hojeISOLocal()}" title="Vazio = situação atual. Uma data passada mostra a situação daquele dia (o histórico começou em 05/10/2026)"></div>
+        ${moMulti('mo-mapa-cid', 'Cidade do mapa', [...new Set(linhas.map(l => l.cidade).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR')), null, 'Todas as cidades')}
+        <button type="button" class="btn-export-xls" data-mo="mapa-hoje">Voltar pra hoje</button>
+        <span data-mo="mapa-msg" style="font-size:12px;color:var(--text-muted);align-self:center"></span>
+      </div>
       <div id="mo-cli-mapa" class="mapa-cidades"></div>
       <div class="mapa-legenda" id="mo-cli-legenda" style="margin-top:10px"></div>
       <p id="mo-cli-mapa-nota" style="font-size:12px;color:var(--text-muted);margin:8px 0 0"></p>
@@ -25116,12 +25236,15 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
         </tbody></table></div></details>`;
     })() : ''}`;
   const sel = id => document.getElementById(id).value;
+  // idade do último contato do equipamento com o AutoISP, em horas (null = sem registro) — quanto mais velho, menos o sinal mostrado vale
+  const idadeH = l => l.acs_ultimo_contato ? (Date.now() - new Date(l.acs_ultimo_contato).getTime()) / 36e5 : null;
   const filtrar = () => {
-    const sit = sel('mo-cli-sit'), fq = sel('mo-cli-freq'), cid = sel('mo-cli-cidade'), rt = sel('mo-cli-ret');
+    const sit = sel('mo-cli-sit'), fq = sel('mo-cli-freq'), cidSet = moFiltro('mo-cli-cidade'), baiSet = moFiltro('mo-cli-bairro'), rt = sel('mo-cli-ret'), vel = sel('mo-cli-vel');
     return linhas.filter(l => (sit === 'todos' || (sit === 'preventiva' ? (l.grupo === 'critico' || l.grupo === 'atencao') : sit === 'ruim' ? ruim(l) : l.grupo === sit))
       && (fq === 'todos' || (fq === '2' && l.atend90 >= 2) || (fq === '3' && l.atend90 >= 3) || (fq === 'r2' && l.reparos90 >= 2))
       && (!rt || (rt === 'ret' ? !!l.retorno : (l.retorno && l.retorno.marca === rt)))
-      && (!cid || l.cidade === cid))
+      && (!cidSet || cidSet.has(l.cidade || '')) && (!baiSet || baiSet.has(l.bairro || ''))
+      && (!vel || (vel === 'sem' ? idadeH(l) == null : vel === 'novo' ? (idadeH(l) != null && idadeH(l) <= 24) : vel === 'velho' ? (idadeH(l) != null && idadeH(l) > 24) : (idadeH(l) != null && idadeH(l) > 72))))
       .sort((a, b) => ['critico', 'atencao', 'semsinal', 'ok'].indexOf(a.grupo) - ['critico', 'atencao', 'semsinal', 'ok'].indexOf(b.grupo)
         || (b.retorno ? 1 : 0) - (a.retorno ? 1 : 0) || b.atend90 - a.atend90 || (a.sinal == null ? 1 : b.sinal == null ? -1 : a.sinal - b.sinal));
   };
@@ -25139,7 +25262,7 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
           <td>${esc(l.cidade || '-')}${l.bairro ? `<div style="font-size:11px;color:var(--text-muted)">${esc(l.bairro)}</div>` : ''}</td><td>${esc(l.olt || '-')}<div style="font-size:11px;color:var(--text-muted)">PON ${esc(l.ponlink || '-')}</div></td>
           <td>${l.atend30}</td><td${l.atend90 >= 3 ? ' style="font-weight:700;color:var(--danger)"' : ''}>${l.atend90}</td><td>${l.reparos90}</td>
           <td>${l.ultimo ? `${formatDate(l.ultimo)}<div style="font-size:11px;color:var(--text-muted)">${esc(l.tipo)}${l.tecnico ? ' · ' + esc(l.tecnico) : ''}</div>` : '-'}</td>
-          <td>${l.acs_ultimo_contato ? `${esc(moDH(l.acs_ultimo_contato))}<div style="font-size:11px;color:var(--text-muted)">${haQuantoTempo(l.acs_ultimo_contato)}</div>` : '-'}</td></tr>`).join('')}
+          <td>${l.acs_ultimo_contato ? `${esc(moDH(l.acs_ultimo_contato))}<div style="font-size:11px;color:var(--text-muted)">${haQuantoTempo(l.acs_ultimo_contato)}</div>${idadeH(l) > 72 ? '<span class="badge warn" title="O equipamento não fala com o AutoISP há mais de 3 dias: o sinal mostrado é antigo">dado muito velho</span>' : idadeH(l) > 24 ? '<span class="badge amber" title="O equipamento não fala com o AutoISP há mais de 24 horas: o sinal mostrado pode estar desatualizado">dado velho</span>' : ''}` : '<span class="badge neutral">sem contato</span>'}</td></tr>`).join('')}
       </tbody></table></div>${lista.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${lista.length.toLocaleString('pt-BR')} na tabela — o mapa e o Excel levam todos os filtrados.</p>` : ''}`;
     ativarFiltrosDeColuna(document.getElementById('mo-cli-tabela'));
     desenharMapa(lista);
@@ -25149,13 +25272,35 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
   const SIT_MAPA = ['critical', 'warning', 'loss_signal', 'power_fail', 'down', 'OK'];
   const ligadas = new Set(SIT_MAPA);
   const sitMapa = l => /^ok$/i.test(l.status || '') ? 'OK' : l.status;
-  function desenharMapa(lista) {
-    const cont = {}; lista.forEach(l => { const k = sitMapa(l); cont[k] = (cont[k] || 0) + 1; });
+  const cacheDia = {}; let tokenMapa = 0;
+  const campoData = () => document.querySelector('[data-mo="mapa-data"]'), msgMapa = t => { const e = document.querySelector('[data-mo="mapa-msg"]'); if (e) e.textContent = t || ''; };
+  async function desenharMapa(lista) {
+    const meu = ++tokenMapa;
+    let base = lista;
+    const cidSet = moFiltro('mo-mapa-cid');
+    if (cidSet) base = base.filter(l => cidSet.has(l.cidade || ''));
+    const dia = campoData() ? campoData().value : '';
+    msgMapa('');
+    if (dia && dia < hojeISOLocal()) {
+      let m = cacheDia[dia];
+      if (m === undefined) {
+        msgMapa('Carregando a situação daquele dia…');
+        try { m = new Map((await rpcPaginado('monitor_olt_status_no_dia', { p_dia: dia })).map(r => [r.contrato, r])); } catch (e) { m = null; }
+        cacheDia[dia] = m;
+        if (meu !== tokenMapa) return;
+      }
+      if (!m) msgMapa('Não consegui ler o histórico (rode o sql/PASSO-41). Mostrando a situação atual.');
+      else {
+        base = base.filter(l => m.has(l.contrato)).map(l => ({ ...l, status: m.get(l.contrato).status, sinal: m.get(l.contrato).sinal }));
+        msgMapa(`Situação em ${formatDate(dia)}: ${base.length.toLocaleString('pt-BR')} cliente(s) com registro nesse dia (o último registro até lá).`);
+      }
+    }
+    const cont = {}; base.forEach(l => { const k = sitMapa(l); cont[k] = (cont[k] || 0) + 1; });
     const leg = document.getElementById('mo-cli-legenda');
     if (leg) leg.innerHTML = SIT_MAPA.map(k => `<label class="legend-item" style="cursor:pointer${cont[k] ? '' : ';opacity:.45'}"><input type="checkbox" class="mo-cli-mapa-check" value="${k}"${ligadas.has(k) ? ' checked' : ''} style="margin-right:4px"><span class="legend-dot" style="background:${moCorSit(k)}"></span>${esc(moStatusTxt(k))} <span style="color:var(--text-muted)">(${(cont[k] || 0).toLocaleString('pt-BR')})</span></label>`).join('')
       + '<span class="legend-item" style="color:var(--text-muted)">· marque o que aparece no mapa (a lista não muda)</span>';
     // situação fora das 6 conhecidas aparece sempre (não tem caixa)
-    const visiveis = lista.filter(l => { const k = sitMapa(l); return !SIT_MAPA.includes(k) || ligadas.has(k); });
+    const visiveis = base.filter(l => { const k = sitMapa(l); return !SIT_MAPA.includes(k) || ligadas.has(k); });
     const nota = renderMapaClientesMonitorOlt('mo-cli-mapa', visiveis);
     const elN = document.getElementById('mo-cli-mapa-nota'); if (elN) elN.textContent = nota || '';
   }
@@ -25164,7 +25309,21 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
     if (c.checked) ligadas.add(c.value); else ligadas.delete(c.value);
     desenharMapa(filtrar());
   });
-  ['mo-cli-sit', 'mo-cli-freq', 'mo-cli-ret', 'mo-cli-cidade'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
+  campoData().addEventListener('change', () => desenharMapa(filtrar()));
+  document.querySelector('[data-mo="mapa-hoje"]').addEventListener('click', () => { campoData().value = ''; desenharMapa(filtrar()); });
+  moMultiLigar('mo-mapa-cid', 'cidade(s)', 'Todas as cidades', () => desenharMapa(filtrar()));
+  ['mo-cli-sit', 'mo-cli-freq', 'mo-cli-ret', 'mo-cli-vel'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
+  // bairros = os dos clientes das cidades marcadas (reconstrói a caixa mantendo o que já estava marcado)
+  const ptb = (a, b) => a.localeCompare(b, 'pt-BR');
+  function montarBairros() {
+    const cs = moFiltro('mo-cli-cidade');
+    const bs = [...new Set(linhas.filter(l => l.bairro && (!cs || cs.has(l.cidade || ''))).map(l => l.bairro))].sort(ptb);
+    const marc = moPreset('mo-cli-bairro', bs);
+    document.getElementById('mo-cli-bairro-wrap').innerHTML = multiSelectInner('mo-cli-bairro', bs.map(esc), { preset: marc, allLabel: 'Todos', noneLabel: 'Nenhum', emptyMsg: 'Sem bairros' });
+    moMultiLigar('mo-cli-bairro', 'bairro(s)', 'Todos os bairros', desenhar);
+  }
+  moMultiLigar('mo-cli-cidade', 'cidade(s)', 'Todas as cidades', () => { montarBairros(); desenhar(); });
+  montarBairros();
   document.getElementById('mo-cli-excel').addEventListener('click', () => {
     const lista = filtrar();
     exportarQuadroPresenca('monitor-olt-clientes-' + hojeISOLocal(),
@@ -25187,7 +25346,7 @@ function renderMonitorOlt() {
   raiz.innerHTML = `
     <div class="toolbar">
       <div class="field"><label>Leitura</label><select id="mo-leitura"><option value="">Carregando…</option></select></div>
-      <div class="field"><label>Cidade</label><select id="mo-cidade"><option value="">Todas as cidades</option></select></div>
+      <div class="field"><label>Cidade</label><span id="mo-cidade-wrap"><select disabled><option>Carregando…</option></select></span></div>
       <div class="field"><label>Atualizar sozinho</label><select id="mo-auto">
         <option value="">Desligado</option><option value="15">A cada 15 min</option><option value="30">A cada 30 min</option><option value="60">A cada 1 hora</option>
       </select></div>
@@ -25417,7 +25576,17 @@ function renderMonitorOlt() {
   }
   selAuto.addEventListener('change', () => { ligarAutomatico(); if (selAuto.value) toast(`Vai atualizar sozinho a cada ${selAuto.value} min enquanto esta tela estiver aberta.`, 'ok', 3500); });
   setTimeout(ligarAutomatico, 500);   // depois de restaurarFiltros devolver a escolha
-  document.getElementById('mo-cidade').addEventListener('change', pintar);
+  // filtro de cidade do TOPO em caixa de seleção (várias cidades); vale pra PREVENTIVA e pra GERAL. Só reconstrói quando a lista de cidades muda.
+  let cidadesTopoChave = '';
+  function montarCidadesTopo(cidades) {
+    const chave = cidades.join('|');
+    if (chave === cidadesTopoChave && document.getElementById('mo-cidade')) return;
+    const marc = moPreset('mo-cidade', cidades);
+    cidadesTopoChave = chave;
+    document.getElementById('mo-cidade-wrap').innerHTML = multiSelectInner('mo-cidade', cidades.map(esc), { preset: marc, allLabel: 'Todas as cidades', noneLabel: 'Nenhuma', emptyMsg: 'Sem cidades' });
+    moMultiLigar('mo-cidade', 'cidade(s)', 'Todas as cidades', () => { pintar(); if (MONITOR_OLT.repintarPreventiva) MONITOR_OLT.repintarPreventiva(); });
+  }
+  MONITOR_OLT.cidadesSel = () => { const f = moFiltro('mo-cidade'); return f ? new Set([...f].map(moChaveCid)) : null; };
   selLeitura.addEventListener('change', pintar);
   document.getElementById('mo-arquivo').addEventListener('change', ev => {
     const f = ev.target.files && ev.target.files[0];
@@ -25604,13 +25773,10 @@ function renderMonitorOlt() {
     const d = reg.dados;
     MONITOR_OLT.atualDados = d;
     const semCid = c => String(c || '').replace(/,\s*SP$/i, '');
-    const cidSel = document.getElementById('mo-cidade');
     const cidades = [...new Set(d.olts.filter(o => !/deactiv/i.test(o.modo)).flatMap(o => (o.cidades || []).map(semCid)))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-    const cidAtual = cidSel.value;
-    cidSel.innerHTML = '<option value="">Todas as cidades</option>' + cidades.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
-    if (cidades.includes(cidAtual)) cidSel.value = cidAtual;
-    const cidade = cidSel.value;
-    const oltNaCidade = o => !cidade || (o && (o.cidades || []).some(c => semCid(c) === cidade));
+    montarCidadesTopo(cidades);
+    const cidSet = MONITOR_OLT.cidadesSel();
+    const oltNaCidade = o => !cidSet || (o && (o.cidades || []).some(c => cidSet.has(moChaveCid(semCid(c)))));
     const olts = d.olts.filter(o => !/deactiv/i.test(o.modo) && oltNaCidade(o));
     const desativadas = d.olts.filter(o => /deactiv/i.test(o.modo)).length;
     const falhas = olts.filter(oltComFalha);
@@ -25624,7 +25790,7 @@ function renderMonitorOlt() {
       .sort((a, b) => (oltComFalha(b.o) - oltComFalha(a.o)) || ((b.m.critico * 3 + b.m.atencao * 2 + b.m.semsinal) - (a.m.critico * 3 + a.m.atencao * 2 + a.m.semsinal)) || b.m.total - a.m.total);
     const totCli = linhasOlt.reduce((a, x) => { ['total', 'critico', 'atencao', 'semsinal'].forEach(k => { a[k] += x.m[k]; }); return a; }, vazio());
     // por cidade (a da OLT)
-    const relCidade = (cidade ? [cidade] : cidades).map(c => {
+    const relCidade = (cidSet ? cidades.filter(c => cidSet.has(moChaveCid(c))) : cidades).map(c => {
       const daCid = olts.filter(o => (o.cidades || []).some(x => semCid(x) === c));
       const m = vazio(); daCid.forEach(o => { const x = porOlt.get(o.hostname); if (x) ['total', 'critico', 'atencao', 'semsinal'].forEach(k => { m[k] += x[k]; }); });
       return { cidade: c, olts: daCid.length, falha: daCid.filter(oltComFalha).length, onus: daCid.reduce((a, o) => a + (o.clientes || 0), 0), ...m };
@@ -25643,7 +25809,7 @@ function renderMonitorOlt() {
         ${d.orfas != null ? metricCard('ONUs sem contrato (órfãs)', d.orfas || 0, false, { icon: icPasta, sub: 'equipamento sem cliente — fora da preventiva' }) : ''}
         ${d.resolvidos_ok ? metricCard('Lista dizia problema, cliente OK', d.resolvidos_ok, false, { icon: icOk, sub: 'sinal normal no registro do contrato' }) : ''}
       </div>
-      <div class="section-heading">OLTs e os clientes da JH em cada uma — ${cidade ? esc(cidade) : 'cidades da JH Litoral'}</div>
+      <div class="section-heading">OLTs e os clientes da JH em cada uma — ${cidSet ? 'cidades selecionadas' : 'cidades da JH Litoral'}</div>
       <div class="table-wrap" style="margin-bottom:0.5rem"><table class="data-table" id="mo-tab-olts"><thead><tr>
         <th>OLT</th><th>Cidades</th><th>Conexão</th><th>Monitoramento</th><th>Auditoria</th><th>ONUs na OLT</th><th>Clientes da JH</th>
         <th>Crítico</th><th>Atenção</th><th>Sem sinal / energia</th><th>% sinal ruim</th><th>Modelo</th><th>IP</th>
@@ -25784,6 +25950,18 @@ function abrirModalTecnicoPreventiva(tecnico) {
 function ligarRelatorioMonitorOlt(onVerInt6) {
   let carregando = false;
   const info = () => document.getElementById('rm-info');
+  // desenha os blocos da PREVENTIVA com o que já foi carregado, aplicando o filtro de cidade do topo
+  function pintarPreventiva() {
+    const P = MONITOR_OLT.prev;
+    if (!P || !document.getElementById('rm-prev-clientes')) return;
+    const cli = P.cli.filter(c => moNaCidadeTopo(c.cidade));
+    const r = pintarClientesMonitorOlt(document.getElementById('rm-prev-clientes'), cli, MONITOR_OLT.status, P.semCli);
+    pintarTecnicoPreventivaMonitorOlt(document.getElementById('rm-prev-tecnico'), r.linhas);
+    pintarHojeOntemMonitorOlt(document.getElementById('rm-prev-ontem'), r.linhas, P.passado);
+    pintarAlteracoesMonitorOlt(document.getElementById('rm-prev-alt'), P.altHoje, r.at, new Map(P.cli.map(c => [c.contrato, c])));
+    ativarTogglesDeSecao(document.getElementById('rm-wrap-prev'));
+  }
+  MONITOR_OLT.repintarPreventiva = pintarPreventiva;
   async function carregar(silencioso) {
     if (carregando) return;
     carregando = true;
@@ -25794,12 +25972,9 @@ function ligarRelatorioMonitorOlt(onVerInt6) {
       if (!document.getElementById('rm-prev-clientes')) return;
       if (st) MONITOR_OLT.status = st;
       MONITOR_OLT.cli = cli;
+      MONITOR_OLT.prev = { cli, semCli, altHoje, passado };
       if (MONITOR_OLT.repintarLeitura) MONITOR_OLT.repintarLeitura();
-      const r = pintarClientesMonitorOlt(document.getElementById('rm-prev-clientes'), cli, MONITOR_OLT.status, semCli);
-      pintarTecnicoPreventivaMonitorOlt(document.getElementById('rm-prev-tecnico'), r.linhas);
-      pintarHojeOntemMonitorOlt(document.getElementById('rm-prev-ontem'), r.linhas, passado);
-      pintarAlteracoesMonitorOlt(document.getElementById('rm-prev-alt'), altHoje, r.at, new Map(cli.map(c => [c.contrato, c.gpon_id])));
-      ativarTogglesDeSecao(document.getElementById('rm-wrap-prev'));
+      pintarPreventiva();
       const i2 = info(), s2 = MONITOR_OLT.status;
       if (i2 && !silencioso) i2.textContent = `Dados de ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}${s2 && s2.clientes_ultima ? ' · última varredura de clientes ' + moDH(s2.clientes_ultima) : ''}`;
     } finally { carregando = false; }
@@ -25837,25 +26012,61 @@ function ligarRelatorioMonitorOlt(onVerInt6) {
   carregar(false);
 }
 
-// ---- RELATÓRIO DO MONITORAMENTO (mensal, 06/10/2026) ----
-// Pedido do cliente: "uma aba de Relatório do Monitoramento que vai servir pro mês — relatórios mensais pra saber se o sistema está
-// ajudando na prevenção; o próprio sistema puxa os dados, com gráficos e poucas tabelas": melhorias de sinal por cidade/OLT, técnicos e
-// endereços (bairro/rua) com mais clientes de sinal ruim e bom, se diminuiu o número de chamados (reparos da Produção/PCR) e quanto
-// tempo o cliente leva entre o sinal ficar ruim e abrir um chamado (por OLT, cidade, bairro, rua e técnico).
-// Fonte: histórico diário e alterações do Monitoramento (PASSO-40/41 — começou em 05/10/2026) + Produção/PCR (chamados e técnicos).
+// ---- RELATÓRIO DO MONITORAMENTO (mensal) ----
+// Pedido do cliente: relatório do mês pra saber se a preventiva está ajudando — poucas tabelas, gráficos e listas com setas.
+// Fonte: histórico diário e alterações do Monitoramento (PASSO-40/41/42 — começou em 05/10/2026) + Produção/PCR (chamados, técnicos, endereços).
+
+// IFI/IRR do período: Produção (coluna oficial IFI-IRR) + reparos do CSV da PCR que ainda não passaram pela planilha oficial
+// (mesma regra do sistema: último serviço CONCLUÍDO do contrato dentro da janela de 15 dias = IFI, reparo em até 30 = IRR). 1 por O.S.
+function moRetornosPeriodo(ini, fim) {
+  const out = [], vistos = new Set();
+  const chaveOs = r => r.os && !/^0+$/.test(String(r.os)) ? 'os:' + r.os : null;
+  DB.producao.forEach(p => {
+    const dia = String(p.data || '').slice(0, 10);
+    if (!dia || dia < ini || dia > fim) return;
+    const m = String(p.ifi_irr || '').trim().toUpperCase();
+    if (m !== 'IFI' && m !== 'IRR') return;
+    const k = chaveOs(p) || 'x:' + p.contrato + '|' + dia;
+    if (vistos.has(k)) return;
+    vistos.add(k); out.push({ dia, contrato: String(p.contrato || '').trim(), cidade: p.cidade, marca: m, os: p.os });
+  });
+  const hist = new Map();
+  [DB.producao, DB.pcr].forEach(base => base.forEach(r => {
+    if (!r.data || !isConcluido(r.status)) return;
+    const c = String(r.contrato || '').trim(); if (!c) return;
+    (hist.get(c) || hist.set(c, []).get(c)).push({ dia: String(r.data).slice(0, 10), tipo: r.tipo_atividade, os: r.os });
+  }));
+  DB.pcr.forEach(r => {
+    const dia = String(r.data || '').slice(0, 10);
+    if (!dia || dia < ini || dia > fim || !ehServicoReparo(r.tipo_atividade)) return;
+    const k = chaveOs(r); if (!k || vistos.has(k)) return;
+    const idx = DB_INDEX.producao.get(r.os), of = idx !== undefined ? DB.producao[idx] : null;
+    if (of && (['IFI', 'IRR', 'DESC'].includes(of.ifi_irr) || (of.tipo_ordem !== undefined && of.tipo_ordem !== null && of.tipo_ordem !== ''))) return;   // a planilha oficial já decidiu
+    const c = String(r.contrato || '').trim();
+    const h = (hist.get(c) || []).filter(v => v.dia < dia && v.os !== r.os).sort((a, b) => a.dia < b.dia ? -1 : 1);
+    if (!h.length) return;
+    const prev = h[h.length - 1], marca = classificaRetorno(prev.tipo, diasEntre(dia, prev.dia));
+    if (marca !== 'IFI' && marca !== 'IRR') return;
+    vistos.add(k); out.push({ dia, contrato: c, cidade: r.cidade, marca, os: r.os });
+  });
+  return out;
+}
+
 function renderRelMonitorOlt() {
   const raiz = document.getElementById('content');
   if (!podeMonitorOlt()) { raiz.innerHTML = '<div class="panel"><div class="empty">Esta tela é só do Analista.</div></div>'; return; }
   const NOMES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
   const nomeMes = m => NOMES[Number(m.slice(5, 7)) - 1] + '/' + m.slice(0, 4);
-  const meses = [];
+  const meses12 = [];
   const d0 = new Date(); d0.setDate(1);
-  for (let i = 0; i < 6; i++) meses.push(isoLocalDe(new Date(d0.getFullYear(), d0.getMonth() - i, 1)).slice(0, 7));
-  const mesAtual = meses[0];
+  for (let i = 0; i < 12; i++) meses12.push(isoLocalDe(new Date(d0.getFullYear(), d0.getMonth() - i, 1)).slice(0, 7));
+  const meses = meses12.slice(0, 6), mesAtual = meses12[0];
+  const mesesAsc = meses12.slice().reverse();
+  const pt = (a, b) => a.localeCompare(b, 'pt-BR');
   raiz.innerHTML = `
     <div class="toolbar">
       <div class="field"><label>Mês</label><select id="rmm-mes">${meses.map(m => `<option value="${m}">${nomeMes(m)}${m === mesAtual ? ' (até hoje)' : ''}</option>`).join('')}</select></div>
-      <div class="field"><label>Cidade</label><select id="rmm-cidade"><option value="">Todas as cidades</option></select></div>
+      <div class="field"><label>Cidade</label><span id="rmm-cid-wrap"><select disabled><option>Carregando…</option></select></span></div>
       <button type="button" class="btn" id="rmm-atualizar">↻ Atualizar</button>
       <button type="button" class="btn-export-xls" id="rmm-monitor">📡 Monitoramento OLT</button>
       <span id="rmm-info" style="font-size:12px;color:var(--text-muted);align-self:center"></span>
@@ -25863,10 +26074,10 @@ function renderRelMonitorOlt() {
     <p style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">Relatório do mês pra saber se a preventiva está funcionando: o sinal dos clientes atendidos pela JH melhorou? Diminuíram os chamados de reparo? Quanto tempo o cliente leva entre o sinal ficar ruim e abrir chamado? O histórico de sinal começou em <b>05/10/2026</b> — meses anteriores só têm os chamados (Produção/PCR).</p>
     <div id="rmm-body"><div class="panel"><div class="empty">Carregando…</div></div></div>`;
   const cache = {};
-  const selMes = document.getElementById('rmm-mes'), selCid = document.getElementById('rmm-cidade');
+  const selMes = document.getElementById('rmm-mes');
+  let cidadesChave = '';
   async function carregar(forcar) {
-    const mes = selMes.value;
-    const info = document.getElementById('rmm-info');
+    const mes = selMes.value, info = document.getElementById('rmm-info');
     if (forcar) delete cache[mes];
     if (!cache[mes]) {
       if (info) info.textContent = 'Carregando o mês…';
@@ -25877,16 +26088,20 @@ function renderRelMonitorOlt() {
       const fim = fimMes < hoje ? fimMes : hoje;
       const iniIso = new Date(ini + 'T00:00:00').toISOString(), fimIso = new Date(new Date(fim + 'T00:00:00').getTime() + 864e5).toISOString();
       const nulo = p => p.catch(() => null);
-      const [cli, stFim, stIni, resumo, altRes, saidas] = await Promise.all([
+      const retornos = moRetornosPeriodo(ini, fim);
+      const contratosRet = [...new Set(retornos.map(r => r.contrato).filter(Boolean))];
+      const [cli, stFim, stIni, resumo, altRes, saidas, primeiroRuim, retHist] = await Promise.all([
         (MONITOR_OLT.cli && MONITOR_OLT.cli.length) ? MONITOR_OLT.cli : carregarClientesMonitorOlt(),
         nulo(rpcPaginado('monitor_olt_status_no_dia', { p_dia: fim })),
         nulo(rpcPaginado('monitor_olt_status_no_dia', { p_dia: moDiaAnteriorDe(ini) })),
         nulo(rpcPaginado('monitor_olt_resumo_diario', { p_desde: ini, p_ate: fim })),
         nulo(rpcPaginado('monitor_olt_alteracoes_resumo', { p_desde: iniIso, p_ate: fimIso, p_por_olt: true })),
         carregarAlteracoesDesde(iniIso, fimIso, 'saiu_do_normal'),
+        nulo(rpcPaginado('monitor_olt_primeiro_ruim', { p_desde: ini, p_ate: fim })),
+        contratosRet.length ? nulo(rpcPaginado('monitor_olt_status_contratos', { p_contratos: contratosRet, p_desde: ini, p_ate: fim })) : Promise.resolve([]),
       ]);
       if (cli.length) MONITOR_OLT.cli = cli;
-      cache[mes] = { ini, fim, cli, stFim, stIni, resumo, altRes, saidas, semRpc: stFim === null };
+      cache[mes] = { ini, fim, cli, stFim, stIni, resumo, altRes, saidas, primeiroRuim, retornos, retHist, semRpc: stFim === null };
       if (info) info.textContent = `Dados de ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
     }
     pintarMes();
@@ -25895,13 +26110,17 @@ function renderRelMonitorOlt() {
     const mes = selMes.value, D = cache[mes];
     const body = document.getElementById('rmm-body');
     if (!D || !body) return;
-    // cidades (do cliente, normalizadas) pro filtro
+    // cidades (do cliente) pro filtro de cima; só reconstrói quando a lista muda
     const nomesCid = new Map(); D.cli.forEach(c => { const k = moChaveCid(c.cidade); if (k && !nomesCid.has(k)) nomesCid.set(k, c.cidade); });
-    const cidAtual = selCid.value;
-    selCid.innerHTML = '<option value="">Todas as cidades</option>' + [...nomesCid.keys()].sort().map(k => `<option value="${esc(k)}">${esc(nomesCid.get(k))}</option>`).join('');
-    if (nomesCid.has(cidAtual)) selCid.value = cidAtual;
-    const cid = selCid.value;
-    const okCid = c => !cid || moChaveCid(c) === cid;
+    const todasCid = [...nomesCid.values()].sort(pt);
+    if (todasCid.join('|') !== cidadesChave || !document.getElementById('rmm-cid')) {
+      const marc = moPreset('rmm-cid', todasCid);
+      cidadesChave = todasCid.join('|');
+      document.getElementById('rmm-cid-wrap').innerHTML = multiSelectInner('rmm-cid', todasCid.map(esc), { preset: marc, allLabel: 'Todas as cidades', noneLabel: 'Nenhuma', emptyMsg: 'Sem cidades' });
+      moMultiLigar('rmm-cid', 'cidade(s)', 'Todas as cidades', pintarMes);
+    }
+    const cidSet = (() => { const f = moFiltro('rmm-cid'); return f ? new Set([...f].map(moChaveCid)) : null; })();
+    const okCid = c => !cidSet || cidSet.has(moChaveCid(c));
     const cliPor = new Map(D.cli.map(c => [c.contrato, c]));
     // situação no fim e no começo do mês (histórico); sem o PASSO-41, no mês corrente vale a situação atual
     const stFimBase = D.stFim && D.stFim.length ? D.stFim : (mes === mesAtual ? D.cli.map(c => ({ contrato: c.contrato, status: c.status, sinal: c.sinal })) : []);
@@ -25910,7 +26129,7 @@ function renderRelMonitorOlt() {
     const ruim = r => MO_GRUPO_SINAL(r.status) !== 'ok';
     const pctRuimFim = fimRows.length ? fimRows.filter(ruim).length / fimRows.length * 100 : null;
     const pctRuimIni = iniRows.length ? iniRows.filter(ruim).length / iniRows.length * 100 : null;
-    // técnico = último atendimento CONCLUÍDO até o fim do mês; endereço (rua/bairro) da Produção/PCR
+    // técnico = último atendimento CONCLUÍDO até o fim do mês; endereço (rua) da Produção/PCR
     const ultTec = new Map(), endDe = new Map();
     [DB.producao, DB.pcr].forEach(base => base.forEach(r => {
       const c = String(r.contrato || '').trim(); if (!c) return;
@@ -25921,26 +26140,25 @@ function renderRelMonitorOlt() {
     }));
     const ruaDe = c => { const p = String(endDe.get(c) || '').split(','); return p.length > 1 ? p[0].trim().toUpperCase() : ''; };
     const bairroDe = c => { const cl = cliPor.get(c); if (cl && cl.bairro) return String(cl.bairro).toUpperCase(); const e = endDe.get(c); return e ? String(extrairBairro(e) || '').toUpperCase() : ''; };
-    const grupoBomRuim = chave => {
+    const cidadeDe = c => { const cl = cliPor.get(c); return cl && cl.cidade ? String(cl.cidade).toUpperCase() : ''; };
+    const grupoBomRuim = (chave, filtro) => {
       const m = new Map();
-      fimRows.forEach(r => { const k = chave(r.contrato); if (!k) return; const g = m.get(k) || { nome: k, total: 0, ruins: 0, bons: 0 }; g.total++; if (ruim(r)) g.ruins++; else g.bons++; m.set(k, g); });
+      fimRows.forEach(r => { if (filtro && !filtro(r)) return; const k = chave(r.contrato); if (!k) return; const g = m.get(k) || { nome: k, total: 0, ruins: 0, bons: 0 }; g.total++; if (ruim(r)) g.ruins++; else g.bons++; m.set(k, g); });
       return [...m.values()];
     };
-    const barras = (lista, campo, cor) => lista.slice().sort((a, b) => b[campo] - a[campo]).filter(g => g[campo] > 0).slice(0, 10)
-      .map(g => ({ label: g.nome, value: g[campo], display: `${g[campo]} de ${g.total} (${formatPct(g[campo] / g.total * 100, 0)})`, color: cor }));
+    const setasBomRuim = (lista, campo, cor, n) => lista.slice().sort((a, b) => b[campo] - a[campo]).filter(g => g[campo] > 0).slice(0, n || 10)
+      .map(g => ({ nome: g.nome, valor: g[campo], sub: `de ${g.total.toLocaleString('pt-BR')} · ${formatPct(g[campo] / g.total * 100, 0)}`, cor }));
     // alterações do mês por cidade e por OLT
     const altR = (D.altRes || []).filter(r => okCid(r.cidade));
     const somaAlt = chave => { const m = new Map(); altR.forEach(r => { const k = chave(r); if (!k) return; const g = m.get(k) || { nome: k, voltou: 0, melhorou: 0, saiu: 0, piorou: 0 }; const t = r.tipo === 'voltou_ao_normal' ? 'voltou' : r.tipo === 'saiu_do_normal' ? 'saiu' : r.tipo; if (g[t] != null) g[t] += Number(r.qtd || 0); m.set(k, g); }); return [...m.values()]; };
     const porCidAlt = somaAlt(r => nomesCid.get(moChaveCid(r.cidade)) || r.cidade), porOltAlt = somaAlt(r => r.olt);
     const tot = t => altR.filter(r => r.tipo === t).reduce((a, r) => a + Number(r.qtd || 0), 0);
-    const melhoraBarras = lista => lista.map(g => ({ ...g, bom: g.voltou + g.melhorou })).filter(g => g.bom > 0).sort((a, b) => b.bom - a.bom).slice(0, 10)
-      .map(g => ({ label: g.nome || '-', value: g.bom, display: `${g.bom} (voltou ${g.voltou} · melhorou ${g.melhorou})`, color: '#16a34a' }));
-    // chamados de reparo por mês (Produção + PCR) — todos e só dos clientes monitorados.
-    // 1 chamado = 1 O.S + 1 data/hora de ABERTURA: a revisita da mesma abertura (remanejamento, improdutiva e volta, a mesma O.S nas
-    // duas bases) conta 1; se o cliente abre OUTRO chamado na mesma O.S (abertura diferente), conta de novo (06/10/2026, pedido do cliente).
+    const melhoraSetas = lista => lista.map(g => ({ ...g, bom: g.voltou + g.melhorou })).filter(g => g.bom > 0).sort((a, b) => b.bom - a.bom).slice(0, 10)
+      .map(g => ({ nome: g.nome || '-', valor: g.bom, sub: `voltou ${g.voltou} · melhorou ${g.melhorou}`, cor: '#16a34a' }));
+    // chamados de reparo por mês (Produção + PCR) — 1 chamado = 1 O.S + 1 data/hora de ABERTURA: a revisita da mesma abertura (remanejamento,
+    // improdutiva e volta, a mesma O.S nas duas bases) conta 1; se o cliente abre OUTRO chamado na mesma O.S (abertura diferente), conta de novo.
     // O.S sem abertura gravada conta 1 (a menos que a mesma O.S já tenha abertura em outra linha).
     const monit = new Set(D.cli.map(c => c.contrato));
-    const mesesAsc = meses.slice().reverse();
     const rep = new Map(mesesAsc.map(m => [m, { total: 0, monit: 0, concl: 0, improd: 0, canc: 0 }]));
     const minutoAbertura = a => {
       if (!a) return '';
@@ -25955,7 +26173,7 @@ function renderRelMonitorOlt() {
       if (!k) return;
       const ab = minutoAbertura(r.abertura), dia = String(r.data).slice(0, 10);
       const g = porOs.get(k) || porOs.set(k, new Map()).get(k);
-      const c = g.get(ab);   // ab '' = linha sem abertura
+      const c = g.get(ab);
       if (!c) g.set(ab, { primeiro: dia, ultimo: dia, r });
       else { if (dia < c.primeiro) c.primeiro = dia; if (dia >= c.ultimo) { c.ultimo = dia; c.r = r; } }
     }));
@@ -25971,7 +26189,8 @@ function renderRelMonitorOlt() {
     });
     const repMes = rep.get(mes) || { total: 0 }, iMes = mesesAsc.indexOf(mes), repAnt = iMes > 0 ? rep.get(mesesAsc[iMes - 1]) : null;
     const varRep = repAnt && repAnt.total ? (repMes.total - repAnt.total) / repAnt.total * 100 : null;
-    // tempo do sinal ruim até abrir chamado: 1º "saiu do normal" do contrato no mês → 1º reparo aberto depois disso (até 30 dias)
+    // tempo do sinal ruim até abrir chamado: o momento em que o cliente ficou ruim (1º "saiu do normal" do mês OU, pra quem já estava ruim
+    // na 1ª leitura do histórico, o 1º registro ruim) → 1º reparo aberto depois disso (até 30 dias)
     const aberturas = new Map();
     const tAbert = r => {
       if (r.abertura instanceof Date) return r.abertura.getTime();
@@ -25984,29 +26203,54 @@ function renderRelMonitorOlt() {
       const c = String(r.contrato || '').trim(), t = tAbert(r); if (!c || !t) return;
       (aberturas.get(c) || aberturas.set(c, []).get(c)).push(t);
     }));
-    const primeiraSaida = new Map();
-    (D.saidas || []).forEach(e => { if (!okCid(e.cidade)) return; const t = new Date(e.quando).getTime(); const a = primeiraSaida.get(e.contrato); if (!a || t < a.t) primeiraSaida.set(e.contrato, { ...e, t }); });
-    const eventos = [...primeiraSaida.values()].map(e => {
-      const ch = (aberturas.get(e.contrato) || []).filter(t => t >= e.t && t <= e.t + 30 * 864e5).sort((a, b) => a - b)[0];
+    const evMap = new Map();
+    (D.saidas || []).forEach(e => { if (!okCid(e.cidade)) return; const t = new Date(e.quando).getTime(); const a = evMap.get(e.contrato); if (!a || t < a.t) evMap.set(e.contrato, { contrato: e.contrato, t, cidade: e.cidade, olt: e.olt, origem: 'saiu' }); });
+    (D.primeiroRuim || []).forEach(r => {
+      const cl = cliPor.get(r.contrato); if (!cl || !okCid(cl.cidade)) return;
+      const t = new Date(r.quando).getTime(), a = evMap.get(r.contrato);
+      if (!a || t < a.t) evMap.set(r.contrato, { contrato: r.contrato, t, cidade: cl.cidade, olt: cl.olt, origem: 'ja_ruim' });
+    });
+    const eventos = [...evMap.values()].map(e => {
+      const ch = (aberturas.get(e.contrato) || []).filter(t => t > e.t && t <= e.t + 30 * 864e5).sort((a, b) => a - b)[0];
       return { ...e, chamado: ch || null, ms: ch ? ch - e.t : null };
     });
     const viraram = eventos.filter(e => e.ms != null);
     const mediaMs = viraram.length ? viraram.reduce((a, e) => a + e.ms, 0) / viraram.length : null;
+    const jaRuins = eventos.filter(e => e.origem === 'ja_ruim').length;
     const durTxt = ms => { if (ms == null) return '-'; const h = ms / 36e5; if (h < 1) return Math.max(1, Math.round(h * 60)) + ' min'; if (h < 48) return Math.floor(h) + 'h ' + Math.round((h % 1) * 60) + 'min'; return Math.floor(h / 24) + 'd ' + Math.round(h % 24) + 'h'; };
     const seta = (v, menorMelhor) => v == null ? '' : `<span style="color:${(v < 0) === menorMelhor ? 'var(--success)' : 'var(--danger)'};font-weight:700">${v > 0 ? '▲' : v < 0 ? '▼' : '='} ${formatPct(Math.abs(v), 1)}</span>`;
     const difPP = pctRuimFim != null && pctRuimIni != null ? pctRuimFim - pctRuimIni : null;
     const semHist = !fimRows.length;
+    // evolução diária por situação
+    const porDia = new Map();
+    (D.resumo || []).forEach(r => { if (!okCid(r.cidade)) return; const k = String(r.dia).slice(0, 10); const g = porDia.get(k) || { critico: 0, atencao: 0, semsinal: 0, ok: 0 }; g[MO_GRUPO_SINAL(r.status)] += Number(r.qtd || 0); porDia.set(k, g); });
+    const diasOrd = [...porDia.keys()].sort(), ultDia = diasOrd.length ? porDia.get(diasOrd[diasOrd.length - 1]) : null;
+    const ultTot = ultDia ? ultDia.critico + ultDia.atencao + ultDia.semsinal + ultDia.ok : 0;
+    // IFI / IRR abertos conforme o sinal do cliente
+    const histPor = new Map(); (D.retHist || []).forEach(r => { (histPor.get(r.contrato) || histPor.set(r.contrato, []).get(r.contrato)).push({ dia: String(r.dia).slice(0, 10), status: r.status }); });
+    const sinalNoDia = (c, dia) => { const rows = histPor.get(c); if (!rows) return null; let r = null; for (const x of rows) { if (x.dia <= dia) r = x; else break; } return r && diasEntre(dia, r.dia) <= 7 ? r : null; };
+    const retornos = (D.retornos || []).filter(r => okCid(r.cidade || (cliPor.get(r.contrato) || {}).cidade));
+    const retCls = retornos.map(r => { const s = sinalNoDia(r.contrato, r.dia); return { ...r, cls: !s ? 'sem' : (MO_GRUPO_SINAL(s.status) === 'ok' ? 'ok' : 'ruim') }; });
+    const nRet = (m, c) => retCls.filter(r => r.marca === m && (!c || r.cls === c)).length;
+    const comLeitura = retCls.filter(r => r.cls !== 'sem');
     body.innerHTML = `
       ${D.semRpc ? '<div class="panel" style="margin-bottom:1rem;border-left:4px solid var(--danger)"><b>Rode o sql/PASSO-41-monitor-relatorios.sql</b> no Supabase — sem ele o relatório não lê o histórico de sinal (mostra só a situação atual e os chamados).</div>' : ''}
+      ${D.primeiroRuim === null && !D.semRpc ? '<div class="panel" style="margin-bottom:1rem;border-left:4px solid var(--danger)"><b>Rode o sql/PASSO-42-monitor-relatorio-mensal-2.sql</b> no Supabase — sem ele o tempo até o chamado só conta quem "saiu do normal" e o gráfico de IFI/IRR fica sem leitura de sinal.</div>' : ''}
       <div class="stat-cards" style="margin-bottom:1.5rem">
         ${statCard('blue', icPessoas, 'Clientes monitorados', fimRows.length.toLocaleString('pt-BR'), `situação em ${formatDate(D.fim)}`)}
         ${statCard(pctRuimFim != null && difPP != null && difPP > 0 ? 'red' : 'green', icBarras, '% com sinal ruim', pctRuimFim == null ? '-' : formatPct(pctRuimFim, 1), difPP == null ? 'sem base do começo do mês pra comparar' : `começo do mês: ${formatPct(pctRuimIni, 1)} (${difPP > 0 ? '▲' : difPP < 0 ? '▼' : '='} ${Math.abs(difPP).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} p.p.)`)}
         ${statCard('green', icOk, 'Voltaram ao normal', tot('voltou_ao_normal').toLocaleString('pt-BR'), `+ ${tot('melhorou').toLocaleString('pt-BR')} melhoraram o sinal`)}
         ${statCard('red', icAviso, 'Saíram do normal', tot('saiu_do_normal').toLocaleString('pt-BR'), `+ ${tot('piorou').toLocaleString('pt-BR')} pioraram`)}
         ${statCard(varRep != null && varRep > 0 ? 'orange' : 'neutral', icChave, 'Chamados de reparo', (repMes.total || 0).toLocaleString('pt-BR'), varRep == null ? 'sem o mês anterior pra comparar' : `vs ${nomeMes(mesesAsc[iMes - 1])}: ${seta(varRep, true)}${mes === mesAtual ? ' (mês ainda em andamento)' : ''}`)}
-        ${statCard('purple', icRelogio, 'Sinal ruim → chamado', durTxt(mediaMs), `${viraram.length} de ${eventos.length} cliente(s) que saíram do normal abriram reparo em até 30 dias`)}
+        ${statCard('purple', icRelogio, 'Sinal ruim → chamado', durTxt(mediaMs), `${viraram.length} de ${eventos.length} cliente(s) que ficaram ruins abriram reparo em até 30 dias`)}
       </div>
-      <div class="section-heading">📈 Evolução diária — % de clientes com sinal ruim</div>
+      <div class="section-heading">📈 Evolução diária — clientes por situação do sinal</div>
+      <div class="stat-cards" style="margin-bottom:12px">
+        ${statCard('red', icAviso, 'Crítico', ultDia ? ultDia.critico.toLocaleString('pt-BR') : '-', ultDia ? `no último dia (${ultTot ? formatPct(ultDia.critico / ultTot * 100, 1) : '-'} dos clientes)` : 'sem histórico')}
+        ${statCard('orange', icBarras, 'Atenção', ultDia ? ultDia.atencao.toLocaleString('pt-BR') : '-', ultDia ? `no último dia (${ultTot ? formatPct(ultDia.atencao / ultTot * 100, 1) : '-'})` : 'sem histórico')}
+        ${statCard('purple', icX, 'Sem sinal / energia / offline', ultDia ? ultDia.semsinal.toLocaleString('pt-BR') : '-', ultDia ? `no último dia (${ultTot ? formatPct(ultDia.semsinal / ultTot * 100, 1) : '-'})` : 'sem histórico')}
+        ${statCard('green', icOk, 'OK', ultDia ? ultDia.ok.toLocaleString('pt-BR') : '-', ultDia ? `no último dia (${ultTot ? formatPct(ultDia.ok / ultTot * 100, 1) : '-'})` : 'sem histórico')}
+      </div>
       <div class="panel" style="margin-bottom:1.5rem"><div id="rmm-graf-dia"></div></div>
       <div class="section-heading">✅ Quem melhorou o sinal no mês <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(voltaram ao normal + melhoraram ≥ 1,5 dB)</span></div>
       <div class="panels-grid" style="margin-bottom:1.5rem">
@@ -26018,53 +26262,89 @@ function renderRelMonitorOlt() {
         <div class="panel"><h3 style="margin:0 0 10px">Mais clientes com sinal ruim</h3><div id="rmm-tec-ruim"></div></div>
         <div class="panel"><h3 style="margin:0 0 10px">Mais clientes com sinal bom</h3><div id="rmm-tec-bom"></div></div>
       </div>
-      <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">📍 Endereços <select id="rmm-end" class="topn-select"><option value="bairro">Por bairro</option><option value="rua">Por rua</option></select></div>
+      <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">📍 Endereços <select id="rmm-end" class="topn-select"><option value="bairro">Por bairro</option><option value="rua">Por rua</option></select>
+        <span id="rmm-end-cid-wrap" style="display:inline-block;min-width:190px"></span></div>
       <div class="panels-grid" style="margin-bottom:1.5rem">
         <div class="panel"><h3 style="margin:0 0 10px">Mais clientes com sinal ruim</h3><div id="rmm-end-ruim"></div></div>
         <div class="panel"><h3 style="margin:0 0 10px">Mais clientes com sinal bom</h3><div id="rmm-end-bom"></div></div>
       </div>
-      <div class="section-heading">📉 Chamados de reparo por mês <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(Produção + PCR, 1 por chamado aberto — se o número cai, a preventiva está evitando chamado)</span></div>
-      <div class="panel" style="margin-bottom:1.5rem"><div id="rmm-graf-rep"></div>
-        <div class="table-wrap" style="margin-top:12px"><table class="data-table" data-sem-ordenar="1"><thead><tr><th>Mês</th><th>Reparos abertos</th><th>De clientes monitorados</th><th>Concluídos</th><th>Improdutivos</th><th>Cancelados</th><th>vs mês anterior</th></tr></thead><tbody>
-          ${mesesAsc.map((m, i) => { const g = rep.get(m), ant = i ? rep.get(mesesAsc[i - 1]) : null; const v = ant && ant.total ? (g.total - ant.total) / ant.total * 100 : null;
-            return `<tr${m === mes ? ' style="font-weight:700"' : ''}><td class="cat-cell">${esc(nomeMes(m))}</td><td>${g.total}</td><td>${g.monit}</td><td>${g.concl}</td><td>${g.improd}</td><td>${g.canc}</td><td>${seta(v, true) || '-'}</td></tr>`; }).join('')}
-        </tbody></table></div>
+      <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">📉 Chamados de reparo por mês <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(Produção + PCR, 1 por chamado aberto — se o número cai, a preventiva está evitando chamado)</span>
+        <span style="display:inline-block;min-width:190px">${multiSelectInner('rmm-rep-meses', mesesAsc.map(m => esc(nomeMes(m))), { preset: meses12.slice(0, 6).map(m => esc(nomeMes(m))), allLabel: 'Todos os meses', noneLabel: 'Nenhum', emptyMsg: 'Sem meses' })}</span></div>
+      <div class="panel" style="margin-bottom:1.5rem"><div id="rmm-rep-corpo"></div>
         <p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">Depende da Produção/PCR importadas: mês sem importação completa aparece menor.</p></div>
+      <div class="section-heading">🔁 IFI e IRR abertos conforme o sinal do cliente <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(retorno aberto com o sinal já ruim = dava pra prevenir)</span></div>
+      <div class="stat-cards" style="margin-bottom:12px">
+        ${statCard('red', icAviso, 'IFI', nRet('IFI'), `${nRet('IFI', 'ruim')} com sinal ruim · ${nRet('IFI', 'ok')} com sinal OK · ${nRet('IFI', 'sem')} sem leitura`)}
+        ${statCard('orange', icChave, 'IRR', nRet('IRR'), `${nRet('IRR', 'ruim')} com sinal ruim · ${nRet('IRR', 'ok')} com sinal OK · ${nRet('IRR', 'sem')} sem leitura`)}
+        ${statCard('purple', icBarras, '% abertos com sinal ruim', comLeitura.length ? formatPct(comLeitura.filter(r => r.cls === 'ruim').length / comLeitura.length * 100, 1) : '-', `dos ${comLeitura.length.toLocaleString('pt-BR')} retornos que têm leitura de sinal`)}
+        ${statCard('neutral', icRelogio, 'Sem leitura de sinal', retCls.filter(r => r.cls === 'sem').length, 'abertos antes do histórico (05/10/2026) ou de cliente não monitorado')}
+      </div>
+      <div class="panel" style="margin-bottom:1.5rem"><div id="rmm-graf-ret"></div>
+        <p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">O sinal considerado é o último registro do cliente até o dia do retorno (no máximo 7 dias antes). IFI/IRR = coluna oficial da Produção + reparos do CSV da PCR que caem na janela (15 dias após ativação/mudança de endereço, 30 após reparo).</p></div>
       <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">⏱ Tempo do sinal ruim até abrir chamado
         <select id="rmm-tempo-por" class="topn-select"><option value="olt">Por OLT</option><option value="cidade">Por cidade</option><option value="bairro">Por bairro</option><option value="rua">Por rua</option><option value="tecnico">Por técnico</option></select></div>
       <div id="rmm-tempo"></div>
-      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1.5rem">Conta o cliente que <b>saiu do normal</b> no mês (estava OK e passou a atenção/crítico/sem sinal) e o primeiro <b>reparo aberto</b> depois disso, até 30 dias. Muitos clientes que viram chamado rápido numa área/técnico = área que precisa de preventiva antes do cliente reclamar. Técnico = quem atendeu o cliente por último.</p>`;
-    // gráfico diário
-    const porDia = new Map();
-    (D.resumo || []).forEach(r => { if (!okCid(r.cidade)) return; const k = String(r.dia).slice(0, 10); const g = porDia.get(k) || { tot: 0, ruim: 0 }; g.tot += Number(r.qtd || 0); if (MO_GRUPO_SINAL(r.status) !== 'ok') g.ruim += Number(r.qtd || 0); porDia.set(k, g); });
-    const diasOrd = [...porDia.keys()].sort();
-    if (diasOrd.length) trendChart('rmm-graf-dia', [{ name: '% com sinal ruim', color: '#dc2626', points: diasOrd.map(dd => { const g = porDia.get(dd); const v = g.tot ? Math.round(g.ruim / g.tot * 1000) / 10 : 0; return { label: dd.slice(8, 10) + '/' + dd.slice(5, 7), value: v, display: `${formatPct(v, 1)} (${g.ruim} de ${g.tot})` }; }) }], { sufixoY: '%', legendaSemTotal: true, maxLabels: 16, expandir: true });
-    else document.getElementById('rmm-graf-dia').innerHTML = '<div class="empty">Ainda não há histórico diário nesse mês.</div>';
-    barsChart('rmm-melh-cid', melhoraBarras(porCidAlt));
-    barsChart('rmm-melh-olt', melhoraBarras(porOltAlt));
+      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1.5rem">Conta o cliente que <b>ficou com o sinal ruim</b> no mês (saiu do normal, ou — como o histórico só começou em 05/10/2026 — já estava ruim na primeira leitura${jaRuins ? `: ${jaRuins.toLocaleString('pt-BR')} cliente(s), contados a partir dali` : ''}) e o primeiro <b>reparo aberto</b> depois disso, até 30 dias. Muitos clientes que viram chamado rápido numa área/técnico = área que precisa de preventiva antes do cliente reclamar. Técnico = quem atendeu o cliente por último. Nos primeiros dias do histórico quase ninguém terá chamado ainda — o número se completa com o tempo.</p>`;
+    // gráfico diário por situação
+    if (diasOrd.length) {
+      const pts = k => diasOrd.map(dd => ({ label: dd.slice(8, 10) + '/' + dd.slice(5, 7), value: porDia.get(dd)[k] }));
+      trendChart('rmm-graf-dia', [{ name: 'Crítico', color: '#dc2626', semArea: true, points: pts('critico') }, { name: 'Atenção', color: '#f59e0b', semArea: true, points: pts('atencao') }, { name: 'Sem sinal / energia / offline', color: '#7c3aed', semArea: true, points: pts('semsinal') }],
+        { legendaSemTotal: true, maxLabels: 16, expandir: true });
+    } else document.getElementById('rmm-graf-dia').innerHTML = '<div class="empty">Ainda não há histórico diário nesse mês.</div>';
+    listaSetas('rmm-melh-cid', melhoraSetas(porCidAlt));
+    listaSetas('rmm-melh-olt', melhoraSetas(porOltAlt));
     const tec = grupoBomRuim(c => (ultTec.get(c) || {}).tecnico || '');
-    barsChart('rmm-tec-ruim', barras(tec, 'ruins', '#dc2626'));
-    barsChart('rmm-tec-bom', barras(tec, 'bons', '#16a34a'));
+    listaSetas('rmm-tec-ruim', setasBomRuim(tec, 'ruins', '#dc2626'));
+    listaSetas('rmm-tec-bom', setasBomRuim(tec, 'bons', '#16a34a'));
+    // endereços: bairro ou rua, sempre com a cidade (rua = "RUA - BAIRRO - CIDADE")
+    const cidEnd = [...nomesCid.values()].sort(pt);
+    document.getElementById('rmm-end-cid-wrap').innerHTML = multiSelectInner('rmm-end-cid', cidEnd.map(esc), { allLabel: 'Todas as cidades', noneLabel: 'Nenhuma', emptyMsg: 'Sem cidades' });
     const pintarEnd = () => {
-      const por = document.getElementById('rmm-end').value;
-      const g = grupoBomRuim(c => por === 'rua' ? ruaDe(c) : bairroDe(c));
-      barsChart('rmm-end-ruim', barras(g, 'ruins', '#dc2626'));
-      barsChart('rmm-end-bom', barras(g, 'bons', '#16a34a'));
+      const por = document.getElementById('rmm-end').value, cs = moFiltro('rmm-end-cid');
+      const noCid = r => !cs || cs.has((r.c && r.c.cidade) || '');
+      const rotulo = c => { const b = bairroDe(c), cd = cidadeDe(c); if (por === 'rua') { const r = ruaDe(c); return r ? [r, b, cd].filter(Boolean).join(' - ') : ''; } return b ? [b, cd].filter(Boolean).join(' - ') : ''; };
+      const g = grupoBomRuim(rotulo, noCid);
+      listaSetas('rmm-end-ruim', setasBomRuim(g, 'ruins', '#dc2626'));
+      listaSetas('rmm-end-bom', setasBomRuim(g, 'bons', '#16a34a'));
     };
     document.getElementById('rmm-end').addEventListener('change', pintarEnd);
+    moMultiLigar('rmm-end-cid', 'cidade(s)', 'Todas as cidades', pintarEnd);
     pintarEnd();
-    trendChart('rmm-graf-rep', [
-      { name: 'Reparos abertos', color: '#2563eb', points: mesesAsc.map(m => ({ label: nomeMes(m).slice(0, 3) + '/' + m.slice(2, 4), value: rep.get(m).total })) },
-      { name: 'De clientes monitorados', color: '#dc2626', points: mesesAsc.map(m => ({ label: nomeMes(m).slice(0, 3) + '/' + m.slice(2, 4), value: rep.get(m).monit })) }], { expandir: true });
+    // chamados por mês: filtro de meses
+    const pintarRep = () => {
+      const f = moFiltro('rmm-rep-meses');
+      const mostrar = mesesAsc.filter(m => !f || f.has(nomeMes(m)));
+      const corpo = document.getElementById('rmm-rep-corpo');
+      if (!mostrar.length) { corpo.innerHTML = '<div class="empty">Marque ao menos um mês.</div>'; return; }
+      corpo.innerHTML = `<div id="rmm-graf-rep"></div>
+        <div class="table-wrap" style="margin-top:12px"><table class="data-table" data-sem-ordenar="1"><thead><tr><th>Mês</th><th>Chamados abertos</th><th>De clientes monitorados</th><th>Concluídos</th><th>Improdutivos</th><th>Cancelados</th><th>vs mês anterior</th></tr></thead><tbody>
+          ${mostrar.map(m => { const g = rep.get(m), i = mesesAsc.indexOf(m), ant = i ? rep.get(mesesAsc[i - 1]) : null; const v = ant && ant.total ? (g.total - ant.total) / ant.total * 100 : null;
+            return `<tr${m === mes ? ' style="font-weight:700"' : ''}><td class="cat-cell">${esc(nomeMes(m))}</td><td>${g.total}</td><td>${g.monit}</td><td>${g.concl}</td><td>${g.improd}</td><td>${g.canc}</td><td>${seta(v, true) || '-'}</td></tr>`; }).join('')}
+        </tbody></table></div>`;
+      trendChart('rmm-graf-rep', [
+        { name: 'Chamados abertos', color: '#2563eb', points: mostrar.map(m => ({ label: nomeMes(m).slice(0, 3) + '/' + m.slice(2, 4), value: rep.get(m).total })) },
+        { name: 'De clientes monitorados', color: '#dc2626', points: mostrar.map(m => ({ label: nomeMes(m).slice(0, 3) + '/' + m.slice(2, 4), value: rep.get(m).monit })) }], { expandir: true });
+    };
+    moMultiLigar('rmm-rep-meses', 'mês(es)', 'Todos os meses', pintarRep);
+    pintarRep();
+    // IFI/IRR por situação do sinal, dia a dia
+    const dias = []; for (const d = new Date(D.ini + 'T12:00:00'); isoLocalDe(d) <= D.fim; d.setDate(d.getDate() + 1)) dias.push(isoLocalDe(d));
+    const cont = (m, c) => dias.map(d => ({ label: d.slice(8, 10) + '/' + d.slice(5, 7), value: retCls.filter(r => r.dia === d && (!m || r.marca === m) && r.cls === c).length }));
+    if (retCls.length) trendChart('rmm-graf-ret', [
+      { name: 'IFI · sinal ruim', color: '#dc2626', semArea: true, points: cont('IFI', 'ruim') }, { name: 'IFI · sinal OK', color: '#2563eb', semArea: true, points: cont('IFI', 'ok') },
+      { name: 'IRR · sinal ruim', color: '#f59e0b', semArea: true, points: cont('IRR', 'ruim') }, { name: 'IRR · sinal OK', color: '#16a34a', semArea: true, points: cont('IRR', 'ok') },
+      { name: 'Sem leitura de sinal', color: '#94a3b8', semArea: true, tracejado: true, points: cont(null, 'sem') }], { maxLabels: 16, expandir: true });
+    else document.getElementById('rmm-graf-ret').innerHTML = '<div class="empty">Nenhum IFI/IRR nesse mês (importe a Produção/PCR).</div>';
+    // tabela do tempo
     const pintarTempo = () => {
       const por = document.getElementById('rmm-tempo-por').value;
-      const chave = e => por === 'olt' ? (e.olt || '') : por === 'cidade' ? (nomesCid.get(moChaveCid(e.cidade)) || e.cidade || '') : por === 'bairro' ? bairroDe(e.contrato) : por === 'rua' ? ruaDe(e.contrato) : ((ultTec.get(e.contrato) || {}).tecnico || '');
+      const chave = e => por === 'olt' ? (e.olt || '') : por === 'cidade' ? (nomesCid.get(moChaveCid(e.cidade)) || e.cidade || '') : por === 'bairro' ? [bairroDe(e.contrato), cidadeDe(e.contrato)].filter(Boolean).join(' - ') : por === 'rua' ? (ruaDe(e.contrato) ? [ruaDe(e.contrato), bairroDe(e.contrato), cidadeDe(e.contrato)].filter(Boolean).join(' - ') : '') : ((ultTec.get(e.contrato) || {}).tecnico || '');
       const m = new Map();
-      eventos.forEach(e => { const k = chave(e) || 'Não identificado'; const g = m.get(k) || { nome: k, ev: 0, vir: 0, soma: 0, min: null }; g.ev++; if (e.ms != null) { g.vir++; g.soma += e.ms; g.min = g.min == null ? e.ms : Math.min(g.min, e.ms); } m.set(k, g); });
+      eventos.forEach(e => { const k = chave(e) || 'Não identificado'; const g = m.get(k) || { nome: k, ev: 0, ja: 0, vir: 0, soma: 0, min: null }; g.ev++; if (e.origem === 'ja_ruim') g.ja++; if (e.ms != null) { g.vir++; g.soma += e.ms; g.min = g.min == null ? e.ms : Math.min(g.min, e.ms); } m.set(k, g); });
       const lin = [...m.values()].sort((a, b) => b.vir - a.vir || b.ev - a.ev);
-      document.getElementById('rmm-tempo').innerHTML = !lin.length ? `<div class="panel" style="margin-bottom:1.5rem"><div class="empty">${semHist ? 'Ainda não há histórico de sinal nesse mês.' : 'Nenhum cliente saiu do normal nesse mês.'}</div></div>` : `
-        <div class="table-wrap" style="margin-bottom:1.5rem;max-height:480px;overflow:auto"><table class="data-table" id="rmm-tab-tempo"><thead><tr><th>${{ olt: 'OLT', cidade: 'Cidade', bairro: 'Bairro', rua: 'Rua', tecnico: 'Técnico' }[por]}</th><th>Sinal ficou ruim (clientes)</th><th>Abriram chamado (até 30 dias)</th><th>% que abriu chamado</th><th>Tempo médio até o chamado</th><th>Mais rápido</th></tr></thead><tbody>
-        ${lin.map(g => `<tr><td class="cat-cell">${esc(g.nome)}</td><td>${g.ev}</td><td>${g.vir}</td><td>${formatPct(g.ev ? g.vir / g.ev * 100 : 0, 1)}</td><td>${durTxt(g.vir ? g.soma / g.vir : null)}</td><td>${durTxt(g.min)}</td></tr>`).join('')}
+      document.getElementById('rmm-tempo').innerHTML = !lin.length ? `<div class="panel" style="margin-bottom:1.5rem"><div class="empty">${semHist ? 'Ainda não há histórico de sinal nesse mês.' : 'Nenhum cliente ficou com sinal ruim nesse mês.'}</div></div>` : `
+        <div class="table-wrap" style="margin-bottom:1.5rem;max-height:480px;overflow:auto"><table class="data-table" id="rmm-tab-tempo"><thead><tr><th>${{ olt: 'OLT', cidade: 'Cidade', bairro: 'Bairro - Cidade', rua: 'Rua - Bairro - Cidade', tecnico: 'Técnico' }[por]}</th><th>Clientes que ficaram com sinal ruim</th><th>(já ruins na 1ª leitura)</th><th>Abriram chamado (até 30 dias)</th><th>% que abriu chamado</th><th>Tempo médio até o chamado</th><th>Mais rápido</th></tr></thead><tbody>
+        ${lin.map(g => `<tr><td class="cat-cell">${esc(g.nome)}</td><td>${g.ev}</td><td>${g.ja}</td><td>${g.vir}</td><td>${formatPct(g.ev ? g.vir / g.ev * 100 : 0, 1)}</td><td>${durTxt(g.vir ? g.soma / g.vir : null)}</td><td>${durTxt(g.min)}</td></tr>`).join('')}
         </tbody></table></div>`;
       ativarFiltrosDeColuna(document.getElementById('rmm-tempo'));
     };
@@ -26074,7 +26354,6 @@ function renderRelMonitorOlt() {
     ativarBotoesImagem(body);
   }
   selMes.addEventListener('change', () => carregar(false));
-  selCid.addEventListener('change', pintarMes);
   document.getElementById('rmm-atualizar').addEventListener('click', () => carregar(true));
   document.getElementById('rmm-monitor').addEventListener('click', () => navigate('monitorolt'));
   carregar(false);
