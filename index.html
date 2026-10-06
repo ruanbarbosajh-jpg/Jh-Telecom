@@ -25481,6 +25481,7 @@ function renderMonitorOlt() {
   if (btnAtu) btnAtu.addEventListener('click', () => atualizarDoAutoIsp(false));
   // ---- Buscar assinante (05/10/2026) ----
   let detalheAberto = null;   // { int6, base } — o "Atualizar do AutoISP" refaz esse detalhe também
+  let msgRefresh = '';        // resultado do "⚡ Atualizar sinal agora" (sobrevive ao refazer o detalhe)
   const msgAss = t => { const el = document.getElementById('mo-ass-msg'); if (el) el.innerHTML = t; };
   function extensaoPronta() {
     if (!EXT_JH.presente) { pintarExtensao(); msgAss('<span style="color:var(--danger)">Instale a extensão do Chrome primeiro (passo a passo logo acima).</span>'); return false; }
@@ -25502,9 +25503,24 @@ function renderMonitorOlt() {
     detalheAberto = { int6: String(int6), base };
     const dadosLeitura = MONITOR_OLT.atualDados;
     const naLeitura = dadosLeitura && d.serial ? (dadosLeitura.onus || []).find(u => u.serial && u.serial === d.serial) : null;
-    alvo.innerHTML = `<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)"><div style="font-size:15px;font-weight:700">${esc(d.nome || (base && base.nome) || 'Assinante')} <span style="font-weight:400;color:var(--text-muted)">· Int6 ${esc(d.int6)}</span> <button type="button" class="btn-export-xls" id="mo-ass-atualizar-det" style="margin-left:8px">↻ Consultar de novo</button></div>${htmlDetalheAssinante(d, base, naLeitura)}</div>`;
+    alvo.innerHTML = `<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)"><div style="font-size:15px;font-weight:700">${esc(d.nome || (base && base.nome) || 'Assinante')} <span style="font-weight:400;color:var(--text-muted)">· Int6 ${esc(d.int6)}</span> <button type="button" class="btn-export-xls" id="mo-ass-atualizar-det" style="margin-left:8px">↻ Consultar de novo</button> <button type="button" class="btn-export-xls" id="mo-ass-refresh" style="margin-left:6px" title="Manda a OLT ler o sinal desta ONU agora — o mesmo que o botão Atualizar da página do cliente no AutoISP">⚡ Atualizar sinal agora</button> <span id="mo-ass-refresh-msg" style="font-size:12px;color:var(--text-muted);margin-left:6px">${msgRefresh}</span></div>${htmlDetalheAssinante(d, base, naLeitura)}</div>`;
     const bt = document.getElementById('mo-ass-atualizar-det');
     if (bt) bt.addEventListener('click', () => abrirDetalhe(int6, base, false));
+    // ⚡ manda a OLT ler o sinal agora (função da nuvem: GET refresh_status do AutoISP) e mostra antes → depois
+    const br = document.getElementById('mo-ass-refresh');
+    if (br) br.addEventListener('click', async () => {
+      const msgR = document.getElementById('mo-ass-refresh-msg');
+      br.disabled = true; msgRefresh = ''; if (msgR) msgR.textContent = 'Pedindo pra OLT ler o sinal… (leva uns 10 segundos)';
+      const rr = await chamarColetorNuvem({ acao: 'atualizar_um', int6: String(d.int6) });
+      br.disabled = false;
+      if (!document.getElementById('mo-ass-refresh-msg')) return;
+      if (!rr.ok) { document.getElementById('mo-ass-refresh-msg').innerHTML = `<span style="color:var(--danger)">⚠ ${esc(rr.erro || 'não foi possível atualizar')}</span>`; return; }
+      // a mensagem mora numa variável porque refazer o detalhe (abaixo) redesenha o bloco inteiro
+      const dh = q => q ? esc(String(q).replace('T', ' ').slice(0, 16)) : '-';
+      msgRefresh = `✔ Sinal ${moSinal(rr.antes.sinal)} → <b>${moSinal(rr.depois.sinal)}</b> · status ${esc(moStatusTxt(rr.antes.status))} → <b>${esc(moStatusTxt(rr.depois.status))}</b> · último contato ${dh(rr.antes.acs_contato)} → <b>${dh(rr.depois.acs_contato)}</b>${rr.refresh && rr.refresh.acs ? ' · ACS atualizado' : ''}`;
+      document.getElementById('mo-ass-refresh-msg').innerHTML = msgRefresh;
+      if (extensaoAtende('1.1.0')) abrirDetalhe(int6, base, false);
+    });
     if (d.lat != null && d.lng != null && typeof L !== 'undefined') {
       const el = document.getElementById('mo-ass-mapa');
       if (el) {
@@ -25642,6 +25658,13 @@ function renderMonitorOlt() {
     if (st.ok && ev && (ev.novas != null)) linhas.push(`Na última coleta: <b>${ev.novas}</b> nova(s) · <b>${ev.reabertas}</b> reaberta(s) · <b>${ev.normalizadas}</b> normalizada(s) · <b>${ev.pioraram}</b> piorou(aram) · <b>${ev.melhoraram}</b> melhorou(aram) · <b>${ev.em_aberto}</b> em aberto no total`);
     const cr = st.clientes_resumo;
     if (cr && st.clientes_ultima) linhas.push(`Varredura de clientes: <b>${esc(fmtDH(st.clientes_ultima))}</b> (${haQuantoTempo(st.clientes_ultima)}) — ${cr.consultados || 0} consultado(s) · ${cr.ativos || 0} ativos · <b>${(cr.ruins || 0)}</b> em atenção/crítico · ${cr.sem_sinal || 0} sem sinal · ${cr.fora || 0} não achado(s) no AutoISP${cr.pendentes > (cr.consultados || 0) ? ` · ${cr.pendentes - (cr.consultados || 0)} na fila` : ''}`);
+    // atualização automática das ONUs (manda a OLT ler o sinal de cada cliente a cada 6 h — janelas 00h/06h/12h/18h de Brasília)
+    const ar = st.atualizar_resumo || null;
+    if (st.atualizar_ativo != null) {
+      linhas.push(`Atualização do sinal das ONUs (6 em 6 h): <b style="color:${st.atualizar_ativo ? 'var(--success)' : 'var(--text-muted)'}">${st.atualizar_ativo ? 'ligada' : 'desligada'}</b>${st.atualizar_mensagem ? ' — ' + esc(st.atualizar_mensagem) : ''}`
+        + (ar ? ` · última rodada ${esc(fmtDH(st.atualizar_ultima))}: <b>${(ar.atualizados || 0).toLocaleString('pt-BR')}</b> atualizada(s)${ar.erros ? `, ${ar.erros} erro(s)` : ''} · faltam <b>${(ar.restam || 0).toLocaleString('pt-BR')}</b> nesta janela de 6 h (de ${(ar.total_ativos || 0).toLocaleString('pt-BR')} clientes)` : '')
+        + ` <button type="button" class="btn-export-xls" id="mo-atu-toggle" style="margin-left:8px">${st.atualizar_ativo ? 'Desligar' : 'Ligar'}</button>`);
+    }
     const precisa = !st.tem_sessao || st.sessao_ok === false;
     if (precisa) { const cfg = document.getElementById('mo-config'); if (cfg) cfg.style.display = ''; }
     el.innerHTML = caixa(cor, selo, `<div style="font-size:13px;line-height:1.8;margin-top:6px">${linhas.join('<br>')}</div><div id="mo-novaleitura"></div>`,
@@ -25722,6 +25745,13 @@ function renderMonitorOlt() {
       const t = (document.getElementById('mo-colar-txt').value || '').trim();
       if (!t) { toast('Cole os cookies primeiro.', 'aviso'); return; }
       enviarSessao(t).then(() => { const x = document.getElementById('mo-colar-txt'); if (x) x.value = ''; });
+      return;
+    }
+    if (ev.target.closest('#mo-atu-toggle')) {
+      const lig = !(MONITOR_OLT.status && MONITOR_OLT.status.atualizar_ativo);
+      const ok = !lig || confirm('Ligar a atualização automática?\n\nO sistema vai mandar a OLT ler o sinal de cada cliente (o mesmo do botão Atualizar do AutoISP), em lotes pequenos, de 10 em 10 minutos, até cobrir todos a cada 6 horas (00h, 06h, 12h, 18h). Para sozinha se o AutoISP começar a dar erro.');
+      if (!ok) return;
+      chamarColetorNuvem({ acao: 'atualizar_config', ativo: lig }).then(async r => { if (!r.ok) toast(r.erro || 'não consegui mudar', 'erro', 5000); else toast(lig ? 'Atualização automática ligada.' : 'Atualização automática desligada.', 'ok', 3500); await atualizarStatusColetor(); });
       return;
     }
     const nova = ev.target.closest('#mo-ver-nova');
