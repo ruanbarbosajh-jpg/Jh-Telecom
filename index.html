@@ -24913,6 +24913,9 @@ const moLinkHist = (c, nome) => `<a href="#" class="mo-hist" data-c="${esc(c)}" 
 const moLinkInt6 = (id, olt, nome, rotulo) => id ? `<a href="#" class="mo-ver-int6" data-int6="${esc(id)}" data-olt="${esc(olt || '')}" data-nome="${esc(nome || '')}" title="Ver sinal e dados deste assinante (Int6 ${esc(id)})">${esc(rotulo != null ? rotulo : id)}</a>` : (rotulo != null ? esc(rotulo) : '-');
 // o CONTRATO é o link (06/10/2026, pedido do cliente: "coloque o link no contrato para o int6")
 const moLinkContrato = (contrato, gpon, olt, nome) => moLinkInt6(gpon, olt, nome, contrato);
+// Link direto pra página do cliente no AutoISP (abre em outra aba; é o usuário que abre — o sistema nunca
+// abre essa página sozinho, porque ela manda a OLT/ACS consultar o equipamento). Só aceita id numérico.
+const moLinkAutoIsp = id => /^\d{1,12}$/.test(String(id || '')) ? `<div class="mapa-popup-item-linha2" style="margin-top:3px"><a href="https://auto.alloha.com/gpon_clients/${id}" target="_blank" rel="noopener noreferrer"><b>Abrir no AutoISP ↗</b></a></div>` : '';
 // ordem de gravidade: OK 0 · Atenção 1 · Crítico 2 · sem sinal/energia/offline 3
 const moRank = st => /^ok$/i.test(st || '') ? 0 : st === 'warning' ? 1 : st === 'critical' ? 2 : 3;
 // pior primeiro na hora de ordenar/colorir: crítico, atenção, LoS, sem energia, offline… e OK por último
@@ -25024,7 +25027,8 @@ function renderMapaClientesMonitorOlt(elId, lista) {
     return `<div class="mapa-popup-cabecalho"><b>${esc(g.lugar || '-')}</b>${g.tipo === 'exato' && g.cidade ? ' — ' + esc(g.cidade) : ''} · ${g.itens.length} cliente(s)</div>
       <div class="mapa-popup-lista">${ord.slice(0, 40).map(x => { const c = moCorSit(x.status); return `<div class="mapa-popup-item"><div class="mapa-popup-item-linha1"><b>${esc(x.nome || 'Cliente')}</b>
         <span class="mapa-popup-badge" style="background:${c}22;color:${c};border-color:${c}55">${esc(moStatusTxt(x.status))}</span></div>
-        <div class="mapa-popup-item-linha2">contrato ${esc(x.contrato)} · ${moSinal(x.sinal)} · ${esc(x.olt || '')} PON ${esc(x.ponlink || '-')}${x.retorno ? ' · <b>' + x.retorno.marca + '</b>' : ''}</div></div>`; }).join('')}
+        <div class="mapa-popup-item-linha2">contrato ${esc(x.contrato)} · ${moSinal(x.sinal)} · ${esc(x.olt || '')} PON ${esc(x.ponlink || '-')}${x.retorno ? ' · <b>' + x.retorno.marca + '</b>' : ''}</div>
+        ${moLinkAutoIsp(x.gpon_id)}</div>`; }).join('')}
       ${ord.length > 40 ? `<div class="mapa-popup-item">… e mais ${ord.length - 40}</div>` : ''}</div>`;
   };
   const pontos = [];
