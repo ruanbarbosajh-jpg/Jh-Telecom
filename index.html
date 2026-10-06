@@ -14125,26 +14125,39 @@ function renderChamadosGiga() {
     const qtdRetornos = abertos.filter(r => infoChamado.get(r).ret).length;
     const qtdVencidos = abertos.filter(r => infoChamado.get(r).sit === 'vencido').length;
     const qtdRisco = abertos.filter(r => infoChamado.get(r).sit === 'risco').length;
-    const celulaRetorno = r => {
+    // Colunas CURTAS (06/10/2026, pedido do cliente: "coloque nessa tabela se é IFI ou IRR, se é prazo 24hrs etc"): antes Retorno e
+    // Prazo eram células de várias linhas no FIM da tabela (fora da tela, e o filtro de coluna lia o texto inteiro). Agora o que
+    // importa fica logo depois da Fila, uma informação por coluna (filtra direito), e o detalhe vai pra uma coluna no fim.
+    const ROTULO_SERVICO = { reparo: 'Reparo', ativacao: 'Ativação', me: 'Mud. de endereço' };
+    const celulaIfiIrr = r => {
       if (classeServico(r.fila) !== 'reparo') return '<span style="color:var(--text-muted)">—</span>';
       const x = infoChamado.get(r).ret;
-      if (!x) return '<span style="color:var(--text-secondary)">Não</span>';
-      return `<span class="badge warn">${x.marca}</span><br><span style="font-size:11px;color:var(--text-secondary)">${esc(x.tipo || '')} em ${formatDate(x.data)} (${x.dias}d) · ${x.restam}d restantes${x.tecnico && ehRecursoTecnico(x.tecnico) ? '<br>ofensor: ' + esc(x.tecnico) : ''}</span>`;
+      if (!x) return '<span class="badge neutral">Sem retorno</span>';
+      return `<span class="badge ${x.marca === 'IFI' ? 'warn' : 'amber'}">${x.marca}</span>`;
     };
-    const celulaPrazo = r => {
+    const celulaPrazoContratado = r => {
+      const cl = classeServico(r.fila);
+      if (cl === 'reparo') return '<span class="badge azul">24h</span> Reparo';
+      if (cl === 'ativacao' || cl === 'me') return `<span class="badge roxo">${PRAZO_ATIVACAO_HORAS}h</span> ${ROTULO_SERVICO[cl]}`;
+      return '<span style="color:var(--text-muted)">Sem prazo</span>';
+    };
+    const celulaSituacaoPrazo = r => {
       const { prazo: p, sit } = infoChamado.get(r);
       if (!p) return '<span style="color:var(--text-muted)">—</span>';
-      const peq = t => `<br><span style="font-size:11px;color:var(--text-secondary)">${t}</span>`;
       if (sit === 'concluida') return '<span style="color:var(--text-secondary)">Concluída no PCR</span>';
-      if (p.exato) {
-        const cor = sit === 'vencido' ? 'var(--danger)' : (p.limite - agora) < 4 * 36e5 ? '#f59e0b' : 'var(--success)';
-        return sit === 'vencido'
-          ? `<span style="color:${cor};font-weight:700">Vencido</span>${peq('há ' + duracao(agora - p.limite) + ' · limite ' + fmtDT(new Date(p.limite)))}`
-          : `<span style="color:${cor};font-weight:700">No prazo</span>${peq('vence em ' + duracao(p.limite - agora) + ' · ' + fmtDT(new Date(p.limite)))}`;
+      if (sit === 'vencido') return '<span style="color:var(--danger);font-weight:700">Vencido</span>';
+      if (sit === 'risco') return '<span style="color:#f59e0b;font-weight:700">Pode ter vencido</span>';
+      return `<span style="color:${p.exato && (p.limite - agora) < 4 * 36e5 ? '#f59e0b' : 'var(--success)'};font-weight:700">No prazo</span>`;
+    };
+    const celulaDetalhe = r => {
+      const { ret: x, prazo: p, sit } = infoChamado.get(r);
+      const linhas = [];
+      if (x) linhas.push(`<b>${x.marca}</b>: ${esc(x.tipo || 'serviço')} em ${formatDate(x.data)} (${x.dias} d) · ${x.restam} d restantes${x.tecnico && ehRecursoTecnico(x.tecnico) ? ' · ofensor ' + esc(x.tecnico) : ''}`);
+      if (p && sit !== 'concluida') {
+        if (p.exato) linhas.push(sit === 'vencido' ? `Prazo vencido há ${duracao(agora - p.limite)} · limite ${fmtDT(new Date(p.limite))}` : `Vence em ${duracao(p.limite - agora)} · ${fmtDT(new Date(p.limite))}`);
+        else linhas.push(sit === 'vencido' ? `Vencido há mais de ${duracao(agora - p.tarde)} (estimado: a GIGA manda só a data)` : sit === 'risco' ? 'Abertura sem horário (estimado)' : 'No prazo (estimado, sem horário da abertura)');
       }
-      if (sit === 'vencido') return `<span style="color:var(--danger);font-weight:700">Vencido</span>${peq('há mais de ' + duracao(agora - p.tarde) + ' (estimado)')}`;
-      if (sit === 'risco') return `<span style="color:#f59e0b;font-weight:700">Pode ter vencido</span>${peq('abertura sem horário (estimado)')}`;
-      return `<span style="color:var(--success);font-weight:700">No prazo</span>${peq('estimado, sem horário da abertura')}`;
+      return linhas.length ? linhas.join('<br>') : '<span style="color:var(--text-muted)">—</span>';
     };
 
     body.innerHTML = `
@@ -14157,8 +14170,8 @@ function renderChamadosGiga() {
       </div>
       <div class="section-heading">Chamados em aberto na GIGA</div>
       <p style="font-size:13px;color:var(--text-secondary);margin:0 0 10px">Cruza o CONTRATO de cada chamado aberto contra o PCR (${esc(String(DB.pcr.length))} linhas carregadas — o CSV de atividades diário). Status = EM CAMPO quando o contrato já tem alguma linha ativa (não Não Concluída) no PCR. "Já visitada hoje" = teve tentativa Não Concluída HOJE pra esse contrato (com o motivo, quando tem).
-        <b>Retorno</b> = reparo de um contrato que já teve serviço concluído dentro da janela (IRR: reparo anterior em até ${JANELA_IRR} dias; IFI: ativação ou mudança de endereço anterior em até ${JANELA_IFI} dias), pelo histórico da Produção + PCR — pode faltar retorno se o serviço anterior é mais antigo que a Produção importada.
-        <b>Prazo</b> = reparo 24h, ativação e mudança de endereço ${PRAZO_ATIVACAO_HORAS}h. É exato quando o contrato já tem a ordem no PCR; sem isso é estimado, porque a GIGA manda só a data da abertura, sem hora.</p>
+        <b>IFI / IRR</b> = reparo de um contrato que já teve serviço concluído dentro da janela (IRR: reparo anterior em até ${JANELA_IRR} dias; IFI: ativação ou mudança de endereço anterior em até ${JANELA_IFI} dias), pelo histórico da Produção + PCR — pode faltar retorno se o serviço anterior é mais antigo que a Produção importada.
+        <b>Prazo</b> = reparo 24h, ativação e mudança de endereço ${PRAZO_ATIVACAO_HORAS}h (mudança de cômodo e upgrade não têm prazo); <b>Situação do prazo</b> diz se está no prazo ou vencido. É exato quando o contrato já tem a ordem no PCR; sem isso é estimado, porque a GIGA manda só a data da abertura, sem hora.</p>
       ${!abertos.length ? '<div class="panel"><div class="empty">Nenhum chamado em aberto no export importado.</div></div>' : (() => {
         const ordenados = [...abertos].sort((a,b) => (a.data_abertura||'').localeCompare(b.data_abertura||''));
         return `
@@ -14169,19 +14182,20 @@ function renderChamadosGiga() {
         </select>
       </div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
-        <th>Abertura</th><th>Fila</th><th>Unidade</th><th>Contrato</th><th>Cliente</th><th>Bairro</th><th>Status</th><th>Já visitada hoje?</th><th>Retorno</th><th>Prazo</th>
+        <th>Abertura</th><th>Fila</th><th>IFI / IRR</th><th>Prazo</th><th>Situação do prazo</th><th>Unidade</th><th>Contrato</th><th>Cliente</th><th>Bairro</th><th>Status</th><th>Já visitada hoje?</th><th>Detalhe do retorno e do prazo</th>
       </tr></thead><tbody>
         ${ordenados.slice(0, limiteGiga).map(r => {
           const emCampo = contratosEmCampo.has(soDigitos(r.contrato));
           const visitadaHoje = visitadaHojeImprodutiva(r.contrato);
           return `<tr>
           <td>${formatDate(r.data_abertura)}</td><td>${esc(r.fila)}</td>
+          <td>${celulaIfiIrr(r)}</td><td>${celulaPrazoContratado(r)}</td><td>${celulaSituacaoPrazo(r)}</td>
           <td>${esc(r.unidade)}</td><td>${esc(r.contrato)}</td><td>${esc(r.cliente)}</td><td>${esc(r.bairro)}</td>
           <td style="color:${emCampo ? 'var(--success)' : 'var(--danger)'};font-weight:700">${emCampo ? 'EM CAMPO' : 'NÃO ESTÁ EM CAMPO'}</td>
           <td>${visitadaHoje
             ? `<span style="color:var(--danger);font-weight:700">Sim</span>${visitadaHoje.motivo ? `<br><span style="font-size:11px;color:var(--text-secondary)">${esc(visitadaHoje.motivo)}</span>` : ''}`
             : '<span style="color:var(--text-secondary)">Não</span>'}</td>
-          <td>${celulaRetorno(r)}</td><td>${celulaPrazo(r)}</td>
+          <td style="white-space:normal;min-width:240px;font-size:12px;line-height:1.5">${celulaDetalhe(r)}</td>
         </tr>`;
         }).join('')}
       </tbody></table></div>`;
