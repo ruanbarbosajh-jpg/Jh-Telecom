@@ -5906,9 +5906,20 @@ function ringStatCard(label, centerText, pct, opts = {}) {
 function trendChart(elId, series, opts = {}) {
   const el = document.getElementById(elId);
   if (!el) return;
-  const comValores = series.filter(s => s.points && s.points.length);
-  if (!comValores.length) { el.innerHTML = '<div class="empty">Sem dados.</div>'; return; }
-  const labels = comValores[0].points.map(p => p.label);
+  const comPontos = series.filter(s => s.points && s.points.length);
+  if (!comPontos.length) { el.innerHTML = '<div class="empty">Sem dados.</div>'; return; }
+  // opts.seletor: uma caixa de seleção por série na legenda (Monitoramento OLT, 06/10/2026: "uma caixa de seleção pra cada status");
+  // desmarcar esconde a linha e a escala se ajusta às que sobram. O estado fica no elemento (sobrevive a redesenhar o gráfico).
+  const ocultas = opts.seletor ? (el._trendOcultas || (el._trendOcultas = new Set())) : null;
+  const comValores = ocultas ? comPontos.filter(s => !ocultas.has(s.name)) : comPontos;
+  const labels = comPontos[0].points.map(p => p.label);
+  const legendaHtml = () => `<div class="trend-legend">${comPontos.map(s => {
+    const totalSerie = s.points.reduce((a,p) => a + p.value, 0);
+    const caixa = ocultas ? `<input type="checkbox" class="trend-chk" data-nome="${esc(s.name)}"${ocultas.has(s.name) ? '' : ' checked'} style="margin-right:6px;cursor:pointer">` : '';
+    return `<${ocultas ? 'label' : 'span'} class="legend-item"${ocultas ? ' style="cursor:pointer"' : ''}>${caixa}<span class="legend-dot" style="background:${s.color}"></span>${esc(s.name)}${opts.legendaSemTotal ? '' : `<b>${totalSerie.toLocaleString('pt-BR')}</b>`}</${ocultas ? 'label' : 'span'}>`;
+  }).join('')}</div>`;
+  const ligarSeletor = () => { if (ocultas) el.querySelectorAll('.trend-chk').forEach(c => c.addEventListener('change', () => { if (c.checked) ocultas.delete(c.dataset.nome); else ocultas.add(c.dataset.nome); trendChart(elId, series, opts); })); };
+  if (!comValores.length) { el.innerHTML = legendaHtml() + '<div class="empty">Marque ao menos uma situação na legenda.</div>'; ligarSeletor(); return; }
   // opts.yMin/yMax: escala fixa (ex.: percentual de 60 a 100 pra mostrar a subida/queda
   // do prazo dia a dia — começando do 0 a linha ficava achatada). opts.legendaSemTotal:
   // a legenda soma os pontos da série, o que não faz sentido pra percentual.
@@ -5951,10 +5962,7 @@ function trendChart(elId, series, opts = {}) {
   const passo = opts.maxLabels && n > opts.maxLabels ? Math.ceil(n / opts.maxLabels) : 1;
   const mostraLabel = i => passo === 1 || i === 0 || i === n - 1 || i % passo === 0;
   el.innerHTML = `
-    <div class="trend-legend">${comValores.map(s => {
-      const totalSerie = s.points.reduce((a,p) => a + p.value, 0);
-      return `<span class="legend-item"><span class="legend-dot" style="background:${s.color}"></span>${esc(s.name)}${opts.legendaSemTotal ? '' : `<b>${totalSerie.toLocaleString('pt-BR')}</b>`}</span>`;
-    }).join('')}</div>
+    ${legendaHtml()}
     <div class="trend-chart-wrap">
     <svg viewBox="0 0 ${W} ${H}" class="trend-chart-svg${opts.suave ? ' trend-suave' : ''}" preserveAspectRatio="xMidYMid meet">
       ${[0, 0.5, 1].map(f => {
@@ -5972,6 +5980,7 @@ function trendChart(elId, series, opts = {}) {
     </svg>
     <div class="trend-tooltip" style="display:none"></div>
     </div>`;
+  ligarSeletor();
 
   // ---- tooltip interativo ao passar o mouse ----
   // Antes só existia o title nativo do navegador em cima do pontinho (que na
@@ -7772,40 +7781,46 @@ function tabelaPlanaParaOrdenar(tbody, nColunas) {
 function ativarOrdenacaoDeColuna(tab, ths, tbody) {
   if (!tabelaPlanaParaOrdenar(tbody, ths.length)) return;
   const linhas = () => [...tbody.querySelectorAll('tr')].filter(tr => !tr.classList.contains('total-row') && tr.querySelector('td'));
-  const estado = { idx: null, dir: null };
+  // ordenação por MAIS DE UMA coluna (06/10/2026, pedido do cliente: "poder colocar mais de uma coluna, menor pro maior etc"):
+  // clique comum = só essa coluna; Shift+clique (ou "➕ Somar" no menu do funil) = soma a coluna às já escolhidas (1º critério, 2º, 3º…)
+  const estado = { chaves: [] };   // [{ idx, dir }]
   let seq = 0;
   function pintar() {
     ths.forEach((th, i) => {
-      th.classList.toggle('ord-ativa', estado.idx === i);
+      const k = estado.chaves.findIndex(c => c.idx === i), c = estado.chaves[k];
+      th.classList.toggle('ord-ativa', !!c);
       const ind = th.querySelector('.ord-ind');
-      if (ind) ind.textContent = estado.idx === i ? (estado.dir === 'asc' ? '▲' : '▼') : '';
-      if (estado.idx === i) th.setAttribute('aria-sort', estado.dir === 'asc' ? 'ascending' : 'descending'); else th.removeAttribute('aria-sort');
+      if (ind) ind.textContent = c ? (c.dir === 'asc' ? '▲' : '▼') + (estado.chaves.length > 1 ? (k + 1) : '') : '';
+      if (c) th.setAttribute('aria-sort', c.dir === 'asc' ? 'ascending' : 'descending'); else th.removeAttribute('aria-sort');
     });
   }
-  function ordenar(idx, dir) {
+  function ordenar(idx, dir, somar) {
     const rows = linhas();
     if (!rows.length) return;
     // tabela com linha "de detalhe"/colspan no meio: reordenar quebraria o par — não mexe
     if (!tabelaPlanaParaOrdenar(tbody, ths.length)) return;
     rows.forEach(tr => { if (tr.dataset.ordOrig === undefined) tr.dataset.ordOrig = String(seq++); });
-    estado.idx = dir ? idx : null; estado.dir = dir;
+    if (!somar) estado.chaves = dir ? [{ idx, dir }] : [];
+    else { estado.chaves = estado.chaves.filter(c => c.idx !== idx); if (dir) estado.chaves.push({ idx, dir }); }
     let ordenadas;
-    if (!dir) {
+    if (!estado.chaves.length) {
       ordenadas = rows.slice().sort((a, b) => +a.dataset.ordOrig - +b.dataset.ordOrig);
     } else {
-      const chaves = new Map(rows.map(tr => [tr, chaveOrdenacaoCelula(tr.querySelectorAll('td')[idx])]));
-      const f = dir === 'asc' ? 1 : -1;
+      const mapas = estado.chaves.map(c => new Map(rows.map(tr => [tr, chaveOrdenacaoCelula(tr.querySelectorAll('td')[c.idx])])));
       ordenadas = rows.slice().sort((a, b) => {
-        const ka = chaves.get(a), kb = chaves.get(b);
-        if (ka.vazio || kb.vazio) return ka.vazio && kb.vazio ? +a.dataset.ordOrig - +b.dataset.ordOrig : (ka.vazio ? 1 : -1);
-        let c;
-        if (ka.n !== undefined && kb.n !== undefined) c = ka.n - kb.n;
-        else if (ka.n !== undefined) c = -1;        // número antes de texto
-        else if (kb.n !== undefined) c = 1;
-        else c = String(ka.s).localeCompare(String(kb.s), 'pt-BR', { numeric: true, sensitivity: 'base' });
-        return c ? c * f : +a.dataset.ordOrig - +b.dataset.ordOrig;
+        for (let k = 0; k < estado.chaves.length; k++) {
+          const f = estado.chaves[k].dir === 'asc' ? 1 : -1, ka = mapas[k].get(a), kb = mapas[k].get(b);
+          // vazio no fim mesmo no sentido decrescente (o f inverteria só quem tem valor)
+          if (ka.vazio || kb.vazio) { if (ka.vazio && kb.vazio) continue; return ka.vazio ? 1 : -1; }
+          let c;
+          if (ka.n !== undefined && kb.n !== undefined) c = ka.n - kb.n;
+          else if (ka.n !== undefined) c = -1;        // número antes de texto
+          else if (kb.n !== undefined) c = 1;
+          else c = String(ka.s).localeCompare(String(kb.s), 'pt-BR', { numeric: true, sensitivity: 'base' });
+          if (c) return c * f;
+        }
+        return +a.dataset.ordOrig - +b.dataset.ordOrig;
       });
-      // vazio no fim mesmo no sentido decrescente (o f acima inverteria só quem tem valor)
     }
     const totais = [...tbody.querySelectorAll('tr.total-row')];
     ordenadas.forEach(tr => tbody.appendChild(tr));
@@ -7818,9 +7833,13 @@ function ativarOrdenacaoDeColuna(tab, ths, tbody) {
     const ind = document.createElement('span');
     ind.className = 'ord-ind';
     th.insertBefore(ind, th.querySelector('.filtro-btn'));
+    th.title = 'Clique pra ordenar · Shift+clique soma outra coluna à ordenação (menor → maior, depois a próxima…)';
     th.addEventListener('click', ev => {
       if (ev.target.closest('.filtro-btn, input, select, button, a, textarea')) return;
-      ordenar(idx, estado.idx === idx ? (estado.dir === 'asc' ? 'desc' : null) : 'asc');
+      const atual = estado.chaves.find(c => c.idx === idx);
+      const prox = atual ? (atual.dir === 'asc' ? 'desc' : null) : 'asc';
+      if (ev.shiftKey || ev.ctrlKey || ev.metaKey) ordenar(idx, prox, true);
+      else ordenar(idx, estado.chaves.length === 1 && atual ? prox : 'asc');
     });
   });
   tab.__ordenar = ordenar;
@@ -7939,7 +7958,7 @@ function ativarFiltrosDeColuna(raiz) {
       menu.className = 'filtro-menu'; menu.dataset.col = idx;
       menu.innerHTML = `
         <div class="fm-topo">${rotulo || 'Coluna'}</div>
-        ${tab.__ordenar ? '<div class="fm-ordem"><a href="#" class="fm-asc">▲ Menor → maior</a><a href="#" class="fm-desc">▼ Maior → menor</a></div>' : ''}
+        ${tab.__ordenar ? '<div class="fm-ordem"><a href="#" class="fm-asc">▲ Menor → maior</a><a href="#" class="fm-desc">▼ Maior → menor</a></div><div class="fm-ordem"><a href="#" class="fm-asc2" title="Mantém a ordenação das outras colunas e usa esta como critério seguinte">➕ Somar ▲</a><a href="#" class="fm-desc2">➕ Somar ▼</a></div>' : ''}
         <input type="text" class="fm-busca" placeholder="Buscar...">
         <div class="fm-acoes"><a href="#" class="fm-todos">Selecionar tudo</a><a href="#" class="fm-nenhum">Limpar</a></div>
         <div class="fm-lista"></div>
@@ -7969,9 +7988,9 @@ function ativarFiltrosDeColuna(raiz) {
       menu.querySelector('.fm-todos').addEventListener('click', e => { e.preventDefault(); valores.forEach(v => sel.add(v)); pintarLista(menu.querySelector('.fm-busca').value); });
       menu.querySelector('.fm-nenhum').addEventListener('click', e => { e.preventDefault(); sel.clear(); pintarLista(menu.querySelector('.fm-busca').value); });
       menu.querySelector('.fm-cancela').addEventListener('click', () => fecharMenusFiltro());
-      [['.fm-asc', 'asc'], ['.fm-desc', 'desc']].forEach(([sel2, dir]) => {
+      [['.fm-asc', 'asc', false], ['.fm-desc', 'desc', false], ['.fm-asc2', 'asc', true], ['.fm-desc2', 'desc', true]].forEach(([sel2, dir, somar]) => {
         const a = menu.querySelector(sel2);
-        if (a) a.addEventListener('click', e => { e.preventDefault(); fecharMenusFiltro(); tab.__ordenar(idx, dir); });
+        if (a) a.addEventListener('click', e => { e.preventDefault(); fecharMenusFiltro(); tab.__ordenar(idx, dir, somar); });
       });
       menu.querySelector('.fm-ok').addEventListener('click', () => {
         // marcar tudo = sem filtro nessa coluna (igual ao Excel)
@@ -24953,10 +24972,10 @@ function pintarHojeOntemMonitorOlt(box, linhas, passado) {
   const lista = () => { const f = document.getElementById('mo-ho-fil').value; return cmp.filter(x => f === 'todos' || x.resultado === f).sort((a, b) => (a.dS == null ? 99 : a.dS) - (b.dS == null ? 99 : b.dS)); };
   const celulaJanela = (x, nd) => { const p = passado.get(x.contrato); const tem = p && p['s' + nd] != null; return `<td title="${tem ? `há ${nd} dias: ${moSinal(p['s' + nd])} (${moStatusTxt(p['st' + nd])})` : `sem registro de ${nd} dias atrás`}">${moVar(varDe(x, nd))}</td>`; };
   const desenhar = () => {
-    const l = lista(), corte = 300;
+    const l = lista(), corte = 1000;
     document.getElementById('mo-ho-resumo').textContent = `${l.length.toLocaleString('pt-BR')} cliente(s)`;
     document.getElementById('mo-ho-tabela').innerHTML = !l.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhum cliente nesse filtro (ou ainda não há base de ontem).</div></div>' : `
-      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:480px;overflow:auto"><table class="data-table" id="mo-ho-tab"><thead><tr><th>Cliente</th><th>Contrato</th><th>Cidade</th><th>OLT / PON</th><th>Ontem</th><th>Hoje</th><th>Variação</th>${JANELAS.map(nd => `<th>${nd} dias</th>`).join('')}<th>Atend. 90 d</th></tr></thead><tbody>
+      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="mo-ho-tab"><thead><tr><th>Cliente</th><th>Contrato</th><th>Cidade</th><th>OLT / PON</th><th>Ontem</th><th>Hoje</th><th>Variação</th>${JANELAS.map(nd => `<th>${nd} dias</th>`).join('')}<th>Atend. 90 d</th></tr></thead><tbody>
       ${l.slice(0, corte).map(x => `<tr><td class="cat-cell">${moLinkHist(x.contrato, x.nome)}</td><td>${moLinkContrato(x.contrato, x.gpon_id, x.olt, x.nome)}</td><td>${esc(x.cidade || '-')}</td><td>${esc(x.olt || '-')}<div style="font-size:11px;color:var(--text-muted)">PON ${esc(x.ponlink || '-')}</div></td>
         <td>${moSinal(x.sinal_ontem)}<div style="font-size:11px;color:var(--text-muted)">${esc(moStatusTxt(x.status_ontem))} · ${esc(formatDate(x.ontem_dia))}</div></td>
         <td>${moSinal(x.sinal)}<div style="font-size:11px;color:var(--text-muted)">${esc(moStatusTxt(x.status))} · ${esc(moDH(x.checado_em))}</div></td><td>${moVar(x.dS)}</td>${JANELAS.map(nd => celulaJanela(x, nd)).join('')}<td>${x.atend90}</td></tr>`).join('')}
@@ -25054,9 +25073,9 @@ function pintarAlteracoesMonitorOlt(box, altHoje, at, cliMap) {
   const lista = () => base().filter(a => on.has(a.tipo));
   function desenhar() {
     desenharCartoes();
-    const l = lista(), corte = 300;
+    const l = lista(), corte = 1000;
     document.getElementById('mo-al-tabela').innerHTML = !l.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma alteração nesse período.</div></div>' : `
-      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:480px;overflow:auto"><table class="data-table" id="mo-al-tab"><thead><tr><th>Quando</th><th>Alteração</th><th>Cliente</th><th>Contrato</th><th>Cidade</th><th>OLT / PON</th><th>Situação</th><th>Sinal</th><th>Atend. 90 d</th></tr></thead><tbody>
+      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="mo-al-tab"><thead><tr><th>Quando</th><th>Alteração</th><th>Cliente</th><th>Contrato</th><th>Cidade</th><th>OLT / PON</th><th>Situação</th><th>Sinal</th><th>Atend. 90 d</th></tr></thead><tbody>
       ${l.slice(0, corte).map(a => { const r = ROT[a.tipo] || ['neutral', a.tipo]; const d = a.de_sinal != null && a.para_sinal != null && Number(a.de_sinal) !== 0 && Number(a.para_sinal) !== 0 ? Number(a.para_sinal) - Number(a.de_sinal) : null;
         return `<tr><td>${esc(moDH(a.quando))}</td><td><span class="badge ${r[0]}">${esc(r[1])}</span></td><td class="cat-cell">${moLinkHist(a.contrato, a.nome)}</td><td>${moLinkContrato(a.contrato, (cliMap.get(a.contrato) || {}).gpon_id, a.olt, a.nome)}</td><td>${esc(a.cidade || '-')}</td><td>${esc(a.olt || '-')}<div style="font-size:11px;color:var(--text-muted)">PON ${esc(a.ponlink || '-')}</div></td>
         <td>${esc(moStatusTxt(a.de_status))} → <b>${esc(moStatusTxt(a.para_status))}</b></td><td>${moSinal(a.de_sinal)} → ${moSinal(a.para_sinal)} ${d != null ? '<div>' + moVar(d) + '</div>' : ''}</td><td>${(at.get(a.contrato) || {}).atend90 || 0}</td></tr>`; }).join('')}
@@ -25251,10 +25270,10 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
   const GR_BADGE = { critico: 'warn', atencao: 'amber', semsinal: 'neutral', ok: 'ok' };
   const dOntem = l => l.sinal != null && l.sinal_ontem != null && Number(l.sinal) !== 0 && Number(l.sinal_ontem) !== 0 ? Number(l.sinal) - Number(l.sinal_ontem) : null;
   const desenhar = () => {
-    const lista = filtrar(), corte = 300, mostrar = lista.slice(0, corte);
+    const lista = filtrar(), corte = 1000, mostrar = lista.slice(0, corte);
     document.getElementById('mo-cli-resumo').textContent = `${lista.length.toLocaleString('pt-BR')} cliente(s)`;
     document.getElementById('mo-cli-tabela').innerHTML = !lista.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhum cliente nesse filtro.</div></div>' : `
-      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:560px;overflow:auto"><table class="data-table" id="mo-cli-tab"><thead><tr>
+      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="mo-cli-tab"><thead><tr>
         <th>Sinal</th><th>Rx</th><th>vs ontem</th><th>Cliente</th><th>Contrato</th><th>IFI / IRR</th><th>Cidade / bairro</th><th>OLT / PON</th><th>Atend. 30 d</th><th>Atend. 90 d</th><th>Reparos 90 d</th><th>Último atendimento</th><th>Sinal lido em · contato do equipamento</th></tr></thead><tbody>
         ${mostrar.map(l => `<tr><td><span class="badge ${GR_BADGE[l.grupo]}">${esc(moStatusTxt(l.status))}</span></td>
           <td style="${l.grupo === 'critico' ? 'color:var(--danger);font-weight:700' : ''}">${moSinal(l.sinal)}</td><td>${moVar(dOntem(l))}</td><td class="cat-cell">${moLinkHist(l.contrato, l.nome)}</td><td>${moLinkContrato(l.contrato, l.gpon_id, l.olt, l.nome)}</td>
@@ -25440,8 +25459,24 @@ function renderMonitorOlt() {
   function mostrarConfig() { const c = document.getElementById('mo-config'); if (c) c.style.display = ''; }
   window.postMessage({ tipo: 'jh-ext-ping' }, location.origin);
   setTimeout(() => { pintarExtensao(); if (!EXT_JH.presente) mostrarConfig(); }, 400);
+  // quando o botão "Atualizar do AutoISP" volta a valer (3 h depois do último clique que mandou atualizar TODAS as ONUs)
+  const liberaAtualizacaoGeral = () => { const st = MONITOR_OLT.status; return st && st.atualizar_forcar_em ? new Date(st.atualizar_forcar_em).getTime() + 3 * 3600e3 : 0; };
   async function atualizarDoAutoIsp(automatico) {
     if (nuvemSaudavel() && !automatico) {
+      // O botão agora MANDA ATUALIZAR todas as ONUs (a OLT lê o sinal de cada uma) — não só lê — e só vale de 3 em 3 horas;
+      // a rotina automática de 6 em 6 h continua valendo sozinha (06/10/2026, pedido do cliente)
+      const lib = liberaAtualizacaoGeral();
+      if (lib > Date.now()) { toast('A atualização geral já foi pedida — o botão libera às ' + new Date(lib).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + '. A atualização automática de 6 em 6 h segue sozinha.', 'aviso', 6000); return; }
+      if (!confirm('Atualizar TODAS as ONUs agora?\n\nO sistema vai mandar a OLT ler o sinal de cada cliente (o mesmo do botão Atualizar do AutoISP), em lotes, ao longo das próximas ~3 horas, e liga a atualização automática de 6 em 6 horas.\n\nDepois deste clique o botão só poderá ser usado de novo daqui a 3 horas.')) return;
+      if (btnAtu) btnAtu.disabled = true;
+      const rg = await chamarColetorNuvem({ acao: 'atualizar_tudo' });
+      if (!rg.ok) {
+        if (btnAtu) btnAtu.disabled = false;
+        status(`<span style="color:var(--danger)">⚠ ${esc(rg.erro || 'não consegui pedir a atualização')}${rg.libera_em ? ' Libera às ' + esc(fmtHora(rg.libera_em)) + '.' : ''}</span>`);
+        await atualizarStatusColetor();
+        return;
+      }
+      toast('Atualização geral iniciada: as ONUs serão atualizadas em lotes nas próximas ~3 horas.', 'ok', 6000);
       if (btnAtu) btnAtu.disabled = true;
       status('☁ Coletando na nuvem… leva cerca de 1 minuto; pode continuar usando o sistema.');
       const rn = await chamarColetorNuvem({ acao: 'coletar' });
@@ -25663,6 +25698,7 @@ function renderMonitorOlt() {
     if (st.atualizar_ativo != null) {
       linhas.push(`Atualização do sinal das ONUs (6 em 6 h): <b style="color:${st.atualizar_ativo ? 'var(--success)' : 'var(--text-muted)'}">${st.atualizar_ativo ? 'ligada' : 'desligada'}</b>${st.atualizar_mensagem ? ' — ' + esc(st.atualizar_mensagem) : ''}`
         + (ar ? ` · última rodada ${esc(fmtDH(st.atualizar_ultima))}: <b>${(ar.atualizados || 0).toLocaleString('pt-BR')}</b> atualizada(s)${ar.erros ? `, ${ar.erros} erro(s)` : ''} · faltam <b>${(ar.restam || 0).toLocaleString('pt-BR')}</b> nesta janela de 6 h (de ${(ar.total_ativos || 0).toLocaleString('pt-BR')} clientes)` : '')
+        + (st.atualizar_forcar_em && Date.now() < new Date(st.atualizar_forcar_em).getTime() + 3 * 3600e3 ? ` · <b>atualização geral em andamento</b> (pedida às ${esc(fmtHora(st.atualizar_forcar_em))}; o botão libera às ${esc(fmtHora(new Date(st.atualizar_forcar_em).getTime() + 3 * 3600e3))})` : '')
         + (st.atualizar_inicio_em && !st.atualizar_ativo ? ` · <b>agendada pra ${esc(fmtDH(st.atualizar_inicio_em))}</b>` : '')
         + (st.atualizar_ativo ? ` <button type="button" class="btn-export-xls" id="mo-atu-toggle" style="margin-left:8px">Desligar</button>`
           : (st.atualizar_inicio_em ? ` <button type="button" class="btn-export-xls" id="mo-atu-toggle" style="margin-left:8px">Cancelar agendamento</button>`
@@ -25674,6 +25710,13 @@ function renderMonitorOlt() {
       btnSessao(precisa ? '📤 Enviar sessão do AutoISP' : '🔁 Renovar sessão'));
     const campoAuto = document.getElementById('mo-auto');
     if (campoAuto && campoAuto.closest('.field')) campoAuto.closest('.field').style.display = nuvemSaudavel() ? 'none' : '';
+    // botão "Atualizar do AutoISP": fica desabilitado durante as 3 h seguintes ao último clique
+    const libG = liberaAtualizacaoGeral(), bloqueado = nuvemSaudavel() && libG > Date.now();
+    if (btnAtu) {
+      btnAtu.disabled = bloqueado;
+      btnAtu.textContent = bloqueado ? '🔄 Atualizar do AutoISP (libera às ' + fmtHora(libG) + ')' : '🔄 Atualizar do AutoISP';
+      btnAtu.title = bloqueado ? 'A atualização geral já foi pedida. A atualização automática de 6 em 6 horas segue sozinha.' : 'Manda a OLT ler o sinal de TODAS as ONUs (em lotes, ao longo de ~3 h) e atualiza a leitura das OLTs. Só pode ser usado de 3 em 3 horas.';
+    }
   }
   async function atualizarStatusColetor() {
     MONITOR_OLT.status = await carregarStatusColetor();
@@ -25919,7 +25962,7 @@ function pintarTecnicoPreventivaMonitorOlt(box, linhas) {
     const sub = document.getElementById('mo-tec-sub');
     if (sub) sub.textContent = `(técnico = quem atendeu o contrato por último no período; ${ident.toLocaleString('pt-BR')} cliente(s) atendidos nos últimos ${N} dias)`;
     document.getElementById('mo-tec-tabela').innerHTML = !rows.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhum cliente monitorado foi atendido nesse período.</div></div>' : `
-      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:520px;overflow:auto"><table class="data-table" id="mo-tab-tec-prev"><thead><tr>
+      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="mo-tab-tec-prev"><thead><tr>
         <th>Técnico</th><th>Clientes</th><th>Crítico</th><th>Atenção</th><th>Sem sinal</th><th>% sinal ruim</th><th>Atend. ${N} d</th><th>Clientes com sinal ruim (contrato · sinal)</th></tr></thead><tbody>
         ${rows.map(r => `<tr><td class="cat-cell">${esc(r.tecnico)}<div><a href="#" class="mo-tec-ver" data-t="${esc(r.tecnico)}" style="font-size:11px">ver os ${r.total} contratos</a></div></td>
           <td>${r.total}</td><td style="${r.critico ? 'color:var(--danger);font-weight:700' : ''}">${r.critico}</td><td>${r.atencao}</td><td>${r.semsinal}</td><td>${pct(r.critico + r.atencao + r.semsinal, r.total)}</td><td>${r.atend}</td>
@@ -26328,7 +26371,7 @@ function renderRelMonitorOlt() {
     if (diasOrd.length) {
       const pts = k => diasOrd.map(dd => ({ label: dd.slice(8, 10) + '/' + dd.slice(5, 7), value: porDia.get(dd)[k] }));
       trendChart('rmm-graf-dia', [{ name: 'Crítico', color: '#dc2626', semArea: true, points: pts('critico') }, { name: 'Atenção', color: '#f59e0b', semArea: true, points: pts('atencao') }, { name: 'Sem sinal / energia / offline', color: '#7c3aed', semArea: true, points: pts('semsinal') }],
-        { legendaSemTotal: true, maxLabels: 16, expandir: true });
+        { legendaSemTotal: true, maxLabels: 16, expandir: true, seletor: true });
     } else document.getElementById('rmm-graf-dia').innerHTML = '<div class="empty">Ainda não há histórico diário nesse mês.</div>';
     listaSetas('rmm-melh-cid', melhoraSetas(porCidAlt));
     listaSetas('rmm-melh-olt', melhoraSetas(porOltAlt));
@@ -26362,7 +26405,7 @@ function renderRelMonitorOlt() {
         </tbody></table></div>`;
       trendChart('rmm-graf-rep', [
         { name: 'Chamados abertos', color: '#2563eb', points: mostrar.map(m => ({ label: nomeMes(m).slice(0, 3) + '/' + m.slice(2, 4), value: rep.get(m).total })) },
-        { name: 'De clientes monitorados', color: '#dc2626', points: mostrar.map(m => ({ label: nomeMes(m).slice(0, 3) + '/' + m.slice(2, 4), value: rep.get(m).monit })) }], { expandir: true });
+        { name: 'De clientes monitorados', color: '#dc2626', points: mostrar.map(m => ({ label: nomeMes(m).slice(0, 3) + '/' + m.slice(2, 4), value: rep.get(m).monit })) }], { expandir: true, seletor: true });
     };
     moMultiLigar('rmm-rep-meses', 'mês(es)', 'Todos os meses', pintarRep);
     pintarRep();
@@ -26372,7 +26415,7 @@ function renderRelMonitorOlt() {
     if (retCls.length) trendChart('rmm-graf-ret', [
       { name: 'IFI · sinal ruim', color: '#dc2626', semArea: true, points: cont('IFI', 'ruim') }, { name: 'IFI · sinal OK', color: '#2563eb', semArea: true, points: cont('IFI', 'ok') },
       { name: 'IRR · sinal ruim', color: '#f59e0b', semArea: true, points: cont('IRR', 'ruim') }, { name: 'IRR · sinal OK', color: '#16a34a', semArea: true, points: cont('IRR', 'ok') },
-      { name: 'Sem leitura de sinal', color: '#94a3b8', semArea: true, tracejado: true, points: cont(null, 'sem') }], { maxLabels: 16, expandir: true });
+      { name: 'Sem leitura de sinal', color: '#94a3b8', semArea: true, tracejado: true, points: cont(null, 'sem') }], { maxLabels: 16, expandir: true, seletor: true });
     else document.getElementById('rmm-graf-ret').innerHTML = '<div class="empty">Nenhum IFI/IRR nesse mês (importe a Produção/PCR).</div>';
     // tabela do tempo
     const pintarTempo = () => {
