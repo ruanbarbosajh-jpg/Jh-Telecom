@@ -25171,6 +25171,115 @@ function pintarAlteracoesMonitorOlt(box, altHoje, at, cliMap) {
   montarCidades(); desenhar(); desenharGrafico();
 }
 
+// ---- BASE COMPLETA das OLTs: clientes FORA da JH com sinal ruim (06/10/2026, pedido do cliente: "prever os clientes que estão com sinal ruim"
+// mesmo os que a JH nunca atendeu"). A função da nuvem lista as ONUs de cada OLT (`monitor_olt_base`) e lê o sinal de cada cliente ~1×/dia;
+// só a ÚLTIMA leitura fica guardada. O sinal é o que o AutoISP tem (não foi mandado atualizar): vale olhar o "último contato" de cada um.
+const MO_BASE_RUINS = ['critical', 'warning', 'loss_signal', 'power_fail', 'down'];
+async function carregarContagemBaseMonitorOlt() {
+  if (!supa) return null;
+  const q = () => supa.from('monitor_olt_base').select('gpon_id', { count: 'exact', head: true }).eq('jh', false);
+  try {
+    const rs = await Promise.all([q(), q().not('checado_em', 'is', null), q().eq('estado', 'active'), ...MO_BASE_RUINS.map(s => q().eq('estado', 'active').eq('status', s))]);
+    if (rs[0].error) return null;
+    const c = i => rs[i].count || 0;
+    return { listados: c(0), lidos: c(1), ativos: c(2), critico: c(3), atencao: c(4), loss: c(5), energia: c(6), offline: c(7) };
+  } catch (e) { return null; }
+}
+async function carregarLinhasBaseMonitorOlt() {
+  if (!supa) return null;
+  const out = [];
+  try {
+    for (let ini = 0; ini < 8000; ini += 1000) {
+      const { data, error } = await supa.from('monitor_olt_base').select('gpon_id,contrato,nome,cidade,bairro,olt,ponlink,sinal,status,acs_ultimo_contato,checado_em')
+        .eq('jh', false).eq('estado', 'active').in('status', MO_BASE_RUINS).order('sinal', { ascending: true, nullsFirst: false }).order('gpon_id').range(ini, ini + 999);
+      if (error) return out.length ? out : null;
+      out.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+  } catch (e) { return out.length ? out : null; }
+  return out;
+}
+function pintarBaseForaJhMonitorOlt(box) {
+  if (!box) return;
+  box.innerHTML = `
+    <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">🔭 Clientes fora da JH com sinal ruim <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(a base completa das OLTs — quem a JH ainda não atendeu nos últimos 90 dias — pra prever o chamado)</span></div>
+    <div id="mo-base-cards"><div class="panel" style="margin-bottom:12px"><div class="empty">Carregando a contagem…</div></div></div>
+    <div class="toolbar" style="margin-bottom:10px"><button type="button" class="btn" id="mo-base-carregar">📥 Carregar a lista de clientes</button><span id="mo-base-msg" style="font-size:12px;color:var(--text-muted);align-self:center"></span></div>
+    <div id="mo-base-lista"></div>
+    <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1.5rem">A varredura roda sozinha no servidor (de 10 em 10 minutos): lista as ONUs de cada OLT e lê o sinal de cada cliente cerca de 1 vez por dia — sem mandar a OLT medir de novo, então o sinal é o último que o AutoISP tem (olhe o "último contato"). Quando um desses clientes passa a ser atendido pela JH, ele sai daqui e entra na lista da preventiva.</p>`;
+  const msg = t => { const e = document.getElementById('mo-base-msg'); if (e) e.innerHTML = t; };
+  const cards = c => {
+    const el = document.getElementById('mo-base-cards'); if (!el) return;
+    if (!c) { el.innerHTML = '<div class="panel" style="margin-bottom:12px"><div class="empty">Ainda não há base listada: rode o <b>sql/PASSO-44</b> e publique a função <b>autoisp</b> atualizada. A varredura começa sozinha.</div></div>'; return; }
+    const pr = c.ativos ? formatPct((c.critico + c.atencao + c.loss + c.energia + c.offline) / c.ativos * 100, 1) : '-';
+    el.innerHTML = `<div class="stat-cards" style="margin-bottom:12px">
+      ${statCard('blue', icPessoas, 'ONUs listadas (fora da JH)', c.listados.toLocaleString('pt-BR'), `${c.lidos.toLocaleString('pt-BR')} já lidas (${c.listados ? formatPct(c.lidos / c.listados * 100, 0) : '0%'})`)}
+      ${statCard('red', icAviso, 'Crítico', c.critico.toLocaleString('pt-BR'), 'sinal muito baixo — prever antes de virar chamado')}
+      ${statCard('orange', icBarras, 'Atenção', c.atencao.toLocaleString('pt-BR'), 'sinal caindo')}
+      ${statCard('purple', icX, 'Sem sinal / energia / offline', (c.loss + c.energia + c.offline).toLocaleString('pt-BR'), `${c.loss.toLocaleString('pt-BR')} sem sinal · ${c.energia.toLocaleString('pt-BR')} sem energia · ${c.offline.toLocaleString('pt-BR')} offline`)}
+      ${statCard('neutral', icOk, '% com sinal ruim', pr, `dos ${c.ativos.toLocaleString('pt-BR')} clientes ativos já lidos`)}</div>`;
+  };
+  carregarContagemBaseMonitorOlt().then(cards);
+  const pintarLista = linhas => {
+    const el = document.getElementById('mo-base-lista'); if (!el) return;
+    const base = linhas.filter(l => moNaCidadeTopo(l.cidade));
+    const pt = (a, b) => a.localeCompare(b, 'pt-BR');
+    const cidades = [...new Set(base.map(l => l.cidade).filter(Boolean))].sort(pt);
+    el.innerHTML = `<div class="toolbar" style="margin-bottom:10px">
+        <div class="field"><label>Sinal</label><select id="mo-base-sit"><option value="preventiva">Preventiva (Crítico + Atenção)</option><option value="ruim">Todo sinal ruim (inclui sem sinal)</option><option value="critical">Só Crítico</option><option value="warning">Só Atenção</option><option value="semsinal">Sem sinal / energia / offline</option></select></div>
+        ${moMulti('mo-base-cidade', 'Cidade', cidades, null, 'Todas as cidades')}
+        <div class="field"><label>Bairro</label><span id="mo-base-bairro-wrap"></span></div>
+        <div class="field"><label>Último contato</label><select id="mo-base-vel"><option value="">Todos</option><option value="novo">Até 24 h</option><option value="velho">Mais de 24 h</option><option value="muito">Mais de 3 dias</option></select></div>
+        <button type="button" class="btn-export-xls" id="mo-base-excel">⤓ Excel (todos os filtrados)</button><span id="mo-base-resumo" style="font-size:12px;color:var(--text-muted);align-self:center"></span></div>
+      <div id="mo-base-tabela"></div>`;
+    const idade = l => l.acs_ultimo_contato ? (Date.now() - new Date(l.acs_ultimo_contato).getTime()) / 36e5 : null;
+    const filtrar = () => {
+      const sit = document.getElementById('mo-base-sit').value, vel = document.getElementById('mo-base-vel').value, cs = moFiltro('mo-base-cidade'), bs = moFiltro('mo-base-bairro');
+      return base.filter(l => (sit === 'ruim' || (sit === 'preventiva' ? (l.status === 'critical' || l.status === 'warning') : sit === 'semsinal' ? (l.status !== 'critical' && l.status !== 'warning') : l.status === sit))
+        && (!cs || cs.has(l.cidade || '')) && (!bs || bs.has(l.bairro || ''))
+        && (!vel || (idade(l) != null && (vel === 'novo' ? idade(l) <= 24 : vel === 'velho' ? idade(l) > 24 : idade(l) > 72))));
+    };
+    const desenhar = () => {
+      const l = filtrar(), corte = 1000;
+      document.getElementById('mo-base-resumo').textContent = `${l.length.toLocaleString('pt-BR')} cliente(s)`;
+      document.getElementById('mo-base-tabela').innerHTML = !l.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhum cliente nesse filtro.</div></div>' : `
+        <div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="mo-base-tab"><thead><tr><th>Sinal</th><th>Rx</th><th>Cliente</th><th>Contrato</th><th>Cidade / bairro</th><th>OLT / PON</th><th>Último contato do equipamento</th><th>Lido pelo sistema</th></tr></thead><tbody>
+        ${l.slice(0, corte).map(x => { const h = idade(x); return `<tr><td><span class="badge ${x.status === 'critical' ? 'warn' : x.status === 'warning' ? 'amber' : 'neutral'}">${esc(moStatusTxt(x.status))}</span></td>
+          <td style="${x.status === 'critical' ? 'color:var(--danger);font-weight:700' : ''}">${moSinal(x.sinal)}</td><td class="cat-cell">${esc(x.nome || '-')}</td><td>${moLinkContrato(x.contrato || x.gpon_id, x.gpon_id, x.olt, x.nome)}</td>
+          <td>${esc(x.cidade || '-')}${x.bairro ? `<div style="font-size:11px;color:var(--text-muted)">${esc(x.bairro)}</div>` : ''}</td><td>${esc(x.olt || '-')}<div style="font-size:11px;color:var(--text-muted)">PON ${esc(x.ponlink || '-')}</div></td>
+          <td>${x.acs_ultimo_contato ? `${esc(moDH(x.acs_ultimo_contato))}<div style="font-size:11px;color:var(--text-muted)">${haQuantoTempo(x.acs_ultimo_contato)}</div>${h > 72 ? '<span class="badge warn">dado muito velho</span>' : h > 24 ? '<span class="badge amber">dado velho</span>' : ''}` : '<span class="badge neutral">sem contato</span>'}</td>
+          <td>${x.checado_em ? esc(moDH(x.checado_em)) : '-'}</td></tr>`; }).join('')}
+        </tbody></table></div>${l.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${l.length.toLocaleString('pt-BR')} — o filtro e o Excel levam todos.</p>` : ''}`;
+      ativarFiltrosDeColuna(document.getElementById('mo-base-tabela'));
+    };
+    const ptb = (a, b) => a.localeCompare(b, 'pt-BR');
+    function montarBairros() {
+      const cs = moFiltro('mo-base-cidade');
+      const bs = [...new Set(base.filter(l => l.bairro && (!cs || cs.has(l.cidade || ''))).map(l => l.bairro))].sort(ptb);
+      document.getElementById('mo-base-bairro-wrap').innerHTML = multiSelectInner('mo-base-bairro', bs.map(esc), { preset: moPreset('mo-base-bairro', bs), allLabel: 'Todos', noneLabel: 'Nenhum', emptyMsg: 'Sem bairros' });
+      moMultiLigar('mo-base-bairro', 'bairro(s)', 'Todos os bairros', desenhar);
+    }
+    ['mo-base-sit', 'mo-base-vel'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
+    moMultiLigar('mo-base-cidade', 'cidade(s)', 'Todas as cidades', () => { montarBairros(); desenhar(); });
+    document.getElementById('mo-base-excel').addEventListener('click', () => exportarQuadroPresenca('monitor-olt-base-fora-da-jh-' + hojeISOLocal(),
+      ['Sinal', 'Rx (dBm)', 'Cliente', 'ID Int6', 'Contrato', 'Cidade', 'Bairro', 'OLT', 'PON', 'Último contato do equipamento', 'Lido pelo sistema em'],
+      filtrar().map(x => [moStatusTxt(x.status), x.sinal, x.nome || '', x.gpon_id, x.contrato || '', x.cidade || '', x.bairro || '', x.olt || '', x.ponlink || '', x.acs_ultimo_contato || '', x.checado_em || '']), 'Fora da JH'));
+    montarBairros(); desenhar();
+  };
+  const btn = document.getElementById('mo-base-carregar');
+  btn.addEventListener('click', async () => {
+    btn.disabled = true; msg('Carregando a lista…');
+    const l = await carregarLinhasBaseMonitorOlt();
+    btn.disabled = false;
+    if (!document.getElementById('mo-base-lista')) return;
+    if (!l) { msg('<span style="color:var(--danger)">⚠ Não consegui ler a base (rode o sql/PASSO-44).</span>'); return; }
+    MONITOR_OLT.baseLinhas = l; MONITOR_OLT.baseEm = Date.now();
+    msg(`${l.length.toLocaleString('pt-BR')} cliente(s) com sinal ruim carregado(s)${l.length >= 8000 ? ' (limite de 8.000 — use os filtros)' : ''} · ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`);
+    pintarLista(l);
+  });
+  if (MONITOR_OLT.baseLinhas) { msg(`${MONITOR_OLT.baseLinhas.length.toLocaleString('pt-BR')} cliente(s) carregado(s) às ${new Date(MONITOR_OLT.baseEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} — clique em Carregar pra atualizar`); pintarLista(MONITOR_OLT.baseLinhas); }
+}
+
 // PREVENTIVA: cartões, comparativo sinal × atendimentos, LISTA de clientes (com IFI/IRR) e o MAPA embaixo dela.
 // Devolve as linhas (com atendimentos) pro resto da página.
 function pintarClientesMonitorOlt(box, cli, st, semCliente) {
@@ -25418,7 +25527,7 @@ function renderMonitorOlt() {
         <button type="button" class="btn-export-xls" id="rm-recarregar">↻ Recarregar tabelas</button>
         <span id="rm-info" style="font-size:12px;color:var(--text-muted)"></span></div>
     </div>
-    <div id="rm-wrap-prev"><div id="rm-prev-clientes"></div><div id="rm-prev-tecnico"></div><div id="rm-prev-ontem"></div><div id="rm-prev-alt"></div></div>
+    <div id="rm-wrap-prev"><div id="rm-prev-clientes"></div><div id="rm-prev-base"></div><div id="rm-prev-tecnico"></div><div id="rm-prev-ontem"></div><div id="rm-prev-alt"></div></div>
     <div class="panel" style="margin:2.5rem 0 1rem;border-left:6px solid #f59e0b;padding:14px 18px">
       <div style="font-size:16px;font-weight:800;letter-spacing:.3px">2 · GERAL — OLTs e cidades</div>
       <div style="font-size:13px;color:var(--text-secondary);margin-top:4px">Busca de qualquer assinante, as OLTs das 6 cidades (conexão e os clientes da JH em cada uma) e o resumo por cidade. O relatório do mês fica na aba <a href="#" id="mo-ir-relmes">Relatório do Monitoramento</a>.</div>
@@ -25704,6 +25813,13 @@ function renderMonitorOlt() {
           : (st.atualizar_inicio_em ? ` <button type="button" class="btn-export-xls" id="mo-atu-toggle" style="margin-left:8px">Cancelar agendamento</button>`
             : ` <button type="button" class="btn-export-xls" id="mo-atu-toggle" style="margin-left:8px">Ligar agora</button> <button type="button" class="btn-export-xls" id="mo-atu-agendar" style="margin-left:4px" title="Liga sozinha à meia-noite (00h de Brasília), com o computador desligado">Ligar às 00h</button>`)));
     }
+    // varredura da base completa das OLTs (clientes fora da JH, 1 leitura por dia, só GET)
+    if (st.base_ativo != null) {
+      const br = st.base_resumo || null;
+      linhas.push(`Base completa das OLTs (clientes fora da JH): <b style="color:${st.base_ativo ? 'var(--success)' : 'var(--text-muted)'}">${st.base_ativo ? 'ligada' : 'desligada'}</b>`
+        + (br && br.leitura ? ` · última rodada ${esc(fmtDH(st.base_ultima))}: <b>${(br.leitura.lidos || 0).toLocaleString('pt-BR')}</b> cliente(s) lido(s)${br.leitura.erros ? `, ${br.leitura.erros} erro(s)` : ''}${br.lista && br.lista.listadas ? ` · ${br.lista.listadas} OLT(s) listada(s)` : ''}${br.leitura.parou ? ' — <b style="color:var(--danger)">parou: ' + esc(br.leitura.parou) + '</b>' : ''}` : '')
+        + ` <button type="button" class="btn-export-xls" id="mo-base-toggle" style="margin-left:8px">${st.base_ativo ? 'Desligar' : 'Ligar'}</button>`);
+    }
     const precisa = !st.tem_sessao || st.sessao_ok === false;
     if (precisa) { const cfg = document.getElementById('mo-config'); if (cfg) cfg.style.display = ''; }
     el.innerHTML = caixa(cor, selo, `<div style="font-size:13px;line-height:1.8;margin-top:6px">${linhas.join('<br>')}</div><div id="mo-novaleitura"></div>`,
@@ -25791,6 +25907,11 @@ function renderMonitorOlt() {
       const t = (document.getElementById('mo-colar-txt').value || '').trim();
       if (!t) { toast('Cole os cookies primeiro.', 'aviso'); return; }
       enviarSessao(t).then(() => { const x = document.getElementById('mo-colar-txt'); if (x) x.value = ''; });
+      return;
+    }
+    if (ev.target.closest('#mo-base-toggle')) {
+      const lig = !(MONITOR_OLT.status && MONITOR_OLT.status.base_ativo);
+      chamarColetorNuvem({ acao: 'base_config', ativo: lig }).then(async r => { if (!r.ok) toast(r.erro || 'não consegui mudar', 'erro', 5000); else toast(lig ? 'Varredura da base ligada.' : 'Varredura da base desligada.', 'ok', 3500); await atualizarStatusColetor(); });
       return;
     }
     if (ev.target.closest('#mo-atu-agendar')) {
@@ -26038,6 +26159,7 @@ function ligarRelatorioMonitorOlt(onVerInt6) {
     if (!P || !document.getElementById('rm-prev-clientes')) return;
     const cli = P.cli.filter(c => moNaCidadeTopo(c.cidade));
     const r = pintarClientesMonitorOlt(document.getElementById('rm-prev-clientes'), cli, MONITOR_OLT.status, P.semCli);
+    pintarBaseForaJhMonitorOlt(document.getElementById('rm-prev-base'));
     pintarTecnicoPreventivaMonitorOlt(document.getElementById('rm-prev-tecnico'), r.linhas);
     pintarHojeOntemMonitorOlt(document.getElementById('rm-prev-ontem'), r.linhas, P.passado);
     pintarAlteracoesMonitorOlt(document.getElementById('rm-prev-alt'), P.altHoje, r.at, new Map(P.cli.map(c => [c.contrato, c])));
