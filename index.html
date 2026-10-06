@@ -25580,10 +25580,10 @@ function renderMonitorOlt() {
   async function atualizarDoAutoIsp(automatico) {
     if (nuvemSaudavel() && !automatico) {
       // O botão agora MANDA ATUALIZAR todas as ONUs (a OLT lê o sinal de cada uma) — não só lê — e só vale de 3 em 3 horas;
-      // a rotina automática de 6 em 6 h continua valendo sozinha (06/10/2026, pedido do cliente)
+      // a rotina automática de 4 em 4 h continua valendo sozinha (06/10/2026, pedido do cliente)
       const lib = liberaAtualizacaoGeral();
-      if (lib > Date.now()) { toast('A atualização geral já foi pedida — o botão libera às ' + new Date(lib).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + '. A atualização automática de 6 em 6 h segue sozinha.', 'aviso', 6000); return; }
-      if (!confirm('Atualizar TODAS as ONUs agora?\n\nO sistema vai mandar a OLT ler o sinal de cada cliente (o mesmo do botão Atualizar do AutoISP), em lotes, ao longo das próximas ~3 horas, e liga a atualização automática de 6 em 6 horas.\n\nDepois deste clique o botão só poderá ser usado de novo daqui a 3 horas.')) return;
+      if (lib > Date.now()) { toast('A atualização geral já foi pedida — o botão libera às ' + new Date(lib).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + '. A atualização automática de 4 em 4 h segue sozinha.', 'aviso', 6000); return; }
+      if (!confirm('Atualizar TODAS as ONUs agora?\n\nO sistema vai mandar a OLT ler o sinal de cada cliente (o mesmo do botão Atualizar do AutoISP), em lotes, ao longo das próximas ~3 horas, e liga a atualização automática de 4 em 4 horas.\n\nDepois deste clique o botão só poderá ser usado de novo daqui a 3 horas.')) return;
       if (btnAtu) btnAtu.disabled = true;
       const rg = await chamarColetorNuvem({ acao: 'atualizar_tudo' });
       if (!rg.ok) {
@@ -25809,11 +25809,11 @@ function renderMonitorOlt() {
     if (st.ok && ev && (ev.novas != null)) linhas.push(`Na última coleta: <b>${ev.novas}</b> nova(s) · <b>${ev.reabertas}</b> reaberta(s) · <b>${ev.normalizadas}</b> normalizada(s) · <b>${ev.pioraram}</b> piorou(aram) · <b>${ev.melhoraram}</b> melhorou(aram) · <b>${ev.em_aberto}</b> em aberto no total`);
     const cr = st.clientes_resumo;
     if (cr && st.clientes_ultima) linhas.push(`Varredura de clientes: <b>${esc(fmtDH(st.clientes_ultima))}</b> (${haQuantoTempo(st.clientes_ultima)}) — ${cr.consultados || 0} consultado(s) · ${cr.ativos || 0} ativos · <b>${(cr.ruins || 0)}</b> em atenção/crítico · ${cr.sem_sinal || 0} sem sinal · ${cr.fora || 0} não achado(s) no AutoISP${cr.pendentes > (cr.consultados || 0) ? ` · ${cr.pendentes - (cr.consultados || 0)} na fila` : ''}`);
-    // atualização automática das ONUs (manda a OLT ler o sinal de cada cliente a cada 6 h — janelas 00h/06h/12h/18h de Brasília)
+    // atualização automática das ONUs (manda a OLT ler o sinal de cada cliente a cada 4 h — janelas 00h/04h/08h/12h/16h/20h de Brasília; era 6 h até 06/10/2026)
     const ar = st.atualizar_resumo || null;
     if (st.atualizar_ativo != null) {
-      linhas.push(`Atualização do sinal das ONUs (6 em 6 h): <b style="color:${st.atualizar_ativo ? 'var(--success)' : 'var(--text-muted)'}">${st.atualizar_ativo ? 'ligada' : 'desligada'}</b>${st.atualizar_mensagem ? ' — ' + esc(st.atualizar_mensagem) : ''}`
-        + (ar ? ` · última rodada ${esc(fmtDH(st.atualizar_ultima))}: <b>${(ar.atualizados || 0).toLocaleString('pt-BR')}</b> atualizada(s)${ar.erros ? `, ${ar.erros} erro(s)` : ''} · faltam <b>${(ar.restam || 0).toLocaleString('pt-BR')}</b> nesta janela de 6 h (de ${(ar.total_ativos || 0).toLocaleString('pt-BR')} clientes)` : '')
+      linhas.push(`Atualização do sinal das ONUs (4 em 4 h): <b style="color:${st.atualizar_ativo ? 'var(--success)' : 'var(--text-muted)'}">${st.atualizar_ativo ? 'ligada' : 'desligada'}</b>${st.atualizar_mensagem ? ' — ' + esc(st.atualizar_mensagem) : ''}`
+        + (ar ? ` · última rodada ${esc(fmtDH(st.atualizar_ultima))}: <b>${(ar.atualizados || 0).toLocaleString('pt-BR')}</b> atualizada(s)${ar.erros ? `, ${ar.erros} erro(s)` : ''} · faltam <b>${(ar.restam || 0).toLocaleString('pt-BR')}</b> nesta janela de 4 h (de ${(ar.total_ativos || 0).toLocaleString('pt-BR')} clientes)` : '')
         + (st.atualizar_forcar_em && Date.now() < new Date(st.atualizar_forcar_em).getTime() + 3 * 3600e3 ? ` · <b>atualização geral em andamento</b> (pedida às ${esc(fmtHora(st.atualizar_forcar_em))}; o botão libera às ${esc(fmtHora(new Date(st.atualizar_forcar_em).getTime() + 3 * 3600e3))}; as leituras novas aparecem nas tabelas ao clicar em ↻ Recarregar tabelas)` : '')
         + (st.atualizar_inicio_em && !st.atualizar_ativo ? ` · <b>agendada pra ${esc(fmtDH(st.atualizar_inicio_em))}</b>` : '')
         + (st.atualizar_ativo ? ` <button type="button" class="btn-export-xls" id="mo-atu-toggle" style="margin-left:8px">Desligar</button>`
@@ -25838,7 +25838,7 @@ function renderMonitorOlt() {
     if (btnAtu) {
       btnAtu.disabled = bloqueado;
       btnAtu.textContent = bloqueado ? '🔄 Atualizar do AutoISP (libera às ' + fmtHora(libG) + ')' : '🔄 Atualizar do AutoISP';
-      btnAtu.title = bloqueado ? 'A atualização geral já foi pedida. A atualização automática de 6 em 6 horas segue sozinha.' : 'Manda a OLT ler o sinal de TODAS as ONUs (em lotes, ao longo de ~3 h) e atualiza a leitura das OLTs. Só pode ser usado de 3 em 3 horas.';
+      btnAtu.title = bloqueado ? 'A atualização geral já foi pedida. A atualização automática de 4 em 4 horas segue sozinha.' : 'Manda a OLT ler o sinal de TODAS as ONUs (em lotes, ao longo de ~3 h) e atualiza a leitura das OLTs. Só pode ser usado de 3 em 3 horas.';
     }
   }
   async function atualizarStatusColetor() {
@@ -25922,14 +25922,14 @@ function renderMonitorOlt() {
       return;
     }
     if (ev.target.closest('#mo-atu-agendar')) {
-      if (!confirm('Ligar a atualização automática às 00h (meia-noite de Brasília)?\n\nEla liga sozinha no servidor, mesmo com o seu computador desligado, e passa a mandar a OLT ler o sinal de cada cliente em lotes pequenos, de 10 em 10 minutos, cobrindo todos a cada 6 horas (00h, 06h, 12h, 18h). Para sozinha se o AutoISP começar a dar erro.')) return;
+      if (!confirm('Ligar a atualização automática às 00h (meia-noite de Brasília)?\n\nEla liga sozinha no servidor, mesmo com o seu computador desligado, e passa a mandar a OLT ler o sinal de cada cliente em lotes pequenos, de 10 em 10 minutos, cobrindo todos a cada 4 horas (00h, 04h, 08h, 12h, 16h, 20h). Para sozinha se o AutoISP começar a dar erro.')) return;
       const b = new Date(Date.now() - 3 * 3600e3), meiaNoite = new Date(Date.UTC(b.getUTCFullYear(), b.getUTCMonth(), b.getUTCDate() + 1) + 3 * 3600e3);
       chamarColetorNuvem({ acao: 'atualizar_config', ativo: false, iniciar_em: meiaNoite.toISOString() }).then(async r => { if (!r.ok) toast(r.erro || 'não consegui agendar', 'erro', 5000); else toast('Agendada: liga sozinha à meia-noite.', 'ok', 4000); await atualizarStatusColetor(); });
       return;
     }
     if (ev.target.closest('#mo-atu-toggle')) {
       const lig = !(MONITOR_OLT.status && (MONITOR_OLT.status.atualizar_ativo || MONITOR_OLT.status.atualizar_inicio_em));
-      const ok = !lig || confirm('Ligar a atualização automática?\n\nO sistema vai mandar a OLT ler o sinal de cada cliente (o mesmo do botão Atualizar do AutoISP), em lotes pequenos, de 10 em 10 minutos, até cobrir todos a cada 6 horas (00h, 06h, 12h, 18h). Para sozinha se o AutoISP começar a dar erro.');
+      const ok = !lig || confirm('Ligar a atualização automática?\n\nO sistema vai mandar a OLT ler o sinal de cada cliente (o mesmo do botão Atualizar do AutoISP), em lotes pequenos, de 10 em 10 minutos, até cobrir todos a cada 4 horas (00h, 04h, 08h, 12h, 16h, 20h). Para sozinha se o AutoISP começar a dar erro.');
       if (!ok) return;
       chamarColetorNuvem({ acao: 'atualizar_config', ativo: lig }).then(async r => { if (!r.ok) toast(r.erro || 'não consegui mudar', 'erro', 5000); else toast(lig ? 'Atualização automática ligada.' : 'Atualização automática desligada.', 'ok', 3500); await atualizarStatusColetor(); });
       return;
