@@ -24863,6 +24863,11 @@ async function carregarSinalPassado() {
 }
 // dia local (AAAA-MM-DD) de um instante ISO — pro filtro/gráfico por data de atualização
 const moDiaLocal = q => q ? isoLocalDe(new Date(q)) : '';
+// filtro de PERÍODO em dias das listas (07/10/2026, pedido do cliente: "é o de 3, 7, 15, 20, 30 e 45 dias", não campo de data)
+const MO_PER_DIAS = [3, 7, 15, 20, 30, 45];
+const moOpcoesPeriodo = () => `<option value="">Todos</option>${MO_PER_DIAS.map(d => `<option value="${d}">Últimos ${d} dias</option>`).join('')}`;
+// o dia (AAAA-MM-DD) está dentro dos últimos N dias? N vazio = sem filtro; dia vazio com filtro ligado = fora
+const moNoPeriodoDias = (dia, n) => { n = Number(n); if (!n) return true; return !!dia && dia >= isoLocalDe(new Date(Date.now() - n * 864e5)); };
 // GRÁFICO DE PERÍODO das listas (07/10/2026, pedido do cliente): quantos clientes por DIA da última atualização do sinal, por situação.
 // itens: [{ dia: 'AAAA-MM-DD' | '', g: 'critico'|'atencao'|'semsinal'|'ok' }]. O elemento guarda o gráfico (e as caixas da legenda) entre redesenhos.
 function moGraficoPeriodo(elId, itens, titulo) {
@@ -25415,17 +25420,15 @@ function pintarBaseForaJhMonitorOlt(box) {
         ${moMulti('mo-base-cidade', 'Cidade', cidades, null, 'Todas as cidades')}
         <div class="field"><label>Bairro</label><span id="mo-base-bairro-wrap"></span></div>
         <div class="field"><label>Última atualização</label><select id="mo-base-vel"><option value="">Todos</option><option value="novo">Atualizado (até 24 h)</option><option value="velho">Mais de 24 h</option><option value="sem">Ainda não atualizado</option></select></div>
-        <div class="field"><label>Atualizado de</label><input type="date" id="mo-base-ade" title="Dia da última atualização do sinal (começo)"></div>
-        <div class="field"><label>Atualizado até</label><input type="date" id="mo-base-aate" title="Dia da última atualização do sinal (fim)"></div>
+        <div class="field"><label>Atualizado nos últimos</label><select id="mo-base-aper" title="Só clientes cuja última atualização do sinal foi dentro do período">${moOpcoesPeriodo()}</select></div>
         <button type="button" class="btn-export-xls" id="mo-base-excel">⤓ Excel (todos os filtrados)</button><span id="mo-base-resumo" style="font-size:12px;color:var(--text-muted);align-self:center"></span></div>
       <div class="panel" id="mo-base-grafico" style="margin-bottom:12px"></div>
       <div id="mo-base-tabela"></div>`;
     const idade = l => l.refresh_em ? (Date.now() - new Date(l.refresh_em).getTime()) / 36e5 : null;   // idade da ÚLTIMA ATUALIZAÇÃO do sinal
     const filtrar = () => {
       const sit = document.getElementById('mo-base-sit').value, vel = document.getElementById('mo-base-vel').value, cs = moFiltro('mo-base-cidade'), bs = moFiltro('mo-base-bairro');
-      const aDe = document.getElementById('mo-base-ade').value, aAte = document.getElementById('mo-base-aate').value;
-      const noPeriodo = l => { if (!aDe && !aAte) return true; const d = moDiaLocal(l.refresh_em); return !!d && (!aDe || d >= aDe) && (!aAte || d <= aAte); };
-      return base.filter(l => noPeriodo(l) && (sit === 'ruim' || (sit === 'preventiva' ? (l.status === 'critical' || l.status === 'warning') : sit === 'semsinal' ? (l.status !== 'critical' && l.status !== 'warning') : l.status === sit))
+      const aPer = document.getElementById('mo-base-aper').value;
+      return base.filter(l => moNoPeriodoDias(moDiaLocal(l.refresh_em), aPer) && (sit === 'ruim' || (sit === 'preventiva' ? (l.status === 'critical' || l.status === 'warning') : sit === 'semsinal' ? (l.status !== 'critical' && l.status !== 'warning') : l.status === sit))
         && (!cs || cs.has(l.cidade || '')) && (!bs || bs.has(l.bairro || ''))
         && (!vel || (vel === 'sem' ? idade(l) == null : (idade(l) != null && (vel === 'novo' ? idade(l) <= 24 : idade(l) > 24)))));
     };
@@ -25450,7 +25453,7 @@ function pintarBaseForaJhMonitorOlt(box) {
       document.getElementById('mo-base-bairro-wrap').innerHTML = multiSelectInner('mo-base-bairro', bs.map(esc), { preset: moPreset('mo-base-bairro', bs), allLabel: 'Todos', noneLabel: 'Nenhum', emptyMsg: 'Sem bairros' });
       moMultiLigar('mo-base-bairro', 'bairro(s)', 'Todos os bairros', desenhar);
     }
-    ['mo-base-sit', 'mo-base-vel', 'mo-base-ade', 'mo-base-aate'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
+    ['mo-base-sit', 'mo-base-vel', 'mo-base-aper'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
     moMultiLigar('mo-base-cidade', 'cidade(s)', 'Todas as cidades', () => { montarBairros(); desenhar(); });
     document.getElementById('mo-base-excel').addEventListener('click', () => exportarQuadroPresenca('monitor-olt-base-fora-da-jh-' + hojeISOLocal(),
       ['Sinal', 'Rx (dBm)', 'Cliente', 'ID Int6', 'Contrato', 'Cidade', 'Bairro', 'OLT', 'PON', 'Última atualização', 'Lido pelo sistema em'],
@@ -25528,10 +25531,8 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
       ${moMulti('mo-cli-cidade', 'Cidade', [...new Set(linhas.map(l => l.cidade).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR')), null, 'Todas as cidades')}
       <div class="field"><label>Bairro</label><span id="mo-cli-bairro-wrap"></span></div>
       <div class="field"><label>Dado do equipamento</label><select id="mo-cli-vel"><option value="">Todos</option><option value="novo">Atualizado (até 24 h)</option><option value="velho">Velho (mais de 24 h)</option><option value="muito">Muito velho (mais de 3 dias)</option><option value="sem">Sem leitura registrada</option></select></div>
-      <div class="field"><label>Atualizado de</label><input type="date" id="mo-cli-ade" title="Dia da última atualização do sinal (começo)"></div>
-      <div class="field"><label>Atualizado até</label><input type="date" id="mo-cli-aate" title="Dia da última atualização do sinal (fim)"></div>
-      <div class="field"><label>Atendido de</label><input type="date" id="mo-cli-tde" title="Dia do último atendimento da JH (começo)"></div>
-      <div class="field"><label>Atendido até</label><input type="date" id="mo-cli-tate" title="Dia do último atendimento da JH (fim)"></div>
+      <div class="field"><label>Atualizado nos últimos</label><select id="mo-cli-aper" title="Só clientes cuja última atualização do sinal foi dentro do período">${moOpcoesPeriodo()}</select></div>
+      <div class="field"><label>Atendido nos últimos</label><select id="mo-cli-tper" title="Só clientes cujo último atendimento da JH foi dentro do período">${moOpcoesPeriodo()}</select></div>
       <button type="button" class="btn-export-xls" id="mo-cli-excel">⤓ Excel (todos os filtrados)</button>
       <span id="mo-cli-resumo" style="font-size:12px;color:var(--text-muted);align-self:center"></span>
     </div>
@@ -25569,9 +25570,8 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
   const naFila = l => !!forcarMs && Date.now() < forcarMs + 3 * 3600e3 && (!l.refresh_em || new Date(l.refresh_em).getTime() < forcarMs);
   const filtrar = () => {
     const sit = sel('mo-cli-sit'), fq = sel('mo-cli-freq'), cidSet = moFiltro('mo-cli-cidade'), baiSet = moFiltro('mo-cli-bairro'), rt = sel('mo-cli-ret'), vel = sel('mo-cli-vel');
-    const aDe = sel('mo-cli-ade'), aAte = sel('mo-cli-aate'), tDe = sel('mo-cli-tde'), tAte = sel('mo-cli-tate');
-    const noPeriodo = (dia, de, ate) => (!de && !ate) || (!!dia && (!de || dia >= de) && (!ate || dia <= ate));
-    return linhas.filter(l => noPeriodo(moDiaLocal(l.refresh_em), aDe, aAte) && noPeriodo(l.ultimo, tDe, tAte)
+    const aPer = sel('mo-cli-aper'), tPer = sel('mo-cli-tper');
+    return linhas.filter(l => moNoPeriodoDias(moDiaLocal(l.refresh_em), aPer) && moNoPeriodoDias(l.ultimo, tPer)
       && (sit === 'todos' || (sit === 'preventiva' ? (l.grupo === 'critico' || l.grupo === 'atencao') : sit === 'ruim' ? ruim(l) : l.grupo === sit))
       && (fq === 'todos' || (fq === '2' && l.atend90 >= 2) || (fq === '3' && l.atend90 >= 3) || (fq === 'r2' && l.reparos90 >= 2))
       && (!rt || (rt === 'ret' ? !!l.retorno : (l.retorno && l.retorno.marca === rt)))
@@ -25656,7 +25656,7 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
   campoData().addEventListener('change', () => desenharMapa(filtrar()));
   document.querySelector('[data-mo="mapa-hoje"]').addEventListener('click', () => { campoData().value = ''; desenharMapa(filtrar()); });
   moMultiLigar('mo-mapa-cid', 'cidade(s)', 'Todas as cidades', () => desenharMapa(filtrar()));
-  ['mo-cli-sit', 'mo-cli-freq', 'mo-cli-ret', 'mo-cli-vel', 'mo-cli-ade', 'mo-cli-aate', 'mo-cli-tde', 'mo-cli-tate'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
+  ['mo-cli-sit', 'mo-cli-freq', 'mo-cli-ret', 'mo-cli-vel', 'mo-cli-aper', 'mo-cli-tper'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
   // bairros = os dos clientes das cidades marcadas (reconstrói a caixa mantendo o que já estava marcado)
   const ptb = (a, b) => a.localeCompare(b, 'pt-BR');
   function montarBairros() {
