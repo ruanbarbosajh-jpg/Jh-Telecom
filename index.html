@@ -24001,6 +24001,8 @@ const SAUDE_CHECAGENS_SQL = [
   { passo: 'PASSO-41', rotulo: 'Coordenada do cliente (mapa da preventiva)', tabela: 'monitor_olt_clientes', coluna: 'lat,lng' },
   { passo: 'PASSO-41', rotulo: 'Resumos do relatório mensal do Monitoramento', rpc: 'monitor_olt_status_no_dia', args: { p_dia: '2026-10-05' } },
   { passo: 'PASSO-45', rotulo: 'Monitoramento trancado no banco (só quem vê a tela)', rpc: 'pode_monitor_olt', args: {} },
+  { passo: 'PASSO-46', rotulo: 'Atualização do sinal da base fora da JH', tabela: 'monitor_olt_base', coluna: 'refresh_em' },
+  { passo: 'PASSO-47', rotulo: 'Sinal dos últimos 7 dias + média de 30 dias', rpc: 'monitor_olt_sinais_7d', args: { p_hoje: '2026-10-07' } },
   { passo: 'PASSO-40', rotulo: 'Sinal de ontem na linha do cliente', tabela: 'monitor_olt_clientes', coluna: 'sinal_ontem,status_ontem,ontem_dia,busca_em' },
   { passo: 'PASSO-36', rotulo: 'Quadro editável de colaboradores do escritório', tabela: 'folha_escritorio_quadro' },
   { passo: 'PASSO-37', rotulo: 'Ajustes manuais da Folha dos técnicos', tabela: 'folha_pagamento', coluna: 'ajustes' },
@@ -24852,12 +24854,31 @@ async function rpcPaginado(nome, args, max) {
   }
   return out;
 }
-// sinal de 7/15/30/45/90 dias atrás, por contrato (Map); vazio se o PASSO-41 não rodou ou ainda não há histórico
+// sinal de ontem até 6 dias atrás + média de 30 dias, por contrato (Map) — PASSO-47; vazio se o SQL não rodou ou ainda não há histórico
 async function carregarSinalPassado() {
   const m = new Map();
   if (!supa) return m;
-  try { (await rpcPaginado('monitor_olt_sinal_passado', {})).forEach(r => m.set(r.contrato, r)); } catch (e) { /* PASSO-41 não rodado */ }
+  try { (await rpcPaginado('monitor_olt_sinais_7d', { p_hoje: hojeISOLocal() })).forEach(r => m.set(r.contrato, r)); } catch (e) { /* PASSO-47 não rodado */ }
   return m;
+}
+// dia local (AAAA-MM-DD) de um instante ISO — pro filtro/gráfico por data de atualização
+const moDiaLocal = q => q ? isoLocalDe(new Date(q)) : '';
+// GRÁFICO DE PERÍODO das listas (07/10/2026, pedido do cliente): quantos clientes por DIA da última atualização do sinal, por situação.
+// itens: [{ dia: 'AAAA-MM-DD' | '', g: 'critico'|'atencao'|'semsinal'|'ok' }]. O elemento guarda o gráfico (e as caixas da legenda) entre redesenhos.
+function moGraficoPeriodo(elId, itens, titulo) {
+  const el = document.getElementById(elId); if (!el) return;
+  if (!el.querySelector('.mo-gp-svg')) el.innerHTML = `<h3 style="margin:0 0 8px">${titulo}</h3><div class="mo-gp-svg" id="${elId}-svg"></div><p class="mo-gp-nota" style="font-size:12px;color:var(--text-muted);margin:6px 0 0"></p>`;
+  const nota = el.querySelector('.mo-gp-nota'), alvo = el.querySelector('.mo-gp-svg');
+  const comDia = itens.filter(i => i.dia).sort((a, b) => a.dia < b.dia ? -1 : 1);
+  if (!comDia.length) { alvo.innerHTML = '<div class="empty">Nenhum cliente com data de atualização nesse filtro.</div>'; nota.textContent = ''; return; }
+  const dias = []; const cur = new Date(comDia[0].dia + 'T12:00:00'), fim = new Date(comDia[comDia.length - 1].dia + 'T12:00:00');
+  while (cur <= fim && dias.length < 120) { dias.push(isoLocalDe(cur)); cur.setDate(cur.getDate() + 1); }
+  const GR = [['critico', 'Crítico', '#ef4444'], ['atencao', 'Atenção', '#f59e0b'], ['semsinal', 'Sem sinal / energia / offline', '#a78bfa'], ['ok', 'OK', '#22c55e']];
+  const series = GR.filter(([g]) => comDia.some(i => i.g === g)).map(([g, nome, cor]) => ({ name: nome, color: cor, semArea: true,
+    points: dias.map(d => ({ label: d.slice(8, 10) + '/' + d.slice(5, 7), value: comDia.filter(i => i.g === g && i.dia === d).length })) }));
+  trendChart(alvo.id, series, { seletor: true, expandir: true, maxLabels: 14 });
+  const sem = itens.length - comDia.length;
+  nota.textContent = `Cada ponto = clientes cuja última atualização do sinal foi naquele dia (${comDia.length.toLocaleString('pt-BR')} cliente(s) no período${sem ? ' · ' + sem.toLocaleString('pt-BR') + ' ainda sem atualização ficam fora do gráfico' : ''}).`;
 }
 // início do período dos filtros de data: 'hoje' = meia-noite de hoje; número = N dias atrás
 function inicioPeriodoMonitorOlt(per) {
@@ -25054,12 +25075,23 @@ function renderMapaClientesMonitorOlt(elId, lista) {
   return `${exato} cliente(s) no ponto exato (coordenada do AutoISP) · ${porBairro} no bairro · ${porCidade} no centro da cidade (marcador tracejado: ainda sem coordenada — a varredura grava aos poucos)${semLugar ? ` · ${semLugar} sem lugar no mapa` : ''}.`;
 }
 
-// comparação hoje × dia anterior (o último valor de ontem fica na própria linha do cliente) e a variação de 7, 15, 30, 45 e 90 dias
-function pintarHojeOntemMonitorOlt(box, linhas, passado) {
+// comparação hoje × dia anterior + SINAL DOS ÚLTIMOS 7 DIAS + MÉDIA DE 30 DIAS (07/10/2026, pedido do cliente: "hoje, ontem, anteontem… por 7 dias",
+// "tire as colunas 7/15/30/45/90 dias e coloque uma coluna de média de 30 dias", "coloque os gráficos de período"). `sete` = Map por contrato do
+// PASSO-47 (s1..s6/st1..st6 = ontem … 6 dias atrás; media30/dias30 = média dos dias COM sinal nos últimos 30). "Hoje" é a linha do cliente.
+function pintarHojeOntemMonitorOlt(box, linhas, sete) {
   if (!box) return;
-  passado = passado || new Map();
-  const JANELAS = [7, 15, 30, 45, 90];
-  const varDe = (x, n) => { const p = passado.get(x.contrato); if (!p) return null; const s = p['s' + n]; return s != null && x.sinal != null && Number(s) !== 0 && Number(x.sinal) !== 0 ? Number(x.sinal) - Number(s) : null; };
+  sete = sete || new Map();
+  const diaIso = n => { const d = new Date(); d.setDate(d.getDate() - n); return isoLocalDe(d); };
+  const NOMES = ['Hoje', 'Ontem', 'Anteontem', 'Há 3 dias', 'Há 4 dias', 'Há 5 dias', 'Há 6 dias'];
+  const dm = n => { const d = diaIso(n); return d.slice(8, 10) + '/' + d.slice(5, 7); };
+  // sinal e situação do cliente no dia n (0 = hoje); null = sem registro daquele dia
+  const doDia = (x, n) => {
+    if (n === 0) return x.status != null || x.sinal != null ? { s: x.sinal, st: x.status } : null;
+    const p = sete.get(x.contrato);
+    if (p && (p['s' + n] != null || p['st' + n] != null)) return { s: p['s' + n], st: p['st' + n] };
+    if (n === 1 && x.status_ontem != null) return { s: x.sinal_ontem, st: x.status_ontem };
+    return null;
+  };
   const base = linhas.filter(l => l.status_ontem != null && l.ontem_dia && l.status != null);
   const cmp = base.map(l => {
     const dS = l.sinal != null && l.sinal_ontem != null && Number(l.sinal) !== 0 && Number(l.sinal_ontem) !== 0 ? Number(l.sinal) - Number(l.sinal_ontem) : null;
@@ -25068,37 +25100,71 @@ function pintarHojeOntemMonitorOlt(box, linhas, passado) {
     return { ...l, dS, resultado };
   });
   const n = r => cmp.filter(x => x.resultado === r).length;
-  const temPassado = passado.size > 0;
+  const temHist = sete.size > 0;
+  const COR_ST = st => /^ok$/i.test(st || '') ? 'var(--success)' : st === 'warning' ? '#f59e0b' : st === 'critical' ? 'var(--danger)' : 'var(--text-muted)';
   box.innerHTML = `
-    <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">📅 Hoje × dia anterior <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(o último sinal de cada cliente no dia anterior contra o de agora — piorou/melhorou = mudou de situação ou 1 dB ou mais)</span></div>
+    <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">📅 Hoje × dia anterior <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(o sinal de cada cliente hoje, ontem, anteontem… até 6 dias atrás, e a média dos últimos 30 dias — piorou/melhorou = mudou de situação ou 1 dB ou mais contra ontem)</span></div>
     <div class="stat-cards" style="margin-bottom:12px">
       ${statCard('blue', icBarras, 'Comparados', cmp.length.toLocaleString('pt-BR'), linhas.length - cmp.length ? `${(linhas.length - cmp.length).toLocaleString('pt-BR')} ainda sem consulta de ontem (a base se forma dia a dia)` : 'todos têm base de ontem')}
       ${statCard('red', icAviso, 'Pioraram', n('piorou'), 'sinal caiu ou mudou pra pior')}
       ${statCard('green', icOk, 'Melhoraram', n('melhorou'), 'sinal subiu ou voltou ao normal')}
       ${statCard('neutral', icRelogio, 'Sem mudança relevante', n('igual'), 'dentro de 1 dB e na mesma situação')}
     </div>
+    <div class="panels-grid" style="margin-bottom:12px">
+      <div class="panel"><h3 style="margin:0 0 8px">📈 Sinal médio por dia <span style="font-size:12px;font-weight:400;color:var(--text-muted)">(últimos 7 dias · dBm — quanto mais perto de 0, melhor)</span></h3><div id="mo-ho-g1"></div></div>
+      <div class="panel"><h3 style="margin:0 0 8px">📊 Clientes por situação, por dia <span style="font-size:12px;font-weight:400;color:var(--text-muted)">(últimos 7 dias)</span></h3><div id="mo-ho-g2"></div></div>
+    </div>
     <div class="toolbar" style="margin-bottom:10px">
       <div class="field"><label>Mostrar</label><select id="mo-ho-fil"><option value="piorou">Pioraram</option><option value="melhorou">Melhoraram</option><option value="igual">Sem mudança</option><option value="todos">Todos</option></select></div>
       <button type="button" class="btn-export-xls" id="mo-ho-excel">⤓ Excel</button><span id="mo-ho-resumo" style="font-size:12px;color:var(--text-muted);align-self:center"></span></div>
     <div id="mo-ho-tabela"></div>
-    <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1.5rem">Colunas <b>7, 15, 30, 45 e 90 dias</b> = quanto o sinal mudou desde aquele dia (passe o mouse pra ver o valor de lá). "-" = ainda não há registro daquele dia: o histórico começou em 05/10/2026 e cresce sozinho a cada dia${temPassado ? '' : ' (rode o <b>sql/PASSO-41</b> pra essas colunas)'}.</p>`;
+    <div class="panel" style="margin-bottom:1.5rem;font-size:12.5px;line-height:1.6">
+      <b>Como ler as colunas</b>
+      <ul style="margin:6px 0 0 18px;padding:0">
+        <li><b>Cliente / Contrato / Cidade / OLT·PON</b> — quem é e onde está o equipamento. Clique no nome pra ver o histórico de sinal e no contrato pra abrir os dados do assinante.</li>
+        <li><b>Hoje</b> — o sinal mais recente que o sistema tem (dBm) e a situação (OK, Atenção, Crítico…), com a hora da leitura.</li>
+        <li><b>Ontem, Anteontem, Há 3 a 6 dias</b> — o ÚLTIMO sinal gravado em cada um desses dias, com a situação embaixo. <b>"-"</b> = o sistema não tem registro daquele dia (o histórico começou em 05/10/2026 e cresce sozinho a cada dia${temHist ? '' : '; rode o <b>sql/PASSO-47</b> pra ver os dias anteriores'}).</li>
+        <li><b>Variação</b> — hoje menos ontem, em dB. Negativo (vermelho) = o sinal caiu; positivo (verde) = melhorou; 1 dB ou mais já conta como mudança.</li>
+        <li><b>Média 30 d</b> — média do sinal (dBm) dos últimos 30 dias, contando só os dias com leitura de sinal (embaixo: quantos dias entraram na média e a diferença de hoje pra ela). Hoje bem abaixo da média = o cliente piorou de verdade; igual à média = é o padrão dele.</li>
+        <li><b>Atend. 90 d</b> — quantos serviços concluídos a JH fez nesse cliente nos últimos 90 dias.</li>
+      </ul>
+    </div>`;
   const lista = () => { const f = document.getElementById('mo-ho-fil').value; return cmp.filter(x => f === 'todos' || x.resultado === f).sort((a, b) => (a.dS == null ? 99 : a.dS) - (b.dS == null ? 99 : b.dS)); };
-  const celulaJanela = (x, nd) => { const p = passado.get(x.contrato); const tem = p && p['s' + nd] != null; return `<td title="${tem ? `há ${nd} dias: ${moSinal(p['s' + nd])} (${moStatusTxt(p['st' + nd])})` : `sem registro de ${nd} dias atrás`}">${moVar(varDe(x, nd))}</td>`; };
+  const celulaDia = (x, k) => { const r = doDia(x, k); return r ? `<td title="${esc(NOMES[k])} (${dm(k)}): ${esc(moSinal(r.s))} · ${esc(moStatusTxt(r.st))}">${moSinal(r.s)}<div style="font-size:11px;color:${COR_ST(r.st)}">${esc(moStatusTxt(r.st))}${k === 0 && x.checado_em ? ' · ' + esc(moDH(x.checado_em)) : ''}</div></td>` : `<td title="sem registro de ${esc(NOMES[k].toLowerCase())}">-</td>`; };
+  const celulaMedia = x => { const p = sete.get(x.contrato); if (!p || p.media30 == null) return '<td title="ainda sem leituras de sinal nos últimos 30 dias">-</td>'; const d = x.sinal != null && Number(x.sinal) !== 0 ? Number(x.sinal) - Number(p.media30) : null; return `<td title="média dos ${p.dias30} dia(s) com sinal nos últimos 30 dias">${moSinal(p.media30)}<div style="font-size:11px;color:var(--text-muted)">${p.dias30} dia(s) · hoje ${d == null ? '-' : (d > 0 ? '+' : '') + d.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' dB'}</div></td>`; };
+  const graficos = l => {
+    // por dia (do mais antigo pro de hoje): média do sinal e contagem por situação dos clientes da lista filtrada
+    const dias = [6, 5, 4, 3, 2, 1, 0].map(k => ({ k, reg: l.map(x => doDia(x, k)).filter(Boolean) })).filter(d => d.reg.length);
+    if (!dias.length) { ['mo-ho-g1', 'mo-ho-g2'].forEach(id => { const e = document.getElementById(id); if (e) e.innerHTML = '<div class="empty">Sem registros nesse filtro.</div>'; }); return; }
+    const media = d => { const v = d.reg.map(r => Number(r.s)).filter(sv => sv < 0); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+    const pts = dias.map(d => ({ d, m: media(d) })).filter(x => x.m != null);
+    if (pts.length) {
+      const vs = pts.map(x => x.m);
+      trendChart('mo-ho-g1', [{ name: 'Sinal médio (dBm)', color: '#38bdf8', points: pts.map(x => ({ label: dm(x.d.k), value: Number(x.m.toFixed(2)), display: x.m.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' dBm' })) }],
+        { expandir: true, yMin: Math.floor(Math.min(...vs) - 1), yMax: Math.ceil(Math.max(...vs) + 1), legendaSemTotal: true });
+    } else document.getElementById('mo-ho-g1').innerHTML = '<div class="empty">Sem leituras de sinal nesse filtro.</div>';
+    const cont = (d, f) => d.reg.filter(r => f(moRank(r.st), r.st)).length;
+    trendChart('mo-ho-g2', [
+      { name: 'Crítico', color: '#ef4444', semArea: true, points: dias.map(d => ({ label: dm(d.k), value: cont(d, rk => rk === 2) })) },
+      { name: 'Atenção', color: '#f59e0b', semArea: true, points: dias.map(d => ({ label: dm(d.k), value: cont(d, rk => rk === 1) })) },
+      { name: 'Sem sinal / energia / offline', color: '#a78bfa', semArea: true, points: dias.map(d => ({ label: dm(d.k), value: cont(d, rk => rk === 3) })) },
+    ], { expandir: true, seletor: true });
+  };
   const desenhar = () => {
     const l = lista(), corte = 1000;
     document.getElementById('mo-ho-resumo').textContent = `${l.length.toLocaleString('pt-BR')} cliente(s)`;
+    graficos(l);
     document.getElementById('mo-ho-tabela').innerHTML = !l.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhum cliente nesse filtro (ou ainda não há base de ontem).</div></div>' : `
-      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="mo-ho-tab"><thead><tr><th>Cliente</th><th>Contrato</th><th>Cidade</th><th>OLT / PON</th><th>Ontem</th><th>Hoje</th><th>Variação</th>${JANELAS.map(nd => `<th>${nd} dias</th>`).join('')}<th>Atend. 90 d</th></tr></thead><tbody>
+      <div class="table-wrap" style="margin-bottom:1rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="mo-ho-tab"><thead><tr><th>Cliente</th><th>Contrato</th><th>Cidade</th><th>OLT / PON</th>${NOMES.map((nm, k) => `<th title="${esc(nm)} (${dm(k)})">${esc(nm)}<div style="font-size:10.5px;font-weight:500;opacity:.8">${dm(k)}</div></th>`).join('')}<th>Variação</th><th>Média 30 d</th><th>Atend. 90 d</th></tr></thead><tbody>
       ${l.slice(0, corte).map(x => `<tr><td class="cat-cell">${moLinkHist(x.contrato, x.nome)}</td><td>${moLinkContrato(x.contrato, x.gpon_id, x.olt, x.nome)}</td><td>${esc(x.cidade || '-')}</td><td>${esc(x.olt || '-')}<div style="font-size:11px;color:var(--text-muted)">PON ${esc(x.ponlink || '-')}</div></td>
-        <td>${moSinal(x.sinal_ontem)}<div style="font-size:11px;color:var(--text-muted)">${esc(moStatusTxt(x.status_ontem))} · ${esc(formatDate(x.ontem_dia))}</div></td>
-        <td>${moSinal(x.sinal)}<div style="font-size:11px;color:var(--text-muted)">${esc(moStatusTxt(x.status))} · ${esc(moDH(x.checado_em))}</div></td><td>${moVar(x.dS)}</td>${JANELAS.map(nd => celulaJanela(x, nd)).join('')}<td>${x.atend90}</td></tr>`).join('')}
+        ${NOMES.map((nm, k) => celulaDia(x, k)).join('')}<td>${moVar(x.dS)}</td>${celulaMedia(x)}<td>${x.atend90}</td></tr>`).join('')}
       </tbody></table></div>${l.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${l.length.toLocaleString('pt-BR')} — o Excel leva todos.</p>` : ''}`;
     ativarFiltrosDeColuna(document.getElementById('mo-ho-tabela'));
   };
   document.getElementById('mo-ho-fil').addEventListener('change', desenhar);
   document.getElementById('mo-ho-excel').addEventListener('click', () => exportarQuadroPresenca('monitor-olt-hoje-x-ontem-' + hojeISOLocal(),
-    ['Cliente', 'ID Int6', 'Contrato', 'Cidade', 'OLT', 'PON', 'Dia anterior', 'Sinal anterior', 'Situação anterior', 'Sinal hoje', 'Situação hoje', 'Variação (dB)'].concat(JANELAS.map(nd => `Var. ${nd} dias (dB)`), ['Atend. 90 d']),
-    lista().map(x => [x.nome || '', x.gpon_id || '', x.contrato, x.cidade || '', x.olt || '', x.ponlink || '', formatDate(x.ontem_dia), x.sinal_ontem, moStatusTxt(x.status_ontem), x.sinal, moStatusTxt(x.status), x.dS].concat(JANELAS.map(nd => varDe(x, nd)), [x.atend90])), 'Hoje x ontem'));
+    ['Cliente', 'ID Int6', 'Contrato', 'Cidade', 'OLT', 'PON'].concat(NOMES.flatMap((nm, k) => [`${nm} ${dm(k)} - sinal`, `${nm} ${dm(k)} - situação`]), ['Variação vs ontem (dB)', 'Média 30 d (dBm)', 'Dias na média', 'Atend. 90 d']),
+    lista().map(x => { const p = sete.get(x.contrato) || {}; return [x.nome || '', x.gpon_id || '', x.contrato, x.cidade || '', x.olt || '', x.ponlink || ''].concat(NOMES.flatMap((nm, k) => { const r = doDia(x, k); return r ? [r.s, moStatusTxt(r.st)] : ['', '']; }), [x.dS, p.media30 == null ? '' : p.media30, p.dias30 == null ? '' : p.dias30, x.atend90]); }), 'Hoje x ontem'));
   desenhar();
 }
 
@@ -25349,18 +25415,24 @@ function pintarBaseForaJhMonitorOlt(box) {
         ${moMulti('mo-base-cidade', 'Cidade', cidades, null, 'Todas as cidades')}
         <div class="field"><label>Bairro</label><span id="mo-base-bairro-wrap"></span></div>
         <div class="field"><label>Última atualização</label><select id="mo-base-vel"><option value="">Todos</option><option value="novo">Atualizado (até 24 h)</option><option value="velho">Mais de 24 h</option><option value="sem">Ainda não atualizado</option></select></div>
+        <div class="field"><label>Atualizado de</label><input type="date" id="mo-base-ade" title="Dia da última atualização do sinal (começo)"></div>
+        <div class="field"><label>Atualizado até</label><input type="date" id="mo-base-aate" title="Dia da última atualização do sinal (fim)"></div>
         <button type="button" class="btn-export-xls" id="mo-base-excel">⤓ Excel (todos os filtrados)</button><span id="mo-base-resumo" style="font-size:12px;color:var(--text-muted);align-self:center"></span></div>
+      <div class="panel" id="mo-base-grafico" style="margin-bottom:12px"></div>
       <div id="mo-base-tabela"></div>`;
     const idade = l => l.refresh_em ? (Date.now() - new Date(l.refresh_em).getTime()) / 36e5 : null;   // idade da ÚLTIMA ATUALIZAÇÃO do sinal
     const filtrar = () => {
       const sit = document.getElementById('mo-base-sit').value, vel = document.getElementById('mo-base-vel').value, cs = moFiltro('mo-base-cidade'), bs = moFiltro('mo-base-bairro');
-      return base.filter(l => (sit === 'ruim' || (sit === 'preventiva' ? (l.status === 'critical' || l.status === 'warning') : sit === 'semsinal' ? (l.status !== 'critical' && l.status !== 'warning') : l.status === sit))
+      const aDe = document.getElementById('mo-base-ade').value, aAte = document.getElementById('mo-base-aate').value;
+      const noPeriodo = l => { if (!aDe && !aAte) return true; const d = moDiaLocal(l.refresh_em); return !!d && (!aDe || d >= aDe) && (!aAte || d <= aAte); };
+      return base.filter(l => noPeriodo(l) && (sit === 'ruim' || (sit === 'preventiva' ? (l.status === 'critical' || l.status === 'warning') : sit === 'semsinal' ? (l.status !== 'critical' && l.status !== 'warning') : l.status === sit))
         && (!cs || cs.has(l.cidade || '')) && (!bs || bs.has(l.bairro || ''))
         && (!vel || (vel === 'sem' ? idade(l) == null : (idade(l) != null && (vel === 'novo' ? idade(l) <= 24 : idade(l) > 24)))));
     };
     const desenhar = () => {
       const l = filtrar(), corte = 1000;
       document.getElementById('mo-base-resumo').textContent = `${l.length.toLocaleString('pt-BR')} cliente(s)`;
+      moGraficoPeriodo('mo-base-grafico', l.map(x => ({ dia: moDiaLocal(x.refresh_em), g: x.status === 'critical' ? 'critico' : x.status === 'warning' ? 'atencao' : 'semsinal' })), '📈 Gráfico de período — clientes por dia da última atualização do sinal');
       document.getElementById('mo-base-tabela').innerHTML = !l.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhum cliente nesse filtro.</div></div>' : `
         <div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="mo-base-tab"><thead><tr><th>Sinal</th><th>Rx</th><th>Cliente</th><th>Contrato</th><th>Cidade / bairro</th><th>OLT / PON</th><th>Última atualização</th><th>Lido pelo sistema</th></tr></thead><tbody>
         ${l.slice(0, corte).map(x => { const h = idade(x); return `<tr><td><span class="badge ${x.status === 'critical' ? 'warn' : x.status === 'warning' ? 'amber' : 'neutral'}">${esc(moStatusTxt(x.status))}</span></td>
@@ -25378,7 +25450,7 @@ function pintarBaseForaJhMonitorOlt(box) {
       document.getElementById('mo-base-bairro-wrap').innerHTML = multiSelectInner('mo-base-bairro', bs.map(esc), { preset: moPreset('mo-base-bairro', bs), allLabel: 'Todos', noneLabel: 'Nenhum', emptyMsg: 'Sem bairros' });
       moMultiLigar('mo-base-bairro', 'bairro(s)', 'Todos os bairros', desenhar);
     }
-    ['mo-base-sit', 'mo-base-vel'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
+    ['mo-base-sit', 'mo-base-vel', 'mo-base-ade', 'mo-base-aate'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
     moMultiLigar('mo-base-cidade', 'cidade(s)', 'Todas as cidades', () => { montarBairros(); desenhar(); });
     document.getElementById('mo-base-excel').addEventListener('click', () => exportarQuadroPresenca('monitor-olt-base-fora-da-jh-' + hojeISOLocal(),
       ['Sinal', 'Rx (dBm)', 'Cliente', 'ID Int6', 'Contrato', 'Cidade', 'Bairro', 'OLT', 'PON', 'Última atualização', 'Lido pelo sistema em'],
@@ -25456,10 +25528,15 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
       ${moMulti('mo-cli-cidade', 'Cidade', [...new Set(linhas.map(l => l.cidade).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR')), null, 'Todas as cidades')}
       <div class="field"><label>Bairro</label><span id="mo-cli-bairro-wrap"></span></div>
       <div class="field"><label>Dado do equipamento</label><select id="mo-cli-vel"><option value="">Todos</option><option value="novo">Atualizado (até 24 h)</option><option value="velho">Velho (mais de 24 h)</option><option value="muito">Muito velho (mais de 3 dias)</option><option value="sem">Sem leitura registrada</option></select></div>
+      <div class="field"><label>Atualizado de</label><input type="date" id="mo-cli-ade" title="Dia da última atualização do sinal (começo)"></div>
+      <div class="field"><label>Atualizado até</label><input type="date" id="mo-cli-aate" title="Dia da última atualização do sinal (fim)"></div>
+      <div class="field"><label>Atendido de</label><input type="date" id="mo-cli-tde" title="Dia do último atendimento da JH (começo)"></div>
+      <div class="field"><label>Atendido até</label><input type="date" id="mo-cli-tate" title="Dia do último atendimento da JH (fim)"></div>
       <button type="button" class="btn-export-xls" id="mo-cli-excel">⤓ Excel (todos os filtrados)</button>
       <span id="mo-cli-resumo" style="font-size:12px;color:var(--text-muted);align-self:center"></span>
     </div>
     <div class="stat-cards" id="mo-cli-cards" style="margin-bottom:12px"></div>
+    <div class="panel" id="mo-cli-grafico" style="margin-bottom:12px"></div>
     <div id="mo-cli-tabela"></div>
     <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1.5rem"><b>Risco de IFI / IRR</b>: o cliente <b>ainda não é</b> retorno — ele só vira se ABRIR um chamado de reparo enquanto o último serviço concluído está dentro da janela: Ativação/Mudança de Endereço há até ${JANELA_IFI} dias (<b>risco de IFI</b>) ou Reparo há até ${JANELA_IRR} dias (<b>risco de IRR</b>). Abaixo do selo aparece quantos dias faltam pra sair da janela (e a data); passou o prazo, o chamado dele já não conta. O ofensor é o técnico daquele serviço — por isso é o cliente que mais vale a preventiva.</p>
     <div class="section-heading">🗺 Mapa — clientes da JH <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(mesmos filtros da lista acima · a cor é a pior situação do lugar · clique pra ver os clientes)</span></div>
@@ -25492,7 +25569,10 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
   const naFila = l => !!forcarMs && Date.now() < forcarMs + 3 * 3600e3 && (!l.refresh_em || new Date(l.refresh_em).getTime() < forcarMs);
   const filtrar = () => {
     const sit = sel('mo-cli-sit'), fq = sel('mo-cli-freq'), cidSet = moFiltro('mo-cli-cidade'), baiSet = moFiltro('mo-cli-bairro'), rt = sel('mo-cli-ret'), vel = sel('mo-cli-vel');
-    return linhas.filter(l => (sit === 'todos' || (sit === 'preventiva' ? (l.grupo === 'critico' || l.grupo === 'atencao') : sit === 'ruim' ? ruim(l) : l.grupo === sit))
+    const aDe = sel('mo-cli-ade'), aAte = sel('mo-cli-aate'), tDe = sel('mo-cli-tde'), tAte = sel('mo-cli-tate');
+    const noPeriodo = (dia, de, ate) => (!de && !ate) || (!!dia && (!de || dia >= de) && (!ate || dia <= ate));
+    return linhas.filter(l => noPeriodo(moDiaLocal(l.refresh_em), aDe, aAte) && noPeriodo(l.ultimo, tDe, tAte)
+      && (sit === 'todos' || (sit === 'preventiva' ? (l.grupo === 'critico' || l.grupo === 'atencao') : sit === 'ruim' ? ruim(l) : l.grupo === sit))
       && (fq === 'todos' || (fq === '2' && l.atend90 >= 2) || (fq === '3' && l.atend90 >= 3) || (fq === 'r2' && l.reparos90 >= 2))
       && (!rt || (rt === 'ret' ? !!l.retorno : (l.retorno && l.retorno.marca === rt)))
       && (!cidSet || cidSet.has(l.cidade || '')) && (!baiSet || baiSet.has(l.bairro || ''))
@@ -25528,6 +25608,7 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
           <td>${l.refresh_em ? `<div title="Mesmo “Atualizado em” do Status GPON do AutoISP: o momento em que a OLT leu o sinal desta ONU">⚡ Atualizado em ${esc(moDH(l.refresh_em))} <span style="font-size:11px;color:var(--text-muted)">(${haQuantoTempo(l.refresh_em)})</span></div>` : ''}${l.acs_ultimo_contato ? `<div style="font-size:11px;color:var(--text-muted)">contato: ${esc(moDH(l.acs_ultimo_contato))} (${haQuantoTempo(l.acs_ultimo_contato)})</div>` : ''}${naFila(l) ? '<div><span class="badge neutral" title="A atualização geral está em andamento: a OLT ainda vai ler o sinal desta ONU (lotes de ~600 a cada 10 min)">⏳ na fila da atualização</span></div>' : ''}${idadeH(l) == null ? '<span class="badge neutral">sem leitura</span>' : idadeH(l) > 72 ? '<span class="badge warn" title="O sinal desta ONU não é lido há mais de 3 dias">dado muito velho</span>' : idadeH(l) > 24 ? '<span class="badge amber" title="O sinal desta ONU não é lido há mais de 24 horas">dado velho</span>' : ''}</td></tr>`).join('')}
       </tbody></table></div>${lista.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${lista.length.toLocaleString('pt-BR')} na tabela — o mapa e o Excel levam todos os filtrados.</p>` : ''}`;
     ativarFiltrosDeColuna(document.getElementById('mo-cli-tabela'));
+    moGraficoPeriodo('mo-cli-grafico', lista.map(l => ({ dia: moDiaLocal(l.refresh_em), g: l.grupo })), '📈 Gráfico de período — clientes por dia da última atualização do sinal');
     desenharMapa(lista);
   };
   // caixas de seleção por situação no mapa (06/10/2026, pedido do cliente): marcam/desmarcam SÓ o que aparece no mapa (a lista não muda);
@@ -25575,7 +25656,7 @@ function pintarClientesMonitorOlt(box, cli, st, semCliente) {
   campoData().addEventListener('change', () => desenharMapa(filtrar()));
   document.querySelector('[data-mo="mapa-hoje"]').addEventListener('click', () => { campoData().value = ''; desenharMapa(filtrar()); });
   moMultiLigar('mo-mapa-cid', 'cidade(s)', 'Todas as cidades', () => desenharMapa(filtrar()));
-  ['mo-cli-sit', 'mo-cli-freq', 'mo-cli-ret', 'mo-cli-vel'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
+  ['mo-cli-sit', 'mo-cli-freq', 'mo-cli-ret', 'mo-cli-vel', 'mo-cli-ade', 'mo-cli-aate', 'mo-cli-tde', 'mo-cli-tate'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
   // bairros = os dos clientes das cidades marcadas (reconstrói a caixa mantendo o que já estava marcado)
   const ptb = (a, b) => a.localeCompare(b, 'pt-BR');
   function montarBairros() {
