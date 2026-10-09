@@ -26214,7 +26214,7 @@ function renderMonitorOlt() {
         <button type="button" class="btn-export-xls" id="rm-recarregar">↻ Recarregar tabelas</button>
         <span id="rm-info" style="font-size:12px;color:var(--text-muted)"></span></div>
     </div>
-    <div id="rm-wrap-prev"><div id="rm-prev-clientes"></div><div id="rm-prev-base"></div><div id="rm-prev-tecnico"></div><div id="rm-prev-ontem"></div><div id="rm-prev-alt"></div></div>
+    <div id="rm-wrap-prev"><div id="rm-prev-clientes"></div><div id="rm-prev-corrigir"></div><div id="rm-prev-base"></div><div id="rm-prev-tecnico"></div><div id="rm-prev-ontem"></div><div id="rm-prev-alt"></div></div>
     <div class="panel" style="margin:2.5rem 0 1rem;border-left:6px solid #f59e0b;padding:14px 18px">
       <div style="font-size:16px;font-weight:800;letter-spacing:.3px">2 · GERAL — OLTs e cidades</div>
       <div style="font-size:13px;color:var(--text-secondary);margin-top:4px">Busca de qualquer assinante, as OLTs das 6 cidades (conexão e os clientes da JH em cada uma) e o resumo por cidade. O relatório do mês fica na aba <a href="#" id="mo-ir-relmes">Relatório do Monitoramento</a>.</div>
@@ -26873,6 +26873,82 @@ function abrirModalTecnicoPreventiva(tecnico) {
   document.getElementById('tecp-excel').addEventListener('click', () => exportarTabelaVisivel(document.getElementById('tecp-tab'), 'preventiva-' + normalizeHeader(tecnico || 'sem-tecnico').replace(/[^a-z0-9]+/g, '-') + '-' + hojeISOLocal()));
   m.classList.add('active');
 }
+// ---- CASOS QUE O SISTEMA PODE CORRIGIR (08/10/2026) ----
+// Pedido do cliente: localizar, nas ONUs do monitoramento, o que se arruma pelo sistema (não provisionado, VLAN errada, PPPoE errado, IP fora do
+// padrão .64/.66 — .69/.122 é IP de bloqueio —, online sem IP) pra prevenir, porque sinal alto quase sempre é problema físico.
+// O QUE JÁ DÁ pra detectar com o que o sistema guarda: ativação / mudança de endereço CONCLUÍDA há poucos dias cujo contrato (a) não aparece
+// como cliente ativo nas OLTs da JH (provável ONU não provisionada — ex.: 24 das 488 ativações de 24/09 a 08/10/2026) ou (b) está ativo mas a ONU
+// não reporta sinal (offline / inativa / indisponível / sem leitura): nesses o sinal e o IP nem existem, então não é problema físico de sinal.
+// Sem energia (power_fail) e rompimento (loss_signal) ficam de fora: são físicos. VLAN, PPPoE e IP AINDA NÃO são lidos do AutoISP — ver a nota na tela.
+const MO_COR_ROTULO = { '': 'Sem leitura de sinal', down: 'Offline', inactive: 'Inativa', unavailable: 'Indisponível' };
+function pintarCorrigirMonitorOlt(box, cli, semCli) {
+  if (!box) return;
+  const hoje = hojeISOLocal();
+  const lim30 = isoLocalDe(new Date(Date.now() - 30 * 864e5));
+  const ativ = new Map();
+  [...DB.producao, ...DB.pcr].forEach(r => {
+    if (!r.data || r.data < lim30 || !r.contrato || !isConcluido(r.status) || !/ativa|mudan.*endereco/.test(normalizeHeader(r.tipo_atividade))) return;
+    const k = String(r.contrato).trim(), a = ativ.get(k);
+    if (!a || a.data < r.data) ativ.set(k, { data: r.data, tipo: String(r.tipo_atividade || '').trim(), tec: r.recurso || '', nome: r.nome || r.cliente || '', cidade: normalizeCidade(r.cidade) });
+  });
+  const cliPor = new Map(cli.map(c => [String(c.contrato).trim(), c]));
+  const semPor = new Map((semCli || []).map(c => [String(c.contrato).trim(), c]));
+  const todos = [];
+  ativ.forEach((a, k) => {
+    const m = cliPor.get(k), sc = semPor.get(k);
+    let caso = '', sit = '', check = '';
+    if (!m && sc && (sc.estado === 'fora' || sc.estado === 'orphan')) { caso = 'nao_prov'; sit = sc.estado === 'orphan' ? 'ONU sem contrato (órfã)' : 'Não aparece nas OLTs da JH'; check = sc.checado_em; }
+    else if (m && Object.prototype.hasOwnProperty.call(MO_COR_ROTULO, String(m.status || '').toLowerCase().replace(/^-$/, ''))) { caso = 'sem_sinal'; sit = MO_COR_ROTULO[String(m.status || '').toLowerCase().replace(/^-$/, '')]; check = m.checado_em; }
+    if (!caso) return;
+    const cidade = (m && m.cidade) || a.cidade;
+    if (!moNaCidadeTopo(cidade)) return;
+    const dias = Math.max(0, Math.round((new Date(hoje + 'T12:00:00') - new Date(a.data + 'T12:00:00')) / 864e5));
+    todos.push({ caso, contrato: k, nome: (m && m.nome) || a.nome, cidade: rotuloCidadeGeral(cidade), tec: a.tec, tipo: a.tipo, data: a.data, dias, sit, check, gpon: m && m.gpon_id, olt: m && m.olt });
+  });
+  const ROT_CASO = { nao_prov: 'Possível ONU não provisionada', sem_sinal: 'No ar, mas ONU sem sinal / offline' };
+  const OQUE = {
+    nao_prov: 'Conferir se a ONU foi provisionada no contrato (serial) e na OLT/PON certa — sem isso não há sinal nem IP.',
+    sem_sinal: 'Conferir provisionamento, VLAN e PPPoE do contrato; se estiver tudo certo, é físico (fibra/energia/equipamento).',
+  };
+  box.innerHTML = `
+    <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">🛠 Pode ser corrigido pelo sistema <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(ativações e mudanças de endereço concluídas recentemente que não ficaram no ar)</span>
+      <select id="mo-cor-per" class="topn-select"><option value="7">Ativação nos últimos 7 dias</option><option value="15" selected>Ativação nos últimos 15 dias</option><option value="30">Ativação nos últimos 30 dias</option></select>
+      <select id="mo-cor-caso" class="topn-select"><option value="">Todos os casos</option><option value="nao_prov">Possível não provisionada</option><option value="sem_sinal">No ar, mas sem sinal / offline</option></select>
+      <button type="button" class="btn-export-xls" id="mo-cor-excel">⤓ Excel</button></div>
+    <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px;line-height:1.5">Aqui entra o que dá pra arrumar pelo sistema, não o que é físico. Sinal alto, sem energia e rompimento ficam de fora. <b>Ainda não lidos do AutoISP:</b> VLAN errada, PPPoE errado, IP fora do padrão (.64/.66 é o certo; .69 e .122 são IP de bloqueio) e "online sem IP" — dependem de ler esses campos no AutoISP (ver o aviso ao final da tela).</p>
+    <div id="mo-cor-cards"></div><div id="mo-cor-tabela"></div>`;
+  const montar = () => {
+    const N = Number(document.getElementById('mo-cor-per').value) || 15, caso = document.getElementById('mo-cor-caso').value;
+    const lim = isoLocalDe(new Date(Date.now() - N * 864e5));
+    const noPer = todos.filter(x => x.data >= lim);
+    const vis = noPer.filter(x => !caso || x.caso === caso).sort((a, b) => (a.caso === b.caso ? 0 : a.caso === 'nao_prov' ? -1 : 1) || b.dias - a.dias);
+    const total = [...ativ.values()].filter(a => a.data >= lim).length;
+    const nProv = noPer.filter(x => x.caso === 'nao_prov').length, nSem = noPer.filter(x => x.caso === 'sem_sinal').length;
+    document.getElementById('mo-cor-cards').innerHTML = `<div class="stat-cards">
+      ${statCard('blue', icPessoas, 'Ativações concluídas no período', total.toLocaleString('pt-BR'), `${N} dias · ativação e mudança de endereço`)}
+      ${statCard(nProv ? 'red' : 'green', icAviso, 'Possível ONU não provisionada', nProv.toLocaleString('pt-BR'), 'não aparece nas OLTs da JH')}
+      ${statCard(nSem ? 'orange' : 'green', icRelogio, 'No ar, mas sem sinal / offline', nSem.toLocaleString('pt-BR'), 'ONU não reporta sinal')}
+      ${statCard('green', icOk, 'Ativações OK', Math.max(0, total - nProv - nSem).toLocaleString('pt-BR'), `${total ? formatPct((total - nProv - nSem) / total * 100, 1) : '-'} das ativações`)}</div>`;
+    document.getElementById('mo-cor-tabela').innerHTML = !vis.length ? '<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhuma ativação recente com esse problema. 👍</div></div>' : `
+      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="mo-tab-corrigir"><thead><tr>
+        <th>Caso</th><th>Contrato</th><th>Cliente</th><th>Cidade</th><th>Serviço</th><th>Concluída em</th><th>Dias</th><th>Técnico</th><th>Situação no AutoISP</th><th>Consultado</th><th>O que verificar</th></tr></thead><tbody>
+        ${vis.slice(0, 1000).map(x => `<tr><td><span class="badge ${x.caso === 'nao_prov' ? 'warn' : 'amber'}">${ROT_CASO[x.caso]}</span></td>
+          <td>${x.gpon ? moLinkContrato(x.contrato, x.gpon, x.olt, x.nome) : esc(x.contrato)}</td><td class="cat-cell">${esc(x.nome) || '-'}</td><td>${esc(x.cidade)}</td><td>${esc(x.tipo)}</td>
+          <td>${formatDate(x.data)}</td><td>${x.dias}</td><td>${esc(x.tec) || '-'}</td><td>${esc(x.sit)}</td><td>${x.check ? haQuantoTempo(x.check) : '-'}</td>
+          <td style="font-size:12px;color:var(--text-secondary);white-space:normal">${OQUE[x.caso]}</td></tr>`).join('')}
+        </tbody></table></div>`;
+    const t = document.getElementById('mo-tab-corrigir');
+    if (t) ativarFiltrosDeColuna(document.getElementById('mo-cor-tabela'));
+  };
+  document.getElementById('mo-cor-per').addEventListener('change', montar);
+  document.getElementById('mo-cor-caso').addEventListener('change', montar);
+  document.getElementById('mo-cor-excel').addEventListener('click', e => {
+    const t = document.getElementById('mo-tab-corrigir'); if (!t) return;
+    const r = exportarTabelaVisivel(t, `monitoramento-corrigir-pelo-sistema-${hoje}`);
+    if (r) avisoBotao(e.currentTarget, `⤓ ${r.linhas} linha(s)`, '⤓ Excel');
+  });
+  montar();
+}
 // liga o bloco PREVENTIVA dentro da tela do Monitoramento OLT (e devolve os clientes pra parte GERAL, que monta as OLTs e as cidades)
 function ligarRelatorioMonitorOlt(onVerInt6) {
   let carregando = false;
@@ -26883,6 +26959,7 @@ function ligarRelatorioMonitorOlt(onVerInt6) {
     if (!P || !document.getElementById('rm-prev-clientes')) return;
     const cli = P.cli.filter(c => moNaCidadeTopo(c.cidade));
     const r = pintarClientesMonitorOlt(document.getElementById('rm-prev-clientes'), cli, MONITOR_OLT.status, P.semCli);
+    pintarCorrigirMonitorOlt(document.getElementById('rm-prev-corrigir'), cli, P.semCli);
     pintarBaseForaJhMonitorOlt(document.getElementById('rm-prev-base'));
     pintarTecnicoPreventivaMonitorOlt(document.getElementById('rm-prev-tecnico'), r.linhas);
     pintarHojeOntemMonitorOlt(document.getElementById('rm-prev-ontem'), r.linhas, P.passado);
