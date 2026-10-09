@@ -1621,6 +1621,7 @@
   .trend-chart-svg, .grouped-bars-svg { width: 100%; height: 220px; overflow: visible; }
   .trend-gridline { stroke: var(--border); stroke-width: 1; }
   .trend-axis-label { fill: var(--text-muted); font-size: 10px; }
+  .trend-axis-semana { font-size: 9px; opacity: .8; }
   .trend-axis-y-label { fill: var(--text-muted); font-size: 10px; }
   .grouped-bar-value { fill: var(--text-primary); font-size: 10.5px; font-weight: 700; }
   .trend-dot { cursor: pointer; transition: r .15s ease; }
@@ -2418,6 +2419,30 @@
   @media (max-width: 900px) { #indice-aba { margin: 12px 14px 0; padding: 14px; } #indice-aba .idx-topo .idx-qtd { display: none; } #indice-aba .idx-grupo { flex-basis: 100%; padding: 0; border-left: 0; }
     #indice-aba .idx-chips { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; } #indice-aba .idx-chip { white-space: nowrap; flex: 0 0 auto; } #indice-voltar { right: 14px; bottom: 14px; } }
   .btn-xls-auto { margin: 0 0 6px; }
+  /* aviso "Atualizando…" do Filtrar (modo novo) */
+  #aviso-carregando { position: fixed; top: 78px; left: 50%; transform: translateX(-50%); z-index: 600; display: none; align-items: center; gap: 10px; padding: 10px 18px;
+    border-radius: 999px; background: var(--accent-solid); color: #fff; font-size: 13.5px; font-weight: 600; box-shadow: 0 8px 22px rgba(0,0,0,.3); }
+  #aviso-carregando.visivel { display: inline-flex; }
+  #aviso-carregando .ac-roda { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; animation: ac-gira .8s linear infinite; }
+  @keyframes ac-gira { to { transform: rotate(360deg); } }
+  /* tópico atual ao lado do título da tela */
+  #titulo-topico { margin-left: 10px; font-size: 14px; font-weight: 600; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 42vw; }
+  @media (max-width: 900px) { #titulo-topico { display: none; } }
+  /* caixa grande de Retornos no Relatório Operacional */
+  .topico-caixa:has(> .secao-oculta) > .topico-filtros { display: none; }
+  .topico-grupo { border: 1px solid var(--accent); border-radius: 18px; padding: 16px 16px 4px; margin-bottom: 22px; background: color-mix(in srgb, var(--accent) 5%, transparent); }
+  .topico-grupo-tit { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 4px 14px; font-size: 16px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: var(--text-primary); }
+  .topico-grupo-tit .acento { color: var(--accent); }
+  .topico-grupo-tit .tg-qtd { font-size: 12px; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+  .topico-grupo-tit .tg-toggle { margin-left: auto; }
+  .topico-grupo-tit .ph-ic { width: 40px; height: 40px; border-radius: 10px; background: var(--accent-bg); color: var(--accent); display: inline-flex; align-items: center; justify-content: center; }
+  .topico-grupo-tit .ph-ic svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  /* botões do painel AO LADO do título (não quebram pra linha de baixo); a nota do painel fica embaixo */
+  @media (min-width: 701px) {
+    :root[data-estilo="novo"] .panel > h3 { flex-wrap: nowrap !important; }
+    :root[data-estilo="novo"] .panel > h3 .ph-acoes { flex-wrap: nowrap; flex-shrink: 0; }
+  }
+  :root[data-estilo="novo"] .panel > h3 .ph-acoes .secao-toggle, :root[data-estilo="novo"] .panel > h3 .ph-acoes .btn-export-xls, :root[data-estilo="novo"] .panel > h3 .ph-acoes .btn-export-img { padding: 6px 11px; font-size: 12.5px; white-space: nowrap; }
   /* lupa (busca global) */
   .cmdk-grupo-tit { padding: 8px 12px 4px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
   .cmdk-item .cmdk-sub { display: block; font-size: 11.5px; color: var(--text-muted); font-weight: 400; margin-top: 2px; }
@@ -6013,12 +6038,12 @@ function tabelaRankingTopN(elId, items, opts = {}) {
     const cor = opts.cor || 'azul';
     document.getElementById(tabId).innerHTML = !sliced.length ? '<div class="empty">Sem dados.</div>' : `
       <div class="table-wrap"><table class="data-table"><thead><tr>
-        <th>Posição</th><th>${esc(opts.rotuloNome || 'Técnico')}</th><th>${esc(opts.rotuloValor || 'Valor')}</th>
+        <th>Posição</th><th>${esc(opts.rotuloNome || 'Técnico')}</th><th>${esc(opts.rotuloValor || 'Valor')}</th>${opts.colExtra ? `<th>${esc(opts.colExtra)}</th>` : ''}
       </tr></thead><tbody>
         ${sliced.map((it, i) => `<tr${opts.clicavel ? ` class="tr-clicavel" data-label="${esc(it.label)}" title="Clique para ver o detalhe"` : ''}>
           <td><span class="badge ${cor}">${String(i + 1).padStart(2, '0')}</span></td>
           <td class="cat-cell"${it.labelColor ? ` style="color:${it.labelColor}"` : ''}>${esc(it.label)}</td>
-          <td style="font-weight:700">${it.value}</td>
+          <td style="font-weight:700">${it.value}</td>${opts.colExtra ? `<td style="white-space:normal;font-size:12.5px;color:var(--text-secondary)">${esc(it.extra || '-')}</td>` : ''}
         </tr>`).join('')}
       </tbody></table></div>`;
   }
@@ -6061,7 +6086,18 @@ function trendChart(elId, series, opts = {}) {
   // modo novo (Analista, 09/10/2026): todo gráfico de período tem caixa de seleção por série e curva suave
   if (modoNovo() && !opts._padraoNovo) {
     const nSeries = series.filter(x => x.points && x.points.length).length;
-    opts = { ...opts, _padraoNovo: true, seletor: opts.seletor || (nSeries > 1 && !opts.onPonto && !opts.semSeletor), suave: opts.suave !== undefined ? opts.suave : true };
+    opts = { ...opts, _padraoNovo: true, seletor: opts.seletor || (nSeries > 1 && !opts.onPonto && !opts.semSeletor), suave: opts.suave !== undefined ? opts.suave : true, expandir: true, diaSemana: opts.diaSemana !== false };
+    // o gráfico é desenhado na largura que o contêiner tem NA HORA; se ela muda depois (caixa do tópico, barra de rolagem, janela),
+    // sobrava espaço vazio dos lados — redesenha quando a largura muda (09/10/2026, pedido do cliente: "preencher toda a largura")
+    el._trendArgs = [series, opts];
+    if (!el._trendRO && typeof ResizeObserver !== 'undefined') {
+      el._trendRO = new ResizeObserver(() => {
+        const w = el.clientWidth;
+        if (!el.isConnected || !el._trendArgs || !w || Math.abs(w - (el._trendW || 0)) < 24) return;
+        clearTimeout(el._trendRT); el._trendRT = setTimeout(() => { if (el.isConnected && el.id) trendChart(el.id, el._trendArgs[0], el._trendArgs[1]); }, 120);
+      });
+      el._trendRO.observe(el);
+    }
   }
   const comPontos = series.filter(s => s.points && s.points.length);
   if (!comPontos.length) { el.innerHTML = '<div class="empty">Sem dados.</div>'; return; }
@@ -6088,10 +6124,23 @@ function trendChart(elId, series, opts = {}) {
   // num painel de 1150px de largura sobrava um terço vazio de cada lado. Com a
   // largura do viewBox igual à do contêiner, a proporção bate e o gráfico ocupa
   // o painel inteiro. Fica opcional pra não mexer nos gráficos já existentes.
-  const H = 220, PADX = 44, PADY_T = 14, PADY_B = 30;
-  const W = opts.expandir && el.clientWidth > 600 ? Math.round(el.clientWidth) : 600;
+  // opts.diaSemana (modo novo): rótulo de data "dd/mm" ganha o dia da semana embaixo (seg, ter…)
+  const SEMANA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+  const diaDaSemana = l => {
+    const m = String(l).match(/^(\d{2})\/(\d{2})(?:\/(\d{4}))?$/); if (!m) return '';
+    const hoje = new Date();
+    let ano = m[3] ? +m[3] : hoje.getFullYear();
+    let d = new Date(ano, +m[2] - 1, +m[1]);
+    if (!m[3] && d - hoje > 60 * 864e5) d = new Date(ano - 1, +m[2] - 1, +m[1]);
+    return d.getMonth() === +m[2] - 1 ? SEMANA[d.getDay()] : '';
+  };
+  const comSemana = opts.diaSemana && labels.some(l => diaDaSemana(l));
+  const H = comSemana ? 232 : 220, PADX = 44, PADY_T = 14, PADY_B = comSemana ? 40 : 30;
+  const PADR = opts._padraoNovo ? 18 : PADX;
+  const W = opts.expandir && el.clientWidth > (opts._padraoNovo ? 280 : 600) ? Math.round(el.clientWidth) : 600;
+  el._trendW = W;
   const n = labels.length;
-  const x = i => n > 1 ? PADX + (i / (n - 1)) * (W - 2 * PADX) : W / 2;
+  const x = i => n > 1 ? PADX + (i / (n - 1)) * (W - PADX - PADR) : W / 2;
   const y = v => H - PADY_B - (((v - min) / ((max - min) || 1)) * (H - PADY_T - PADY_B));
   // eixo Y: sem valor nenhum os dados "flutuavam" sem referência de escala —
   // 3 rótulos (0, metade, topo) nas mesmas alturas das 3 linhas de grade.
@@ -6122,10 +6171,10 @@ function trendChart(elId, series, opts = {}) {
   el.innerHTML = `
     ${legendaHtml()}
     <div class="trend-chart-wrap">
-    <svg viewBox="0 0 ${W} ${H}" class="trend-chart-svg${opts.suave ? ' trend-suave' : ''}" preserveAspectRatio="xMidYMid meet">
+    <svg viewBox="0 0 ${W} ${H}" class="trend-chart-svg${opts.suave ? ' trend-suave' : ''}" preserveAspectRatio="xMidYMid meet"${comSemana ? ` style="height:${H}px"` : ''}>
       ${[0, 0.5, 1].map(f => {
         const yy = (H - PADY_B - f * (H - PADY_T - PADY_B)).toFixed(1);
-        return `<line x1="${PADX}" y1="${yy}" x2="${W - PADX}" y2="${yy}" class="trend-gridline" stroke-dasharray="3 3"/>
+        return `<line x1="${PADX}" y1="${yy}" x2="${W - PADR}" y2="${yy}" class="trend-gridline" stroke-dasharray="3 3"/>
         <text x="${PADX - 8}" y="${yy}" dy="3.5" text-anchor="end" class="trend-axis-y-label">${yLabel(min + (max - min) * f)}${opts.sufixoY || ''}</text>`;
       }).join('')}
       ${comValores.map(s => `
@@ -6134,7 +6183,9 @@ function trendChart(elId, series, opts = {}) {
         ${s.points.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="4" fill="${s.color}" class="trend-dot" data-idx="${i}"><title>${s.name} — ${p.label}: ${p.display !== undefined ? p.display : p.value}</title></circle>`).join('')}
       `).join('')}
       <line class="trend-hover-line" x1="0" y1="${PADY_T}" x2="0" y2="${H - PADY_B}" style="display:none"/>
-      ${labels.map((l, i) => mostraLabel(i) ? `<text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" class="trend-axis-label">${l}</text>` : '').join('')}
+      ${labels.map((l, i) => !mostraLabel(i) ? '' : comSemana
+        ? `<text x="${x(i).toFixed(1)}" y="${H - 22}" text-anchor="middle" class="trend-axis-label">${l}</text><text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" class="trend-axis-label trend-axis-semana">${diaDaSemana(l)}</text>`
+        : `<text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" class="trend-axis-label">${l}</text>`).join('')}
     </svg>
     <div class="trend-tooltip" style="display:none"></div>
     </div>`;
@@ -6157,7 +6208,7 @@ function trendChart(elId, series, opts = {}) {
       hoverLine.setAttribute('x1', x(idx).toFixed(1));
       hoverLine.setAttribute('x2', x(idx).toFixed(1));
       hoverLine.style.display = 'block';
-      tooltipEl.innerHTML = `<div class="trend-tooltip-data">${esc(labels[idx])}</div>` + comValores.map(s => {
+      tooltipEl.innerHTML = `<div class="trend-tooltip-data">${esc(labels[idx])}${comSemana && diaDaSemana(labels[idx]) ? ' · ' + diaDaSemana(labels[idx]) : ''}</div>` + comValores.map(s => {
         const p = s.points[idx];
         return `<div class="trend-tooltip-item"><span class="legend-dot" style="background:${s.color}"></span>${esc(s.name)}<b>${p.display !== undefined ? p.display : p.value}</b></div>`;
       }).join('');
@@ -6534,7 +6585,7 @@ function renderMapaBairros(elId, rankingBairros) {
     return;
   }
   const comCoord = rankingBairros
-    .map(b => ({ ...b, coord: COORDENADAS_BAIRROS[`${b.bairro}|${String(b.cidade || '').toUpperCase()}`] }))
+    .map(b => ({ ...b, coord: b.coord || COORDENADAS_BAIRROS[`${b.bairro}|${String(b.cidade || '').toUpperCase()}`] }))
     .filter(b => b.coord);
   if (!comCoord.length) { el.innerHTML = '<div class="empty">Nenhum bairro do filtro tem coordenada conhecida — veja o ranking na tabela abaixo.</div>'; return; }
   el.innerHTML = '';
@@ -7678,12 +7729,33 @@ function envolverTopicos(raiz) {
     if (getComputedStyle(pai).display !== 'block') return;
     limparTituloTopico(h);
     const grupo = [h];
-    for (let el = h.nextElementSibling; el && !(el.classList.contains('section-heading') || el.classList.contains('faixa-secao') || el.classList.contains('topico-caixa')); el = el.nextElementSibling) grupo.push(el);
+    for (let el = h.nextElementSibling; el && !(el.classList.contains('section-heading') || el.classList.contains('faixa-secao') || el.classList.contains('topico-caixa') || el.classList.contains('topico-grupo')); el = el.nextElementSibling) grupo.push(el);
     const box = document.createElement('section');
     box.className = 'topico-caixa'; box.dataset.chave = slugTitulo(textoDoTitulo(h));
     pai.insertBefore(box, h);
     grupo.forEach(x => box.appendChild(x));
     cabecalhoNovo(h, iconeDoTopico(textoDoTitulo(h)));
+  });
+  if (ROTA_ATUAL.nome === 'reuniaoprazos') agruparTopicosRetorno(raiz);
+}
+// Relatório Operacional: os tópicos seguidos de Retornos (taxa, cidades, ofensores, motivos, IRR anterior × retorno) ficam dentro de
+// UMA caixa grande "Retornos — IFI / IRR" (pedido do cliente, 09/10/2026), como a caixa do Prazo. Cada tópico continua com o seu filtro.
+function agruparTopicosRetorno(raiz) {
+  const ehRet = el => el && el.classList && el.classList.contains('topico-caixa') && /retorno|\birr\b|\bifi\b/.test(normalizeHeader(textoDoTitulo(el.querySelector(':scope > .section-heading') || el)));
+  [...raiz.querySelectorAll('.topico-caixa')].forEach(box => {
+    if (!ehRet(box) || box.parentElement.classList.contains('topico-grupo-corpo') || ehRet(box.previousElementSibling)) return;
+    const seq = [box];
+    for (let el = box.nextElementSibling; ehRet(el); el = el.nextElementSibling) seq.push(el);
+    if (seq.length < 2) return;
+    const g = document.createElement('section'); g.className = 'topico-grupo';
+    g.innerHTML = `<div class="topico-grupo-tit"><span class="ph-ic">${IC_RETORNO}</span><span>Retornos <span class="acento">— IFI / IRR</span></span><span class="tg-qtd">${seq.length} tópicos</span><button type="button" class="secao-toggle tg-toggle">▾ ocultar</button></div><div class="topico-grupo-corpo"></div>`;
+    box.parentNode.insertBefore(g, box);
+    const corpo = g.querySelector('.topico-grupo-corpo');
+    seq.forEach(x => corpo.appendChild(x));
+    const chave = 'reuniaoprazos|grupo-retornos', bt = g.querySelector('.tg-toggle');
+    const aplicar = oculto => { corpo.classList.toggle('secao-oculta', oculto); bt.textContent = oculto ? '▸ exibir' : '▾ ocultar'; };
+    aplicar(SECOES_OCULTAS.has(chave));
+    bt.addEventListener('click', () => { const o = !corpo.classList.contains('secao-oculta'); if (o) SECOES_OCULTAS.add(chave); else SECOES_OCULTAS.delete(chave); aplicar(o); });
   });
 }
 // páginas com filtro por tópico: os campos do TOPO que cada tópico pode trocar só pra ele
@@ -7810,7 +7882,7 @@ const GRUPOS_INDICE = [
   { nome: 'Monitoramento', ic: () => IC_SINAL, re: /sinal|\bonu|\bolt|preventiva|provision/ },
   { nome: 'Financeiro', ic: () => icMoeda, re: /folha|financ|receita|despesa|desconto|holerite|pagamento|valor|aluguel/ },
   { nome: 'Frota e pedágio', ic: () => icCarro, re: /pedagio|frota|veiculo|multa|manutenc|passage|condutor|revis/ },
-  { nome: 'Produção', ic: () => IC_BARRAS, re: /produc|tecnic|cidade|desloc|ordens|status|\bmax\b|pendente|bairro|servic|cancelad|mapa|visao geral|operac|clean|certific|chamado|cliente/ },
+  { nome: 'Produção', ic: () => IC_BARRAS, re: /produc|produtiv|tecnic|cidade|desloc|ordens|status|\bmax\b|pendente|bairro|servic|cancelad|mapa|visao geral|operac|clean|certific|chamado|cliente/ },
 ];
 function grupoDoIndice(texto) {
   const n = normalizeHeader(texto);
@@ -7865,16 +7937,26 @@ function atualizarIndiceAba() {
     document.body.appendChild(voltar);
   }
 }
+// mostra "› Prazos — reparo (24h)" ao lado do título da tela enquanto a pessoa rola (pedido do cliente, 09/10/2026)
+function atualizarTituloTopico(ativo, passouDoPainel) {
+  const h = document.getElementById('page-title'); if (!h) return;
+  let sp = document.getElementById('titulo-topico');
+  if (!sp) { sp = document.createElement('span'); sp.id = 'titulo-topico'; h.after(sp); }
+  const it = passouDoPainel && ativo >= 0 ? INDICE_ITENS[ativo] : null;
+  sp.textContent = it ? '› ' + it.texto : '';
+  sp.title = it ? it.texto : '';
+}
 function marcarChipAtivo() {
   const barra = document.getElementById('indice-aba');
   const voltar = document.getElementById('indice-voltar');
-  if (!barra || !barra.classList.contains('visivel')) { if (voltar) voltar.classList.remove('visivel'); return; }
+  if (!barra || !barra.classList.contains('visivel')) { if (voltar) voltar.classList.remove('visivel'); atualizarTituloTopico(-1, false); return; }
   const topo = alturaDoTopo();
   if (voltar) voltar.classList.toggle('visivel', barra.getBoundingClientRect().bottom < topo);
   const limite = topo + 40;
   let ativo = -1;
   INDICE_ITENS.forEach((x, i) => { if (x.el.isConnected && x.el.getBoundingClientRect().top <= limite) ativo = i; });
   if (ativo < 0 && INDICE_ITENS.length) ativo = 0;
+  atualizarTituloTopico(ativo, barra.getBoundingClientRect().bottom < topo);
   // fim da página: a seção clicada pode não chegar ao topo — se ela está visível, ela é a ativa
   const noFim = window.scrollY >= document.documentElement.scrollHeight - window.innerHeight - 4;
   const clic = INDICE_CLICADO != null && INDICE_ITENS[INDICE_CLICADO];
@@ -7889,6 +7971,23 @@ function irParaSecao(texto, tentativas) {
   if ((tentativas || 0) < 8) setTimeout(() => irParaSecao(texto, (tentativas || 0) + 1), 250);
 }
 let OBSERVADOR_ANALISTA = null, TIMER_ANALISTA = null;
+// Filtrar das telas grandes leva 1–2 s fazendo conta: sem aviso parecia travado (pedido do cliente, 09/10/2026).
+// Segura o clique, mostra "Atualizando…", deixa o navegador desenhar e só então solta o clique de verdade.
+function avisoCarregando(ligar) {
+  let el = document.getElementById('aviso-carregando');
+  if (!el) { el = document.createElement('div'); el.id = 'aviso-carregando'; el.className = 'fora-da-imagem'; el.setAttribute('role', 'status'); el.innerHTML = '<span class="ac-roda"></span>Atualizando…'; document.body.appendChild(el); }
+  el.classList.toggle('visivel', !!ligar);
+}
+document.addEventListener('click', ev => {
+  const b = ev.target.closest && ev.target.closest('#f-apply');
+  if (!b || !modoNovo() || b._liberado || TOPICO_PROGRAMATICO || !ev.isTrusted) return;
+  ev.stopImmediatePropagation(); ev.preventDefault();
+  avisoCarregando(true);
+  requestAnimationFrame(() => setTimeout(() => {
+    b._liberado = true;
+    try { b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); } finally { b._liberado = false; setTimeout(() => avisoCarregando(false), 60); }
+  }, 30));
+}, true);
 function atualizarFerramentasAnalista() {
   const lupa = document.getElementById('btn-lupa'); if (lupa) lupa.hidden = !modoNovo();
   if (!modoNovo()) { atualizarIndiceAba(); return; }
@@ -7917,7 +8016,7 @@ const LUPA_ASSUNTOS = [
   { termos: ['produtividade', 'producao', 'tecnico', 'dias trabalhados', 'ativacao', 'reparo'], rota: 'relgeral', secao: 'Produção por técnico', sub: 'produção, dias, produtividade, IFI/IRR e indicador' },
   { termos: ['cidade', 'cancelad', 'irr', 'producao'], rota: 'relgeral', secao: 'Produção geral por cidade', sub: 'IRR, prazo e cancelados por cidade' },
   { termos: ['status', 'ordens', 'cancelad', 'improdutiv'], rota: 'relgeral', secao: 'Ordens do período', sub: 'ordens por status e tipo, evolução' },
-  { termos: ['deslocamento', 'deslocam', 'cidades atendidas'], rota: 'relgeral', secao: 'Técnicos — quem mais', sub: 'quem mais e menos se desloca' },
+  { termos: ['deslocamento', 'deslocam', 'cidades atendidas'], rota: 'relgeral', secao: 'Produção e deslocamento', sub: 'quem mais e menos se desloca' },
   { termos: ['improdutiv', 'nao concluido', 'ausente'], rota: 'reldia', secao: 'Improdutivas do dia', sub: 'motivos e técnicos' },
   { termos: ['18h', 'depois das 18', 'hora extra'], rota: 'reldia', secao: 'Concluídas depois das 18h', sub: 'ordens concluídas após as 18h' },
   { termos: ['bairro', 'volume'], rota: 'reldia', secao: 'Volume por bairro', sub: 'top 10 bairros do dia' },
@@ -8400,17 +8499,22 @@ document.addEventListener('click', e => {
 // render — igual a ativarFiltrosDeColuna logo abaixo — pra valer em qualquer
 // tela sem precisar mexer página por página: "quero que todas as tabelas seja
 // possível ocultar".
+// seções que a pessoa ocultou (modo novo): chave = rota + título. Sobrevive ao Filtrar e a trocar de aba; some no F5.
+const SECOES_OCULTAS = new Set();
 function ativarTogglesDeSecao(raiz) {
   const alvo = raiz || document.getElementById('content');
   if (!alvo) return;
-  const criarBotao = (alvos) => {
+  const criarBotao = (alvos, tituloEl) => {
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'secao-toggle'; b.textContent = '▾ ocultar';
+    const chave = modoNovo() && tituloEl ? (ROTA_ATUAL.nome || '') + '|' + normalizeHeader(textoDoTitulo(tituloEl)) : null;
     b.addEventListener('click', () => {
       const escondido = alvos[0].classList.contains('secao-oculta');
       alvos.forEach(a => a.classList.toggle('secao-oculta', !escondido));
       b.textContent = escondido ? '▾ ocultar' : '▸ exibir';
+      if (chave) { if (escondido) SECOES_OCULTAS.delete(chave); else SECOES_OCULTAS.add(chave); }
     });
+    if (chave && SECOES_OCULTAS.has(chave)) { alvos.forEach(a => a.classList.add('secao-oculta')); b.textContent = '▸ exibir'; }
     return b;
   };
   // 1) Blocos demarcados por "section-heading" OU "faixa-secao" (a faixa
@@ -8431,7 +8535,7 @@ function ativarTogglesDeSecao(raiz) {
     let el = h.nextElementSibling;
     while (el && !ehTitulo(el)) { alvos.push(el); el = el.nextElementSibling; }
     if (!alvos.length) return;
-    h.appendChild(criarBotao(alvos));
+    h.appendChild(criarBotao(alvos, h));
   });
   // 2) Painéis (.panel > h3) com tabela dentro que NÃO estão debaixo de um
   // "section-heading" (a maioria das telas usa só isso, sem título de seção) —
@@ -8444,7 +8548,7 @@ function ativarTogglesDeSecao(raiz) {
     if (!h3.style.display) { h3.style.display = 'flex'; h3.style.alignItems = 'center'; h3.style.gap = '12px'; h3.style.flexWrap = 'wrap'; }
     const alvosPainel = [...p.children].filter(c => c !== h3);
     if (!alvosPainel.length) return;
-    h3.appendChild(criarBotao(alvosPainel));
+    h3.appendChild(criarBotao(alvosPainel, h3));
   });
 }
 // ---------- Ordenar qualquer coluna (menor→maior / maior→menor) ----------
@@ -12214,6 +12318,12 @@ function capturarElementoComoImagem(elemento, nomeArquivo, aoTerminar) {
       // Genéricos (01/10/2026): `.fora-da-imagem` = controle de tela que não
       // entra na imagem (ex.: "Importar CSV"/"Exportar Excel" do Pedágio do Dia);
       // `.rolagem-inteira-na-imagem` = caixa com rolagem própria que sai inteira.
+      // coluna de tabela marcada fora-da-imagem: some o título E as células daquela coluna (senão a tabela desalinha)
+      clone.querySelectorAll('table').forEach(t => {
+        const cab = [...t.querySelectorAll('thead tr')].pop(); if (!cab) return;
+        const idx = [...cab.children].map((th, i) => th.classList.contains('fora-da-imagem') ? i : -1).filter(i => i >= 0).reverse();
+        if (idx.length) t.querySelectorAll('tr').forEach(tr => { if (tr.children.length === cab.children.length) idx.forEach(i => tr.children[i] && tr.children[i].remove()); });
+      });
       clone.querySelectorAll('.fora-da-imagem').forEach(el => el.remove());
       clone.querySelectorAll('.rolagem-inteira-na-imagem').forEach(el => { el.style.maxHeight = 'none'; el.style.overflowY = 'visible'; });
     },
@@ -12341,9 +12451,11 @@ const PALETA_IMG_CLARO  = { fundo: '#ffffff', titulo: '#0d1526', cabFundo: '#e4e
 function imagemPadraoDaTabela(tabela, titulo, subtitulo, nomeArquivo) {
   if (!tabela) return null;
   const cabLinha = [...tabela.querySelectorAll('thead tr')].filter(tr => tr.querySelector('th')).pop();
-  const colunas = [...cabLinha.querySelectorAll('th')].map(th => ({ titulo: th.textContent.replace('▾', '').trim() }));
+  // coluna com th.fora-da-imagem não entra na imagem (ex.: Taxa de Conclusão e Execução da Caixa — pedido do cliente, 09/10/2026)
+  const ths = [...cabLinha.querySelectorAll('th')], fora = new Set(ths.map((th, i) => th.classList.contains('fora-da-imagem') ? i : -1).filter(i => i >= 0));
+  const colunas = ths.filter((th, i) => !fora.has(i)).map(th => ({ titulo: th.textContent.replace('▾', '').trim() }));
   const visiveis = [...tabela.querySelectorAll('tbody tr')].filter(tr => tr.style.display !== 'none' && tr.querySelector('td'));
-  const daLinha = tr => ({ celulas: [...tr.querySelectorAll('td')].map(textoCelulaExport) });
+  const daLinha = tr => ({ celulas: [...tr.querySelectorAll('td')].filter((td, i) => !fora.has(i)).map(textoCelulaExport) });
   // linha .total-row da tela vira a linha de total do motor (faixa azul-marinho)
   const trTotal = visiveis.find(tr => tr.classList.contains('total-row')) || tabela.querySelector('tfoot tr.total-row');
   const linhas = visiveis.filter(tr => tr !== trTotal).map(daLinha);
@@ -15549,6 +15661,8 @@ function renderParcialDoDia() {
     }
     function imagemStatusPorBalde(titulo, rotuloPrimeira, linhasTodas, totalLinha, nomeArquivo, tabelaId) {
       const linhas = ordemVisivelDaTabela(tabelaId, l => l.label, linhasTodas);
+      // a imagem NUNCA leva Taxa de Conclusão / Execução da Caixa (09/10/2026, pedido do cliente) — só a tela do Analista mostra
+      const verEficiencia = false;
       const colunas = [{ titulo: rotuloPrimeira }]
         .concat(bucketsTabela.map(b => ({ titulo: bucketLabel[b], fundo: FUNDO_BALDE_IMG[b] })))
         .concat([{ titulo: 'Total O.S' }].concat(verEficiencia ? [{ titulo: 'Taxa de Conclusão' }, { titulo: 'Execução da Caixa' }] : []));
@@ -18135,18 +18249,47 @@ function relGeralMax(chamados, s, e, cidadeOk, criterio, tipoFiltro) {
   const somaBate = lista.every(c => c.conc + c.naoConc === c.max && c.prod + c.improd + c.outros === c.max);
   return { lista, dist, info, somaBate };
 }
+// resumo por quantidade de chamados (MAX 2, MAX 3…) — mesmo formato da planilha que o cliente usa (09/10/2026)
+function htmlResumoMax(lista, idTab) {
+  const por = new Map();
+  lista.filter(c => c.max >= 2).forEach(c => { const o = por.get(c.max) || { max: c.max, clientes: 0, reparos: 0, conc: 0, improd: 0, outros: 0 }; o.clientes++; o.reparos += c.max; o.conc += c.conc; o.improd += c.improd; o.outros += c.outros; por.set(c.max, o); });
+  const linhas = [...por.values()].sort((a, b) => a.max - b.max);
+  if (!linhas.length) return '';
+  const t = linhas.reduce((a, l) => { ['clientes', 'reparos', 'conc', 'improd', 'outros'].forEach(k => { a[k] += l[k]; }); return a; }, { clientes: 0, reparos: 0, conc: 0, improd: 0, outros: 0 });
+  return `<div class="panel"><h3>Resumo por MAX (clientes reincidentes)</h3><p class="panel-subtitle">Reparos = nº de clientes × MAX. Concluídos + improdutivos + cancelados/em aberto = reparos.</p><div class="table-wrap"><table class="data-table" id="${idTab}"><thead><tr><th>Tipo</th><th>Nº de clientes</th><th>Reparos</th><th>Concluídos</th><th>Improdutivos</th><th>Cancelados / em aberto</th></tr></thead><tbody>
+    ${linhas.map(l => `<tr><td class="cat-cell">MAX ${l.max}</td><td style="font-weight:700">${l.clientes}</td><td>${l.reparos}</td><td style="color:var(--success);font-weight:600">${l.conc}</td><td>${l.improd}</td><td>${l.outros}</td></tr>`).join('')}
+    <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${t.clientes}</td><td>${t.reparos}</td><td>${t.conc}</td><td>${t.improd}</td><td>${t.outros}</td></tr></tbody></table></div></div>`;
+}
+// motivo com o principal ofensor; clicar no motivo abre todos os ofensores (Relatório Geral e Operacional, 09/10/2026)
+function principalOfensorTxt(tec) {
+  const ord = Object.entries(tec || {}).sort((a, b) => b[1] - a[1]);
+  if (!ord.length) return '-';
+  return `${esc(ord[0][0])} · <b>${ord[0][1]}</b>${ord.length > 1 ? ` <span style="color:var(--text-muted)">+${ord.length - 1} outro(s)</span>` : ''}`;
+}
+function linkOfensoresMotivo(motivo, tec, rotuloQtd) {
+  return `<a href="#" class="link-os-tec" data-mot-of="${esc(JSON.stringify(Object.entries(tec || {}).sort((a, b) => b[1] - a[1])))}" data-mot-nome="${esc(motivo)}" data-mot-rot="${esc(rotuloQtd || 'Quantidade')}" title="Ver todos os ofensores deste motivo">${esc(motivo)}</a>`;
+}
+function abrirOfensoresDoMotivo(ev) {
+  const a = ev.target.closest('a[data-mot-of]'); if (!a) return false;
+  ev.preventDefault();
+  let lista = []; try { lista = JSON.parse(a.dataset.motOf); } catch (e) { /* lista vazia */ }
+  const tot = lista.reduce((x, [, q]) => x + q, 0);
+  abrirModalLista(`Ofensores — ${a.dataset.motNome}`, `${tot} no total · ${lista.length} técnico(s)`, ['Posição', 'Técnico', a.dataset.motRot, '% do motivo'],
+    lista.map(([n, q], i) => ({ celulas: [String(i + 1).padStart(2, '0'), esc(n), `<b>${q}</b>`, formatPct(tot ? q / tot * 100 : 0, 1)] })), { nome: `ofensores-${slugTitulo(a.dataset.motNome)}` });
+  return true;
+}
 function htmlTabelaMax(lista, minimo, idTab) {
   const vis = lista.filter(c => c.max >= minimo);
   if (!vis.length) return '<div class="empty">Nenhum cliente com essa quantidade de chamados no período.</div>';
   const LIM = 1500, cortado = vis.length > LIM;
   return `<div class="table-wrap"><table class="data-table" id="${idTab}"><thead><tr>
-    <th>Cliente</th><th>ID do cliente</th><th>MAX</th><th>Concluídos</th><th>Não concluídos</th><th>Produtivos</th><th>Improdutivos</th><th>Cancelados / em aberto</th><th>O.S</th></tr></thead><tbody>
+    <th>Cliente</th><th>ID do cliente</th><th>MAX</th><th>Concluídos</th><th>Improdutivos</th><th>Cancelados / em aberto</th><th>O.S</th></tr></thead><tbody>
     ${vis.slice(0, LIM).map(c => `<tr><td class="cat-cell">${esc(c.nome) || '-'}</td><td>${esc(c.id)}</td>
       <td>${c.max > 1 ? `<span class="badge warn">MAX ${c.max}</span>` : `MAX ${c.max}`}</td>
-      <td>${c.conc}</td><td>${c.naoConc}</td><td>${c.prod}</td><td>${c.improd}</td><td>${c.outros}</td>
+      <td style="color:var(--success);font-weight:600">${c.conc}</td><td>${c.improd}</td><td>${c.outros}</td>
       <td style="font-size:12px;color:var(--text-secondary);white-space:normal">${esc(c.os.slice(0, 8).join(', '))}${c.os.length > 8 ? '…' : ''}</td></tr>`).join('')}
     ${(() => { const tt = vis.reduce((a, c) => { ['max', 'conc', 'naoConc', 'prod', 'improd', 'outros'].forEach(k => { a[k] += c[k]; }); return a; }, { max: 0, conc: 0, naoConc: 0, prod: 0, improd: 0, outros: 0 });
-      return `<tr class="total-row"><td class="cat-cell">Total (${vis.length.toLocaleString('pt-BR')} clientes)</td><td>-</td><td>${tt.max}</td><td>${tt.conc}</td><td>${tt.naoConc}</td><td>${tt.prod}</td><td>${tt.improd}</td><td>${tt.outros}</td><td>-</td></tr>`; })()}
+      return `<tr class="total-row"><td class="cat-cell">Total (${vis.length.toLocaleString('pt-BR')} clientes)</td><td>-</td><td>${tt.max}</td><td>${tt.conc}</td><td>${tt.improd}</td><td>${tt.outros}</td><td>-</td></tr>`; })()}
     </tbody></table></div>${cortado ? `<p style="font-size:12px;color:var(--text-muted)">Mostrando os ${LIM} maiores de ${vis.length.toLocaleString('pt-BR')}.</p>` : ''}`;
 }
 
@@ -18187,20 +18330,26 @@ function htmlTabelaPrazoPorDia(linhas, idTab) {
   let ant = null;
   const tot = linhas.reduce((a, l) => { ['total', 'ate24', 'ate48', 'maior48', 'outlier'].forEach(k => { a[k] += l[k]; }); return a; }, { total: 0, ate24: 0, ate48: 0, maior48: 0, outlier: 0 });
   const parciais = linhas.filter(l => l.fonte === 'parcial').length;
-  return `<div class="table-wrap"><table class="data-table" id="${idTab}"><thead><tr><th>Data</th><th>Fonte</th><th>Reparos</th><th>Até 24h</th><th>Até 48h</th><th>Maior que 48h</th><th>Outlier</th><th>% no prazo</th><th>vs anterior</th></tr></thead><tbody>
+  return `<div class="table-wrap"><table class="data-table" id="${idTab}"><thead><tr><th>Data</th><th>Reparos</th><th>Até 24h</th><th>Até 48h</th><th>Maior que 48h</th><th>Outlier</th><th>% no prazo</th><th>vs anterior</th></tr></thead><tbody>
     ${linhas.map(l => { const p = l.ate24 / l.total * 100, v = ant === null ? null : p - ant; ant = p;
-      return `<tr><td>${formatDate(l.data)}</td><td>${l.fonte === 'parcial' ? '<span class="badge amber">Prazo parcial (ao vivo)</span>' : 'Planilha'}</td><td>${l.total}</td><td>${l.ate24}</td><td>${l.ate48}</td><td>${l.maior48}</td><td>${l.outlier}</td>
+      return `<tr><td>${formatDate(l.data)}${l.fonte === 'parcial' ? ' <span class="badge amber" title="Dia ainda não está na planilha: vem do CSV da PCR, ao vivo">parcial</span>' : ''}</td><td>${l.total}</td><td>${l.ate24}</td><td>${l.ate48}</td><td>${l.maior48}</td><td>${l.outlier}</td>
         <td${corPctMeta(p, PRAZO_META, true)}>${formatPct(p, 1)} <span style="font-weight:400;color:var(--text-muted)">(${l.ate24} de ${l.total})</span></td>
         <td style="color:${v === null ? 'var(--text-muted)' : v >= 0 ? 'var(--success)' : 'var(--danger)'}">${v === null ? '-' : (v >= 0 ? '▲ ' : '▼ ') + fmtDec(Math.abs(v), 1) + ' p.p.'}</td></tr>`; }).join('')}
-    <tr class="total-row"><td class="cat-cell">${parciais ? 'Prazo do mês até agora (com o parcial)' : 'Total do período'}</td><td>-</td><td>${tot.total}</td><td>${tot.ate24}</td><td>${tot.ate48}</td><td>${tot.maior48}</td><td>${tot.outlier}</td><td>${formatPct(tot.ate24 / tot.total * 100, 1)} (${tot.ate24} de ${tot.total})</td><td>-</td></tr>
+    <tr class="total-row"><td class="cat-cell">${parciais ? 'Prazo do mês até agora (com o parcial)' : 'Total do período'}</td><td>${tot.total}</td><td>${tot.ate24}</td><td>${tot.ate48}</td><td>${tot.maior48}</td><td>${tot.outlier}</td><td>${formatPct(tot.ate24 / tot.total * 100, 1)} (${tot.ate24} de ${tot.total})</td><td>-</td></tr>
     </tbody></table></div>`;
 }
 // gráficos de período do prazo: % no prazo × meta, e as faixas (até 24h, até 48h, > 48h, outlier) dia a dia
-function graficosPrazoPorDia(idPct, idFaixas, linhas) {
+function graficosPrazoPorDia(idPct, idFaixas, linhas, ativDias) {
   const k = d => d.slice(8, 10) + '/' + d.slice(5, 7);
+  // com ativação (36h): as duas séries no MESMO eixo de dias; dia sem dado de um lado repete o valor anterior (tooltip diz "sem dado")
+  const ativ = (ativDias || []).filter(a => a.total);
+  const dias = [...new Set([...linhas.map(l => l.data), ...ativ.map(a => a.data)])].sort();
+  const serie = (mapa, num, den) => { let ult = null; return dias.map(d => { const o = mapa.get(d); if (o && o[den]) { ult = Number((o[num] / o[den] * 100).toFixed(1)); return { label: k(d), value: ult, display: `${formatPct(ult, 1)} (${o[num]} de ${o[den]})` }; } return { label: k(d), value: ult === null ? 0 : ult, display: 'sem dado' }; }); };
+  const mRep = new Map(linhas.map(l => [l.data, l])), mAtiv = new Map(ativ.map(a => [a.data, a]));
   trendChart(idPct, [
-    { name: '% no prazo (até 24h)', color: '#3b82f6', points: linhas.map(l => ({ label: k(l.data), value: Number((l.ate24 / l.total * 100).toFixed(1)) })) },
-    { name: `Meta ${PRAZO_META}%`, color: '#16a34a', tracejado: true, semArea: true, points: linhas.map(l => ({ label: k(l.data), value: PRAZO_META })) },
+    { name: '% reparo no prazo (24h)', color: '#3b82f6', points: serie(mRep, 'ate24', 'total') },
+    ...(ativ.length ? [{ name: '% ativação/M.E no prazo (36h)', color: '#a855f7', points: serie(mAtiv, 'ate36', 'total') }] : []),
+    { name: `Meta ${PRAZO_META}%`, color: '#16a34a', tracejado: true, semArea: true, points: dias.map(d => ({ label: k(d), value: PRAZO_META })) },
   ], { expandir: true, yMin: 40, yMax: 100, legendaSemTotal: true });
   if (idFaixas) trendChart(idFaixas, [
     { name: 'Até 24h', color: '#16a34a', points: linhas.map(l => ({ label: k(l.data), value: l.ate24 })) },
@@ -18304,13 +18453,23 @@ function evolucaoRetornos(s, e, cidadeOk, tecOk, tipoOk) {
     const i = caixa(p.data); if (i < 0) return;
     if (String(p.ifi_irr).trim().toUpperCase() === 'IFI') ifi[i]++; else irr[i]++;
   });
-  const pts = (num, den) => ev.caixas.map((c, i) => ({ label: c.label, value: den[i] ? Number((num[i] / den[i] * 100).toFixed(2)) : 0 }));
-  return { granularidade: ev.granularidade, series: [
+  const pts = (num, den) => ev.caixas.map((c, i) => ({ label: c.label, value: den[i] ? Number((num[i] / den[i] * 100).toFixed(2)) : 0, display: den[i] ? `${formatPct(num[i] / den[i] * 100, 2)} (${num[i]} de ${den[i]})` : '- (sem base)' }));
+  return { granularidade: ev.granularidade, caixas: ev.caixas, ifi, irr, baseIfi, baseIrr, series: [
     { name: '% IFI', color: '#ef4444', points: pts(ifi, baseIfi) },
     { name: '% IRR', color: '#f59e0b', points: pts(irr, baseIrr) },
     { name: `Meta IFI ${formatPct(BONUS_IFI_MAX, 1)}`, color: '#fca5a5', tracejado: true, semArea: true, points: ev.caixas.map(c => ({ label: c.label, value: BONUS_IFI_MAX })) },
     { name: `Meta IRR ${formatPct(BONUS_IRR_MAX, 1)}`, color: '#fcd34d', tracejado: true, semArea: true, points: ev.caixas.map(c => ({ label: c.label, value: BONUS_IRR_MAX })) },
   ], totais: { ifi: ifi.reduce((a, b) => a + b, 0), irr: irr.reduce((a, b) => a + b, 0), baseIfi: baseIfi.reduce((a, b) => a + b, 0), baseIrr: baseIrr.reduce((a, b) => a + b, 0) } };
+}
+// tabela com as QUANTIDADES por trás do gráfico de evolução do % de retorno (pedido do cliente, 09/10/2026)
+function htmlTabelaEvolRetornos(evr, idTab) {
+  if (!evr) return '';
+  const pc = (n, d) => d ? formatPct(n / d * 100, 2) : '-';
+  const cor = (n, d, meta) => d ? ` style="font-weight:700;color:${n / d * 100 > meta ? 'var(--danger)' : 'var(--success)'}"` : '';
+  const T = k => evr[k].reduce((a, b) => a + b, 0);
+  return `<div class="table-wrap" style="margin-top:12px"><table class="data-table" id="${idTab}"><thead><tr><th>Período</th><th>IFI</th><th>Ativações + M.E</th><th>% IFI</th><th>IRR</th><th>Reparos</th><th>% IRR</th></tr></thead><tbody>
+    ${evr.caixas.map((c, i) => `<tr><td>${esc(c.label)}</td><td>${evr.ifi[i]}</td><td>${evr.baseIfi[i]}</td><td${cor(evr.ifi[i], evr.baseIfi[i], BONUS_IFI_MAX)}>${pc(evr.ifi[i], evr.baseIfi[i])}</td><td>${evr.irr[i]}</td><td>${evr.baseIrr[i]}</td><td${cor(evr.irr[i], evr.baseIrr[i], BONUS_IRR_MAX)}>${pc(evr.irr[i], evr.baseIrr[i])}</td></tr>`).join('')}
+    <tr class="total-row"><td class="cat-cell">Total</td><td>${T('ifi')}</td><td>${T('baseIfi')}</td><td>${pc(T('ifi'), T('baseIfi'))}</td><td>${T('irr')}</td><td>${T('baseIrr')}</td><td>${pc(T('irr'), T('baseIrr'))}</td></tr></tbody></table></div>`;
 }
 // ranking de bairros pra renderMapaBairros (mesmo formato do mapa do Dashboard)
 function rankingBairrosDe(rows) {
@@ -18337,11 +18496,12 @@ function renderRelatorioGeral() {
     <div class="field"><label>Status (tópico Ordens)</label><select id="rg-status"><option value="">Todos</option><option value="concluido">Concluído</option><option value="naoconcluido">Improdutivo</option><option value="cancelado">Cancelado</option></select></div>
     <div class="field"><label>MAX: contar por</label><select id="rg-max-crit" title="Regra: chamados de REPARO abertos no período"><option value="abertura">Data de abertura do chamado</option><option value="atendimento">Data do atendimento</option></select></div>
     <div class="field"><label>MAX: mostrar</label><select id="rg-max-min"><option value="2">Reincidentes (MAX ≥ 2)</option><option value="1">Todos os clientes</option></select></div>
+    <div class="field"><label>MAX: período</label><select id="rg-max-per"><option value="filtro">Período do filtro</option><option value="hoje">Somente hoje</option></select></div>
   `)}<div id="rg-body"></div>`;
   wireMultiCityField('rg-cidades');
   ligarCampoTipos('rg-tipos');
   document.getElementById('f-apply').addEventListener('click', load);
-  ['rg-max-crit', 'rg-max-min', 'rg-status'].forEach(id => document.getElementById(id).addEventListener('change', load));
+  ['rg-max-crit', 'rg-max-min', 'rg-max-per', 'rg-status'].forEach(id => document.getElementById(id).addEventListener('change', load));
   load();
   function load() {
     const s = document.getElementById('f-start').value, e = document.getElementById('f-end').value;
@@ -18391,7 +18551,8 @@ function renderRelatorioGeral() {
       if (!techCities[k]) { techCities[k] = new Set(); techCityCount[k] = {}; }
       if (r.cidade) { techCities[k].add(r.cidade); techCityCount[k][r.cidade] = (techCityCount[k][r.cidade] || 0) + 1; }
     });
-    const deslocList = Object.entries(techCities).map(([label, set]) => ({ label, value: set.size })).sort((a, b) => b.value - a.value);
+    const cidadesTxt = k => Object.entries(techCityCount[k] || {}).sort((a, b) => b[1] - a[1]).map(([c, q]) => `${rotuloCidadeGeral(c)} (${q})`).join(', ');
+    const deslocList = Object.entries(techCities).map(([label, set]) => ({ label, value: set.size, extra: cidadesTxt(label) })).sort((a, b) => b.value - a.value);
     const bottomDeslocList = [...deslocList].sort((a, b) => a.value - b.value);
     const comFrotaJH = new Set();
     [...techList, ...deslocList].forEach(x => { if (!comFrotaJH.has(x.label) && temCarroDaFrotaJH(x.label, s, e)) comFrotaJH.add(x.label); });
@@ -18428,6 +18589,8 @@ function renderRelatorioGeral() {
     const motivos = Object.values(motivoMap).sort((a, b) => b.qtd - a.qtd);
     const ativRows = DB.prazo.filter(p => inRange(p.data, s, e) && cidadeOk(p.cidade) && tecOk(p.recurso) && (tipoOk('Ativação') || tipoOk('Mudança de Endereço')) && ehPrazoDeAtivacao(p, true) && classifyBucketAtivacao(p.status_prazo, p.aging) !== 'outro');
     const ativDentro = ativRows.filter(p => classifyBucketAtivacao(p.status_prazo, p.aging) === 'ate36').length;
+    const ativPorDia = new Map();
+    ativRows.forEach(p => { const o = ativPorDia.get(p.data) || { data: p.data, total: 0, ate36: 0 }; o.total++; if (classifyBucketAtivacao(p.status_prazo, p.aging) === 'ate36') o.ate36++; ativPorDia.set(p.data, o); });
     const pPzAtiv = pctSobre(ativDentro, ativRows.length);
     const pPzDia = pctSobre(pzTot.ate24, pzTot.total);
 
@@ -18440,7 +18603,9 @@ function renderRelatorioGeral() {
     // ---- MAX (só REPARO, pedido do cliente 09/10/2026) ----
     const crit = document.getElementById('rg-max-crit').value;
     const minMax = parseInt(document.getElementById('rg-max-min').value, 10) || 2;
-    const mx = relGeralMax(g.chamados, s, e, cidadeOk, crit, 'rep');
+    const maxHoje = document.getElementById('rg-max-per').value === 'hoje', hojeIso = hojeISOLocal();
+    const mx = relGeralMax(maxHoje ? chamadosUnificados(isoLocalDe(new Date(Date.now() - 7 * 864e5))) : g.chamados, maxHoje ? hojeIso : s, maxHoje ? hojeIso : e, cidadeOk, crit, 'rep');
+    const maxPeriodoTxt = maxHoje ? `hoje (${formatDate(hojeIso)})` : periodoTxt;
     const reinc = mx.lista.filter(c => c.max > 1).length;
 
     // ---- canceladas por cidade × tipo de serviço (O.S únicas, Produção + PCR) ----
@@ -18504,7 +18669,7 @@ function renderRelatorioGeral() {
       </div>
       <div class="panel"><h3>Evolução dos serviços no período${evolucao ? ` <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(por ${evolucao.granularidade})</span>` : ''}</h3><div id="rg-g-evol"></div></div>
 
-      <div class="section-heading">Técnicos — quem mais e quem menos produz, e deslocamento</div>
+      <div class="section-heading">Produção e deslocamento por técnico</div>
       <div class="panels-grid">
         <div class="panel"><h3>Técnicos que mais produzem (concluído)</h3><p class="panel-subtitle">Nome em laranja: técnico com carro da frota da JH</p><div id="rg-g-tmais"></div></div>
         <div class="panel"><h3>Técnicos que menos produzem (concluído)</h3><p class="panel-subtitle">Nome em laranja: técnico com carro da frota da JH</p><div id="rg-g-tmenos"></div></div>
@@ -18514,8 +18679,15 @@ function renderRelatorioGeral() {
         <div class="panel"><h3>Técnicos que menos se deslocam (nº de cidades atendidas)</h3><p class="panel-subtitle">Clique no nome para ver as cidades</p><div id="rg-g-dmenos"></div></div>
       </div>
       <div id="rg-desloc-detalhe"></div>
-      <div class="panel"><h3>Mapa — produção por bairro e cidade (concluídas)</h3><p class="panel-subtitle">Círculo maior = mais ordens concluídas no bairro; cor = cidade. ${fmtN(bairros.length)} bairro(s) com ordem no período.</p><div id="rg-mapa" class="mapa-cidades" style="height:520px"></div></div>
-      <div class="panel"><h3>Produtividade por técnico (ord./dia) — todos</h3><div id="rg-g-prod"></div></div>
+      <div class="panel"><h3>Mapa — produção por bairro e cidade (concluídas)</h3><p class="panel-subtitle">Círculo maior = mais ordens concluídas; cor = cidade. ${fmtN(bairros.length)} bairro(s) com ordem no período.</p>
+        <div class="toolbar fora-da-imagem" style="margin:0 0 10px;padding:10px 12px">
+          <div class="field"><label>Mostrar</label><select id="rg-mapa-modo"><option value="bairros">Bairros</option><option value="cidades">Cidades</option></select></div>
+          <div class="field"><label>Quantidade</label><select id="rg-mapa-top"><option value="10">Top 10</option><option value="20">Top 20</option><option value="50">Top 50</option><option value="100">Top 100</option><option value="todos" selected>Todos</option></select></div>
+          ${multiSelectField('rg-mapa-cid', 'Cidades do mapa', [...new Set(bairros.map(b => b.cidade))].sort(), { allLabel: 'Todas', noneLabel: 'Nenhuma' })}
+          <span id="rg-mapa-info" style="font-size:12px;color:var(--text-muted);align-self:center"></span>
+        </div>
+        <div id="rg-mapa" class="mapa-cidades" style="height:520px"></div></div>
+      <div class="panel"><h3>Produtividade por técnico (ord./dia)</h3><p class="panel-subtitle">Ordens concluídas ÷ dias em que o técnico concluiu ao menos uma.</p><div id="rg-g-prod"></div></div>
 
       <div class="section-heading">Prazos — reparo (24h) e ativação (36h)</div>
       ${nota(`Dia que já está na planilha PRAZOS_ESCRITÓRIO vem da planilha; dia que ainda não está vem do CSV da PCR e aparece como <b>Prazo parcial (ao vivo)</b>. A linha de baixo mostra como o prazo do mês está ficando. Meta ${formatPct(PRAZO_META, 0)} em até 24h; ativação e mudança de endereço, 36h.`)}
@@ -18529,7 +18701,7 @@ function renderRelatorioGeral() {
       </div>
       <div class="panel"><h3>Prazo por dia</h3>${xls('rg-xls-pzdia')}${htmlTabelaPrazoPorDia(pzDias, 'rg-tab-pzdia')}</div>
       <div class="panels-grid">
-        <div class="panel"><h3>Evolução do % no prazo</h3><div id="rg-g-pzevol"></div></div>
+        <div class="panel"><h3>Evolução do % no prazo — reparo (24h) e ativação/M.E (36h)</h3><div id="rg-g-pzevol"></div></div>
         <div class="panel"><h3>Evolução das faixas — até 24h, até 48h, maior que 48h e outliers</h3><div id="rg-g-pzfaixas"></div></div>
       </div>
       <div class="panels-grid">
@@ -18538,23 +18710,23 @@ function renderRelatorioGeral() {
           ${ofensores.map((o, i) => `<tr><td><span class="badge warn">${String(i + 1).padStart(2, '0')}</span></td><td class="cat-cell">${esc(o.nome)}</td><td>${o.total}</td><td style="font-weight:700">${o.fora}</td><td${corPctMeta(o.fora / o.total * 100, 100 - PRAZO_META, false)}>${formatPct(o.fora / o.total * 100, 1)}</td><td>${o.ate48}</td><td>${o.maior48}</td><td>${o.outlier}</td></tr>`).join('')}
           <tr class="total-row"><td>-</td><td class="cat-cell">Total</td><td>${prazoRows.length}</td><td>${foraRows.length}</td><td>${prazoRows.length ? formatPct(foraRows.length / prazoRows.length * 100, 1) : '-'}</td><td>${ofensores.reduce((a, o) => a + o.ate48, 0)}</td><td>${ofensores.reduce((a, o) => a + o.maior48, 0)}</td><td>${ofensores.reduce((a, o) => a + o.outlier, 0)}</td></tr></tbody></table></div>`}</div>
         <div class="panel"><h3>Motivos da baixa — reparos fora do prazo, com os ofensores</h3>${xls('rg-xls-pzmot')}
-          ${!motivos.length ? '<div class="empty">Nenhum reparo fora do prazo.</div>' : `<div class="table-wrap"><table class="data-table" id="rg-tab-pzmot"><thead><tr><th>Posição</th><th>Motivo</th><th>Reparos fora do prazo</th><th>% do total fora</th><th>Ofensores (técnico · qtd)</th></tr></thead><tbody>
-          ${motivos.map((m, i) => `<tr><td><span class="badge warn">${String(i + 1).padStart(2, '0')}</span></td><td class="cat-cell">${esc(m.nome)}</td><td style="font-weight:700">${m.qtd}</td><td>${formatPct(m.qtd / foraRows.length * 100, 1)}</td>
-            <td style="font-size:12px;white-space:normal">${Object.entries(m.tec).sort((a, b) => b[1] - a[1]).map(([n, q]) => `${esc(n)} · ${q}`).join('<br>')}</td></tr>`).join('')}
+          ${!motivos.length ? '<div class="empty">Nenhum reparo fora do prazo.</div>' : `<p class="panel-subtitle fora-da-imagem">Clique no motivo pra ver todos os ofensores dele.</p><div class="table-wrap"><table class="data-table" id="rg-tab-pzmot"><thead><tr><th>Posição</th><th>Motivo</th><th>Reparos fora do prazo</th><th>% do total fora</th><th>Principal ofensor</th></tr></thead><tbody>
+          ${motivos.map((m, i) => `<tr><td><span class="badge warn">${String(i + 1).padStart(2, '0')}</span></td><td class="cat-cell">${linkOfensoresMotivo(m.nome, m.tec, 'Reparos fora do prazo')}</td><td style="font-weight:700">${m.qtd}</td><td>${formatPct(m.qtd / foraRows.length * 100, 1)}</td>
+            <td style="font-size:12.5px;white-space:normal">${principalOfensorTxt(m.tec)}</td></tr>`).join('')}
           <tr class="total-row"><td>-</td><td class="cat-cell">Total</td><td>${foraRows.length}</td><td>100%</td><td>-</td></tr></tbody></table></div>`}</div>
       </div>`}
 
-      <div class="section-heading">Retornos — % de serviço que volta</div>
+      <div class="section-heading">Retornos — taxa de retorno (IFI / IRR)</div>
       ${nota(`IFI ÷ ativações + M.E concluídas e IRR ÷ reparos concluídos, por ${evRet ? evRet.granularidade : 'período'} — a linha mostra se está aumentando ou diminuindo. Retorno conta para o ofensor.`)}
       <div class="cards-grid">
         ${metricCard(`% IFI · meta ≤ ${formatPct(BONUS_IFI_MAX, 2)}`, pIfi === null ? '-' : formatPct(pIfi, 2), pIfi !== null && pIfi > BONUS_IFI_MAX, { positive: pIfi !== null && pIfi <= BONUS_IFI_MAX, sub: `${fmtN(t.ifi)} IFI em ${fmtN(t.ativ + t.me)} ativações + M.E` })}
         ${metricCard(`% IRR · meta ≤ ${formatPct(BONUS_IRR_MAX, 2)}`, pIrr === null ? '-' : formatPct(pIrr, 2), pIrr !== null && pIrr > BONUS_IRR_MAX, { positive: pIrr !== null && pIrr <= BONUS_IRR_MAX, sub: `${fmtN(t.irr)} IRR em ${fmtN(t.rep)} reparos` })}
         ${metricCard('Total de retornos', fmtN(t.ifi + t.irr), false, {})}
       </div>
-      <div class="panel"><h3>Evolução do % de retorno</h3><div id="rg-g-ret"></div></div>
+      <div class="panel"><h3>Evolução do % de retorno</h3><div id="rg-g-ret"></div>${htmlTabelaEvolRetornos(evRet, 'rg-tab-ret')}</div>
 
-      <div class="section-heading">Técnicos que mais dão improdutiva (não concluído)</div>
-      ${nota(`Tentativas "Não Concluído" (suspensas não entram), do CSV da PCR. Taxa = improdutivas ÷ (improdutivas + concluídas) do técnico. <b>Clique no nome</b> pra ver todas as improdutivas dele no período, por tipo de serviço.`)}
+      <div class="section-heading">Técnicos com maior volume de improdutivas</div>
+      ${nota(`Visitas improdutivas (status "Não Concluído" no CSV da PCR; suspensas não entram). Taxa = improdutivas ÷ (improdutivas + concluídas) do técnico. <b>Clique no nome</b> pra ver todas as improdutivas dele no período, por tipo de serviço.`)}
       <div class="cards-grid">
         ${metricCard('Visitas improdutivas', fmtN(totImp), totImp > 0, { sub: `${improd.length} técnico(s)` })}
         ${metricCard('Taxa geral de improdutividade', (totImp + totImpConc) ? formatPct(totImp / (totImp + totImpConc) * 100, 1) : '-', false, { sub: `${fmtN(totImp)} de ${fmtN(totImp + totImpConc)} visitas finalizadas` })}
@@ -18562,7 +18734,7 @@ function renderRelatorioGeral() {
       ${xls('rg-xls-imp')}
       ${htmlRankingImprodutivas(improd, 'rg-tab-imp')}
 
-      <div class="section-heading">Ordens concluídas depois das 18h</div>
+      <div class="section-heading">Ordens concluídas após as 18h</div>
       ${nota('Ordens concluídas com hora de fim a partir das 18:00 (campo "Fim" do CSV da PCR). <b>Clique no nome</b> pra ver cada O.S.')}
       ${xls('rg-xls-a18')}
       ${htmlRankingApos18(a18, 'rg-tab-a18')}
@@ -18588,8 +18760,8 @@ function renderRelatorioGeral() {
         ${cancLista.map(c => `<tr><td class="cat-cell">${esc(c.nome)}</td>${TIPOS_COL.map(k => `<td>${c[k]}</td>`).join('')}<td style="font-weight:700">${c.total}</td><td>${c.chamados}</td><td>${c.chamados ? formatPct(c.total / c.chamados * 100, 1) : '-'}</td></tr>`).join('')}
         <tr class="total-row"><td class="cat-cell">Total</td>${TIPOS_COL.map(k => `<td>${cancTot[k]}</td>`).join('')}<td>${cancTot.total}</td><td>${cancTot.chamados}</td><td>${cancTot.chamados ? formatPct(cancTot.total / cancTot.chamados * 100, 1) : '-'}</td></tr></tbody></table></div>`}
 
-      <div class="section-heading">MAX — reparos abertos por cliente</div>
-      ${nota(`Só <b>reparo</b>. Cada cliente (ID = número do contrato) é contado pela quantidade de chamados de reparo <b>${crit === 'abertura' ? 'abertos' : 'atendidos'}</b> de ${esc(periodoTxt)}, produtivos ou não, concluídos ou não — uma vez por O.S. Produtivo = concluído; improdutivo = "Não Concluído"; o resto (cancelado, pendente…) vai em "Cancelados / em aberto".`)}
+      <div class="section-heading">MAX — reincidência de reparos por cliente</div>
+      ${nota(`Só <b>reparo</b>. Cada cliente (ID = número do contrato) é contado pela quantidade de chamados de reparo <b>${crit === 'abertura' ? 'abertos' : 'atendidos'}</b> ${maxHoje ? '' : 'de '}${esc(maxPeriodoTxt)}, concluídos ou não — uma vez por O.S. Concluído = produtivo; improdutivo = "Não Concluído" (é o mesmo status, só muda o nome); o resto (cancelado, pendente, em rota…) vai em "Cancelados / em aberto".`)}
       <div class="cards-grid">
         ${metricCard('Clientes com reparo', fmtN(mx.lista.length), false, { sub: `${fmtN(mx.info.considerados)} reparos (O.S únicas)` })}
         ${metricCard('MAX 1', fmtN(mx.dist[1]), false, {})}
@@ -18598,6 +18770,7 @@ function renderRelatorioGeral() {
         ${metricCard('MAX 4 ou mais', fmtN(mx.dist[4]), mx.dist[4] > 0, { sub: mx.lista.length ? `maior: MAX ${mx.lista[0].max}` : '' })}
         ${metricCard('Clientes reincidentes (MAX ≥ 2)', fmtN(reinc), reinc > 0, { sub: mx.lista.length ? `${formatPct(pctSobre(reinc, mx.lista.length), 1)} dos clientes` : '' })}
       </div>
+      ${htmlResumoMax(mx.lista, 'rg-tab-max-resumo')}
       ${xls('rg-xls-max')}
       ${htmlTabelaMax(mx.lista, minMax, 'rg-tab-max')}
       ${nota(`<b>Conferência:</b> ${mx.somaBate ? '✔ as somas fecham com o MAX em todos os clientes' : '⚠ há cliente em que a soma não bate'} · ${fmtN(g.chamados.linhasLidas)} linhas lidas → ${fmtN(g.chamados.osDistintas)} O.S distintas · fora do período: ${fmtN(mx.info.foraDoPeriodo)} · sem data de abertura: ${fmtN(mx.info.semAbertura)} · sem contrato: ${fmtN(mx.info.semContrato)}.`)}
@@ -18623,9 +18796,26 @@ function renderRelatorioGeral() {
     trendChart('rg-g-evol', evolucaoSeries, { suave: true, maxLabels: 12, expandir: true });
     barsChartTopN('rg-g-tmais', marcarFrota(techList), { color: '#22c55e', defaultN: 5 });
     barsChartTopN('rg-g-tmenos', marcarFrota(bottomTechList), { color: '#ef4444', defaultN: 5 });
-    tabelaRankingTopN('rg-g-dmais', marcarFrota(deslocList), { cor: 'azul', defaultN: 5, clicavel: true, rotuloValor: 'Cidades atendidas' });
-    tabelaRankingTopN('rg-g-dmenos', marcarFrota(bottomDeslocList), { cor: 'neutral', defaultN: 5, clicavel: true, rotuloValor: 'Cidades atendidas' });
-    renderMapaBairros('rg-mapa', bairros);
+    tabelaRankingTopN('rg-g-dmais', marcarFrota(deslocList), { cor: 'azul', defaultN: 5, clicavel: true, rotuloValor: 'Cidades atendidas', colExtra: 'Cidades (ordens)' });
+    tabelaRankingTopN('rg-g-dmenos', marcarFrota(bottomDeslocList), { cor: 'neutral', defaultN: 5, clicavel: true, rotuloValor: 'Cidades atendidas', colExtra: 'Cidades (ordens)' });
+    // mapa: Top N, só bairros ou só cidades, e cidades (pedido do cliente, 09/10/2026)
+    const pintarMapaRg = () => {
+      const modo = (document.getElementById('rg-mapa-modo') || {}).value || 'bairros';
+      const topV = (document.getElementById('rg-mapa-top') || {}).value || 'todos';
+      const cidSel = document.getElementById('rg-mapa-cid-panel') ? new Set(getMultiSelectValues('rg-mapa-cid')) : null;
+      let lista = bairros.filter(b => !cidSel || cidSel.has(b.cidade));
+      if (modo === 'cidades') {
+        const m = new Map();
+        lista.forEach(b => { const o = m.get(b.cidade) || { bairro: rotuloCidadeGeral(b.cidade), cidade: b.cidade, total: 0, concluida: 0, cancelada: 0, naoConcluida: 0, coord: COORDENADAS_CIDADES[normalizeHeader(b.cidade).toUpperCase()] }; ['total', 'concluida', 'cancelada', 'naoConcluida'].forEach(k => { o[k] += b[k]; }); m.set(b.cidade, o); });
+        lista = [...m.values()].filter(c => c.coord).sort((a, b) => b.total - a.total);
+      }
+      if (topV !== 'todos') lista = lista.slice(0, parseInt(topV, 10));
+      renderMapaBairros('rg-mapa', lista);
+      const info = document.getElementById('rg-mapa-info'); if (info) info.textContent = `${lista.length} ${modo === 'cidades' ? 'cidade(s)' : 'bairro(s)'} no mapa`;
+    };
+    if (document.getElementById('rg-mapa-cid')) wireMultiSelectField('rg-mapa-cid', { noun: 'cidade(s)', allLabel: 'Todas' }, pintarMapaRg);
+    ['rg-mapa-modo', 'rg-mapa-top'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('change', pintarMapaRg); });
+    pintarMapaRg();
     const alvoDesloc = document.getElementById('rg-desloc-detalhe');
     ['rg-g-dmais', 'rg-g-dmenos'].forEach(id => {
       const cont = document.getElementById(id);
@@ -18644,8 +18834,8 @@ function renderRelatorioGeral() {
         alvoDesloc.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       });
     });
-    barsChart('rg-g-prod', tecAtivos.map(x => ({ label: x.nome, value: x.producao / x.dias.size, display: `${fmtDec(x.producao / x.dias.size)} (${x.producao} em ${x.dias.size} dia${x.dias.size > 1 ? 's' : ''})` })).sort((a, b) => b.value - a.value));
-    if (reparoNoFiltro && pzDias.length) graficosPrazoPorDia('rg-g-pzevol', 'rg-g-pzfaixas', pzDias);
+    barsChartTopN('rg-g-prod', tecAtivos.map(x => ({ label: x.nome, value: x.producao / x.dias.size, display: `${fmtDec(x.producao / x.dias.size)} (${x.producao} em ${x.dias.size} dia${x.dias.size > 1 ? 's' : ''})` })).sort((a, b) => b.value - a.value), { defaultN: 15, options: [10, 15, 20, 30, 'Todos'] });
+    if (reparoNoFiltro && pzDias.length) graficosPrazoPorDia('rg-g-pzevol', 'rg-g-pzfaixas', pzDias, [...ativPorDia.values()]);
     if (evRet) trendChart('rg-g-ret', evRet.series, { expandir: true, sufixoY: '%', legendaSemTotal: true, maxLabels: 12 });
     trendChart('rg-g-dia', [
       { name: 'Concluídas', color: '#3b82f6', points: g.dias.map(d => ({ label: kdia(d.data), value: d.concluidas })) },
@@ -18665,6 +18855,7 @@ function renderRelatorioGeral() {
 
     // clique no técnico: improdutivas / O.S depois das 18h
     body.onclick = ev => {
+      if (abrirOfensoresDoMotivo(ev)) return;
       const ai = ev.target.closest('a[data-imp-tec]'), aa = ev.target.closest('a[data-a18-tec]');
       if (!ai && !aa) return;
       ev.preventDefault();
@@ -18773,8 +18964,8 @@ function renderRelatorioDoDia() {
     const conclusao = l => { const b = l.concluido + l.nao_concluido; return b ? l.concluido / b * 100 : null; };
     const execucao = l => { const mov = l.concluido + l.nao_concluido + l.em_rota + l.iniciado, cart = mov + l.pendente; return cart ? mov / cart * 100 : null; };
     const corMeta3 = (v, ruim, bom) => v === null ? '' : ` style="font-weight:700;color:${v < ruim ? 'var(--danger)' : v > bom ? 'var(--success)' : '#f59e0b'}"`;
-    const tabStatus = (id, rotulo, linhas, tot) => `<div class="table-wrap"><table class="data-table" id="${id}"><thead><tr><th>${rotulo}</th>${RD_BUCKETS.map(b => `<th>${RD_ROTULO[b]}</th>`).join('')}<th>Total O.S</th><th>Taxa de Conclusão</th><th>Execução da Caixa</th></tr></thead><tbody>
-      ${[...linhas, tot].map((l, i) => `<tr${i === linhas.length ? ' class="total-row"' : ''}><td class="cat-cell">${esc(l.label)}</td>${RD_BUCKETS.map(b => `<td>${l[b]}</td>`).join('')}<td style="font-weight:700">${l.total}</td>
+    const tabStatus = (id, rotulo, linhas, tot) => `<div class="table-wrap"><table class="data-table" id="${id}"><thead><tr><th>${rotulo}</th>${RD_BUCKETS.map(b => `<th>${RD_ROTULO[b]}</th>`).join('')}<th>Total O.S</th><th class="fora-da-imagem">Taxa de Conclusão</th><th class="fora-da-imagem">Execução da Caixa</th></tr></thead><tbody>
+      ${[...linhas, tot].map((l, i) => `<tr${i === linhas.length ? ' class="total-row"' : ''}><td class="cat-cell">${esc(l.label)}</td>${RD_BUCKETS.map(b => `<td${b === 'concluido' && l[b] ? ' style="color:var(--success);font-weight:700"' : ''}>${l[b]}</td>`).join('')}<td style="font-weight:700">${l.total}</td>
         <td${i === linhas.length ? '' : corMeta3(conclusao(l), 55, 80)}>${conclusao(l) === null ? '-' : formatPct(conclusao(l), 1)}</td><td${i === linhas.length ? '' : corMeta3(execucao(l), 60, 80)}>${execucao(l) === null ? '-' : formatPct(execucao(l), 1)}</td></tr>`).join('')}
       </tbody></table></div>`;
     const cidadesDia = [...new Set(rows.map(r => rotuloCidadeGeral(r.cidade)))];
@@ -19340,7 +19531,7 @@ function renderReuniaoPrazos() {
     const novoOp = modoNovo();
     const deslocMap = {}, deslocCid = {};
     if (novoOp) prodPeriodo.forEach(p => { if (!ehRecursoTecnico(p.recurso) || !p.cidade) return; (deslocMap[p.recurso] = deslocMap[p.recurso] || new Set()).add(p.cidade); const o = deslocCid[p.recurso] || (deslocCid[p.recurso] = {}); o[p.cidade] = (o[p.cidade] || 0) + 1; });
-    const deslocLista = Object.entries(deslocMap).map(([label, set]) => ({ label, value: set.size })).sort((a, b) => b.value - a.value);
+    const deslocLista = Object.entries(deslocMap).map(([label, set]) => ({ label, value: set.size, extra: Object.entries(deslocCid[label] || {}).sort((a, b) => b[1] - a[1]).map(([c, q]) => `${rotuloCidadeGeral(c)} (${q})`).join(', ') })).sort((a, b) => b.value - a.value);
     const motRetOf = {};
     if (novoOp) retornos.forEach(r => { const m = (r.motivo || '').trim() || 'Não informado'; const o = ofensorDaLinha(r); const x = motRetOf[m] || (motRetOf[m] = {}); x[o] = (x[o] || 0) + 1; });
     const sec16 = `
@@ -19385,11 +19576,11 @@ function renderReuniaoPrazos() {
         </div>
       </div>
 
-      ${novoOp ? `<div class="section-heading">Técnicos que mais se deslocam</div>
+      ${novoOp ? `<div class="section-heading">Deslocamento dos técnicos — cidades atendidas</div>
       ${nota('Quantas cidades diferentes cada técnico atendeu no período (Produção, todos os status). Clique no nome pra ver as cidades.')}
       <div class="panel"><h3>Técnicos que mais se deslocam (nº de cidades atendidas)</h3><div id="reu-g-desloc"></div></div><div id="reu-desloc-det"></div>` : ''}
 
-      <div class="section-heading">3. Cidades ofensoras — % do mês</div>
+      <div class="section-heading">${novoOp ? '3. Cidades com maior perda de prazo no mês' : '3. Cidades ofensoras — % do mês'}</div>
       ${nota('Percentual da própria cidade, não do total da empresa.')}
       <div class="panel" style="margin-bottom:1.5rem">
         ${tabelaRankingReuniao(cidadesRank.map(c => ({
@@ -19399,7 +19590,7 @@ function renderReuniaoPrazos() {
         })), { rotuloNome: 'Cidade', rotuloValor: '% fora do prazo', rotuloSub: '% no prazo' })}
       </div>
 
-      <div class="section-heading" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">4. Período ofensor de prazo
+      <div class="section-heading" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${novoOp ? '4. Perda de prazo por período (manhã × tarde)' : '4. Período ofensor de prazo'}
         <select class="topn-select" id="reu-periodo-filtro">
           <option value="ambos">Manhã e tarde</option>
           <option value="manha">Só manhã</option>
@@ -19457,7 +19648,7 @@ function renderReuniaoPrazos() {
         })), { rotuloNome: 'Técnico', rotuloValor: 'Início médio', rotuloSub: 'Amostra', vazio: 'Nenhum técnico com 3+ dias medidos nesse período.' })}
       </div>`}
 
-      <div class="section-heading">7. Retornos — % de serviço que volta</div>
+      <div class="section-heading">${novoOp ? '7. Retornos — taxa de retorno (IFI / IRR)' : '7. Retornos — % de serviço que volta'}</div>
       ${nota('IFI ÷ ativações + M.E · IRR ÷ reparos · retorno lançado no ofensor.')}
       <div class="cards-grid">
         ${metricCard('% IRR (reparo que voltou)', formatPct(pctIrr, 2), pctIrr > BONUS_IRR_MAX, { sub: `${qtdIrr} retorno(s) · base ${basesGeral.reparos} reparo(s) · meta ${formatPct(BONUS_IRR_MAX, 2)}` })}
@@ -19465,9 +19656,9 @@ function renderReuniaoPrazos() {
         ${metricCard('Tempo médio até voltar', mediaDiasGeral === null ? '-' : `${mediaDiasGeral.toFixed(1).replace('.', ',')} dias`, false, { sub: `IRR ${mediaDiasIrr === null ? '-' : mediaDiasIrr.toFixed(1).replace('.', ',') + 'd'} · IFI ${mediaDiasIfi === null ? '-' : mediaDiasIfi.toFixed(1).replace('.', ',') + 'd'}` })}
       </div>
 
-      ${novoOp ? '<div class="panel"><h3>Evolução do % de retorno</h3><div id="reu-g-ret"></div></div>' : ''}
+      ${novoOp ? `<div class="panel"><h3>Evolução do % de retorno</h3><div id="reu-g-ret"></div>${htmlTabelaEvolRetornos(evolucaoRetornos(s, e, cidadeOk, () => true, () => true), 'reu-tab-ret')}</div>` : ''}
 
-      <div class="section-heading">8. Retornos — cidades ofensoras</div>
+      <div class="section-heading">${novoOp ? '8. Retornos — cidades com maior índice' : '8. Retornos — cidades ofensoras'}</div>
       ${nota('Percentual de retorno sobre os serviços da própria cidade.')}
       <div class="panel" style="margin-bottom:1.5rem">
         ${tabelaRankingReuniao(cidadesRetRank.map(c => ({
@@ -19477,7 +19668,7 @@ function renderReuniaoPrazos() {
         })), { rotuloNome: 'Cidade', rotuloValor: '% de retorno', rotuloSub: 'Abertura IRR / IFI', vazio: 'Sem retornos no período/cidades.' })}
       </div>
 
-      <div class="section-heading">9. Retornos — maior ofensor de cada cidade</div>
+      <div class="section-heading">${novoOp ? '9. Retornos — principal ofensor por cidade' : '9. Retornos — maior ofensor de cada cidade'}</div>
       <div class="panel" style="margin-bottom:1.5rem">
         ${!maioresPorCidade.length ? '<div class="empty">Sem retornos no período/cidades.</div>' : `
         <div class="table-wrap"><table class="data-table"><thead><tr>
@@ -19492,7 +19683,7 @@ function renderReuniaoPrazos() {
         </tbody></table></div>`}
       </div>
 
-      <div class="section-heading">10. Retornos — principais ofensores no geral</div>
+      <div class="section-heading">${novoOp ? '10. Retornos — principais ofensores' : '10. Retornos — principais ofensores no geral'}</div>
       <div class="panel" style="margin-bottom:1.5rem">
         ${tabelaRankingReuniao(ofensoresGeral.map(o => ({
           nome: o.nome,
@@ -19501,11 +19692,11 @@ function renderReuniaoPrazos() {
         })), { rotuloNome: 'Ofensor', rotuloValor: '% dos retornos', rotuloSub: 'Total', vazio: 'Sem retornos no período/cidades.' })}
       </div>
 
-      <div class="section-heading">11. Motivo da baixa dos retornos (IFI / IRR)</div>
+      <div class="section-heading">${novoOp ? '11. Retornos — motivos da baixa (IFI / IRR)' : '11. Motivo da baixa dos retornos (IFI / IRR)'}</div>
       ${nota('Motivo com que a visita de retorno foi encerrada.')}
-      ${novoOp ? `<div class="panel"><h3>Motivos e ofensores</h3>${!motivosRet.length ? '<div class="empty">Sem motivo preenchido nos retornos do período.</div>' : `<div class="table-wrap"><table class="data-table" id="reu-tab-motret"><thead><tr><th>Posição</th><th>Motivo da baixa do retorno</th><th>% dos retornos</th><th>Total</th><th>IRR</th><th>IFI</th><th>Ofensores (técnico · qtd)</th></tr></thead><tbody>
-        ${motivosRet.map((m, i) => `<tr><td><span class="badge warn">${String(i + 1).padStart(2, '0')}</span></td><td class="cat-cell">${esc(m.nome)}</td><td style="font-weight:700">${formatPct(retornos.length ? (m.total / retornos.length) * 100 : 0, 1)}</td><td>${m.total}</td><td>${m.irr}</td><td>${m.ifi}</td>
-          <td style="font-size:12px;white-space:normal">${Object.entries(motRetOf[m.nome] || {}).sort((a, b) => b[1] - a[1]).map(([n, q]) => `${esc(n)} · ${q}`).join('<br>')}</td></tr>`).join('')}
+      ${novoOp ? `<div class="panel"><h3>Motivos e ofensores</h3>${!motivosRet.length ? '<div class="empty">Sem motivo preenchido nos retornos do período.</div>' : `<div class="table-wrap"><table class="data-table" id="reu-tab-motret"><thead><tr><th>Posição</th><th>Motivo da baixa do retorno</th><th>% dos retornos</th><th>Total</th><th>IRR</th><th>IFI</th><th>Principal ofensor</th></tr></thead><tbody>
+        ${motivosRet.map((m, i) => `<tr><td><span class="badge warn">${String(i + 1).padStart(2, '0')}</span></td><td class="cat-cell">${linkOfensoresMotivo(m.nome, motRetOf[m.nome], 'Retornos')}</td><td style="font-weight:700">${formatPct(retornos.length ? (m.total / retornos.length) * 100 : 0, 1)}</td><td>${m.total}</td><td>${m.irr}</td><td>${m.ifi}</td>
+          <td style="font-size:12.5px;white-space:normal">${principalOfensorTxt(motRetOf[m.nome])}</td></tr>`).join('')}
         <tr class="total-row"><td>-</td><td class="cat-cell">Total</td><td>100%</td><td>${retornos.length}</td><td>${retornos.filter(r => r.ifi_irr === 'IRR').length}</td><td>${retornos.filter(r => r.ifi_irr === 'IFI').length}</td><td>-</td></tr></tbody></table></div>`}</div>` : ''}
       <div class="panel" style="margin-bottom:1.5rem${novoOp ? ';display:none' : ''}">
         ${tabelaRankingReuniao(motivosRet.map(m => ({
@@ -19515,7 +19706,7 @@ function renderReuniaoPrazos() {
         })), { rotuloNome: 'Motivo da baixa do retorno', rotuloValor: '% dos retornos', rotuloSub: 'Total', vazio: 'Sem motivo preenchido nos retornos do período.' })}
       </div>
 
-      <div class="section-heading">12. IRR — motivo do serviço anterior × motivo do retorno</div>
+      <div class="section-heading">${novoOp ? '12. Retornos IRR — motivo anterior × motivo do retorno' : '12. IRR — motivo do serviço anterior × motivo do retorno'}</div>
       ${nota(`Par achado por contrato + data da ordem anterior (correspondência aproximada — a planilha não traz a O.S. anterior).${irrSemPar ? ` <b>${irrSemPar}</b> IRR sem par encontrado ficaram de fora.` : ''}`)}
       ${!paresIrr.length ? '<div class="panel"><div class="empty">Não consegui casar nenhum retorno IRR com o serviço anterior nesse período.</div></div>' : `
       <div class="cards-grid">
@@ -19532,7 +19723,7 @@ function renderReuniaoPrazos() {
         })), { rotuloNome: 'Motivo do serviço anterior ➜ motivo do retorno', rotuloValor: '% dos pares', rotuloSub: 'Leitura' })}
       </div>`}
 
-      <div class="section-heading">13. Técnicos que mais dão improdutiva (não concluído)</div>
+      <div class="section-heading">${novoOp ? '13. Técnicos com maior volume de improdutivas' : '13. Técnicos que mais dão improdutiva (não concluído)'}</div>
       ${nota(`Tentativas de visita encerradas como "Não Concluído" (suspensas não entram). A taxa é improdutivas ÷ (improdutivas + concluídas) do próprio técnico. Base: CSV diário da PCR${diasPcr ? ` — ${diasPcr} dia(s) importado(s) no período` : ''}.`)}
       ${!pcrTodos.length ? '<div class="panel"><div class="empty">Sem CSV da PCR importado nesse período/cidades.</div></div>' : `
       <div class="cards-grid">
@@ -19562,7 +19753,7 @@ function renderReuniaoPrazos() {
         })), { rotuloNome: 'Técnico', rotuloValor: 'Taxa', rotuloSub: 'Improdutivas e motivo principal', vazio: `Nenhum técnico com ${IMP_MIN_VISITAS}+ visitas finalizadas e improdutivas nesse período.` })}
       </div>`}
 
-      <div class="section-heading">14. Média de serviços por técnico no dia</div>
+      <div class="section-heading">${novoOp ? '14. Produtividade diária por técnico' : '14. Média de serviços por técnico no dia'}</div>
       ${nota('Ordens concluídas ÷ dias em que o técnico concluiu ao menos uma (um dia com 0 concluídas não conta). Base: Produção do período — cidades marcadas no filtro. Técnico com poucos dias tem média pouco confiável.')}
       ${!prodConc.length ? '<div class="panel"><div class="empty">Sem ordens concluídas na Produção nesse período/cidades.</div></div>' : `
       <div class="cards-grid">
@@ -19586,9 +19777,11 @@ function renderReuniaoPrazos() {
           })), { cor: 'ok', rotuloNome: 'Cidade', rotuloValor: 'Média por técnico/dia', rotuloSub: 'Total' })}
         </div>
       </div>
-      ${novoOp ? '<div class="panel"><h3>Andamento de serviços por técnico, dia a dia</h3><p class="panel-subtitle">Média geral (ordens concluídas ÷ técnicos que trabalharam no dia) e as ordens dos 6 técnicos com mais produção — marque/desmarque na legenda.</p><div id="reu-g-media"></div></div>' : ''}`}
+      ${novoOp ? `<div class="panel"><h3>Andamento de serviços por técnico, dia a dia</h3><p class="panel-subtitle">Média geral (ordens concluídas ÷ técnicos que trabalharam no dia) e as ordens de cada técnico escolhido — começa com os 6 que mais produziram.</p>
+        <div class="toolbar fora-da-imagem" style="margin:0 0 10px;padding:10px 12px">${multiSelectField('reu-media-tecs', 'Técnicos no gráfico', mdTodos.slice().sort((a, b) => b.total - a.total).map(t => t.nome), { preset: mdTodos.slice().sort((a, b) => b.total - a.total).slice(0, 6).map(t => t.nome), allLabel: 'Todos', noneLabel: 'Nenhum' })}</div>
+        <div id="reu-g-media"></div></div>` : ''}`}
 
-      <div class="section-heading">15. Ordens concluídas depois das 18h</div>
+      <div class="section-heading">${novoOp ? '15. Ordens concluídas após as 18h' : '15. Ordens concluídas depois das 18h'}</div>
       ${nota(`Ordens CONCLUÍDAS com hora de fim a partir das 18:00 (campo "Fim" do CSV). Base: CSV diário da PCR${diasPcr ? ` — ${diasPcr} dia(s) importado(s) no período` : ''}.`)}
       ${!concluidasPcr.size ? '<div class="panel"><div class="empty">Sem ordens concluídas no CSV da PCR nesse período/cidades.</div></div>' : `
       <div class="cards-grid">
@@ -19628,7 +19821,7 @@ function renderReuniaoPrazos() {
       if (r) avisoBotao(btnXlsCid, `⤓ ${r.linhas} linha(s)`, '⤓ Excel');
     });
     if (novoOp) {
-      tabelaRankingTopN('reu-g-desloc', deslocLista, { cor: 'azul', defaultN: 10, clicavel: true, rotuloValor: 'Cidades atendidas' });
+      tabelaRankingTopN('reu-g-desloc', deslocLista, { cor: 'azul', defaultN: 10, clicavel: true, rotuloValor: 'Cidades atendidas', colExtra: 'Cidades (ordens)' });
       const gd = document.getElementById('reu-g-desloc');
       if (gd) gd.addEventListener('click', ev => {
         const l = ev.target.closest('[data-label]'); if (!l) return;
@@ -19645,17 +19838,22 @@ function renderReuniaoPrazos() {
       const porDia = new Map(), porTecDia = {};
       prodConc.forEach(p => { const d = porDia.get(p.data) || { ordens: 0, tecs: new Set() }; d.ordens++; d.tecs.add(p.recurso); porDia.set(p.data, d); const t = porTecDia[p.recurso] || (porTecDia[p.recurso] = {}); t[p.data] = (t[p.data] || 0) + 1; });
       const diasOrd = [...porDia.keys()].sort(), kd = d => d.slice(8, 10) + '/' + d.slice(5, 7);
-      const top6 = mdTodos.slice().sort((a, b) => b.total - a.total).slice(0, 6);
-      const PAL = ['#22c55e', '#f59e0b', '#a78bfa', '#06b6d4', '#f472b6', '#facc15'];
-      trendChart('reu-g-media', [
-        { name: 'Média geral por técnico', color: '#3b82f6', points: diasOrd.map(d => ({ label: kd(d), value: Number((porDia.get(d).ordens / porDia.get(d).tecs.size).toFixed(1)) })) },
-        ...top6.map((t, i) => ({ name: t.nome, color: PAL[i], semArea: true, points: diasOrd.map(d => ({ label: kd(d), value: (porTecDia[t.nome] || {})[d] || 0 })) })),
-      ], { expandir: true, legendaSemTotal: true, maxLabels: 14 });
+      const PAL = ['#22c55e', '#f59e0b', '#a78bfa', '#06b6d4', '#f472b6', '#facc15', '#fb7185', '#34d399', '#60a5fa', '#fbbf24', '#c084fc', '#2dd4bf'];
+      const pintarMedia = () => {
+        const escolhidos = document.getElementById('reu-media-tecs-panel') ? getMultiSelectValues('reu-media-tecs') : [];
+        trendChart('reu-g-media', [
+          { name: 'Média geral por técnico', color: '#3b82f6', points: diasOrd.map(d => ({ label: kd(d), value: Number((porDia.get(d).ordens / porDia.get(d).tecs.size).toFixed(1)) })) },
+          ...escolhidos.map((nome, i) => ({ name: nome, color: PAL[i % PAL.length], semArea: true, points: diasOrd.map(d => ({ label: kd(d), value: (porTecDia[nome] || {})[d] || 0 })) })),
+        ], { expandir: true, legendaSemTotal: true, maxLabels: 14 });
+      };
+      if (document.getElementById('reu-media-tecs')) wireMultiSelectField('reu-media-tecs', { noun: 'técnico(s)', allLabel: 'Todos' }, pintarMedia);
+      if (document.getElementById('reu-g-media')) pintarMedia();
     }
     // clique no nome do técnico (seções 2 e 4) → janela com as O.S fora do prazo.
     // `onclick` por atribuição (não addEventListener): o body é o MESMO elemento
     // a cada Filtrar, então um listener novo por load() se acumularia.
     body.onclick = ev => {
+      if (abrirOfensoresDoMotivo(ev)) return;
       const ai = ev.target.closest('a[data-imp-tec]'), aa = ev.target.closest('a[data-a18-tec]');
       if (ai || aa) {
         ev.preventDefault();
@@ -28350,11 +28548,11 @@ function pintarCorrigirMonitorOlt(box, cli, semCli) {
     sem_sinal: 'Conferir provisionamento, VLAN e PPPoE do contrato; se estiver tudo certo, é físico (fibra/energia/equipamento).',
   };
   box.innerHTML = `
-    <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">🛠 Pode ser corrigido pelo sistema <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(ativações e mudanças de endereço concluídas recentemente que não ficaram no ar)</span>
+    <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">🛠 Preventiva via sistema <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(ativações e mudanças de endereço concluídas recentemente que não ficaram no ar)</span>
       <select id="mo-cor-per" class="topn-select"><option value="7">Ativação nos últimos 7 dias</option><option value="15" selected>Ativação nos últimos 15 dias</option><option value="30">Ativação nos últimos 30 dias</option></select>
       <select id="mo-cor-caso" class="topn-select"><option value="">Todos os casos</option><option value="nao_prov">Possível não provisionada</option><option value="sem_sinal">No ar, mas sem sinal / offline</option></select>
       <button type="button" class="btn-export-xls" id="mo-cor-excel">⤓ Excel</button></div>
-    <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px;line-height:1.5">Aqui entra o que dá pra arrumar pelo sistema, não o que é físico. Sinal alto, sem energia e rompimento ficam de fora. <b>Ainda não lidos do AutoISP:</b> VLAN errada, PPPoE errado, IP fora do padrão (.64/.66 é o certo; .69 e .122 são IP de bloqueio) e "online sem IP" — dependem de ler esses campos no AutoISP (ver o aviso ao final da tela).</p>
+    <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px;line-height:1.5">Aqui entra o que dá pra arrumar pelo sistema, não o que é físico. Sinal alto, sem energia e rompimento ficam de fora. <b>Ainda não lidos do AutoISP:</b> VLAN errada, PPPoE errado, IP fora do padrão (navegando: 100.<b>62</b>, 100.<b>64</b>, 100.<b>66</b> e 100.<b>73</b>; bloqueio: 100.<b>69</b> e 100.<b>122</b>) e "online sem IP" — dependem de ler esses campos no AutoISP (ver o aviso ao final da tela).</p>
     <div id="mo-cor-cards"></div><div id="mo-cor-tabela"></div>`;
   const montar = () => {
     const N = Number(document.getElementById('mo-cor-per').value) || 15, caso = document.getElementById('mo-cor-caso').value;
