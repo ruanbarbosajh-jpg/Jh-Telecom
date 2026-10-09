@@ -7568,7 +7568,9 @@ function ativarBotoesAnalista() {
     if (!graf.length && !tabs.length) return;
     const titulo = textoDoTitulo(h3);
     if (!p.querySelector('.gerar-imagem-btn, .btn-export-img') && !p.hasAttribute('data-sem-imagem')) {
-      const b = btn('secao-toggle gerar-imagem-btn', '🖼 Gerar imagem', () => capturarElementoComoImagem(p, 'imagem-' + (slugTitulo(titulo) || 'painel') + '-' + hoje));
+      const b = btn('secao-toggle gerar-imagem-btn', '🖼 Gerar imagem', () => (tabs.length === 1 && !graf.length)
+        ? imagemPadraoDaTabela(tabs[0], titulo, '', (slugTitulo(titulo) || 'tabela') + '-' + hoje)
+        : capturarElementoComoImagem(p, 'imagem-' + (slugTitulo(titulo) || 'painel') + '-' + hoje));
       h3.appendChild(b);
     }
     if (jaTemExcel(p)) return;
@@ -7589,10 +7591,19 @@ function ativarBotoesAnalista() {
     w.parentNode.insertBefore(box, w);
   });
   // "Gerar imagem" da caixa inteira do tópico (modelo novo)
+  // (09/10/2026, pedido do cliente: "o gerar imagem deve manter o padrão de antes") — se o tópico JÁ tem o botão próprio da tela
+  // (ex.: Status Detalhado por Técnico da Parcial do Dia, que gera a imagem no padrão azul-marinho), não põe outro; se o tópico é
+  // UMA tabela só, a imagem sai no padrão azul-marinho (`imagemPadraoDaTabela`); com gráfico ou várias tabelas, sai a captura da caixa.
   alvo.querySelectorAll('.topico-caixa > .section-heading').forEach(h => {
-    if (h.querySelector('.gerar-imagem-btn, .btn-export-img')) return;
     const box = h.parentElement;
-    h.appendChild(btn('secao-toggle gerar-imagem-btn', '🖼 Gerar imagem', () => capturarElementoComoImagem(box, 'imagem-' + (slugTitulo(textoDoTitulo(h)) || 'topico') + '-' + hoje)));
+    if (h.querySelector('.gerar-imagem-btn, .btn-export-img') || box.querySelector('.btn-export-img, [data-gerar-imagem-cartao]')) return;
+    const titulo = textoDoTitulo(h), nome = (slugTitulo(titulo) || 'topico') + '-' + hoje;
+    h.appendChild(btn('secao-toggle gerar-imagem-btn', '🖼 Gerar imagem', () => {
+      const tabs = [...box.querySelectorAll('table.data-table')].filter(t => !t.closest('.topico-filtros') && t.querySelector('tbody tr'));
+      const temGraf = box.querySelector('[data-grafico], .leaflet-container');
+      if (tabs.length === 1 && !temGraf) { if (!imagemPadraoDaTabela(tabs[0], titulo, '', nome)) toast('Tabela vazia — nada pra gerar.', 'aviso'); }
+      else capturarElementoComoImagem(box, 'imagem-' + nome);
+    }));
   });
   // títulos no modelo novo (ícone + botões à direita) — painéis com tabela/gráfico e os tópicos
   alvo.querySelectorAll('.panel > h3').forEach(h3 => {
@@ -12208,6 +12219,11 @@ function ativarBotoesImagem(raiz) {
     // pra mesma tabela.
     if (alvos.some(jaTemBotaoImagem)) return;
     h.appendChild(criarBotaoImg(() => {
+      // modo novo (Analista): uma tabela só = imagem no padrão azul-marinho de sempre
+      const tabsGrupo = alvos.flatMap(a => [...(a.matches && a.matches('table.data-table') ? [a] : a.querySelectorAll ? a.querySelectorAll('table.data-table') : [])]).filter(t => t.querySelector('tbody tr'));
+      if (modoNovo() && tabsGrupo.length === 1 && !alvos.some(a => a.querySelector && a.querySelector('[data-grafico], .leaflet-container'))) {
+        imagemPadraoDaTabela(tabsGrupo[0], textoDoTitulo(h), '', nomeArquivoDe(h.textContent)); return;
+      }
       const largura = alvo.clientWidth || 1000;
       const wrapper = document.createElement('div');
       wrapper.style.cssText = `position:fixed;top:0;left:-${largura + 200}px;width:${largura}px;background:var(--bg-page);padding:16px;`;
@@ -12223,7 +12239,11 @@ function ativarBotoesImagem(raiz) {
     if (jaTemBotaoImagem(p) || !p.querySelector('table')) return;
     const h3 = p.querySelector(':scope > h3');
     if (!h3) return;
-    h3.appendChild(criarBotaoImg(() => capturarElementoComoImagem(p, nomeArquivoDe(h3.textContent))));
+    h3.appendChild(criarBotaoImg(() => {
+      const tabsP = [...p.querySelectorAll('table.data-table')].filter(t => t.querySelector('tbody tr'));
+      if (modoNovo() && tabsP.length === 1 && !p.querySelector('[data-grafico], .leaflet-container')) { imagemPadraoDaTabela(tabsP[0], textoDoTitulo(h3), '', nomeArquivoDe(h3.textContent)); return; }
+      capturarElementoComoImagem(p, nomeArquivoDe(h3.textContent));
+    }));
   });
 }
 // Texto de uma célula PRA EXPORTAR. Célula que tem campo dentro (a folha
