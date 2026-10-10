@@ -28255,7 +28255,7 @@ const U2K_COL = {
   rx: ['rx optical power dbm', 'rx optical power', 'rx power', 'ont rx power', 'rx dbm', 'received optical power', 'olt rx ont power dbm', 'potencia rx'],
   tx: ['tx optical power dbm', 'tx optical power', 'tx power'], vlan: ['vlan id', 'vlan', 'user vlan', 'svlan'],
   ip: ['ipv4 address', 'ip address', 'ip', 'ipv4'], servico: ['service type', 'name', 'connection type'], ipStatus: ['ipv4 connection status', 'connection status'],
-  tipo: ['ont type', 'onu type', 'type', 'equipment id'], local: ['location information', 'location'],
+  tipo: ['ont type', 'onu type', 'type', 'equipment id', 'terminal type'], local: ['location information', 'location'],
 };
 const U2K_ALM = { severidade: ['severity', 'severidade'], id: ['alarm id'], nome: ['name', 'alarm name', 'nome'], fonte: ['alarm source', 'source'], local: ['location information', 'location'],
   adicional: ['additional information'], vezes: ['occurrence times'], primeiro: ['first occurred st', 'first occurred'], ultimo: ['last occurred st', 'last occurred'],
@@ -28354,8 +28354,8 @@ async function u2kLerArquivo(file) {
           saida.push(r);
         } else { const loc = /(\d+)\/(\d+)\/(\d+)(?:\/(\d+))?/.exec(g(l, 'local')), stMot = u2kStatusMotivo(g(l, 'status')), soLista = col.sn < 0 && col.frame < 0 && col.slot < 0 && !!oltTitulo;
           if (soLista) { const pn = Number(g(l, 'porta')), on = Number(g(l, 'onuId')); if (pn < pp || (pn === pp && on <= po)) gp++; pp = pn; po = on; }
-          saida.push({ alarme: false, lista: soLista, grp: gp, motivo: stMot.motivo, olt: g(l, 'olt') || oltTitulo, frame: g(l, 'frame') || (loc ? loc[1] : ''), slot: g(l, 'slot') || (loc ? loc[2] : ''), porta: g(l, 'porta') || (loc ? loc[3] : ''), onuId: g(l, 'onuId') || (loc ? loc[4] || '' : ''),
-            alias: g(l, 'alias'), sn: g(l, 'sn').replace(/\s+/g, ''), status: stMot.status, rx: u2kNum(g(l, 'rx')), tx: u2kNum(g(l, 'tx')), vlan: g(l, 'vlan'), ip: g(l, 'ip'), servico: g(l, 'servico'), ipStatus: g(l, 'ipStatus'), tipo: g(l, 'tipo') }); }
+          saida.push({ alarme: false, lista: soLista, deLista: !!oltTitulo, grp: gp, motivo: stMot.motivo, olt: g(l, 'olt') || oltTitulo, frame: g(l, 'frame') || (loc ? loc[1] : ''), slot: g(l, 'slot') || (loc ? loc[2] : ''), porta: g(l, 'porta') || (loc ? loc[3] : ''), onuId: g(l, 'onuId') || (loc ? loc[4] || '' : ''),
+            alias: g(l, 'alias'), sn: g(l, 'sn').replace(/\s+/g, ''), status: stMot.status, rx: u2kNum(g(l, 'rx')), tx: u2kNum(g(l, 'tx')), vlan: g(l, 'vlan'), ip: g(l, 'ip'), servico: oltTitulo ? '' : g(l, 'servico'), ipStatus: g(l, 'ipStatus'), tipo: g(l, 'tipo') }); }
       });
       break;
     }
@@ -28368,13 +28368,13 @@ function u2kJuntar(linhas, nomeArquivo) {
   // a mesma ONU pode vir por SN (lista de ONUs) ou só pela localização OLT+frame/slot/porta+ONU ID (tabela de WAN): acha por qualquer das duas
   const locDe = o => `${normalizeHeader(o.olt)}|${o.frame}/${o.slot}/${o.porta}|${o.onuId}`;
   // a lista GPON é uma foto da OLT: a nova substitui a anterior da mesma OLT (ONU que saiu da OLT não fica pra trás)
-  const oltsLista = new Set(linhas.filter(r => !r.alarme && r.lista).map(r => r.olt));
+  const oltsLista = new Set(linhas.filter(r => !r.alarme && (r.lista || r.deLista)).map(r => r.olt));   // a lista completa (com SN/slot) também substitui a lista simples antiga da OLT
   if (oltsLista.size) { U2K.onus = U2K.onus.filter(o => !(String(o._k).startsWith('lst:') && oltsLista.has(o.olt))); U2K._apagarLst = [...(U2K._apagarLst || []), ...oltsLista]; }
   const idx = new Map(), idxLoc = new Map();
   U2K.onus.forEach((o, i) => { idx.set(o._k, i); if (o.olt && o.onuId !== '' && o.slot) idxLoc.set(locDe(o), i); });
   linhas.forEach(r => {
     if (r.alarme) { delete r.alarme; alarmesNovos.push(r); novosAlm++; return; }
-    delete r.alarme; r._k = u2kChave(r); delete r.lista;
+    delete r.alarme; r._k = u2kChave(r); delete r.lista; delete r.deLista;
     let i = idx.get(r._k);
     if (i === undefined && r.olt && r.onuId !== '' && r.slot) i = idxLoc.get(locDe(r));
     if (i === undefined) { r.wan = (r.ip || r.vlan || r.servico) ? [{ servico: r.servico, vlan: r.vlan, ip: r.ip, ipStatus: r.ipStatus }] : []; idx.set(r._k, U2K.onus.length); if (r.olt && r.onuId !== '' && r.slot) idxLoc.set(locDe(r), U2K.onus.length); U2K._tocadas.add(r._k); U2K.onus.push(r); novosOnu++; return; }
@@ -28567,6 +28567,7 @@ function renderU2000() {
         <div class="field"><label>Sinal (Rx)</label><select id="u2-f-rx"><option value="">Todos</option><option value="critico">Crítico</option><option value="atencao">Atenção</option><option value="ok">OK</option><option value="sem">Sem leitura</option></select></div>
         <div class="field"><label>IP</label><select id="u2-f-ip"><option value="">Todos</option>${Object.entries(U2K_ROT_IP).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
         <div class="field"><label>Alias / SN</label><input type="text" id="u2-f-q" placeholder="digite…" autocomplete="off"></div>
+        <div class="field"><label>Mostrar</label><select id="u2-f-lim"><option value="1000">1.000</option><option value="3000">3.000</option><option value="10000" selected>10.000</option><option value="0">Todas</option></select></div>
         <button type="button" class="btn-export-xls" id="u2-xls">⤓ Excel (todos os filtrados)</button><span id="u2-cont" style="font-size:12px;color:var(--text-muted);align-self:center"></span></div>
       <div id="u2-tab"></div>` : ''}
       ${alm.length ? `<div class="section-heading">Alarmes <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(Browse Current Alarm)</span></div>
@@ -28578,6 +28579,7 @@ function renderU2000() {
         <div class="field"><label>Situação</label><select id="u2-a-ab"><option value="">Todas as ONUs</option><option value="1">Só com alarme aberto</option></select></div>
         <div class="field"><label>Agora (lista GPON)</label><select id="u2-a-ag"><option value="">Todas</option><option>Online</option><option>Offline</option><option>Desativada</option><option value="sem">Não está na lista</option></select></div>
         <div class="field"><label>Cliente / OLT</label><input type="text" id="u2-a-q" placeholder="digite…" autocomplete="off"></div>
+        <div class="field"><label>Mostrar</label><select id="u2-a-lim"><option value="1000">1.000</option><option value="3000">3.000</option><option value="10000" selected>10.000</option><option value="0">Todas</option></select></div>
         <button type="button" class="btn-export-xls" id="u2-a-xls">⤓ Excel (todas as filtradas)</button><span id="u2-a-cont" style="font-size:12px;color:var(--text-muted);align-self:center"></span></div>
       <div id="u2-alm-onu"></div>
       <div class="section-heading">Todos os alarmes lidos <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(linha a linha)</span></div>
@@ -28587,7 +28589,7 @@ function renderU2000() {
       const filtrar = () => { const q = normalizeHeader(sel('u2-f-q'));
         return onus.filter(o => (!sel('u2-f-olt') || o.olt === sel('u2-f-olt')) && (!sel('u2-f-st') || o.status === sel('u2-f-st')) && (!sel('u2-f-rx') || o.grupoRx === sel('u2-f-rx')) && (!sel('u2-f-ip') || o.classeIp === sel('u2-f-ip')) && (!q || normalizeHeader(o.alias + ' ' + o.sn).includes(q)))
           .sort((a, b) => ['critico', 'atencao', 'sem', 'ok'].indexOf(a.grupoRx) - ['critico', 'atencao', 'sem', 'ok'].indexOf(b.grupoRx) || (a.rx == null ? 1 : b.rx == null ? -1 : a.rx - b.rx)); };
-      const desenhar = () => { const l = filtrar(), corte = 1000;
+      const desenhar = () => { const l = filtrar(), corte = Number(sel('u2-f-lim')) || Infinity;
         document.getElementById('u2-cont').textContent = `${l.length.toLocaleString('pt-BR')} ONU(s)`;
         document.getElementById('u2-tab').innerHTML = !l.length ? '<div class="panel"><div class="empty">Nenhuma ONU nesse filtro.</div></div>' : `<div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="u2-tab-onus"><thead><tr><th>OLT</th><th>Frame/Slot/Porta <span style="font-weight:400;color:var(--text-muted)">(a lista GPON traz só a porta)</span></th><th>ONU</th><th>Alias (cliente)</th><th>SN</th><th>Status</th><th>Rx (dBm)</th><th>VLAN</th><th>IPv4</th><th>IP</th></tr></thead><tbody>
           ${l.slice(0, corte).map(o => `<tr><td>${esc(o.olt || '-')}</td><td>${esc([o.frame, o.slot, o.porta].filter(x => x !== '').join('/') || '-')}</td><td>${esc(o.onuId || '-')}</td><td class="cat-cell">${esc(o.alias || '-')}</td><td style="font-size:12px">${esc(o.sn || '-')}</td>
@@ -28596,7 +28598,7 @@ function renderU2000() {
             <td>${esc(o.vlanFinal || '-')}</td><td style="font-size:12px">${esc(o.ipFinal || '-')}</td><td><span class="badge ${o.classeIp === 'navegando' ? 'ok' : o.classeIp === 'bloqueio' ? 'warn' : o.classeIp === 'sem_ip' || o.classeIp === 'outro' ? 'amber' : 'neutral'}">${U2K_ROT_IP[o.classeIp]}</span></td></tr>`).join('')}
           </tbody></table></div>${l.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${l.length.toLocaleString('pt-BR')} — o Excel leva todos.</p>` : ''}`;
         ativarFiltrosDeColuna(document.getElementById('u2-tab')); };
-      ['u2-f-olt', 'u2-f-st', 'u2-f-rx', 'u2-f-ip'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
+      ['u2-f-olt', 'u2-f-st', 'u2-f-rx', 'u2-f-ip', 'u2-f-lim'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
       document.getElementById('u2-f-q').addEventListener('input', desenhar);
       document.getElementById('u2-xls').addEventListener('click', () => exportarQuadroPresenca('u2000-onus-' + hojeISOLocal(), ['OLT', 'Frame', 'Slot', 'Porta', 'ONU ID', 'Alias', 'SN', 'Status', 'Motivo offline', 'Rx (dBm)', 'Tx (dBm)', 'VLAN', 'IPv4', 'Situação do IP'],
         filtrar().map(o => [o.olt, o.frame, o.slot, o.porta, o.onuId, o.alias, o.sn, o.status, o.motivo || '', o.rx, o.tx, o.vlanFinal, o.ipFinal, U2K_ROT_IP[o.classeIp]]), 'ONUs'));
@@ -28622,7 +28624,7 @@ function renderU2000() {
       const lista = [...agr.values()], selA = id => document.getElementById(id).value, txtCats = o => Object.entries(o).sort((x, y) => y[1] - x[1]).map(([k, v]) => k + (v > 1 ? ' ×' + v : '')).join(' · ');
       const filtrarA = () => { const c = selA('u2-a-cat'), ab = selA('u2-a-ab'), ag = selA('u2-a-ag'), q = normalizeHeader(selA('u2-a-q'));
         return lista.filter(g => (!c || g.cats[c]) && (!ab || g.abertos) && (!ag || (ag === 'sem' ? !g.agora : g.agora === ag)) && (!q || normalizeHeader(g.cliente + ' ' + g.olt).includes(q))).sort((x, y) => y.abertos - x.abertos || y.n - x.n); };
-      const desenharA = () => { const l = filtrarA(), corte = 1000;
+      const desenharA = () => { const l = filtrarA(), corte = Number(selA('u2-a-lim')) || Infinity;
         document.getElementById('u2-a-cont').textContent = `${l.length.toLocaleString('pt-BR')} ONU(s)`;
         document.getElementById('u2-alm-onu').innerHTML = !l.length ? '<div class="panel"><div class="empty">Nenhuma ONU nesse filtro.</div></div>' : `<div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="u2-tab-onualm"><thead><tr><th>OLT</th><th>Frame/Slot/Porta</th><th>ONU</th><th>Cliente (alias)</th><th>Agora (lista GPON)</th><th>Aberto agora</th><th>Alarmes no período</th><th>Tipos no período</th><th>Primeiro</th><th>Último</th></tr></thead><tbody>
           ${l.slice(0, corte).map(g => `<tr><td>${esc(g.olt || '-')}</td><td>${esc(g.loc)}</td><td>${esc(g.onuId)}</td><td class="cat-cell">${esc(g.cliente || '-')}</td>
@@ -28631,7 +28633,7 @@ function renderU2000() {
             <td style="font-size:12px">${esc(u2kFmtData(g.primeiro) || '-')}</td><td style="font-size:12px">${esc(u2kFmtData(g.ultimo) || '-')}</td></tr>`).join('')}
           </tbody></table></div>${l.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${l.length.toLocaleString('pt-BR')} — o Excel leva todas.</p>` : ''}`;
         ativarFiltrosDeColuna(document.getElementById('u2-alm-onu')); };
-      ['u2-a-cat', 'u2-a-ab', 'u2-a-ag'].forEach(id => document.getElementById(id).addEventListener('change', desenharA));
+      ['u2-a-cat', 'u2-a-ab', 'u2-a-ag', 'u2-a-lim'].forEach(id => document.getElementById(id).addEventListener('change', desenharA));
       document.getElementById('u2-a-q').addEventListener('input', desenharA);
       document.getElementById('u2-a-xls').addEventListener('click', () => exportarQuadroPresenca('u2000-onus-com-alarme-' + hojeISOLocal(), ['OLT', 'Frame/Slot/Porta', 'ONU', 'Cliente', 'Agora (lista GPON)', 'Alarmes abertos', 'Tipos abertos', 'Alarmes no período', 'Tipos no período', 'Primeiro', 'Último'],
         filtrarA().map(g => [g.olt, g.loc, g.onuId, g.cliente, g.agora ? g.agora + (g.motivo ? ' · ' + g.motivo : '') : '', g.abertos, txtCats(g.catsAb), g.n, txtCats(g.cats), u2kFmtData(g.primeiro), u2kFmtData(g.ultimo)]), 'ONUs com alarme'));
@@ -28655,14 +28657,15 @@ function renderU2000() {
           <div class="field"><label>Quem resolve</label><select id="u2-d-q"><option value="">Todos</option>${quems.map(q => `<option>${esc(q)}</option>`).join('')}</select></div>
           <div class="field"><label>OLT</label><select id="u2-d-o"><option value="">Todas</option>${oltsD.map(o => `<option>${esc(o)}</option>`).join('')}</select></div>
           <div class="field"><label>Cliente</label><input type="text" id="u2-d-t" placeholder="nome do cliente…" autocomplete="off"></div>
-          <button type="button" class="btn-export-xls" id="u2-d-xls">⤓ Excel (todas as filtradas)</button><span id="u2-d-cont" style="font-size:12px;color:var(--text-muted);align-self:center"></span></div>
+          <div class="field"><label>Mostrar</label><select id="u2-d-lim"><option value="1000">1.000</option><option value="3000">3.000</option><option value="10000" selected>10.000</option><option value="0">Todas</option></select></div>
+        <button type="button" class="btn-export-xls" id="u2-d-xls">⤓ Excel (todas as filtradas)</button><span id="u2-d-cont" style="font-size:12px;color:var(--text-muted);align-self:center"></span></div>
         <div id="u2-d-tab"></div>`;
       const v = id => document.getElementById(id).value, txt = o => Object.entries(o).sort((x, y) => y[1] - x[1]).map(([k, n]) => k + (n > 1 ? ' ×' + n : '')).join(' · ');
       const filtrarD = () => { const q = normalizeHeader(v('u2-d-t'));
         return rows.filter(r => (!v('u2-d-d') || r.diag === v('u2-d-d')) && (!v('u2-d-q') || r.info.quem === v('u2-d-q')) && (!v('u2-d-o') || r.olt === v('u2-d-o')) && (!q || normalizeHeader(r.alias).includes(q))); };
       const chips = () => { document.getElementById('u2-d-chips').innerHTML = Object.entries(U2K_DIAG).filter(([k]) => cont[k]).map(([k, d]) =>
         `<button type="button" class="u2d-chip" data-d="${k}" style="border:1px solid var(--border);background:${v('u2-d-d') === k ? 'var(--accent)' : 'var(--card-bg)'};color:${v('u2-d-d') === k ? '#fff' : 'var(--text-primary)'};border-radius:999px;padding:6px 12px;font-size:12.5px;cursor:pointer">${esc(d.rot)} <b>${cont[k].toLocaleString('pt-BR')}</b></button>`).join(''); };
-      const desenhar = () => { const l = filtrarD(), corte = 1000; chips();
+      const desenhar = () => { const l = filtrarD(), corte = Number(v('u2-d-lim')) || Infinity; chips();
         document.getElementById('u2-d-cont').textContent = `${l.length.toLocaleString('pt-BR')} ONU(s)`;
         document.getElementById('u2-d-tab').innerHTML = !l.length ? '<div class="panel"><div class="empty">Nenhuma ONU nesse filtro.</div></div>' : `<div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="u2-tab-diag"><thead><tr><th>Diagnóstico</th><th>Quem resolve</th><th>Cliente (alias)</th><th>OLT</th><th>Onde</th><th>Agora</th><th>Aberto agora</th><th>Alarmes no período</th><th>Último alarme</th><th>O que fazer</th></tr></thead><tbody>
           ${l.slice(0, corte).map(r => `<tr><td style="white-space:normal"><span class="badge ${r.info.cor}">${esc(r.info.rot)}</span></td><td>${esc(r.info.quem)}</td><td class="cat-cell">${esc(r.alias || '-')}</td><td>${esc(r.olt || '-')}</td><td style="font-size:12px">${esc(r.local)}</td>
@@ -28670,7 +28673,7 @@ function renderU2000() {
             <td style="white-space:normal;font-size:12.5px">${r.abertos ? esc(txt(r.catsAb)) : '-'}</td><td>${r.n || '-'}</td><td style="font-size:12px">${esc(u2kFmtData(r.ultimo) || '-')}</td><td style="white-space:normal;font-size:12.5px;min-width:260px">${esc(r.info.acao)}</td></tr>`).join('')}
           </tbody></table></div>${l.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${l.length.toLocaleString('pt-BR')} — o Excel leva todas.</p>` : ''}`;
         ativarFiltrosDeColuna(document.getElementById('u2-d-tab')); };
-      ['u2-d-d', 'u2-d-q', 'u2-d-o'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
+      ['u2-d-d', 'u2-d-q', 'u2-d-o', 'u2-d-lim'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
       document.getElementById('u2-d-t').addEventListener('input', desenhar);
       document.getElementById('u2-d-chips').addEventListener('click', ev => { const b = ev.target.closest('.u2d-chip'); if (!b) return; const s = document.getElementById('u2-d-d'); s.value = s.value === b.dataset.d ? '' : b.dataset.d; desenhar(); });
       document.getElementById('u2-d-xls').addEventListener('click', () => exportarQuadroPresenca('u2000-diagnostico-' + hojeISOLocal(), ['Diagnóstico', 'Quem resolve', 'Cliente', 'OLT', 'Onde', 'Status agora', 'Motivo', 'Alarmes abertos', 'Alarmes no período', 'Último alarme', 'O que fazer'],
