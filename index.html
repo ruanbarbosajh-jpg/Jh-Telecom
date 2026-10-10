@@ -28259,7 +28259,7 @@ const U2K_COL = {
 };
 const U2K_ALM = { severidade: ['severity', 'severidade'], id: ['alarm id'], nome: ['name', 'alarm name', 'nome'], fonte: ['alarm source', 'source'], local: ['location information', 'location'],
   adicional: ['additional information'], vezes: ['occurrence times'], primeiro: ['first occurred st', 'first occurred'], ultimo: ['last occurred st', 'last occurred'],
-  limpo: ['cleared on st', 'cleared on'], reconhecido: ['acknowledged on st', 'acknowledged on'] };
+  limpo: ['cleared on st', 'cleared on'], reconhecido: ['acknowledged on st', 'acknowledged on'], razao: ['reason'], rotulo: ['user label'] };
 function u2kAchaCol(cab, lista) { for (const a of lista) { const i = cab.indexOf(a); if (i >= 0) return i; } return -1; }
 const u2kNorm = t => normalizeHeader(String(t == null ? '' : t)).replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
 function u2kNum(v) { if (v === '' || v == null) return null; const n = parseFloat(String(v).replace(',', '.').replace(/[^\d.\-]/g, '')); return isFinite(n) ? n : null; }
@@ -28311,6 +28311,13 @@ const u2kFmtData = t => { const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}:\d{2})/.exe
 // o que cada alarme da OLT significa pra preventiva
 function u2kCategoria(nome) {
   const n = String(nome || '');
+  if (/feeder fiber is broken|can not receive any expected/i.test(n)) return 'PON sem sinal (feeder / LOS da porta)';
+  if (/failed in ranging/i.test(n)) return 'Falha de ranging na porta PON';
+  if (/optical transceiver parameters exceed/i.test(n)) return 'Parâmetro óptico fora do limite';
+  if (/optical transceiver of the PON port is absent/i.test(n)) return 'Falha de hardware da OLT';
+  if (/hardware of the ONT is faulty/i.test(n)) return 'ONT com defeito de hardware';
+  if (/SIP user register/i.test(n)) return 'Falha de VoIP (SIP)';
+  if (/communication with the device failed/i.test(n)) return 'OLT sem comunicação';
   if (/dying-gasp/i.test(n)) return 'Sem energia (dying-gasp)';
   if (/LOSi|LOBi|distribute fiber is broken/i.test(n)) return 'Fibra rompida / sem sinal (LOS)';
   if (/signal degrade|\(SD\)|SDi/i.test(n)) return 'Sinal degradado (SD)';
@@ -28346,11 +28353,12 @@ async function u2kLerArquivo(file) {
           const local = g(l, 'local'), adic = g(l, 'adicional');
           // "Frame=0, Slot=11, Subslot=65535, Port=5, ONUID=20" ou, no alarme "downstream signal fail (SF) of the ONT", "Frame=0, Slot=2, SlotID=7 ONTID=31" (SlotID = porta PON: 341 das 640 ONTs coincidem com a porta dos outros alarmes)
           const m = /Frame=(\d+).*?Slot=(\d+).*?Port=(\d+)(?:.*?ONUID=(\d+))?/i.exec(local) || /Frame=(\d+),\s*Slot=(\d+),\s*SlotID=(\d+)\s*ONTID=(\d+)/i.exec(local);
-          if (!m) { saida.meta.ignorados++; return; }      // alarme do servidor U2000 (OSS: licença, usuários, banco): não é de OLT/ONU
+          const fonteA = g(l, 'fonte'), nivelOlt = !m && !!fonteA && fonteA !== 'OSS';      // "Communication with the device failed": alarme da OLT inteira
+          if (!m && !nivelOlt) { saida.meta.ignorados++; return; }      // alarme do servidor U2000 (OSS: licença, usuários, banco): não é de OLT/ONU
           const alias = ((/Description of the ONT\(only for NMS\)=(.*)$/i.exec(adic) || [])[1] || '').trim(), equip = (/Equipment ID=([^\s,]+)/i.exec(local + ' ' + adic) || [])[1] || '', oltIp = (/OLTIP=([\d.]+)/i.exec(adic) || [])[1] || '';
           const r = { alarme: true, severidade: g(l, 'severidade'), id: g(l, 'id'), nome: g(l, 'nome'), fonte: g(l, 'fonte'), local, vezes: u2kNum(g(l, 'vezes')) || 0,
-            primeiro: u2kData(g(l, 'primeiro'), fmt), ultimo: u2kData(g(l, 'ultimo'), fmt), limpo: u2kData(g(l, 'limpo'), fmt), alias: /ONT_NO_DESCRIPTION/i.test(alias) ? '' : alias, equip: equip === '--' ? '' : equip, oltIp,
-            categoria: u2kCategoria(g(l, 'nome')), frame: m[1], slot: m[2], porta: m[3], onuId: m[4] || '' };
+            primeiro: u2kData(g(l, 'primeiro'), fmt), ultimo: u2kData(g(l, 'ultimo'), fmt), limpo: u2kData(g(l, 'limpo'), fmt), alias: /ONT_NO_DESCRIPTION/i.test(alias) || !alias ? (/^-+$/.test(g(l, 'rotulo')) ? '' : g(l, 'rotulo')) : alias, equip: equip === '--' ? '' : equip, oltIp, razao: /^-+$/.test(g(l, 'razao')) ? '' : g(l, 'razao'),
+            categoria: u2kCategoria(g(l, 'nome')), frame: m ? m[1] : '', slot: m ? m[2] : '', porta: m ? m[3] : '', onuId: m ? m[4] || '' : '' };
           saida.push(r);
         } else { const loc = /(\d+)\/(\d+)\/(\d+)(?:\/(\d+))?/.exec(g(l, 'local')), stMot = u2kStatusMotivo(g(l, 'status')), soLista = col.sn < 0 && col.frame < 0 && col.slot < 0 && !!oltTitulo;
           if (soLista) { const pn = Number(g(l, 'porta')), on = Number(g(l, 'onuId')); if (pn < pp || (pn === pp && on <= po)) gp++; pp = pn; po = on; }
@@ -28417,7 +28425,7 @@ async function u2kSalvarNoBanco() {
       const del = await supa.from('u2000_alarmes').delete().gte('id', 0); if (del.error) return { ok: false, motivo: del.error.message };
       // abertos primeiro, depois os mais recentes (o banco guarda até 8.000)
       const al = [...U2K.alarmes].sort((x, y) => (x.limpo ? 1 : 0) - (y.limpo ? 1 : 0) || String(y.ultimo).localeCompare(String(x.ultimo))).slice(0, 8000).map(a => ({ severidade: a.severidade || '', alarme_id: a.id || '', nome: a.nome || '', fonte: a.fonte || '', local: a.local || '', frame: a.frame || '', slot: a.slot || '', porta: a.porta || '', onu_id: a.onuId || '',
-        vezes: a.vezes || 0, primeiro: a.primeiro || '', ultimo: a.ultimo || '', limpo: a.limpo || '', alias: a.alias || '', categoria: a.categoria || '', equip: a.equip || '', olt_ip: a.oltIp || '', importado_em: new Date().toISOString(), importado_por: quem }));
+        vezes: a.vezes || 0, primeiro: a.primeiro || '', ultimo: a.ultimo || '', limpo: a.limpo || '', alias: a.alias || '', categoria: a.categoria || '', equip: a.equip || '', olt_ip: a.oltIp || '', razao: a.razao || '', importado_em: new Date().toISOString(), importado_por: quem }));
       for (let i = 0; i < al.length; i += 500) { const { error } = await supa.from('u2000_alarmes').insert(al.slice(i, i + 500)); if (error) return { ok: false, motivo: error.message }; }
       U2K._alarmesNovos = false;
     }
@@ -28440,7 +28448,7 @@ async function u2kCarregarDoBanco() {
     }
     if (!onus.length && !alm.length) return { ok: true, vazio: true };
     U2K.onus = onus.map(r => ({ _k: r.chave, olt: r.olt, frame: r.frame, slot: r.slot, porta: r.porta, onuId: r.onu_id, alias: r.alias, sn: r.sn, status: r.status, rx: r.rx == null ? null : Number(r.rx), tx: r.tx == null ? null : Number(r.tx), tipo: r.tipo, motivo: r.motivo || '', wan: r.wan || [], _importado: r.importado_em }));
-    U2K.alarmes = alm.map(r => ({ severidade: r.severidade, id: r.alarme_id, nome: r.nome, fonte: r.fonte, local: r.local, frame: r.frame, slot: r.slot, porta: r.porta, onuId: r.onu_id, vezes: r.vezes, primeiro: r.primeiro || '', ultimo: r.ultimo || '', limpo: r.limpo || '', alias: r.alias || '', categoria: r.categoria || u2kCategoria(r.nome), equip: r.equip || '', oltIp: r.olt_ip || '' }));
+    U2K.alarmes = alm.map(r => ({ severidade: r.severidade, id: r.alarme_id, nome: r.nome, fonte: r.fonte, local: r.local, frame: r.frame, slot: r.slot, porta: r.porta, onuId: r.onu_id, vezes: r.vezes, primeiro: r.primeiro || '', ultimo: r.ultimo || '', limpo: r.limpo || '', alias: r.alias || '', categoria: r.categoria || u2kCategoria(r.nome), equip: r.equip || '', oltIp: r.olt_ip || '', razao: r.razao || '' }));
     u2kConsolidar(); U2K._doBanco = true;
     U2K.importadoEm = onus.reduce((m, r) => r.importado_em && r.importado_em > m ? r.importado_em : m, '');
     return { ok: true, n: onus.length };
@@ -28448,63 +28456,104 @@ async function u2kCarregarDoBanco() {
 }
 // ---- diagnóstico das falhas (lista GPON + alarmes): o que está caído, por quê e quem resolve — o que o AutoISP mostrava na tela de ONUs ----
 const U2K_DIAG = {
+  pon:        { rot: 'Porta PON com problema (feeder / ranging)', quem: 'Campo (urgente)', ordem: 0, cor: 'warn', acao: 'Problema na PORTA inteira: rompimento no tronco/feeder, laser da porta fechado ou nenhuma ONT conseguindo registrar. Afeta todas as ONUs da porta: abrir reparo urgente.' },
+  olt:        { rot: 'OLT sem comunicação', quem: 'Rede / GIGA', ordem: 0.5, cor: 'warn', acao: 'O U2000 perdeu a comunicação com a OLT. Conferir o link/energia do ponto; os dados dessa OLT podem estar desatualizados.' },
   los:        { rot: 'LOS — fibra rompida / sem sinal', quem: 'Campo', ordem: 1, cor: 'warn', acao: 'Abrir reparo: conferir fibra, conector e CTO. Várias ONUs da mesma porta com LOS = rompimento no tronco ou na caixa.' },
   energia:    { rot: 'Sem energia (dying-gasp)', quem: 'Cliente', ordem: 2, cor: 'warn', acao: 'Ligar para o cliente (a ONT perdeu energia). Várias na mesma porta/bairro ao mesmo tempo = queda de energia local.' },
   config:     { rot: 'Falha de configuração da ONT', quem: 'Sistema', ordem: 3, cor: 'amber', acao: 'A OLT não conseguiu aplicar a configuração na ONT: reaplicar o provisionamento (perfil de linha/serviço) no U2000. Pode ser resolvido sem ir ao campo.' },
+  hwonu:      { rot: 'ONT com defeito de hardware', quem: 'Campo', ordem: 3.5, cor: 'amber', acao: 'A própria ONT acusa falha de hardware: agendar a troca do equipamento.' },
   desativada: { rot: 'ONU desativada na OLT', quem: 'Sistema', ordem: 4, cor: 'amber', acao: 'Conferir se o bloqueio é devido (inadimplência/cancelamento); se não for, reativar a ONU no U2000.' },
   semid:      { rot: 'ONU sem identificação', quem: 'Sistema', ordem: 5, cor: 'amber', acao: 'O nome da ONU está vazio ou automático ("--", OLT-…): vincular ao cliente (nome/contrato) para poder atender.' },
-  sinal:      { rot: 'Sinal degradado (SD / SF)', quem: 'Campo (preventiva)', ordem: 6, cor: 'amber', acao: 'Preventiva: medir a atenuação e limpar/trocar conector ou pigtail antes que caia.' },
+  sinal:      { rot: 'Sinal degradado / fora do limite', quem: 'Campo (preventiva)', ordem: 6, cor: 'amber', acao: 'Preventiva: medir a atenuação e limpar/trocar conector ou pigtail antes que caia.' },
   instavel:   { rot: 'Enlace instável / reincidente', quem: 'Sistema, depois campo', ordem: 7, cor: 'amber', acao: 'Reiniciar/ressincronizar a ONU pelo U2000 (ONU Operate); se continuar caindo, trocar a ONT ou revisar a porta da OLT.' },
   outro:      { rot: 'Offline sem alarme (outro motivo)', quem: 'Cliente', ordem: 8, cor: 'neutral', acao: 'Ligar para o cliente: ONT desligada, sem energia local ou roteador travado. Sem alarme de fibra.' },
   desligou:   { rot: 'ONT desligou sozinha', quem: 'Cliente', ordem: 9, cor: 'neutral', acao: 'O equipamento reiniciou ou foi desligado; acompanhar se volta sozinho.' },
   ethernet:   { rot: 'Porta Ethernet sem link', quem: 'Cliente', ordem: 10, cor: 'neutral', acao: 'Cabo ou roteador do cliente desconectado: resolver por suporte remoto.' },
+  voip:       { rot: 'Falha de VoIP (SIP)', quem: 'Rede / Sistema', ordem: 10.5, cor: 'neutral', acao: 'A ONT não registrou o telefone no servidor SIP: conferir o perfil de VoIP da ONU e o servidor SIP.' },
   recuperada: { rot: 'Online com alarme aberto (provável recuperada)', quem: 'Monitorar', ordem: 11, cor: 'ok', acao: 'A ONU está online agora; o alarme pode ser antigo. Conferir a data do último alarme.' },
-  antigo:     { rot: 'Alarme aberto antigo (sem lista GPON)', quem: 'Monitorar', ordem: 13, cor: 'neutral', acao: 'Alarme aberto há mais de 3 dias e a ONU não está na lista GPON importada: importe a lista dessa OLT para saber se ela está online.' },
   outros:     { rot: 'Outros alarmes abertos', quem: 'Monitorar', ordem: 12, cor: 'neutral', acao: 'Alarme aberto sem classificação própria: ver o tipo na coluna de alarmes.' },
+  antigo:     { rot: 'Alarme aberto antigo (sem lista GPON)', quem: 'Monitorar', ordem: 13, cor: 'neutral', acao: 'Alarme aberto há mais de 3 dias e a ONU não está na lista GPON importada: importe a lista dessa OLT para saber se ela está online.' },
 };
 const u2kAliasVazio = a => { const t = String(a || '').trim(); return !t || /^-+$/.test(t) || /^(OLT|NIU)-.*_Frame\d+_Slot\d+/i.test(t); };
-function u2kDiagnostico(onus, alm) {
-  const chaveA = (olt, alias) => normalizeHeader(olt) + '|' + normalizeHeader(alias);
-  const ents = new Map(), porAlias = new Map();
+// queda em massa: muitas ONUs da MESMA OLT com sem-energia (dying-gasp) ou LOS na mesma janela de ~10 min (ex.: 102 ONUs na mesma porta às 18:30) = evento de rede/energia, não falha individual
+function u2kEventosMassa(alm, limite) {
+  limite = limite || 15; const nk = normalizeHeader, jan = [];
   alm.forEach(a => {
-    if (a.onuId === '' || a.onuId == null) return;
-    const k = `${normalizeHeader(a.fonte)}|${a.frame}/${a.slot}/${a.porta}|${a.onuId}`; let e = ents.get(k);
-    if (!e) { e = { olt: a.fonte, local: `${a.frame}/${a.slot}/${a.porta} · ONU ${a.onuId}`, alias: '', n: 0, abertos: 0, cats: {}, catsAb: {}, ultimo: '', usado: false }; ents.set(k, e); }
+    if (a.onuId === '' || a.onuId == null || !a.primeiro) return;
+    const tipo = a.categoria === 'Sem energia (dying-gasp)' ? 'Sem energia (dying-gasp)' : a.categoria === 'Fibra rompida / sem sinal (LOS)' ? 'LOS / fibra' : ''; if (!tipo) return;
+    const t = Date.parse(a.primeiro.replace(' ', 'T')); if (!t) return;
+    jan.push({ olt: a.fonte, tipo, b: Math.floor(t / 600000), a, id: `${nk(a.fonte)}|${a.frame}/${a.slot}/${a.porta}|${a.onuId}` });
+  });
+  jan.sort((x, y) => (x.olt + x.tipo).localeCompare(y.olt + y.tipo) || x.b - y.b);
+  const evs = []; let cur = null;
+  jan.forEach(j => {
+    if (!cur || cur.olt !== j.olt || cur.tipo !== j.tipo || j.b - cur.ultB > 1) { cur = { olt: j.olt, tipo: j.tipo, ultB: j.b, ini: j.a.primeiro, fim: j.a.primeiro, onus: new Set(), portas: new Set(), abertas: new Set(), chaves: new Set() }; evs.push(cur); }
+    cur.ultB = j.b; cur.onus.add(j.id); cur.chaves.add(j.id); cur.portas.add(`${j.a.slot}/${j.a.porta}`); if (!j.a.limpo) cur.abertas.add(j.id);
+    if (j.a.primeiro < cur.ini) cur.ini = j.a.primeiro; if (j.a.primeiro > cur.fim) cur.fim = j.a.primeiro;
+  });
+  return evs.filter(e => e.onus.size >= limite).sort((x, y) => y.onus.size - x.onus.size);
+}
+function u2kDiagnostico(onus, alm) {
+  const nk = normalizeHeader, chaveA = (olt, alias) => nk(olt) + '|' + nk(alias), chaveL = (olt, f, sl, p, o) => `${nk(olt)}|${f}/${sl}/${p}|${o}`;
+  const ents = new Map(), pons = new Map(), olts = new Map(), porAlias = new Map();
+  const acumula = (mapa, k, base, a) => {
+    let e = mapa.get(k); if (!e) { e = { ...base, alias: '', n: 0, abertos: 0, cats: {}, catsAb: {}, ultimo: '', desde: '', razao: '', usado: false }; mapa.set(k, e); }
     e.n++; if (a.alias && !e.alias) e.alias = a.alias; e.cats[a.categoria] = (e.cats[a.categoria] || 0) + 1;
-    if (!a.limpo) { e.abertos++; e.catsAb[a.categoria] = (e.catsAb[a.categoria] || 0) + 1; } if (a.ultimo > e.ultimo) e.ultimo = a.ultimo;
+    if (!a.limpo) { e.abertos++; e.catsAb[a.categoria] = (e.catsAb[a.categoria] || 0) + 1; if (a.primeiro && (!e.desde || a.primeiro < e.desde)) e.desde = a.primeiro; if (a.razao) e.razao = a.razao; }
+    if (a.ultimo > e.ultimo) e.ultimo = a.ultimo; if (!e.razao && a.razao) e.razao = a.razao;
+  };
+  alm.forEach(a => {
+    if (a.onuId !== '' && a.onuId != null) acumula(ents, chaveL(a.fonte, a.frame, a.slot, a.porta, a.onuId), { olt: a.fonte, chave: chaveL(a.fonte, a.frame, a.slot, a.porta, a.onuId), local: `${a.frame}/${a.slot}/${a.porta} · ONU ${a.onuId}` }, a);
+    else if (a.porta !== '' && a.porta != null) acumula(pons, `${nk(a.fonte)}|${a.frame}/${a.slot}/${a.porta}`, { olt: a.fonte, frame: a.frame, slot: a.slot, porta: a.porta, local: `${a.frame}/${a.slot}/${a.porta} (porta PON)` }, a);
+    else acumula(olts, nk(a.fonte), { olt: a.fonte, local: 'OLT inteira' }, a);
   });
   ents.forEach(e => { if (e.alias && !/^-+$/.test(e.alias)) { const k = chaveA(e.olt, e.alias); if (!porAlias.has(k)) porAlias.set(k, e); } });
   const linhas = [], ref = Date.parse(String(alm.reduce((m, a) => a.ultimo > m ? a.ultimo : m, '')).replace(' ', 'T')) || 0;
+  const eventos = u2kEventosMassa(alm), evPorOnu = new Map(); eventos.forEach(ev => ev.chaves.forEach(k => { if (!evPorOnu.has(k)) evPorOnu.set(k, ev); }));
+  const marcaEvento = (r, chave) => { const ev = (r.diag === 'energia' || r.diag === 'los') && evPorOnu.get(chave); if (ev) r.extra = `Parte de uma queda em massa: ${ev.onus.size} ONUs da ${ev.olt} às ${u2kFmtData(ev.ini).slice(0, 16)}`; };
   const classifica = r => {
     const ab = r.catsAb, has = c => !!ab[c], offline = r.status ? r.status === 'Offline' : true;
     if (!r.status && r.abertos && ref && r.ultimo && ref - Date.parse(r.ultimo.replace(' ', 'T')) > 3 * 86400000) return 'antigo';   // sem lista pra confirmar e o último alarme é velho
     if (r.status === 'Desativada') return 'desativada';
     if (has('Falha de configuração')) return 'config';
+    if (has('ONT com defeito de hardware')) return 'hwonu';
     if (r.motivo === 'fibra' || (offline && has('Fibra rompida / sem sinal (LOS)'))) return 'los';
     if (r.motivo === 'sem energia' || (offline && has('Sem energia (dying-gasp)'))) return 'energia';
-    if (has('Sinal degradado (SD)') || has('Falha de sinal (SF)')) return 'sinal';
+    if (has('Sinal degradado (SD)') || has('Falha de sinal (SF)') || has('Parâmetro óptico fora do limite')) return 'sinal';
     if (has('Enlace instável (LOF / LCDG / LOAM)')) return 'instavel';
     if (r.status === 'Offline' && u2kAliasVazio(r.alias)) return 'semid';
     if (r.status === 'Offline' && !Object.keys(ab).length) return 'outro';
     if (has('ONT desligou sozinha')) return 'desligou';
     if (has('Porta Ethernet sem link')) return 'ethernet';
+    if (has('Falha de VoIP (SIP)')) return 'voip';
     if (r.status === 'Online' && Object.keys(ab).length) return 'recuperada';
     if (r.n >= 8) return 'instavel';
     return Object.keys(ab).length ? 'outros' : '';
   };
   onus.forEach(o => {
     if (!o.status) return;
-    const e = o.alias && !/^-+$/.test(o.alias) ? porAlias.get(chaveA(o.olt, o.alias)) : null;
+    const comSlot = o.slot !== '' && o.slot != null;
+    const e = (comSlot && ents.get(chaveL(o.olt, o.frame, o.slot, o.porta, o.onuId))) || (o.alias && !/^-+$/.test(o.alias) ? porAlias.get(chaveA(o.olt, o.alias)) : null);
     if (e) e.usado = true;
     if (o.status === 'Online' && !(e && e.abertos)) return;
-    const r = { olt: o.olt, alias: o.alias || '', local: e ? e.local : `porta ${o.porta} · ONU ${o.onuId}`, status: o.status, motivo: o.motivo || '', n: e ? e.n : 0, abertos: e ? e.abertos : 0, cats: e ? e.cats : {}, catsAb: e ? e.catsAb : {}, ultimo: e ? e.ultimo : '' };
-    r.diag = classifica(r); if (r.diag) linhas.push(r);
+    const alias = o.alias && !/^-+$/.test(o.alias) ? o.alias : (e && e.alias) || o.alias || '';
+    if (e && e.chave && !comSlot) { /* casou por alias */ }
+    const r = { olt: o.olt, alias, sn: o.sn || '', local: e ? e.local : comSlot ? `${o.frame}/${o.slot}/${o.porta} · ONU ${o.onuId}` : `porta ${o.porta} · ONU ${o.onuId}`, status: o.status, motivo: o.motivo || '', n: e ? e.n : 0, abertos: e ? e.abertos : 0, cats: e ? e.cats : {}, catsAb: e ? e.catsAb : {}, ultimo: e ? e.ultimo : '', desde: e ? e.desde : '', razao: e ? e.razao : '' };
+    r.diag = classifica(r); marcaEvento(r, comSlot ? chaveL(o.olt, o.frame, o.slot, o.porta, o.onuId) : ''); if (r.diag) linhas.push(r);
   });
   ents.forEach(e => {
     if (e.usado || (!e.abertos && e.n < 8)) return;
-    const r = { olt: e.olt, alias: e.alias, local: e.local, status: '', motivo: '', n: e.n, abertos: e.abertos, cats: e.cats, catsAb: e.catsAb, ultimo: e.ultimo };
-    r.diag = classifica(r); if (r.diag) linhas.push(r);
+    const r = { olt: e.olt, alias: e.alias, sn: '', local: e.local, status: '', motivo: '', n: e.n, abertos: e.abertos, cats: e.cats, catsAb: e.catsAb, ultimo: e.ultimo, desde: e.desde, razao: e.razao };
+    r.diag = classifica(r); marcaEvento(r, e.chave); if (r.diag) linhas.push(r);
   });
+  // porta PON: quantas ONUs da porta estão offline agora (precisa da lista GPON com slot)
+  pons.forEach(e => {
+    if (!e.abertos) return;
+    const daPorta = onus.filter(o => o.slot !== '' && o.slot != null && nk(o.olt) === nk(e.olt) && String(o.slot) === String(e.slot) && String(o.porta) === String(e.porta));
+    linhas.push({ olt: e.olt, alias: '(porta PON)', sn: '', local: e.local, status: '', motivo: '', n: e.n, abertos: e.abertos, cats: e.cats, catsAb: e.catsAb, ultimo: e.ultimo, desde: e.desde, razao: e.razao, diag: 'pon',
+      extra: daPorta.length ? `${daPorta.filter(o => o.status === 'Offline').length} de ${daPorta.length} ONUs offline` : '' });
+  });
+  olts.forEach(e => { if (e.abertos) linhas.push({ olt: e.olt, alias: '(OLT)', sn: '', local: e.local, status: '', motivo: '', n: e.n, abertos: e.abertos, cats: e.cats, catsAb: e.catsAb, ultimo: e.ultimo, desde: e.desde, razao: e.razao, diag: 'olt' }); });
   linhas.forEach(r => { r.info = U2K_DIAG[r.diag]; });
   return linhas.sort((x, y) => x.info.ordem - y.info.ordem || y.abertos - x.abertos || y.n - x.n);
 }
@@ -28650,7 +28699,11 @@ function renderU2000() {
       if (!rows.length) { el.innerHTML = ''; return; }
       const cont = {}; rows.forEach(r => { cont[r.diag] = (cont[r.diag] || 0) + 1; });
       const quems = [...new Set(Object.values(U2K_DIAG).map(d => d.quem))], oltsD = [...new Set(rows.map(r => r.olt).filter(Boolean))].sort();
-      el.innerHTML = `<div class="section-heading">Diagnóstico das falhas <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(o que está fora do ar ou com alarme, o motivo e quem resolve — junta a lista GPON com os alarmes)</span></div>
+      const evs = u2kEventosMassa(alm);
+      const htmlEv = evs.length ? `<div class="section-heading">Quedas em massa <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(15 ou mais ONUs da mesma OLT com sem-energia ou LOS na mesma janela de ~10 min — evento de energia/rede, não falha individual)</span></div>
+        <div class="table-wrap" style="margin-bottom:1.2rem;max-height:340px;overflow:auto"><table class="data-table" id="u2-tab-ev"><thead><tr><th>Início</th><th>Fim</th><th>OLT</th><th>Tipo</th><th>ONUs afetadas</th><th>Portas PON</th><th>Ainda abertas</th></tr></thead><tbody>
+        ${evs.slice(0, 40).map(e => `<tr><td>${esc(u2kFmtData(e.ini))}</td><td>${esc(u2kFmtData(e.fim))}</td><td>${esc(e.olt)}</td><td>${esc(e.tipo)}</td><td><b>${e.onus.size}</b></td><td>${e.portas.size}</td><td>${e.abertas.size}</td></tr>`).join('')}</tbody></table></div>` : '';
+      el.innerHTML = htmlEv + `<div class="section-heading">Diagnóstico das falhas <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(o que está fora do ar ou com alarme, o motivo e quem resolve — junta a lista GPON com os alarmes)</span></div>
         <div id="u2-d-chips" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px"></div>
         <div class="toolbar" style="margin-bottom:10px">
           <div class="field"><label>Diagnóstico</label><select id="u2-d-d"><option value="">Todos</option>${Object.entries(U2K_DIAG).filter(([k]) => cont[k]).map(([k, d]) => `<option value="${k}">${esc(d.rot)}</option>`).join('')}</select></div>
@@ -28667,17 +28720,17 @@ function renderU2000() {
         `<button type="button" class="u2d-chip" data-d="${k}" style="border:1px solid var(--border);background:${v('u2-d-d') === k ? 'var(--accent)' : 'var(--card-bg)'};color:${v('u2-d-d') === k ? '#fff' : 'var(--text-primary)'};border-radius:999px;padding:6px 12px;font-size:12.5px;cursor:pointer">${esc(d.rot)} <b>${cont[k].toLocaleString('pt-BR')}</b></button>`).join(''); };
       const desenhar = () => { const l = filtrarD(), corte = Number(v('u2-d-lim')) || Infinity; chips();
         document.getElementById('u2-d-cont').textContent = `${l.length.toLocaleString('pt-BR')} ONU(s)`;
-        document.getElementById('u2-d-tab').innerHTML = !l.length ? '<div class="panel"><div class="empty">Nenhuma ONU nesse filtro.</div></div>' : `<div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="u2-tab-diag"><thead><tr><th>Diagnóstico</th><th>Quem resolve</th><th>Cliente (alias)</th><th>OLT</th><th>Onde</th><th>Agora</th><th>Aberto agora</th><th>Alarmes no período</th><th>Último alarme</th><th>O que fazer</th></tr></thead><tbody>
-          ${l.slice(0, corte).map(r => `<tr><td style="white-space:normal"><span class="badge ${r.info.cor}">${esc(r.info.rot)}</span></td><td>${esc(r.info.quem)}</td><td class="cat-cell">${esc(r.alias || '-')}</td><td>${esc(r.olt || '-')}</td><td style="font-size:12px">${esc(r.local)}</td>
+        document.getElementById('u2-d-tab').innerHTML = !l.length ? '<div class="panel"><div class="empty">Nenhuma ONU nesse filtro.</div></div>' : `<div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="u2-tab-diag"><thead><tr><th>Diagnóstico</th><th>Quem resolve</th><th>Cliente (alias)</th><th>OLT</th><th>Onde</th><th>SN</th><th>Agora</th><th>Aberto agora</th><th>Causa provável (U2000)</th><th>Aberto desde</th><th>Alarmes no período</th><th>Último alarme</th><th>O que fazer</th></tr></thead><tbody>
+          ${l.slice(0, corte).map(r => `<tr><td style="white-space:normal"><span class="badge ${r.info.cor}">${esc(r.info.rot)}</span></td><td>${esc(r.info.quem)}</td><td class="cat-cell">${esc(r.alias || '-')}</td><td>${esc(r.olt || '-')}</td><td style="font-size:12px">${esc(r.local)}${r.extra ? `<br><b>${esc(r.extra)}</b>` : ''}</td><td style="font-size:11.5px">${esc(r.sn || '-')}</td>
             <td>${r.status ? `<span class="badge ${r.status === 'Online' ? 'ok' : r.status === 'Desativada' ? 'neutral' : 'warn'}">${esc(r.status)}</span>${r.motivo ? ` <span style="font-size:11.5px;color:var(--text-muted)">${esc(r.motivo)}</span>` : ''}` : '<span style="color:var(--text-muted)">-</span>'}</td>
-            <td style="white-space:normal;font-size:12.5px">${r.abertos ? esc(txt(r.catsAb)) : '-'}</td><td>${r.n || '-'}</td><td style="font-size:12px">${esc(u2kFmtData(r.ultimo) || '-')}</td><td style="white-space:normal;font-size:12.5px;min-width:260px">${esc(r.info.acao)}</td></tr>`).join('')}
+            <td style="white-space:normal;font-size:12.5px">${r.abertos ? esc(txt(r.catsAb)) : '-'}</td><td style="white-space:normal;font-size:12px;min-width:200px">${esc(r.razao || '-')}</td><td style="font-size:12px">${esc(u2kFmtData(r.desde) || '-')}</td><td>${r.n || '-'}</td><td style="font-size:12px">${esc(u2kFmtData(r.ultimo) || '-')}</td><td style="white-space:normal;font-size:12.5px;min-width:260px">${esc(r.info.acao)}</td></tr>`).join('')}
           </tbody></table></div>${l.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${l.length.toLocaleString('pt-BR')} — o Excel leva todas.</p>` : ''}`;
         ativarFiltrosDeColuna(document.getElementById('u2-d-tab')); };
       ['u2-d-d', 'u2-d-q', 'u2-d-o', 'u2-d-lim'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
       document.getElementById('u2-d-t').addEventListener('input', desenhar);
       document.getElementById('u2-d-chips').addEventListener('click', ev => { const b = ev.target.closest('.u2d-chip'); if (!b) return; const s = document.getElementById('u2-d-d'); s.value = s.value === b.dataset.d ? '' : b.dataset.d; desenhar(); });
-      document.getElementById('u2-d-xls').addEventListener('click', () => exportarQuadroPresenca('u2000-diagnostico-' + hojeISOLocal(), ['Diagnóstico', 'Quem resolve', 'Cliente', 'OLT', 'Onde', 'Status agora', 'Motivo', 'Alarmes abertos', 'Alarmes no período', 'Último alarme', 'O que fazer'],
-        filtrarD().map(r => [r.info.rot, r.info.quem, r.alias, r.olt, r.local, r.status, r.motivo, txt(r.catsAb), r.n, u2kFmtData(r.ultimo), r.info.acao]), 'Diagnóstico'));
+      document.getElementById('u2-d-xls').addEventListener('click', () => exportarQuadroPresenca('u2000-diagnostico-' + hojeISOLocal(), ['Diagnóstico', 'Quem resolve', 'Cliente', 'OLT', 'Onde', 'SN', 'Status agora', 'Motivo', 'Alarmes abertos', 'Causa provável', 'Aberto desde', 'Alarmes no período', 'Último alarme', 'O que fazer'],
+        filtrarD().map(r => [r.info.rot, r.info.quem, r.alias, r.olt, r.local + (r.extra ? ' — ' + r.extra : ''), r.sn, r.status, r.motivo, txt(r.catsAb), r.razao, u2kFmtData(r.desde), r.n, u2kFmtData(r.ultimo), r.info.acao]), 'Diagnóstico'));
       desenhar();
     }
     pintarDiag();
