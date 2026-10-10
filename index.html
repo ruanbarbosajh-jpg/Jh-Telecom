@@ -28271,7 +28271,15 @@ function u2kClasseIp(ip, temWan) {
   const o = Number(m[2]); return U2K_IP_NAVEGANDO.includes(o) ? 'navegando' : U2K_IP_BLOQUEIO.includes(o) ? 'bloqueio' : 'outro';
 }
 const U2K_ROT_IP = { navegando: 'Navegando', bloqueio: 'IP de bloqueio', sem_ip: 'Online sem IP', outro: 'IP fora do padrão', nao_lido: 'Não lido' };
-const u2kChave = o => (o.sn ? 'sn:' + String(o.sn).toUpperCase() : `loc:${normalizeHeader(o.olt)}|${o.frame}/${o.slot}/${o.porta}|${o.onuId}`);
+// a lista "GPON ONU" da OLT (Save As…) só traz Status, ONU ID, Port e Alias — sem SN nem slot. Ela vem ordenada por slot → porta → ONU ID, então cada vez que porta/ONU ID "voltam" começa outro slot: a chave é OLT + nº do grupo (slot na ordem) + porta + ONU ID
+const u2kChave = o => (o.sn ? 'sn:' + String(o.sn).toUpperCase() : o.lista ? `lst:${o.olt}|${o.grp}|${o.porta}|${o.onuId}` : `loc:${normalizeHeader(o.olt)}|${o.frame}/${o.slot}/${o.porta}|${o.onuId}`);
+// "Active (Online)" / "Offline due to power failure" / "…fiber issues" / "…other issues" / "Deactivate"
+function u2kStatusMotivo(v) {
+  const t = String(v || ''); let motivo = '';
+  if (/deactiv/i.test(t)) return { status: 'Desativada', motivo: '' };
+  if (/power fail/i.test(t)) motivo = 'sem energia'; else if (/fiber/i.test(t)) motivo = 'fibra'; else if (/offline/i.test(t) && /other/i.test(t)) motivo = 'outro motivo';
+  return { status: u2kStatus(t), motivo };
+}
 // lê uma planilha/CSV exportada do U2000 e devolve { tipo: 'onu' | 'alarme', linhas }
 // CSV próprio: o U2000 grava um texto de apresentação (título, usuário, filtro) com aspas que atravessam linhas ANTES do cabeçalho, e o leitor do XLSX
 // transformaria "01/10/2026 08:30:30" em número de série. Aqui tudo fica texto.
@@ -28320,6 +28328,8 @@ async function u2kLerArquivo(file) {
   else { const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' }); wb.SheetNames.forEach(n => planilhas.push(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: '' }))); }
   const saida = []; saida.meta = { alarmesLidos: 0, ignorados: 0 };
   for (const linhas of planilhas) {
+    const tit = linhas.slice(0, 30).map(l => String(l[0] == null ? '' : l[0])).find(t => /GPON ONU Report/i.test(t));
+    const oltTitulo = tit ? tit.replace(/\s*GPON ONU Report.*$/i, '').replace(/-MA\d+\w*$/i, '').trim() : '';
     for (let i = 0; i < Math.min(linhas.length, 30); i++) {
       const cab = linhas[i].map(u2kNorm);
       if (cab.filter(Boolean).length < 3) continue;
@@ -28327,7 +28337,7 @@ async function u2kLerArquivo(file) {
       const col = {}; const mapa = ehAlarme ? U2K_ALM : U2K_COL; Object.keys(mapa).forEach(k => { col[k] = u2kAchaCol(cab, mapa[k]); });
       if (!ehAlarme && col.sn < 0 && col.alias < 0 && col.onuId < 0 && col.ip < 0 && col.rx < 0) continue;
       const g = (l, k) => col[k] >= 0 ? String(l[col[k]] == null ? '' : l[col[k]]).trim() : '';
-      const corpo = linhas.slice(i + 1);
+      const corpo = linhas.slice(i + 1); let gp = 0, pp = -1, po = -1;
       const fmt = ehAlarme ? u2kFormatoData(corpo.flatMap(l => [g(l, 'primeiro'), g(l, 'ultimo'), g(l, 'limpo')])) : 'md';
       corpo.forEach(l => {
         if (!l.some(c => String(c).trim() !== '')) return;
@@ -28341,9 +28351,10 @@ async function u2kLerArquivo(file) {
             primeiro: u2kData(g(l, 'primeiro'), fmt), ultimo: u2kData(g(l, 'ultimo'), fmt), limpo: u2kData(g(l, 'limpo'), fmt), alias: /ONT_NO_DESCRIPTION/i.test(alias) ? '' : alias, equip: equip === '--' ? '' : equip, oltIp,
             categoria: u2kCategoria(g(l, 'nome')), frame: m[1], slot: m[2], porta: m[3], onuId: m[4] || '' };
           saida.push(r);
-        } else { const loc = /(\d+)\/(\d+)\/(\d+)(?:\/(\d+))?/.exec(g(l, 'local'));
-          saida.push({ alarme: false, olt: g(l, 'olt'), frame: g(l, 'frame') || (loc ? loc[1] : ''), slot: g(l, 'slot') || (loc ? loc[2] : ''), porta: g(l, 'porta') || (loc ? loc[3] : ''), onuId: g(l, 'onuId') || (loc ? loc[4] || '' : ''),
-            alias: g(l, 'alias'), sn: g(l, 'sn').replace(/\s+/g, ''), status: u2kStatus(g(l, 'status')), rx: u2kNum(g(l, 'rx')), tx: u2kNum(g(l, 'tx')), vlan: g(l, 'vlan'), ip: g(l, 'ip'), servico: g(l, 'servico'), ipStatus: g(l, 'ipStatus'), tipo: g(l, 'tipo') }); }
+        } else { const loc = /(\d+)\/(\d+)\/(\d+)(?:\/(\d+))?/.exec(g(l, 'local')), stMot = u2kStatusMotivo(g(l, 'status')), soLista = col.sn < 0 && col.frame < 0 && col.slot < 0 && !!oltTitulo;
+          if (soLista) { const pn = Number(g(l, 'porta')), on = Number(g(l, 'onuId')); if (pn < pp || (pn === pp && on <= po)) gp++; pp = pn; po = on; }
+          saida.push({ alarme: false, lista: soLista, grp: gp, motivo: stMot.motivo, olt: g(l, 'olt') || oltTitulo, frame: g(l, 'frame') || (loc ? loc[1] : ''), slot: g(l, 'slot') || (loc ? loc[2] : ''), porta: g(l, 'porta') || (loc ? loc[3] : ''), onuId: g(l, 'onuId') || (loc ? loc[4] || '' : ''),
+            alias: g(l, 'alias'), sn: g(l, 'sn').replace(/\s+/g, ''), status: stMot.status, rx: u2kNum(g(l, 'rx')), tx: u2kNum(g(l, 'tx')), vlan: g(l, 'vlan'), ip: g(l, 'ip'), servico: g(l, 'servico'), ipStatus: g(l, 'ipStatus'), tipo: g(l, 'tipo') }); }
       });
       break;
     }
@@ -28355,15 +28366,18 @@ function u2kJuntar(linhas, nomeArquivo) {
   U2K._tocadas = U2K._tocadas || new Set();
   // a mesma ONU pode vir por SN (lista de ONUs) ou só pela localização OLT+frame/slot/porta+ONU ID (tabela de WAN): acha por qualquer das duas
   const locDe = o => `${normalizeHeader(o.olt)}|${o.frame}/${o.slot}/${o.porta}|${o.onuId}`;
+  // a lista GPON é uma foto da OLT: a nova substitui a anterior da mesma OLT (ONU que saiu da OLT não fica pra trás)
+  const oltsLista = new Set(linhas.filter(r => !r.alarme && r.lista).map(r => r.olt));
+  if (oltsLista.size) { U2K.onus = U2K.onus.filter(o => !(String(o._k).startsWith('lst:') && oltsLista.has(o.olt))); U2K._apagarLst = [...(U2K._apagarLst || []), ...oltsLista]; }
   const idx = new Map(), idxLoc = new Map();
-  U2K.onus.forEach((o, i) => { idx.set(o._k, i); if (o.olt && o.onuId !== '') idxLoc.set(locDe(o), i); });
+  U2K.onus.forEach((o, i) => { idx.set(o._k, i); if (o.olt && o.onuId !== '' && o.slot) idxLoc.set(locDe(o), i); });
   linhas.forEach(r => {
     if (r.alarme) { delete r.alarme; alarmesNovos.push(r); novosAlm++; return; }
-    delete r.alarme; r._k = u2kChave(r);
+    delete r.alarme; r._k = u2kChave(r); delete r.lista;
     let i = idx.get(r._k);
-    if (i === undefined && r.olt && r.onuId !== '') i = idxLoc.get(locDe(r));
-    if (i === undefined) { r.wan = (r.ip || r.vlan || r.servico) ? [{ servico: r.servico, vlan: r.vlan, ip: r.ip, ipStatus: r.ipStatus }] : []; idx.set(r._k, U2K.onus.length); if (r.olt && r.onuId !== '') idxLoc.set(locDe(r), U2K.onus.length); U2K._tocadas.add(r._k); U2K.onus.push(r); novosOnu++; return; }
-    const o = U2K.onus[i]; ['olt', 'frame', 'slot', 'porta', 'onuId', 'alias', 'sn', 'status', 'tipo'].forEach(k => { if (r[k]) o[k] = r[k]; });
+    if (i === undefined && r.olt && r.onuId !== '' && r.slot) i = idxLoc.get(locDe(r));
+    if (i === undefined) { r.wan = (r.ip || r.vlan || r.servico) ? [{ servico: r.servico, vlan: r.vlan, ip: r.ip, ipStatus: r.ipStatus }] : []; idx.set(r._k, U2K.onus.length); if (r.olt && r.onuId !== '' && r.slot) idxLoc.set(locDe(r), U2K.onus.length); U2K._tocadas.add(r._k); U2K.onus.push(r); novosOnu++; return; }
+    const o = U2K.onus[i]; ['olt', 'frame', 'slot', 'porta', 'onuId', 'alias', 'sn', 'status', 'tipo'].forEach(k => { if (r[k]) o[k] = r[k]; }); if (r.status) o.motivo = r.motivo || '';
     if (r.rx != null) o.rx = r.rx; if (r.tx != null) o.tx = r.tx;
     if (r.ip || r.vlan || r.servico) { o.wan = (o.wan || []).filter(x => !(x.servico === r.servico && x.vlan === r.vlan)); o.wan.push({ servico: r.servico, vlan: r.vlan, ip: r.ip, ipStatus: r.ipStatus }); }
     U2K._tocadas.add(o._k);
@@ -28389,9 +28403,11 @@ async function u2kSalvarNoBanco() {
   if (!supa) return { ok: false, motivo: 'sem conexão com o banco' };
   const quem = currentUser ? (currentUser.nome || currentUser.login || '') : '';
   try {
+    for (const olt of (U2K._apagarLst || [])) { const d = await supa.from('u2000_onus').delete().like('chave', 'lst:' + olt + '|%'); if (d.error) return { ok: false, motivo: d.error.message }; }
+    U2K._apagarLst = [];
     const chaves = [...(U2K._tocadas || [])], porChave = new Map(U2K.onus.map(o => [o._k, o]));
     const linhas = chaves.map(k => porChave.get(k)).filter(Boolean).map(o => ({ chave: o._k, olt: o.olt || '', frame: o.frame || '', slot: o.slot || '', porta: o.porta || '', onu_id: o.onuId || '', alias: o.alias || '', sn: o.sn || '',
-      status: o.status || '', rx: o.rx, tx: o.tx, vlan: o.vlanFinal || '', ip: o.ipFinal || '', classe_ip: o.classeIp || '', grupo_rx: o.grupoRx || '', wan: o.wan || [], tipo: o.tipo || '', importado_em: new Date().toISOString(), importado_por: quem }));
+      status: o.status || '', rx: o.rx, tx: o.tx, vlan: o.vlanFinal || '', ip: o.ipFinal || '', classe_ip: o.classeIp || '', grupo_rx: o.grupoRx || '', wan: o.wan || [], tipo: o.tipo || '', motivo: o.motivo || '', importado_em: new Date().toISOString(), importado_por: quem }));
     for (let i = 0; i < linhas.length; i += 500) {
       const { error } = await supa.from('u2000_onus').upsert(linhas.slice(i, i + 500), { onConflict: 'chave' });
       if (error) return { ok: false, motivo: /does not exist|schema cache|PGRST205|42P01/i.test(String(error.message || '')) ? 'rode o sql/PASSO-52-u2000.sql no Supabase' : error.message };
@@ -28422,7 +28438,7 @@ async function u2kCarregarDoBanco() {
       if (error) break; alm.push(...(data || [])); if (!data || data.length < 1000) break;
     }
     if (!onus.length && !alm.length) return { ok: true, vazio: true };
-    U2K.onus = onus.map(r => ({ _k: r.chave, olt: r.olt, frame: r.frame, slot: r.slot, porta: r.porta, onuId: r.onu_id, alias: r.alias, sn: r.sn, status: r.status, rx: r.rx == null ? null : Number(r.rx), tx: r.tx == null ? null : Number(r.tx), tipo: r.tipo, wan: r.wan || [], _importado: r.importado_em }));
+    U2K.onus = onus.map(r => ({ _k: r.chave, olt: r.olt, frame: r.frame, slot: r.slot, porta: r.porta, onuId: r.onu_id, alias: r.alias, sn: r.sn, status: r.status, rx: r.rx == null ? null : Number(r.rx), tx: r.tx == null ? null : Number(r.tx), tipo: r.tipo, motivo: r.motivo || '', wan: r.wan || [], _importado: r.importado_em }));
     U2K.alarmes = alm.map(r => ({ severidade: r.severidade, id: r.alarme_id, nome: r.nome, fonte: r.fonte, local: r.local, frame: r.frame, slot: r.slot, porta: r.porta, onuId: r.onu_id, vezes: r.vezes, primeiro: r.primeiro || '', ultimo: r.ultimo || '', limpo: r.limpo || '', alias: r.alias || '', categoria: r.categoria || u2kCategoria(r.nome), equip: r.equip || '', oltIp: r.olt_ip || '' }));
     u2kConsolidar(); U2K._doBanco = true;
     U2K.importadoEm = onus.reduce((m, r) => r.importado_em && r.importado_em > m ? r.importado_em : m, '');
@@ -28474,7 +28490,7 @@ function renderU2000() {
       <div class="stat-cards" style="margin-bottom:12px">
         ${statCard('blue', icPessoas, 'ONUs lidas', onus.length.toLocaleString('pt-BR'), `${olts.length} OLT(s)`)}
         ${statCard('green', icOk, 'Online', on.toLocaleString('pt-BR'), onus.length ? formatPct(on / onus.length * 100, 1) + ' das ONUs' : '')}
-        ${statCard(off ? 'orange' : 'neutral', icRelogio, 'Offline', off.toLocaleString('pt-BR'), 'ONU sem comunicação')}
+        ${statCard(off ? 'orange' : 'neutral', icRelogio, 'Offline', off.toLocaleString('pt-BR'), `${conta(onus, o => o.motivo === 'sem energia').toLocaleString('pt-BR')} sem energia · ${conta(onus, o => o.motivo === 'fibra').toLocaleString('pt-BR')} fibra · ${conta(onus, o => o.status === 'Desativada').toLocaleString('pt-BR')} desativadas`)}
         ${statCard(crit ? 'red' : 'neutral', icAviso, `Rx crítico (≤ ${U2K_RX_CRITICO} dBm)`, crit.toLocaleString('pt-BR'), `${aten.toLocaleString('pt-BR')} em atenção (≤ ${U2K_RX_ATENCAO} dBm)`)}
         ${statCard(bloq ? 'red' : 'neutral', icChave, 'IP de bloqueio', bloq.toLocaleString('pt-BR'), `100.69 / 100.122 · ${semIp} online sem IP · ${foraP} fora do padrão`)}
         ${statCard(alm.length ? 'orange' : 'neutral', icAviso, 'Alarmes', alm.length.toLocaleString('pt-BR'), `${aberto.length} sem "Cleared" · ${Object.entries(porSev).map(([k, v]) => k + ' ' + v).join(' · ') || '-'}`)}
@@ -28483,7 +28499,7 @@ function renderU2000() {
       ${onus.length ? `<div class="section-heading">ONUs <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(exportação do U2000)</span></div>
       <div class="toolbar" style="margin-bottom:10px">
         <div class="field"><label>OLT</label><select id="u2-f-olt"><option value="">Todas</option>${olts.map(o => `<option>${esc(o)}</option>`).join('')}</select></div>
-        <div class="field"><label>Status</label><select id="u2-f-st"><option value="">Todos</option><option>Online</option><option>Offline</option></select></div>
+        <div class="field"><label>Status</label><select id="u2-f-st"><option value="">Todos</option><option>Online</option><option>Offline</option><option>Desativada</option></select></div>
         <div class="field"><label>Sinal (Rx)</label><select id="u2-f-rx"><option value="">Todos</option><option value="critico">Crítico</option><option value="atencao">Atenção</option><option value="ok">OK</option><option value="sem">Sem leitura</option></select></div>
         <div class="field"><label>IP</label><select id="u2-f-ip"><option value="">Todos</option>${Object.entries(U2K_ROT_IP).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
         <div class="field"><label>Alias / SN</label><input type="text" id="u2-f-q" placeholder="digite…" autocomplete="off"></div>
@@ -28496,6 +28512,7 @@ function renderU2000() {
       <div class="toolbar" style="margin-bottom:10px">
         <div class="field"><label>Tipo de alarme</label><select id="u2-a-cat"><option value="">Todos</option>${catsAlm.map(c => `<option>${esc(c)}</option>`).join('')}</select></div>
         <div class="field"><label>Situação</label><select id="u2-a-ab"><option value="">Todas as ONUs</option><option value="1">Só com alarme aberto</option></select></div>
+        <div class="field"><label>Agora (lista GPON)</label><select id="u2-a-ag"><option value="">Todas</option><option>Online</option><option>Offline</option><option>Desativada</option><option value="sem">Não está na lista</option></select></div>
         <div class="field"><label>Cliente / OLT</label><input type="text" id="u2-a-q" placeholder="digite…" autocomplete="off"></div>
         <button type="button" class="btn-export-xls" id="u2-a-xls">⤓ Excel (todas as filtradas)</button><span id="u2-a-cont" style="font-size:12px;color:var(--text-muted);align-self:center"></span></div>
       <div id="u2-alm-onu"></div>
@@ -28508,17 +28525,17 @@ function renderU2000() {
           .sort((a, b) => ['critico', 'atencao', 'sem', 'ok'].indexOf(a.grupoRx) - ['critico', 'atencao', 'sem', 'ok'].indexOf(b.grupoRx) || (a.rx == null ? 1 : b.rx == null ? -1 : a.rx - b.rx)); };
       const desenhar = () => { const l = filtrar(), corte = 1000;
         document.getElementById('u2-cont').textContent = `${l.length.toLocaleString('pt-BR')} ONU(s)`;
-        document.getElementById('u2-tab').innerHTML = !l.length ? '<div class="panel"><div class="empty">Nenhuma ONU nesse filtro.</div></div>' : `<div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="u2-tab-onus"><thead><tr><th>OLT</th><th>Frame/Slot/Porta</th><th>ONU</th><th>Alias (cliente)</th><th>SN</th><th>Status</th><th>Rx (dBm)</th><th>VLAN</th><th>IPv4</th><th>IP</th></tr></thead><tbody>
+        document.getElementById('u2-tab').innerHTML = !l.length ? '<div class="panel"><div class="empty">Nenhuma ONU nesse filtro.</div></div>' : `<div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="u2-tab-onus"><thead><tr><th>OLT</th><th>Frame/Slot/Porta <span style="font-weight:400;color:var(--text-muted)">(a lista GPON traz só a porta)</span></th><th>ONU</th><th>Alias (cliente)</th><th>SN</th><th>Status</th><th>Rx (dBm)</th><th>VLAN</th><th>IPv4</th><th>IP</th></tr></thead><tbody>
           ${l.slice(0, corte).map(o => `<tr><td>${esc(o.olt || '-')}</td><td>${esc([o.frame, o.slot, o.porta].filter(x => x !== '').join('/') || '-')}</td><td>${esc(o.onuId || '-')}</td><td class="cat-cell">${esc(o.alias || '-')}</td><td style="font-size:12px">${esc(o.sn || '-')}</td>
-            <td><span class="badge ${o.status === 'Online' ? 'ok' : o.status ? 'warn' : 'neutral'}">${esc(o.status || '-')}</span></td>
+            <td><span class="badge ${o.status === 'Online' ? 'ok' : o.status === 'Desativada' ? 'neutral' : o.status ? 'warn' : 'neutral'}">${esc(o.status || '-')}</span>${o.motivo ? ` <span style="font-size:11.5px;color:var(--text-muted)">${esc(o.motivo)}</span>` : ''}</td>
             <td style="${o.grupoRx === 'critico' ? 'color:var(--danger);font-weight:700' : o.grupoRx === 'atencao' ? 'color:#f59e0b;font-weight:700' : ''}">${o.rx == null ? '-' : o.rx.toLocaleString('pt-BR')}</td>
             <td>${esc(o.vlanFinal || '-')}</td><td style="font-size:12px">${esc(o.ipFinal || '-')}</td><td><span class="badge ${o.classeIp === 'navegando' ? 'ok' : o.classeIp === 'bloqueio' ? 'warn' : o.classeIp === 'sem_ip' || o.classeIp === 'outro' ? 'amber' : 'neutral'}">${U2K_ROT_IP[o.classeIp]}</span></td></tr>`).join('')}
           </tbody></table></div>${l.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${l.length.toLocaleString('pt-BR')} — o Excel leva todos.</p>` : ''}`;
         ativarFiltrosDeColuna(document.getElementById('u2-tab')); };
       ['u2-f-olt', 'u2-f-st', 'u2-f-rx', 'u2-f-ip'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
       document.getElementById('u2-f-q').addEventListener('input', desenhar);
-      document.getElementById('u2-xls').addEventListener('click', () => exportarQuadroPresenca('u2000-onus-' + hojeISOLocal(), ['OLT', 'Frame', 'Slot', 'Porta', 'ONU ID', 'Alias', 'SN', 'Status', 'Rx (dBm)', 'Tx (dBm)', 'VLAN', 'IPv4', 'Situação do IP'],
-        filtrar().map(o => [o.olt, o.frame, o.slot, o.porta, o.onuId, o.alias, o.sn, o.status, o.rx, o.tx, o.vlanFinal, o.ipFinal, U2K_ROT_IP[o.classeIp]]), 'ONUs'));
+      document.getElementById('u2-xls').addEventListener('click', () => exportarQuadroPresenca('u2000-onus-' + hojeISOLocal(), ['OLT', 'Frame', 'Slot', 'Porta', 'ONU ID', 'Alias', 'SN', 'Status', 'Motivo offline', 'Rx (dBm)', 'Tx (dBm)', 'VLAN', 'IPv4', 'Situação do IP'],
+        filtrar().map(o => [o.olt, o.frame, o.slot, o.porta, o.onuId, o.alias, o.sn, o.status, o.motivo || '', o.rx, o.tx, o.vlanFinal, o.ipFinal, U2K_ROT_IP[o.classeIp]]), 'ONUs'));
       desenhar();
     }
     if (alm.length) {
@@ -28536,21 +28553,24 @@ function renderU2000() {
         g.cats[a.categoria] = (g.cats[a.categoria] || 0) + 1; if (!a.limpo) { g.abertos++; g.catsAb[a.categoria] = (g.catsAb[a.categoria] || 0) + 1; }
         if (a.primeiro && (!g.primeiro || a.primeiro < g.primeiro)) g.primeiro = a.primeiro; if (a.ultimo > g.ultimo) g.ultimo = a.ultimo;
         const sv = SEV[String(a.severidade).toLowerCase()]; if (sv !== undefined && sv < g.sev) g.sev = sv; });
+      const porAlias = new Map(onus.filter(o => o.alias && o.status).map(o => [normalizeHeader(o.olt) + '|' + normalizeHeader(o.alias), o]));
+      agr.forEach(g => { const o = porAlias.get(normalizeHeader(g.olt) + '|' + normalizeHeader(g.cliente)); g.agora = o ? o.status : ''; g.motivo = o ? o.motivo || '' : ''; });
       const lista = [...agr.values()], selA = id => document.getElementById(id).value, txtCats = o => Object.entries(o).sort((x, y) => y[1] - x[1]).map(([k, v]) => k + (v > 1 ? ' ×' + v : '')).join(' · ');
-      const filtrarA = () => { const c = selA('u2-a-cat'), ab = selA('u2-a-ab'), q = normalizeHeader(selA('u2-a-q'));
-        return lista.filter(g => (!c || g.cats[c]) && (!ab || g.abertos) && (!q || normalizeHeader(g.cliente + ' ' + g.olt).includes(q))).sort((x, y) => y.abertos - x.abertos || y.n - x.n); };
+      const filtrarA = () => { const c = selA('u2-a-cat'), ab = selA('u2-a-ab'), ag = selA('u2-a-ag'), q = normalizeHeader(selA('u2-a-q'));
+        return lista.filter(g => (!c || g.cats[c]) && (!ab || g.abertos) && (!ag || (ag === 'sem' ? !g.agora : g.agora === ag)) && (!q || normalizeHeader(g.cliente + ' ' + g.olt).includes(q))).sort((x, y) => y.abertos - x.abertos || y.n - x.n); };
       const desenharA = () => { const l = filtrarA(), corte = 1000;
         document.getElementById('u2-a-cont').textContent = `${l.length.toLocaleString('pt-BR')} ONU(s)`;
-        document.getElementById('u2-alm-onu').innerHTML = !l.length ? '<div class="panel"><div class="empty">Nenhuma ONU nesse filtro.</div></div>' : `<div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="u2-tab-onualm"><thead><tr><th>OLT</th><th>Frame/Slot/Porta</th><th>ONU</th><th>Cliente (alias)</th><th>Aberto agora</th><th>Alarmes no período</th><th>Tipos no período</th><th>Primeiro</th><th>Último</th></tr></thead><tbody>
+        document.getElementById('u2-alm-onu').innerHTML = !l.length ? '<div class="panel"><div class="empty">Nenhuma ONU nesse filtro.</div></div>' : `<div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="u2-tab-onualm"><thead><tr><th>OLT</th><th>Frame/Slot/Porta</th><th>ONU</th><th>Cliente (alias)</th><th>Agora (lista GPON)</th><th>Aberto agora</th><th>Alarmes no período</th><th>Tipos no período</th><th>Primeiro</th><th>Último</th></tr></thead><tbody>
           ${l.slice(0, corte).map(g => `<tr><td>${esc(g.olt || '-')}</td><td>${esc(g.loc)}</td><td>${esc(g.onuId)}</td><td class="cat-cell">${esc(g.cliente || '-')}</td>
+            <td>${g.agora ? `<span class="badge ${g.agora === 'Online' ? 'ok' : g.agora === 'Desativada' ? 'neutral' : 'warn'}">${esc(g.agora)}</span>${g.motivo ? ` <span style="font-size:11.5px;color:var(--text-muted)">${esc(g.motivo)}</span>` : ''}` : '<span style="color:var(--text-muted)">-</span>'}</td>
             <td style="white-space:normal;font-size:12.5px">${g.abertos ? `<span class="badge ${g.sev <= 1 ? 'warn' : 'amber'}">${g.abertos}</span> ${esc(txtCats(g.catsAb))}` : '<span style="color:var(--text-muted)">-</span>'}</td><td>${g.n}</td><td style="white-space:normal;font-size:12.5px">${esc(txtCats(g.cats))}</td>
             <td style="font-size:12px">${esc(u2kFmtData(g.primeiro) || '-')}</td><td style="font-size:12px">${esc(u2kFmtData(g.ultimo) || '-')}</td></tr>`).join('')}
           </tbody></table></div>${l.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${l.length.toLocaleString('pt-BR')} — o Excel leva todas.</p>` : ''}`;
         ativarFiltrosDeColuna(document.getElementById('u2-alm-onu')); };
-      ['u2-a-cat', 'u2-a-ab'].forEach(id => document.getElementById(id).addEventListener('change', desenharA));
+      ['u2-a-cat', 'u2-a-ab', 'u2-a-ag'].forEach(id => document.getElementById(id).addEventListener('change', desenharA));
       document.getElementById('u2-a-q').addEventListener('input', desenharA);
-      document.getElementById('u2-a-xls').addEventListener('click', () => exportarQuadroPresenca('u2000-onus-com-alarme-' + hojeISOLocal(), ['OLT', 'Frame/Slot/Porta', 'ONU', 'Cliente', 'Alarmes abertos', 'Tipos abertos', 'Alarmes no período', 'Tipos no período', 'Primeiro', 'Último'],
-        filtrarA().map(g => [g.olt, g.loc, g.onuId, g.cliente, g.abertos, txtCats(g.catsAb), g.n, txtCats(g.cats), u2kFmtData(g.primeiro), u2kFmtData(g.ultimo)]), 'ONUs com alarme'));
+      document.getElementById('u2-a-xls').addEventListener('click', () => exportarQuadroPresenca('u2000-onus-com-alarme-' + hojeISOLocal(), ['OLT', 'Frame/Slot/Porta', 'ONU', 'Cliente', 'Agora (lista GPON)', 'Alarmes abertos', 'Tipos abertos', 'Alarmes no período', 'Tipos no período', 'Primeiro', 'Último'],
+        filtrarA().map(g => [g.olt, g.loc, g.onuId, g.cliente, g.agora ? g.agora + (g.motivo ? ' · ' + g.motivo : '') : '', g.abertos, txtCats(g.catsAb), g.n, txtCats(g.cats), u2kFmtData(g.primeiro), u2kFmtData(g.ultimo)]), 'ONUs com alarme'));
       desenharA();
       document.getElementById('u2-alm-tab').innerHTML = `<div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(520px,70vh);overflow:auto"><table class="data-table" id="u2-tab-alm"><thead><tr><th>Severidade</th><th>Alarme</th><th>Tipo</th><th>OLT</th><th>Frame/Slot/Porta</th><th>ONU</th><th>Cliente (alias)</th><th>Ocorrências</th><th>Primeira</th><th>Última</th><th>Cleared</th></tr></thead><tbody>
         ${alm.slice(0, 1000).map(a => `<tr><td><span class="badge ${/critical/i.test(a.severidade) ? 'warn' : /major/i.test(a.severidade) ? 'amber' : 'neutral'}">${esc(a.severidade || '-')}</span></td><td style="font-size:12.5px;white-space:normal">${esc(a.nome || '-')}</td><td style="font-size:12.5px;white-space:normal">${esc(a.categoria || '-')}</td><td>${esc(a.fonte || '-')}</td><td>${esc([a.frame, a.slot, a.porta].filter(x => x !== undefined && x !== '').join('/') || '-')}</td><td>${esc(a.onuId || '-')}</td><td class="cat-cell">${esc(a.cliente || '-')}</td><td>${a.vezes || '-'}</td><td style="font-size:12px">${esc(u2kFmtData(a.primeiro) || '-')}</td><td style="font-size:12px">${esc(u2kFmtData(a.ultimo) || '-')}</td><td style="font-size:12px">${esc(u2kFmtData(a.limpo) || '-')}</td></tr>`).join('')}
