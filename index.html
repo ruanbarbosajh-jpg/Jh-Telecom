@@ -26293,6 +26293,7 @@ const SAUDE_CHECAGENS_SQL = [
   { passo: 'PASSO-40', rotulo: 'Sinal de ontem na linha do cliente', tabela: 'monitor_olt_clientes', coluna: 'sinal_ontem,status_ontem,ontem_dia,busca_em' },
   { passo: 'PASSO-36', rotulo: 'Quadro editável de colaboradores do escritório', tabela: 'folha_escritorio_quadro' },
   { passo: 'PASSO-50', rotulo: 'Fotos dos veículos (Frota)', tabela: 'frota_fotos' },
+  { passo: 'PASSO-52', rotulo: 'U2000: ONUs e alarmes importados', tabela: 'u2000_onus' },
   { passo: 'PASSO-51', rotulo: 'Gasolina por técnico e ciclo (Importar Excel)', tabela: 'gasolina_ciclo' },
   { passo: 'PASSO-37', rotulo: 'Ajustes manuais da Folha dos técnicos', tabela: 'folha_pagamento', coluna: 'ajustes' },
   { passo: 'PASSO-37', rotulo: 'Técnicos excluídos da Folha', tabela: 'folha_pagamento_excluidos' },
@@ -28303,21 +28304,25 @@ async function u2kLerArquivo(file) {
   return saida;
 }
 function u2kJuntar(linhas, nomeArquivo) {
-  let novosOnu = 0, novosAlm = 0;
+  let novosOnu = 0, novosAlm = 0; const alarmesNovos = [];
+  U2K._tocadas = U2K._tocadas || new Set();
   // a mesma ONU pode vir por SN (lista de ONUs) ou só pela localização OLT+frame/slot/porta+ONU ID (tabela de WAN): acha por qualquer das duas
   const locDe = o => `${normalizeHeader(o.olt)}|${o.frame}/${o.slot}/${o.porta}|${o.onuId}`;
   const idx = new Map(), idxLoc = new Map();
   U2K.onus.forEach((o, i) => { idx.set(o._k, i); if (o.olt && o.onuId !== '') idxLoc.set(locDe(o), i); });
   linhas.forEach(r => {
-    if (r.alarme) { delete r.alarme; U2K.alarmes.push(r); novosAlm++; return; }
+    if (r.alarme) { delete r.alarme; alarmesNovos.push(r); novosAlm++; return; }
     delete r.alarme; r._k = u2kChave(r);
     let i = idx.get(r._k);
     if (i === undefined && r.olt && r.onuId !== '') i = idxLoc.get(locDe(r));
-    if (i === undefined) { r.wan = (r.ip || r.vlan || r.servico) ? [{ servico: r.servico, vlan: r.vlan, ip: r.ip, ipStatus: r.ipStatus }] : []; idx.set(r._k, U2K.onus.length); if (r.olt && r.onuId !== '') idxLoc.set(locDe(r), U2K.onus.length); U2K.onus.push(r); novosOnu++; return; }
+    if (i === undefined) { r.wan = (r.ip || r.vlan || r.servico) ? [{ servico: r.servico, vlan: r.vlan, ip: r.ip, ipStatus: r.ipStatus }] : []; idx.set(r._k, U2K.onus.length); if (r.olt && r.onuId !== '') idxLoc.set(locDe(r), U2K.onus.length); U2K._tocadas.add(r._k); U2K.onus.push(r); novosOnu++; return; }
     const o = U2K.onus[i]; ['olt', 'frame', 'slot', 'porta', 'onuId', 'alias', 'sn', 'status', 'tipo'].forEach(k => { if (r[k]) o[k] = r[k]; });
     if (r.rx != null) o.rx = r.rx; if (r.tx != null) o.tx = r.tx;
-    if (r.ip || r.vlan || r.servico) o.wan.push({ servico: r.servico, vlan: r.vlan, ip: r.ip, ipStatus: r.ipStatus });
+    if (r.ip || r.vlan || r.servico) { o.wan = (o.wan || []).filter(x => !(x.servico === r.servico && x.vlan === r.vlan)); o.wan.push({ servico: r.servico, vlan: r.vlan, ip: r.ip, ipStatus: r.ipStatus }); }
+    U2K._tocadas.add(o._k);
   });
+  // a lista de alarmes é uma FOTO do momento: o arquivo novo substitui a anterior
+  if (alarmesNovos.length) { U2K.alarmes = alarmesNovos; U2K._alarmesNovos = true; }
   U2K.arquivos.unshift({ nome: nomeArquivo, quando: new Date().toISOString(), onus: novosOnu, alarmes: novosAlm });
   u2kConsolidar();
   try { localStorage.setItem('jh_u2000_v1', JSON.stringify({ onus: U2K.onus, alarmes: U2K.alarmes.slice(0, 5000), arquivos: U2K.arquivos.slice(0, 20) })); } catch (e) { /* cheio: fica só na sessão */ }
@@ -28331,6 +28336,50 @@ function u2kConsolidar() {
     if (!w.length) o.classeIp = 'nao_lido';
     o.grupoRx = u2kGrupoRx(o.rx);
   });
+}
+// ---- persistência no Supabase (sql/PASSO-52-u2000.sql): assim os dados importados valem pra todo mundo e com o seu PC desligado ----
+async function u2kSalvarNoBanco() {
+  if (!supa) return { ok: false, motivo: 'sem conexão com o banco' };
+  const quem = currentUser ? (currentUser.nome || currentUser.login || '') : '';
+  try {
+    const chaves = [...(U2K._tocadas || [])], porChave = new Map(U2K.onus.map(o => [o._k, o]));
+    const linhas = chaves.map(k => porChave.get(k)).filter(Boolean).map(o => ({ chave: o._k, olt: o.olt || '', frame: o.frame || '', slot: o.slot || '', porta: o.porta || '', onu_id: o.onuId || '', alias: o.alias || '', sn: o.sn || '',
+      status: o.status || '', rx: o.rx, tx: o.tx, vlan: o.vlanFinal || '', ip: o.ipFinal || '', classe_ip: o.classeIp || '', grupo_rx: o.grupoRx || '', wan: o.wan || [], tipo: o.tipo || '', importado_em: new Date().toISOString(), importado_por: quem }));
+    for (let i = 0; i < linhas.length; i += 500) {
+      const { error } = await supa.from('u2000_onus').upsert(linhas.slice(i, i + 500), { onConflict: 'chave' });
+      if (error) return { ok: false, motivo: /does not exist|schema cache|PGRST205|42P01/i.test(String(error.message || '')) ? 'rode o sql/PASSO-52-u2000.sql no Supabase' : error.message };
+    }
+    if (U2K._alarmesNovos) {
+      const del = await supa.from('u2000_alarmes').delete().gte('id', 0); if (del.error) return { ok: false, motivo: del.error.message };
+      const al = U2K.alarmes.slice(0, 5000).map(a => ({ severidade: a.severidade || '', alarme_id: a.id || '', nome: a.nome || '', fonte: a.fonte || '', local: a.local || '', frame: a.frame || '', slot: a.slot || '', porta: a.porta || '', onu_id: a.onuId || '',
+        vezes: a.vezes || 0, primeiro: a.primeiro || '', ultimo: a.ultimo || '', limpo: a.limpo || '', importado_em: new Date().toISOString(), importado_por: quem }));
+      for (let i = 0; i < al.length; i += 500) { const { error } = await supa.from('u2000_alarmes').insert(al.slice(i, i + 500)); if (error) return { ok: false, motivo: error.message }; }
+      U2K._alarmesNovos = false;
+    }
+    U2K._tocadas = new Set();
+    return { ok: true, n: linhas.length };
+  } catch (e) { return { ok: false, motivo: String((e && e.message) || e) }; }
+}
+async function u2kCarregarDoBanco() {
+  if (!supa || U2K._doBanco) return U2K._doBanco ? { ok: true } : { ok: false };
+  try {
+    const onus = [], alm = [];
+    for (let ini = 0; ini < 40000; ini += 1000) {
+      const { data, error } = await supa.from('u2000_onus').select('*').order('chave').range(ini, ini + 999);
+      if (error) return { ok: false, motivo: /does not exist|schema cache|PGRST205|42P01/i.test(String(error.message || '')) ? 'tabela' : error.message };
+      onus.push(...(data || [])); if (!data || data.length < 1000) break;
+    }
+    for (let ini = 0; ini < 10000; ini += 1000) {
+      const { data, error } = await supa.from('u2000_alarmes').select('*').order('id').range(ini, ini + 999);
+      if (error) break; alm.push(...(data || [])); if (!data || data.length < 1000) break;
+    }
+    if (!onus.length && !alm.length) return { ok: true, vazio: true };
+    U2K.onus = onus.map(r => ({ _k: r.chave, olt: r.olt, frame: r.frame, slot: r.slot, porta: r.porta, onuId: r.onu_id, alias: r.alias, sn: r.sn, status: r.status, rx: r.rx == null ? null : Number(r.rx), tx: r.tx == null ? null : Number(r.tx), tipo: r.tipo, wan: r.wan || [], _importado: r.importado_em }));
+    U2K.alarmes = alm.map(r => ({ severidade: r.severidade, id: r.alarme_id, nome: r.nome, fonte: r.fonte, local: r.local, frame: r.frame, slot: r.slot, porta: r.porta, onuId: r.onu_id, vezes: r.vezes, primeiro: r.primeiro, ultimo: r.ultimo, limpo: r.limpo }));
+    u2kConsolidar(); U2K._doBanco = true;
+    U2K.importadoEm = onus.reduce((m, r) => r.importado_em && r.importado_em > m ? r.importado_em : m, '');
+    return { ok: true, n: onus.length };
+  } catch (e) { return { ok: false, motivo: String((e && e.message) || e) }; }
 }
 function renderU2000() {
   try { if (!U2K.onus.length && !U2K.alarmes.length) { const s = JSON.parse(localStorage.getItem('jh_u2000_v1') || 'null'); if (s) { U2K.onus = s.onus || []; U2K.alarmes = s.alarmes || []; U2K.arquivos = s.arquivos || []; u2kConsolidar(); } } } catch (e) { /* sem cache */ }
@@ -28348,10 +28397,16 @@ function renderU2000() {
     const msg = document.getElementById('u2-msg'); const arqs = [...ev.target.files]; if (!arqs.length) return;
     msg.textContent = 'Lendo…'; let tot = 0;
     for (const f of arqs) { try { const l = await u2kLerArquivo(f); if (!l.length) { toast(`"${f.name}": não achei colunas do U2000 (ONU ou alarme).`, 'aviso'); continue; } u2kJuntar(l, f.name); tot += l.length; } catch (e) { toast(`"${f.name}": ${String((e && e.message) || e)}`, 'aviso'); } }
-    msg.textContent = tot ? `${tot.toLocaleString('pt-BR')} linha(s) lida(s).` : ''; ev.target.value = ''; pintar();
+    msg.textContent = tot ? `${tot.toLocaleString('pt-BR')} linha(s) lida(s). Salvando no banco…` : ''; ev.target.value = ''; pintar();
+    if (tot) { const r = await u2kSalvarNoBanco(); msg.textContent = r.ok ? `✔ ${tot.toLocaleString('pt-BR')} linha(s) lida(s) e salvas no banco (ficam pra todos, mesmo com o seu PC desligado).` : `${tot.toLocaleString('pt-BR')} linha(s) lida(s) — só neste navegador (${r.motivo}).`; }
   });
-  document.getElementById('u2-limpar').addEventListener('click', () => { if (!confirm('Apagar os dados do U2000 guardados neste navegador?')) return; U2K.onus = []; U2K.alarmes = []; U2K.arquivos = []; try { localStorage.removeItem('jh_u2000_v1'); } catch (e) { /* ok */ } pintar(); });
+  document.getElementById('u2-limpar').addEventListener('click', () => { if (!confirm('Apagar os dados do U2000 guardados neste navegador E no banco?')) return; U2K.onus = []; U2K.alarmes = []; U2K.arquivos = []; U2K._tocadas = new Set(); U2K._doBanco = false; try { localStorage.removeItem('jh_u2000_v1'); } catch (e) { /* ok */ }
+    if (supa) { supa.from('u2000_onus').delete().neq('chave', '').then(() => {}, () => {}); supa.from('u2000_alarmes').delete().gte('id', 0).then(() => {}, () => {}); } pintar(); });
   pintar();
+  u2kCarregarDoBanco().then(r => { const m = document.getElementById('u2-msg'); if (!m) return;
+    if (r && r.motivo === 'tabela') m.textContent = '⚠ Para guardar no banco (e ver com o PC desligado) rode o sql/PASSO-52-u2000.sql no Supabase.';
+    else if (r && r.ok && !r.vazio && U2K.importadoEm) m.textContent = `Dados do banco · última importação ${new Date(U2K.importadoEm).toLocaleString('pt-BR')}`;
+    pintar(); });
   function pintar() {
     const box = document.getElementById('u2-corpo'); if (!box) return;
     const onus = U2K.onus, alm = U2K.alarmes;
