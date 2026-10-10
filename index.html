@@ -28445,6 +28445,68 @@ async function u2kCarregarDoBanco() {
     return { ok: true, n: onus.length };
   } catch (e) { return { ok: false, motivo: String((e && e.message) || e) }; }
 }
+// ---- diagnóstico das falhas (lista GPON + alarmes): o que está caído, por quê e quem resolve — o que o AutoISP mostrava na tela de ONUs ----
+const U2K_DIAG = {
+  los:        { rot: 'LOS — fibra rompida / sem sinal', quem: 'Campo', ordem: 1, cor: 'warn', acao: 'Abrir reparo: conferir fibra, conector e CTO. Várias ONUs da mesma porta com LOS = rompimento no tronco ou na caixa.' },
+  energia:    { rot: 'Sem energia (dying-gasp)', quem: 'Cliente', ordem: 2, cor: 'warn', acao: 'Ligar para o cliente (a ONT perdeu energia). Várias na mesma porta/bairro ao mesmo tempo = queda de energia local.' },
+  config:     { rot: 'Falha de configuração da ONT', quem: 'Sistema', ordem: 3, cor: 'amber', acao: 'A OLT não conseguiu aplicar a configuração na ONT: reaplicar o provisionamento (perfil de linha/serviço) no U2000. Pode ser resolvido sem ir ao campo.' },
+  desativada: { rot: 'ONU desativada na OLT', quem: 'Sistema', ordem: 4, cor: 'amber', acao: 'Conferir se o bloqueio é devido (inadimplência/cancelamento); se não for, reativar a ONU no U2000.' },
+  semid:      { rot: 'ONU sem identificação', quem: 'Sistema', ordem: 5, cor: 'amber', acao: 'O nome da ONU está vazio ou automático ("--", OLT-…): vincular ao cliente (nome/contrato) para poder atender.' },
+  sinal:      { rot: 'Sinal degradado (SD / SF)', quem: 'Campo (preventiva)', ordem: 6, cor: 'amber', acao: 'Preventiva: medir a atenuação e limpar/trocar conector ou pigtail antes que caia.' },
+  instavel:   { rot: 'Enlace instável / reincidente', quem: 'Sistema, depois campo', ordem: 7, cor: 'amber', acao: 'Reiniciar/ressincronizar a ONU pelo U2000 (ONU Operate); se continuar caindo, trocar a ONT ou revisar a porta da OLT.' },
+  outro:      { rot: 'Offline sem alarme (outro motivo)', quem: 'Cliente', ordem: 8, cor: 'neutral', acao: 'Ligar para o cliente: ONT desligada, sem energia local ou roteador travado. Sem alarme de fibra.' },
+  desligou:   { rot: 'ONT desligou sozinha', quem: 'Cliente', ordem: 9, cor: 'neutral', acao: 'O equipamento reiniciou ou foi desligado; acompanhar se volta sozinho.' },
+  ethernet:   { rot: 'Porta Ethernet sem link', quem: 'Cliente', ordem: 10, cor: 'neutral', acao: 'Cabo ou roteador do cliente desconectado: resolver por suporte remoto.' },
+  recuperada: { rot: 'Online com alarme aberto (provável recuperada)', quem: 'Monitorar', ordem: 11, cor: 'ok', acao: 'A ONU está online agora; o alarme pode ser antigo. Conferir a data do último alarme.' },
+  antigo:     { rot: 'Alarme aberto antigo (sem lista GPON)', quem: 'Monitorar', ordem: 13, cor: 'neutral', acao: 'Alarme aberto há mais de 3 dias e a ONU não está na lista GPON importada: importe a lista dessa OLT para saber se ela está online.' },
+  outros:     { rot: 'Outros alarmes abertos', quem: 'Monitorar', ordem: 12, cor: 'neutral', acao: 'Alarme aberto sem classificação própria: ver o tipo na coluna de alarmes.' },
+};
+const u2kAliasVazio = a => { const t = String(a || '').trim(); return !t || /^-+$/.test(t) || /^(OLT|NIU)-.*_Frame\d+_Slot\d+/i.test(t); };
+function u2kDiagnostico(onus, alm) {
+  const chaveA = (olt, alias) => normalizeHeader(olt) + '|' + normalizeHeader(alias);
+  const ents = new Map(), porAlias = new Map();
+  alm.forEach(a => {
+    if (a.onuId === '' || a.onuId == null) return;
+    const k = `${normalizeHeader(a.fonte)}|${a.frame}/${a.slot}/${a.porta}|${a.onuId}`; let e = ents.get(k);
+    if (!e) { e = { olt: a.fonte, local: `${a.frame}/${a.slot}/${a.porta} · ONU ${a.onuId}`, alias: '', n: 0, abertos: 0, cats: {}, catsAb: {}, ultimo: '', usado: false }; ents.set(k, e); }
+    e.n++; if (a.alias && !e.alias) e.alias = a.alias; e.cats[a.categoria] = (e.cats[a.categoria] || 0) + 1;
+    if (!a.limpo) { e.abertos++; e.catsAb[a.categoria] = (e.catsAb[a.categoria] || 0) + 1; } if (a.ultimo > e.ultimo) e.ultimo = a.ultimo;
+  });
+  ents.forEach(e => { if (e.alias && !/^-+$/.test(e.alias)) { const k = chaveA(e.olt, e.alias); if (!porAlias.has(k)) porAlias.set(k, e); } });
+  const linhas = [], ref = Date.parse(String(alm.reduce((m, a) => a.ultimo > m ? a.ultimo : m, '')).replace(' ', 'T')) || 0;
+  const classifica = r => {
+    const ab = r.catsAb, has = c => !!ab[c], offline = r.status ? r.status === 'Offline' : true;
+    if (!r.status && r.abertos && ref && r.ultimo && ref - Date.parse(r.ultimo.replace(' ', 'T')) > 3 * 86400000) return 'antigo';   // sem lista pra confirmar e o último alarme é velho
+    if (r.status === 'Desativada') return 'desativada';
+    if (has('Falha de configuração')) return 'config';
+    if (r.motivo === 'fibra' || (offline && has('Fibra rompida / sem sinal (LOS)'))) return 'los';
+    if (r.motivo === 'sem energia' || (offline && has('Sem energia (dying-gasp)'))) return 'energia';
+    if (has('Sinal degradado (SD)') || has('Falha de sinal (SF)')) return 'sinal';
+    if (has('Enlace instável (LOF / LCDG / LOAM)')) return 'instavel';
+    if (r.status === 'Offline' && u2kAliasVazio(r.alias)) return 'semid';
+    if (r.status === 'Offline' && !Object.keys(ab).length) return 'outro';
+    if (has('ONT desligou sozinha')) return 'desligou';
+    if (has('Porta Ethernet sem link')) return 'ethernet';
+    if (r.status === 'Online' && Object.keys(ab).length) return 'recuperada';
+    if (r.n >= 8) return 'instavel';
+    return Object.keys(ab).length ? 'outros' : '';
+  };
+  onus.forEach(o => {
+    if (!o.status) return;
+    const e = o.alias && !/^-+$/.test(o.alias) ? porAlias.get(chaveA(o.olt, o.alias)) : null;
+    if (e) e.usado = true;
+    if (o.status === 'Online' && !(e && e.abertos)) return;
+    const r = { olt: o.olt, alias: o.alias || '', local: e ? e.local : `porta ${o.porta} · ONU ${o.onuId}`, status: o.status, motivo: o.motivo || '', n: e ? e.n : 0, abertos: e ? e.abertos : 0, cats: e ? e.cats : {}, catsAb: e ? e.catsAb : {}, ultimo: e ? e.ultimo : '' };
+    r.diag = classifica(r); if (r.diag) linhas.push(r);
+  });
+  ents.forEach(e => {
+    if (e.usado || (!e.abertos && e.n < 8)) return;
+    const r = { olt: e.olt, alias: e.alias, local: e.local, status: '', motivo: '', n: e.n, abertos: e.abertos, cats: e.cats, catsAb: e.catsAb, ultimo: e.ultimo };
+    r.diag = classifica(r); if (r.diag) linhas.push(r);
+  });
+  linhas.forEach(r => { r.info = U2K_DIAG[r.diag]; });
+  return linhas.sort((x, y) => x.info.ordem - y.info.ordem || y.abertos - x.abertos || y.n - x.n);
+}
 function renderU2000() {
   try { if (!U2K.onus.length && !U2K.alarmes.length) { const s = JSON.parse(localStorage.getItem('jh_u2000_v1') || 'null'); if (s) { U2K.onus = s.onus || []; U2K.alarmes = s.alarmes || []; U2K.arquivos = s.arquivos || []; U2K.meta = s.meta || null; u2kConsolidar(); } } } catch (e) { /* sem cache */ }
   document.getElementById('content').innerHTML = `
@@ -28496,6 +28558,7 @@ function renderU2000() {
         ${statCard(alm.length ? 'orange' : 'neutral', icAviso, 'Alarmes', alm.length.toLocaleString('pt-BR'), `${aberto.length} sem "Cleared" · ${Object.entries(porSev).map(([k, v]) => k + ' ' + v).join(' · ') || '-'}`)}
       </div>
       <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 12px">Arquivos lidos: ${U2K.arquivos.slice(0, 6).map(a => `${esc(a.nome)} (${a.onus} ONU · ${a.alarmes} alarme)`).join(' · ')}.</p>
+      <div id="u2-diag"></div>
       ${onus.length ? `<div class="section-heading">ONUs <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(exportação do U2000)</span></div>
       <div class="toolbar" style="margin-bottom:10px">
         <div class="field"><label>OLT</label><select id="u2-f-olt"><option value="">Todas</option>${olts.map(o => `<option>${esc(o)}</option>`).join('')}</select></div>
@@ -28577,6 +28640,43 @@ function renderU2000() {
         </tbody></table></div>${alm.length > 1000 ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando 1000 de ${alm.length.toLocaleString('pt-BR')} — a tabela "ONUs com alarme" acima leva todos.</p>` : ''}`;
       ativarFiltrosDeColuna(document.getElementById('u2-alm-tab'));
     }
+    // ---- diagnóstico das falhas ----
+    function pintarDiag() {
+      const el = document.getElementById('u2-diag'); if (!el) return;
+      const rows = u2kDiagnostico(onus, alm);
+      if (!rows.length) { el.innerHTML = ''; return; }
+      const cont = {}; rows.forEach(r => { cont[r.diag] = (cont[r.diag] || 0) + 1; });
+      const quems = [...new Set(Object.values(U2K_DIAG).map(d => d.quem))], oltsD = [...new Set(rows.map(r => r.olt).filter(Boolean))].sort();
+      el.innerHTML = `<div class="section-heading">Diagnóstico das falhas <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(o que está fora do ar ou com alarme, o motivo e quem resolve — junta a lista GPON com os alarmes)</span></div>
+        <div id="u2-d-chips" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px"></div>
+        <div class="toolbar" style="margin-bottom:10px">
+          <div class="field"><label>Diagnóstico</label><select id="u2-d-d"><option value="">Todos</option>${Object.entries(U2K_DIAG).filter(([k]) => cont[k]).map(([k, d]) => `<option value="${k}">${esc(d.rot)}</option>`).join('')}</select></div>
+          <div class="field"><label>Quem resolve</label><select id="u2-d-q"><option value="">Todos</option>${quems.map(q => `<option>${esc(q)}</option>`).join('')}</select></div>
+          <div class="field"><label>OLT</label><select id="u2-d-o"><option value="">Todas</option>${oltsD.map(o => `<option>${esc(o)}</option>`).join('')}</select></div>
+          <div class="field"><label>Cliente</label><input type="text" id="u2-d-t" placeholder="nome do cliente…" autocomplete="off"></div>
+          <button type="button" class="btn-export-xls" id="u2-d-xls">⤓ Excel (todas as filtradas)</button><span id="u2-d-cont" style="font-size:12px;color:var(--text-muted);align-self:center"></span></div>
+        <div id="u2-d-tab"></div>`;
+      const v = id => document.getElementById(id).value, txt = o => Object.entries(o).sort((x, y) => y[1] - x[1]).map(([k, n]) => k + (n > 1 ? ' ×' + n : '')).join(' · ');
+      const filtrarD = () => { const q = normalizeHeader(v('u2-d-t'));
+        return rows.filter(r => (!v('u2-d-d') || r.diag === v('u2-d-d')) && (!v('u2-d-q') || r.info.quem === v('u2-d-q')) && (!v('u2-d-o') || r.olt === v('u2-d-o')) && (!q || normalizeHeader(r.alias).includes(q))); };
+      const chips = () => { document.getElementById('u2-d-chips').innerHTML = Object.entries(U2K_DIAG).filter(([k]) => cont[k]).map(([k, d]) =>
+        `<button type="button" class="u2d-chip" data-d="${k}" style="border:1px solid var(--border);background:${v('u2-d-d') === k ? 'var(--accent)' : 'var(--card-bg)'};color:${v('u2-d-d') === k ? '#fff' : 'var(--text-primary)'};border-radius:999px;padding:6px 12px;font-size:12.5px;cursor:pointer">${esc(d.rot)} <b>${cont[k].toLocaleString('pt-BR')}</b></button>`).join(''); };
+      const desenhar = () => { const l = filtrarD(), corte = 1000; chips();
+        document.getElementById('u2-d-cont').textContent = `${l.length.toLocaleString('pt-BR')} ONU(s)`;
+        document.getElementById('u2-d-tab').innerHTML = !l.length ? '<div class="panel"><div class="empty">Nenhuma ONU nesse filtro.</div></div>' : `<div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="u2-tab-diag"><thead><tr><th>Diagnóstico</th><th>Quem resolve</th><th>Cliente (alias)</th><th>OLT</th><th>Onde</th><th>Agora</th><th>Aberto agora</th><th>Alarmes no período</th><th>Último alarme</th><th>O que fazer</th></tr></thead><tbody>
+          ${l.slice(0, corte).map(r => `<tr><td style="white-space:normal"><span class="badge ${r.info.cor}">${esc(r.info.rot)}</span></td><td>${esc(r.info.quem)}</td><td class="cat-cell">${esc(r.alias || '-')}</td><td>${esc(r.olt || '-')}</td><td style="font-size:12px">${esc(r.local)}</td>
+            <td>${r.status ? `<span class="badge ${r.status === 'Online' ? 'ok' : r.status === 'Desativada' ? 'neutral' : 'warn'}">${esc(r.status)}</span>${r.motivo ? ` <span style="font-size:11.5px;color:var(--text-muted)">${esc(r.motivo)}</span>` : ''}` : '<span style="color:var(--text-muted)">-</span>'}</td>
+            <td style="white-space:normal;font-size:12.5px">${r.abertos ? esc(txt(r.catsAb)) : '-'}</td><td>${r.n || '-'}</td><td style="font-size:12px">${esc(u2kFmtData(r.ultimo) || '-')}</td><td style="white-space:normal;font-size:12.5px;min-width:260px">${esc(r.info.acao)}</td></tr>`).join('')}
+          </tbody></table></div>${l.length > corte ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${corte} de ${l.length.toLocaleString('pt-BR')} — o Excel leva todas.</p>` : ''}`;
+        ativarFiltrosDeColuna(document.getElementById('u2-d-tab')); };
+      ['u2-d-d', 'u2-d-q', 'u2-d-o'].forEach(id => document.getElementById(id).addEventListener('change', desenhar));
+      document.getElementById('u2-d-t').addEventListener('input', desenhar);
+      document.getElementById('u2-d-chips').addEventListener('click', ev => { const b = ev.target.closest('.u2d-chip'); if (!b) return; const s = document.getElementById('u2-d-d'); s.value = s.value === b.dataset.d ? '' : b.dataset.d; desenhar(); });
+      document.getElementById('u2-d-xls').addEventListener('click', () => exportarQuadroPresenca('u2000-diagnostico-' + hojeISOLocal(), ['Diagnóstico', 'Quem resolve', 'Cliente', 'OLT', 'Onde', 'Status agora', 'Motivo', 'Alarmes abertos', 'Alarmes no período', 'Último alarme', 'O que fazer'],
+        filtrarD().map(r => [r.info.rot, r.info.quem, r.alias, r.olt, r.local, r.status, r.motivo, txt(r.catsAb), r.n, u2kFmtData(r.ultimo), r.info.acao]), 'Diagnóstico'));
+      desenhar();
+    }
+    pintarDiag();
     ativarTogglesDeSecao(box);
   }
 }
