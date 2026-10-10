@@ -28344,8 +28344,9 @@ async function u2kLerArquivo(file) {
         if (ehAlarme) {
           saida.meta.alarmesLidos++;
           const local = g(l, 'local'), adic = g(l, 'adicional');
-          const m = /Frame=(\d+).*?Slot=(\d+).*?Port=(\d+)(?:.*?ONUID=(\d+))?/i.exec(local);
-          if (!m) { saida.meta.ignorados++; return; }      // alarme do servidor (licença, usuários) ou de ONT sem porta: não é de ONU
+          // "Frame=0, Slot=11, Subslot=65535, Port=5, ONUID=20" ou, no alarme "downstream signal fail (SF) of the ONT", "Frame=0, Slot=2, SlotID=7 ONTID=31" (SlotID = porta PON: 341 das 640 ONTs coincidem com a porta dos outros alarmes)
+          const m = /Frame=(\d+).*?Slot=(\d+).*?Port=(\d+)(?:.*?ONUID=(\d+))?/i.exec(local) || /Frame=(\d+),\s*Slot=(\d+),\s*SlotID=(\d+)\s*ONTID=(\d+)/i.exec(local);
+          if (!m) { saida.meta.ignorados++; return; }      // alarme do servidor U2000 (OSS: licença, usuários, banco): não é de OLT/ONU
           const alias = ((/Description of the ONT\(only for NMS\)=(.*)$/i.exec(adic) || [])[1] || '').trim(), equip = (/Equipment ID=([^\s,]+)/i.exec(local + ' ' + adic) || [])[1] || '', oltIp = (/OLTIP=([\d.]+)/i.exec(adic) || [])[1] || '';
           const r = { alarme: true, severidade: g(l, 'severidade'), id: g(l, 'id'), nome: g(l, 'nome'), fonte: g(l, 'fonte'), local, vezes: u2kNum(g(l, 'vezes')) || 0,
             primeiro: u2kData(g(l, 'primeiro'), fmt), ultimo: u2kData(g(l, 'ultimo'), fmt), limpo: u2kData(g(l, 'limpo'), fmt), alias: /ONT_NO_DESCRIPTION/i.test(alias) ? '' : alias, equip: equip === '--' ? '' : equip, oltIp,
@@ -28545,7 +28546,7 @@ function renderU2000() {
     const aberto = alm.filter(a => !a.limpo);
     const porSev = {}; alm.forEach(a => { porSev[a.severidade] = (porSev[a.severidade] || 0) + 1; });
     const meta = U2K.meta || {}, dsAlm = alm.map(a => a.ultimo).filter(Boolean).sort(), catsAlm = [...new Set(alm.map(a => a.categoria).filter(Boolean))].sort();
-    const avisoAlm = (dsAlm.length ? `<p style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px">Alarmes de ${esc(u2kFmtData(dsAlm[0]))} até ${esc(u2kFmtData(dsAlm[dsAlm.length - 1]))}${meta.ignorados ? ` · ${meta.ignorados.toLocaleString('pt-BR')} alarme(s) sem porta/ONU ignorados (licença, usuários, ONT sem porta)` : ''}. Cada importação de alarmes substitui a anterior.</p>` : '')
+    const avisoAlm = (dsAlm.length ? `<p style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px">Alarmes de ${esc(u2kFmtData(dsAlm[0]))} até ${esc(u2kFmtData(dsAlm[dsAlm.length - 1]))}${meta.ignorados ? ` · ${meta.ignorados.toLocaleString('pt-BR')} alarme(s) do servidor U2000 (OSS: licença, usuários, banco) ignorados` : ''}. Cada importação de alarmes substitui a anterior.</p>` : '')
       + (meta.cap ? `<div class="panel" style="border-left:4px solid var(--danger);margin-bottom:12px;font-size:13px;line-height:1.5">⚠ O arquivo tem ${meta.lidos.toLocaleString('pt-BR')} alarmes: o U2000 <b>corta a exportação em 20.000</b>, então o que passou disso ficou de fora. No U2000, em <b>Filter…</b>, use <b>Last Occurred → Previous: 2 Days</b> (ou digite a data como <b>mês/dia/ano</b>) e exporte de novo.</div>` : '');
     box.innerHTML = `
       <div class="section-heading">Resumo da leitura</div>
