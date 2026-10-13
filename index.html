@@ -28258,7 +28258,7 @@ const U2K_COL = {
   tx: ['tx optical power dbm', 'tx optical power', 'tx power'], vlan: ['vlan id', 'vlan', 'user vlan', 'svlan'],
   ip: ['ipv4 address', 'ip address', 'ip', 'ipv4'], servico: ['service type', 'name', 'connection type'], ipStatus: ['ipv4 connection status', 'connection status'],
   tipo: ['ont type', 'onu type', 'type', 'equipment id', 'terminal type'], local: ['location information', 'location'],
-  perfilLinha: ['line profile'], perfilServico: ['service profile'], perfilVas: ['onu vas profile'],
+  perfilLinha: ['line profile'], perfilServico: ['service profile'], perfilVas: ['onu vas profile'], configStatus: ['config status'], operStatus: ['operation status'],
 };
 const U2K_ALM = { severidade: ['severity', 'severidade'], id: ['alarm id'], nome: ['name', 'alarm name', 'nome'], fonte: ['alarm source', 'source'], local: ['location information', 'location'],
   adicional: ['additional information'], vezes: ['occurrence times'], primeiro: ['first occurred st', 'first occurred'], ultimo: ['last occurred st', 'last occurred'],
@@ -28367,7 +28367,7 @@ async function u2kLerArquivo(file) {
           if (soLista) { const pn = Number(g(l, 'porta')), on = Number(g(l, 'onuId')); if (pn < pp || (pn === pp && on <= po)) gp++; pp = pn; po = on; }
           saida.push({ alarme: false, lista: soLista, deLista: !!oltTitulo, grp: gp, motivo: stMot.motivo, olt: g(l, 'olt') || oltTitulo, frame: g(l, 'frame') || (loc ? loc[1] : ''), slot: g(l, 'slot') || (loc ? loc[2] : ''), porta: g(l, 'porta') || (loc ? loc[3] : ''), onuId: g(l, 'onuId') || (loc ? loc[4] || '' : ''),
             alias: g(l, 'alias'), sn: g(l, 'sn').replace(/\s+/g, ''), status: stMot.status, rx: u2kNum(g(l, 'rx')), tx: u2kNum(g(l, 'tx')), vlan: g(l, 'vlan'), ip: g(l, 'ip'), servico: oltTitulo ? '' : g(l, 'servico'), ipStatus: g(l, 'ipStatus'), tipo: g(l, 'tipo'),
-            perfilLinha: g(l, 'perfilLinha').replace(/^-+$/, ''), perfilServico: g(l, 'perfilServico').replace(/^-+$/, ''), perfilVas: g(l, 'perfilVas').replace(/^-+$/, '') }); }
+            configStatus: g(l, 'configStatus'), operStatus: g(l, 'operStatus'), perfilLinha: g(l, 'perfilLinha').replace(/^-+$/, ''), perfilServico: g(l, 'perfilServico').replace(/^-+$/, ''), perfilVas: g(l, 'perfilVas').replace(/^-+$/, '') }); }
       });
       break;
     }
@@ -28390,7 +28390,7 @@ function u2kJuntar(linhas, nomeArquivo) {
     let i = idx.get(r._k);
     if (i === undefined && r.olt && r.onuId !== '' && r.slot) i = idxLoc.get(locDe(r));
     if (i === undefined) { r.wan = (r.ip || r.vlan || r.servico) ? [{ servico: r.servico, vlan: r.vlan, ip: r.ip, ipStatus: r.ipStatus }] : []; idx.set(r._k, U2K.onus.length); if (r.olt && r.onuId !== '' && r.slot) idxLoc.set(locDe(r), U2K.onus.length); U2K._tocadas.add(r._k); U2K.onus.push(r); novosOnu++; return; }
-    const o = U2K.onus[i]; ['olt', 'frame', 'slot', 'porta', 'onuId', 'alias', 'sn', 'status', 'tipo', 'perfilLinha', 'perfilServico', 'perfilVas'].forEach(k => { if (r[k]) o[k] = r[k]; }); if (r.status) o.motivo = r.motivo || '';
+    const o = U2K.onus[i]; ['olt', 'frame', 'slot', 'porta', 'onuId', 'alias', 'sn', 'status', 'tipo', 'perfilLinha', 'perfilServico', 'perfilVas', 'configStatus', 'operStatus'].forEach(k => { if (r[k]) o[k] = r[k]; }); if (r.status) o.motivo = r.motivo || '';
     if (r.rx != null) o.rx = r.rx; if (r.tx != null) o.tx = r.tx;
     if (r.ip || r.vlan || r.servico) { o.wan = (o.wan || []).filter(x => !(x.servico === r.servico && x.vlan === r.vlan)); o.wan.push({ servico: r.servico, vlan: r.vlan, ip: r.ip, ipStatus: r.ipStatus }); }
     U2K._tocadas.add(o._k);
@@ -28417,7 +28417,10 @@ function u2kConsolidar() {
     o.grupoRx = u2kGrupoRx(o.rx);
     // VLAN: vem no nome dos perfis (LINE-INTERNET_NG_316 → 316). Sem número em nenhum perfil = sem VLAN de internet; números diferentes entre perfis = divergente
     const vs = [o.perfilLinha, o.perfilServico, o.perfilVas].map(u2kVlanDe).filter(Boolean);
-    o.vlanPerfil = vs[0] || ''; o.vlanDiv = new Set(vs).size > 1; o.semVlan = !!(o.perfilLinha || o.perfilServico) && !o.vlanPerfil;
+    o.vlanPerfil = vs[0] || ''; o.vlanDiv = new Set(vs).size > 1 || !!(o.vlanFinal && o.vlanPerfil && String(o.vlanFinal) !== String(o.vlanPerfil)); o.semVlan = !!(o.perfilLinha || o.perfilServico) && !o.vlanPerfil;
+    // sem VLAN no nome do perfil: PERFIL PADRÃO (GPON_lp_128_por_porta, default) = ONU registrada mas não provisionada com a internet; PLATAFORMA (SmartOLT / INT6) = a VLAN fica no service-port, não no perfil (não dá pra afirmar que falta)
+    o.tipoSemVlan = !o.semVlan ? '' : /^GPON_lp_128_por_porta$/i.test(o.perfilLinha || '') || /default/i.test((o.perfilLinha || '') + ' ' + (o.perfilServico || '')) ? 'padrao' : /SMARTOLT|INT6/i.test((o.perfilLinha || '') + ' ' + (o.perfilServico || '')) ? 'plataforma' : 'outro';
+    o.configFalhou = /fail/i.test(o.configStatus || '');
   });
 }
 // ---- persistência no Supabase (sql/PASSO-52-u2000.sql): assim os dados importados valem pra todo mundo e com o seu PC desligado ----
@@ -28429,7 +28432,7 @@ async function u2kSalvarNoBanco() {
     U2K._apagarLst = [];
     const chaves = [...(U2K._tocadas || [])], porChave = new Map(U2K.onus.map(o => [o._k, o]));
     const linhas = chaves.map(k => porChave.get(k)).filter(Boolean).map(o => ({ chave: o._k, olt: o.olt || '', frame: o.frame || '', slot: o.slot || '', porta: o.porta || '', onu_id: o.onuId || '', alias: o.alias || '', sn: o.sn || '',
-      status: o.status || '', rx: o.rx, tx: o.tx, vlan: o.vlanFinal || '', ip: o.ipFinal || '', classe_ip: o.classeIp || '', grupo_rx: o.grupoRx || '', wan: o.wan || [], tipo: o.tipo || '', motivo: o.motivo || '', perfil_linha: o.perfilLinha || '', perfil_servico: o.perfilServico || '', perfil_vas: o.perfilVas || '', importado_em: new Date().toISOString(), importado_por: quem }));
+      status: o.status || '', rx: o.rx, tx: o.tx, vlan: o.vlanFinal || '', ip: o.ipFinal || '', classe_ip: o.classeIp || '', grupo_rx: o.grupoRx || '', wan: o.wan || [], tipo: o.tipo || '', motivo: o.motivo || '', perfil_linha: o.perfilLinha || '', perfil_servico: o.perfilServico || '', perfil_vas: o.perfilVas || '', config_status: o.configStatus || '', oper_status: o.operStatus || '', importado_em: new Date().toISOString(), importado_por: quem }));
     for (let i = 0; i < linhas.length; i += 500) {
       const { error } = await supa.from('u2000_onus').upsert(linhas.slice(i, i + 500), { onConflict: 'chave' });
       if (error) return { ok: false, motivo: /does not exist|schema cache|PGRST205|42P01/i.test(String(error.message || '')) ? 'rode o sql/PASSO-52-u2000.sql no Supabase' : error.message };
@@ -28462,7 +28465,7 @@ async function u2kCarregarDoBanco() {
       if (error) break; alm.push(...(data || [])); if (!data || data.length < 1000) break;
     }
     if (!onus.length && !alm.length) return { ok: true, vazio: true };
-    U2K.onus = onus.map(r => ({ _k: r.chave, olt: r.olt, frame: r.frame, slot: r.slot, porta: r.porta, onuId: r.onu_id, alias: r.alias, sn: r.sn, status: r.status, rx: r.rx == null ? null : Number(r.rx), tx: r.tx == null ? null : Number(r.tx), tipo: r.tipo, motivo: r.motivo || '', perfilLinha: r.perfil_linha || '', perfilServico: r.perfil_servico || '', perfilVas: r.perfil_vas || '', wan: r.wan || [], _importado: r.importado_em }));
+    U2K.onus = onus.map(r => ({ _k: r.chave, olt: r.olt, frame: r.frame, slot: r.slot, porta: r.porta, onuId: r.onu_id, alias: r.alias, sn: r.sn, status: r.status, rx: r.rx == null ? null : Number(r.rx), tx: r.tx == null ? null : Number(r.tx), tipo: r.tipo, motivo: r.motivo || '', perfilLinha: r.perfil_linha || '', perfilServico: r.perfil_servico || '', perfilVas: r.perfil_vas || '', configStatus: r.config_status || '', operStatus: r.oper_status || '', wan: r.wan || [], _importado: r.importado_em }));
     U2K.alarmes = alm.map(r => ({ severidade: r.severidade, id: r.alarme_id, nome: r.nome, fonte: r.fonte, local: r.local, frame: r.frame, slot: r.slot, porta: r.porta, onuId: r.onu_id, vezes: r.vezes, primeiro: r.primeiro || '', ultimo: r.ultimo || '', limpo: r.limpo || '', alias: r.alias || '', categoria: r.categoria || u2kCategoria(r.nome), equip: r.equip || '', oltIp: r.olt_ip || '', razao: r.razao || '' }));
     u2kConsolidar(); U2K._doBanco = true;
     U2K.importadoEm = onus.reduce((m, r) => r.importado_em && r.importado_em > m ? r.importado_em : m, '');
@@ -28478,7 +28481,9 @@ const U2K_DIAG = {
   energia:    { rot: 'Sem energia (dying-gasp)', quem: 'Cliente', aba: 'cliente', ordem: 2, cor: 'warn', acao: 'Ligar para o cliente (a ONT perdeu energia). Várias na mesma porta/bairro ao mesmo tempo = queda de energia local.' },
   config:     { rot: 'Falha de configuração da ONT', quem: 'Sistema', aba: 'sistema', ordem: 3, cor: 'amber', acao: 'A OLT não conseguiu aplicar a configuração na ONT: reaplicar o provisionamento (perfil de linha/serviço) no U2000. Pode ser resolvido sem ir ao campo.' },
   hwonu:      { rot: 'ONT com defeito de hardware', quem: 'Campo', aba: 'operacional', ordem: 3.5, cor: 'amber', acao: 'A própria ONT acusa falha de hardware: agendar a troca do equipamento.' },
-  semvlan:    { rot: 'Online sem VLAN de internet no perfil', quem: 'Sistema', aba: 'sistema', ordem: 3.7, cor: 'amber', acao: 'A ONU está online, mas nenhum perfil (linha/serviço) traz a VLAN de internet (ex.: GPON_lp_128_por_porta, SMARTOLT_FLEXIBLE_GPON): aplicar o perfil de internet da VLAN do bairro no U2000. Sem isso o cliente fica sem navegar.' },
+  naoprov:    { rot: 'Online sem provisionamento de internet (perfil padrão)', quem: 'Sistema', aba: 'sistema', ordem: 3.6, cor: 'amber', acao: 'A ONU está online mas com o perfil PADRÃO (GPON_lp_128_por_porta / default), sem VLAN: não foi provisionada com a internet. Provisionar no U2000 com o perfil de internet da VLAN do bairro (e vincular ao cliente).' },
+  semip:      { rot: 'Online sem IP / PPPoE (WAN lida)', quem: 'Sistema', aba: 'sistema', ordem: 3.65, cor: 'amber', acao: 'A WAN da ONU foi lida e não tem IPv4: o PPPoE não subiu ou a VLAN de internet não está no service-port. Conferir usuário/senha PPPoE e a VLAN da WAN e reaplicar o serviço.' },
+  semvlan:    { rot: 'Online sem VLAN de internet no perfil', quem: 'Sistema', aba: 'sistema', ordem: 3.7, cor: 'amber', acao: 'A ONU está online, mas nenhum perfil (linha/serviço) traz a VLAN de internet: aplicar o perfil de internet da VLAN do bairro no U2000. Sem isso o cliente pode ficar sem navegar.' },
   vlandiv:    { rot: 'VLAN divergente entre os perfis', quem: 'Sistema', aba: 'sistema', ordem: 3.8, cor: 'amber', acao: 'Os perfis de linha e de serviço apontam VLANs diferentes: corrigir o perfil da ONU no U2000 para a VLAN certa do bairro.' },
   desativada: { rot: 'ONU desativada na OLT', quem: 'Sistema', aba: 'sistema', ordem: 4, cor: 'amber', acao: 'Conferir se o bloqueio é devido (inadimplência/cancelamento); se não for, reativar a ONU no U2000.' },
   semid:      { rot: 'ONU sem identificação', quem: 'Sistema', aba: 'sistema', ordem: 5, cor: 'amber', acao: 'O nome da ONU está vazio ou automático ("--", OLT-…): vincular ao cliente (nome/contrato) para poder atender.' },
@@ -28488,6 +28493,8 @@ const U2K_DIAG = {
   desligou:   { rot: 'ONT desligou sozinha', quem: 'Cliente', aba: 'cliente', ordem: 9, cor: 'neutral', acao: 'O equipamento reiniciou ou foi desligado; acompanhar se volta sozinho.' },
   ethernet:   { rot: 'Porta Ethernet sem link', quem: 'Cliente', aba: 'cliente', ordem: 10, cor: 'neutral', acao: 'Cabo ou roteador do cliente desconectado: resolver por suporte remoto.' },
   voip:       { rot: 'Falha de VoIP (SIP)', quem: 'Sistema', aba: 'sistema', ordem: 10.5, cor: 'neutral', acao: 'A ONT não registrou o telefone no servidor SIP: conferir o perfil de VoIP da ONU e o servidor SIP.' },
+  plataforma: { rot: 'VLAN fora do perfil (SmartOLT / INT6)', quem: 'Monitorar', aba: 'cliente', ordem: 11.5, cor: 'neutral', acao: 'Provisionada por plataforma (SmartOLT / INT6): a VLAN fica no service-port, não no nome do perfil. Para confirmar, exporte a lista Service Port da OLT ou a WAN Interface da ONU; não é erro por si só.' },
+  bloqueio:   { rot: 'IP de bloqueio (cliente bloqueado)', quem: 'Cliente', aba: 'cliente', ordem: 9.5, cor: 'neutral', acao: 'A ONU está com IP de bloqueio (100.69 / 100.122): o cliente está bloqueado. Conferir pagamento/liberação.' },
   recuperada: { rot: 'Online com alarme aberto (provável recuperada)', quem: 'Monitorar', aba: 'cliente', ordem: 11, cor: 'ok', acao: 'A ONU está online agora; o alarme pode ser antigo. Conferir a data do último alarme.' },
   outros:     { rot: 'Outros alarmes abertos', quem: 'Monitorar', aba: 'cliente', ordem: 12, cor: 'neutral', acao: 'Alarme aberto sem classificação própria: ver o tipo na coluna de alarmes.' },
   antigo:     { rot: 'Alarme aberto antigo (sem lista GPON)', quem: 'Monitorar', aba: 'cliente', ordem: 13, cor: 'neutral', acao: 'Alarme aberto há mais de 3 dias e a ONU não está na lista GPON importada: importe a lista dessa OLT para saber se ela está online.' },
@@ -28499,9 +28506,9 @@ function u2kSnPorLoc() {
   return (olt, f, sl, p, id) => m.get(`${nk(olt)}|${f}/${sl}/${p}|${id}`) || '';
 }
 // queda em massa: muitas ONUs da MESMA OLT com sem-energia (dying-gasp) ou LOS na mesma janela de ~10 min (janelas vizinhas se juntam). Vira evento de rede/energia, não falha individual.
-// Limites: 15 ONUs (sem energia) e 8 ONUs (LOS). O escopo diz se foi a OLT inteira (≥ 8 portas ou ≥ 3 placas), uma placa/slot (≥ 3 portas) ou uma porta PON.
+// Limite (pedido do cliente, 13/10/2026): 5 ONUs ou mais na mesma OLT, mesma data e mesma janela de ~10 min (sem energia ou LOS). O escopo diz se foi a OLT inteira (≥ 8 portas ou ≥ 3 placas), uma placa/slot (≥ 3 portas) ou uma porta PON.
 function u2kEventosMassa(alm) {
-  const nk = normalizeHeader, jan = [], LIM = { 'Sem energia (dying-gasp)': 15, 'LOS / fibra': 8 };
+  const nk = normalizeHeader, jan = [], LIM = { 'Sem energia (dying-gasp)': 5, 'LOS / fibra': 5 };
   alm.forEach(a => {
     if (a.onuId === '' || a.onuId == null || !a.primeiro) return;
     const tipo = a.categoria === 'Sem energia (dying-gasp)' ? 'Sem energia (dying-gasp)' : a.categoria === 'Fibra rompida / sem sinal (LOS)' ? 'LOS / fibra' : ''; if (!tipo) return;
@@ -28604,7 +28611,7 @@ function u2kResumoOlt(alm, eventos) {
   });
   const linhas = [...m.values()].map(e => {
     const evs = eventos.filter(v => nk(v.olt) === nk(e.olt)), massiva = evs.filter(v => v.escopo === 'OLT inteira (massiva)'), maior = evs.slice().sort((x, y) => y.onus - x.onus)[0];
-    const situacao = massiva.length ? 'Falha massiva' : e.semComAb ? 'Sem comunicação' : (evs.length || e.portasProb.size) ? 'Atenção' : 'Normal';
+    const situacao = evs.length ? 'Falha massiva' : e.semComAb ? 'Sem comunicação' : (evs.length || e.portasProb.size) ? 'Atenção' : 'Normal';
     const ref = maior ? { frame: maior.frame, slot: maior.slot, porta: maior.porta, onuId: maior.onuId } : e.amostra ? { frame: e.amostra.frame, slot: e.amostra.slot, porta: e.amostra.porta, onuId: e.amostra.onuId } : { frame: '', slot: '', porta: '', onuId: '' };
     return { ...e, evs: evs.length, massivas: massiva.length, maior: evs.reduce((x, v) => Math.max(x, v.onus), 0), situacao, frame: ref.frame, slot: ref.slot, porta: ref.porta, onuId: ref.onuId, sn: snDe(e.olt, ref.frame, ref.slot, ref.porta, ref.onuId) };
   });
@@ -28715,9 +28722,11 @@ function u2kDiagnostico(onus, alm) {
     const ab = r.catsAb, has = c => !!ab[c], offline = r.status ? r.status === 'Offline' : true;
     if (!r.status && r.abertos && ref && r.ultimo && ref - Date.parse(r.ultimo.replace(' ', 'T')) > 3 * 86400000) return 'antigo';   // sem lista pra confirmar e o último alarme é velho
     if (r.status === 'Desativada') return 'desativada';
-    if (has('Falha de configuração')) return 'config';
+    if (r.configFalhou || has('Falha de configuração')) return 'config';
     if (has('ONT com defeito de hardware')) return 'hwonu';
-    if (r.status === 'Online' && r.semVlan) return 'semvlan';
+    if (r.status === 'Online' && r.semVlan) return r.tipoSemVlan === 'padrao' ? 'naoprov' : r.tipoSemVlan === 'plataforma' ? 'plataforma' : 'semvlan';
+    if (r.status === 'Online' && r.classeIp === 'sem_ip') return 'semip';
+    if (r.status === 'Online' && r.classeIp === 'bloqueio') return 'bloqueio';
     if (r.status === 'Online' && r.vlanDiv) return 'vlandiv';
     if (r.motivo === 'fibra' || (offline && has('Fibra rompida / sem sinal (LOS)'))) return 'los';
     if (r.motivo === 'sem energia' || (offline && has('Sem energia (dying-gasp)'))) return 'energia';
@@ -28737,9 +28746,9 @@ function u2kDiagnostico(onus, alm) {
     const comSlot = o.slot !== '' && o.slot != null;
     const e = (comSlot && ents.get(chaveL(o.olt, o.frame, o.slot, o.porta, o.onuId))) || (o.alias && !/^-+$/.test(o.alias) ? porAlias.get(chaveA(o.olt, o.alias)) : null);
     if (e) e.usado = true;
-    if (o.status === 'Online' && !(e && e.abertos) && !o.semVlan && !o.vlanDiv) return;
+    if (o.status === 'Online' && !(e && e.abertos) && !o.semVlan && !o.vlanDiv && !o.configFalhou && o.classeIp !== 'sem_ip' && o.classeIp !== 'bloqueio') return;
     const alias = o.alias && !/^-+$/.test(o.alias) ? o.alias : (e && e.alias) || o.alias || '';
-    const r = { olt: o.olt, frame: o.frame, slot: o.slot, porta: o.porta, onuId: o.onuId, alias, sn: o.sn || '', vlan: o.vlanPerfil || '', perfil: o.perfilLinha || '', semVlan: !!o.semVlan, vlanDiv: !!o.vlanDiv,
+    const r = { olt: o.olt, frame: o.frame, slot: o.slot, porta: o.porta, onuId: o.onuId, alias, sn: o.sn || '', vlan: o.vlanPerfil || '', perfil: o.perfilLinha || '', semVlan: !!o.semVlan, vlanDiv: !!o.vlanDiv, tipoSemVlan: o.tipoSemVlan || '', configFalhou: !!o.configFalhou, configStatus: o.configStatus || '', classeIp: o.classeIp || '',
       status: o.status, motivo: o.motivo || '', n: e ? e.n : 0, abertos: e ? e.abertos : 0, cats: e ? e.cats : {}, catsAb: e ? e.catsAb : {}, ultimo: e ? e.ultimo : '', desde: e ? e.desde : '', razao: e ? e.razao : '', chave: comSlot ? chaveL(o.olt, o.frame, o.slot, o.porta, o.onuId) : '' };
     r.diag = classifica(r); marcaEvento(r, r.chave); if (r.diag) linhas.push(r);
   });
@@ -28899,7 +28908,7 @@ function renderU2000() {
 
     // ---------------- abas ----------------
     function abaResumo() {
-      const conta = (arr, f) => arr.filter(f).length, on = conta(onus, o => o.status === 'Online'), off = conta(onus, o => o.status === 'Offline'), des = conta(onus, o => o.status === 'Desativada'), semV = conta(onus, o => o.semVlan && o.status === 'Online');
+      const conta = (arr, f) => arr.filter(f).length, on = conta(onus, o => o.status === 'Online'), off = conta(onus, o => o.status === 'Offline'), des = conta(onus, o => o.status === 'Desativada'), semV = conta(onus, o => o.semVlan && o.status === 'Online'), viaSis = diag.filter(r => r.info.aba === 'sistema').length;
       const abertos = alm.filter(a => !a.limpo), temRx = onus.some(o => o.rx != null), crit = conta(onus, o => o.grupoRx === 'critico'), aten = conta(onus, o => o.grupoRx === 'atencao');
       const sinalAb = new Set(alm.filter(a => !a.limpo && /Sinal degradado|Falha de sinal|Parâmetro óptico/.test(a.categoria)).map(a => `${a.fonte}|${a.slot}|${a.porta}|${a.onuId}`)).size;
       const evHoje = eventos.filter(e => String(e.ini).slice(0, 10) === diaRef), meta = U2K.meta || {}, dsAlm = alm.map(a => a.ultimo).filter(Boolean).sort();
@@ -28910,7 +28919,7 @@ function renderU2000() {
           ${statCard('green', icOk, 'Online', on.toLocaleString('pt-BR'), onus.length ? formatPct(on / onus.length * 100, 1) + ' das ONUs' : '')}
           ${statCard(off ? 'orange' : 'neutral', icRelogio, 'Offline', off.toLocaleString('pt-BR'), `${conta(onus, o => o.motivo === 'sem energia').toLocaleString('pt-BR')} sem energia · ${conta(onus, o => o.motivo === 'fibra').toLocaleString('pt-BR')} fibra · ${conta(onus, o => o.motivo === 'outro motivo').toLocaleString('pt-BR')} outro`)}
           ${statCard(des ? 'orange' : 'neutral', icAviso, 'Desativadas', des.toLocaleString('pt-BR'), 'ONU desativada na OLT')}
-          ${statCard(semV ? 'red' : 'neutral', icChave, 'Online sem VLAN no perfil', semV.toLocaleString('pt-BR'), 'resolve pelo sistema')}
+          ${statCard(viaSis ? 'red' : 'neutral', icChave, 'Resolvem pelo sistema', viaSis.toLocaleString('pt-BR'), `${conta(onus, o => o.configFalhou).toLocaleString('pt-BR')} config falhou · ${conta(onus, o => o.status === 'Online' && o.tipoSemVlan === 'padrao').toLocaleString('pt-BR')} sem provisionar · ${conta(onus, o => o.status === 'Online' && o.tipoSemVlan === 'outro').toLocaleString('pt-BR')} sem VLAN`)}
           ${statCard(sinalAb ? 'red' : 'neutral', icAviso, 'Sinal ruim (alarmes abertos)', sinalAb.toLocaleString('pt-BR'), temRx ? `${crit} Rx crítico · ${aten} atenção` : 'o U2000 não traz o Rx na lista')}
           ${statCard(abertos.length ? 'orange' : 'neutral', icAviso, 'Alarmes abertos', abertos.length.toLocaleString('pt-BR'), `${alm.length.toLocaleString('pt-BR')} no arquivo${dsAlm.length ? ' · até ' + u2kFmtData(dsAlm[dsAlm.length - 1]).slice(0, 16) : ''}`)}
           ${statCard(evHoje.length ? 'red' : 'neutral', icAviso, `Quedas em massa em ${fmtDia(diaRef)}`, evHoje.length.toLocaleString('pt-BR'), diaRef === hoje ? 'hoje' : 'dia mais recente com dados')}
@@ -28929,7 +28938,7 @@ function renderU2000() {
       u2kVisao(document.getElementById('u2-d'), { id: 'u2d-' + grupo, excel: 'u2000-' + grupo, linhas: () => todas, chips: { filtro: 'diag' },
         filtros: [{ id: 'diag', rot: 'Diagnóstico', valor: r => r.diag, opcoes: Object.entries(U2K_DIAG).filter(([k, d]) => d.aba === grupo && todas.some(r => r.diag === k)).map(([k, d]) => [k, d.rot]) }, { id: 'olt', rot: 'OLT', valor: r => r.olt }, { id: 'st', rot: 'Agora (lista GPON)', valor: r => r.status || 'Não está na lista' }],
         cols: [{ t: 'Diagnóstico', h: r => `<span class="badge ${r.info.cor}">${esc(r.info.rot)}</span>`, x: r => r.info.rot, s: 'white-space:normal' }, { t: 'Quem resolve', f: r => r.info.quem }, ...u2kColsLoc(),
-          { t: 'Cliente (alias)', f: r => r.alias, s: 'font-weight:600' }, { t: 'Agora', h: u2kBadgeStatus, x: r => (r.status || '') + (r.motivo ? ' · ' + r.motivo : '') }, { t: 'VLAN (perfil)', f: r => r.vlan || (r.semVlan ? 'sem VLAN' : '') }, { t: 'Perfil de linha', f: r => r.perfil, s: 'font-size:11.5px' },
+          { t: 'Cliente (alias)', f: r => r.alias, s: 'font-weight:600' }, { t: 'Agora', h: u2kBadgeStatus, x: r => (r.status || '') + (r.motivo ? ' · ' + r.motivo : '') }, { t: 'VLAN (perfil)', f: r => r.vlan || (r.semVlan ? 'sem VLAN' : '') }, { t: 'Perfil de linha', f: r => r.perfil, s: 'font-size:11.5px' }, { t: 'Config Status', f: r => r.configStatus },
           { t: 'Aberto agora', f: r => Object.keys(r.catsAb).length ? Object.entries(r.catsAb).sort((a, b) => b[1] - a[1]).map(([k, n]) => k + (n > 1 ? ' ×' + n : '')).join(' · ') : '', s: 'white-space:normal;font-size:12.5px' },
           { t: 'Causa provável (U2000)', f: r => r.razao, s: 'white-space:normal;font-size:12px;min-width:200px' }, { t: 'Aberto desde', f: r => u2kFmtData(r.desde), s: 'font-size:12px' }, { t: 'Alarmes no período', f: r => r.n || '' }, { t: 'Último alarme', f: r => u2kFmtData(r.ultimo), s: 'font-size:12px' },
           { t: 'Observação', f: r => r.extra, s: 'white-space:normal;font-size:12px' }, { t: 'O que fazer', f: r => r.info.acao, s: 'white-space:normal;font-size:12.5px;min-width:260px' }] });
@@ -28961,7 +28970,7 @@ function renderU2000() {
     function abaHoje() {
       const evH = eventos.filter(e => String(e.ini).slice(0, 10) === diaRef), almH = alm.filter(a => String(a.primeiro).slice(0, 10) === diaRef);
       const nota = `<p style="font-size:13px;margin:0 0 10px">Dia: <b>${fmtDia(diaRef)}</b>${diaRef !== hoje ? ` — <span style="color:var(--danger)">não há dados de hoje (${fmtDia(hoje)}); mostrando o dia mais recente com dados</span>` : ' (hoje)'} · ${evH.length} queda(s) em massa · ${evH.reduce((t, e) => t + e.onus, 0).toLocaleString('pt-BR')} ONUs afetadas · ${new Set(evH.map(e => e.olt)).size} OLT(s) · ${evH.filter(e => e.escopo.startsWith('OLT')).length} da OLT inteira</p>`;
-      el.innerHTML = titulo('Quedas em massa hoje', '15+ ONUs sem energia ou 8+ ONUs em LOS na mesma OLT em ~10 min') + nota + '<div id="u2-h1"></div>' + titulo('OLTs no dia', 'o que cada OLT teve no dia') + '<div id="u2-h2"></div>';
+      el.innerHTML = titulo('Quedas em massa hoje', '5 ou mais ONUs sem energia ou em LOS na mesma OLT, na mesma data e na mesma janela de ~10 min') + nota + '<div id="u2-h1"></div>' + titulo('OLTs no dia', 'o que cada OLT teve no dia') + '<div id="u2-h2"></div>';
       const colsEv = [{ t: 'Início', f: e => u2kFmtData(e.ini) }, { t: 'Fim', f: e => u2kFmtData(e.fim) }, { t: 'OLT', f: e => e.olt }, { t: 'Tipo', f: e => e.tipo }, { t: 'Escopo', h: e => `<span class="badge ${String(e.escopo).startsWith('OLT') ? 'warn' : 'amber'}">${esc(e.escopo)}</span>`, x: e => e.escopo },
         { t: 'ONUs afetadas', h: e => `<b>${e.onus}</b>`, x: e => e.onus }, { t: 'Portas PON', f: e => e.portas }, { t: 'Frame', f: e => e.frame }, { t: 'Slot (mais afetada)', f: e => e.slot }, { t: 'Porta (mais afetada)', f: e => e.porta }, { t: 'ONU ID (referência)', f: e => e.onuId }, { t: 'SN (referência)', f: e => e.sn, s: 'font-size:11.5px' },
         { t: 'Onde (slot/porta e ONUs)', f: e => e.onde, s: 'font-size:12px;white-space:normal' }, { t: 'Ainda abertas', f: e => e.abertas }, { t: 'Leitura', f: e => e.leitura, s: 'font-size:12.5px;white-space:normal;min-width:240px' }];
@@ -28986,7 +28995,7 @@ function renderU2000() {
       u2kVisao(document.getElementById('u2-p2'), { id: 'u2o', excel: 'u2000-onus', linhas: () => onus, busca: o => [o.alias, o.sn, o.olt, o.tipo].join(' '),
         filtros: [{ id: 'olt', rot: 'OLT', valor: o => o.olt }, { id: 'st', rot: 'Status', valor: o => o.status || 'sem status' }, { id: 'vlan', rot: 'VLAN (perfil)', valor: o => o.vlanPerfil || (o.semVlan ? 'sem VLAN' : 'sem perfil') }, { id: 'modelo', rot: 'Modelo da ONT', valor: o => o.tipo }],
         cols: [...u2kColsLoc().map(c => c.t === 'SN (referência)' ? { ...c, t: 'SN' } : c), { t: 'Alias (cliente)', f: o => o.alias, s: 'font-weight:600' }, { t: 'Modelo', f: o => o.tipo }, { t: 'Status', h: u2kBadgeStatus, x: o => (o.status || '') + (o.motivo ? ' · ' + o.motivo : '') },
-          { t: 'VLAN (perfil)', f: o => o.vlanPerfil || (o.semVlan ? 'sem VLAN' : '') }, { t: 'Perfil de linha', f: o => o.perfilLinha, s: 'font-size:11.5px' }, { t: 'Perfil de serviço', f: o => o.perfilServico, s: 'font-size:11.5px' },
+          { t: 'VLAN (perfil)', f: o => o.vlanPerfil || (o.semVlan ? 'sem VLAN' : '') }, { t: 'Perfil de linha', f: o => o.perfilLinha, s: 'font-size:11.5px' }, { t: 'Perfil de serviço', f: o => o.perfilServico, s: 'font-size:11.5px' }, { t: 'Config Status', f: o => o.configStatus },
           ...(temRx ? [{ t: 'Rx (dBm)', f: o => o.rx == null ? '' : o.rx.toLocaleString('pt-BR'), s: o => '' }] : []), ...(temIp ? [{ t: 'IPv4', f: o => o.ipFinal, s: 'font-size:12px' }, { t: 'IP', f: o => o.classeIp ? U2K_ROT_IP[o.classeIp] : '' }] : [])] });
     }
     function abaVlan() {
@@ -28996,15 +29005,15 @@ function renderU2000() {
       const perfis = new Map(); onus.forEach(o => { const k = o.perfilLinha || 'sem perfil'; let e = perfis.get(k); if (!e) { e = { perfil: k, vlan: o.vlanPerfil || (o.semVlan ? 'sem VLAN' : ''), total: 0, online: 0, offline: 0 }; perfis.set(k, e); } e.total++; if (o.status === 'Online') e.online++; else if (o.status === 'Offline') e.offline++; });
       const modelos = new Map(); onus.forEach(o => { const k = o.tipo || 'sem modelo'; let e = modelos.get(k); if (!e) { e = { modelo: k, total: 0, online: 0, offline: 0 }; modelos.set(k, e); } e.total++; if (o.status === 'Online') e.online++; else if (o.status === 'Offline') e.offline++; });
       el.innerHTML = `${titulo('VLAN e perfis', 'a VLAN vem no nome do perfil (LINE-INTERNET_NG_316 = VLAN 316); a lista GPON do U2000 não traz o IP nem a VLAN da WAN')}
-        <div class="stat-cards" style="margin-bottom:12px">${statCard('blue', icChave, 'ONUs com VLAN no perfil', com.length.toLocaleString('pt-BR'), `${por.size} VLAN(s)/situações`)}${statCard(sem.length ? 'red' : 'neutral', icAviso, 'ONUs sem VLAN no perfil', sem.length.toLocaleString('pt-BR'), `${onus.filter(o => o.semVlan && o.status === 'Online').length} online · resolve pelo sistema`)}${statCard(div.length ? 'orange' : 'neutral', icAviso, 'VLAN divergente', div.length.toLocaleString('pt-BR'), 'perfis com números diferentes')}</div>
-        ${titulo('ONUs por VLAN')}<div id="u2-v1"></div>${titulo('Perfis de linha')}<div id="u2-v2"></div>${titulo('Modelos de ONT')}<div id="u2-v3"></div>${titulo('ONUs sem VLAN ou com VLAN divergente', 'ONU ID a ONU ID, com os perfis')}<div id="u2-v4"></div>`;
+        <div class="stat-cards" style="margin-bottom:12px">${statCard('blue', icChave, 'ONUs com VLAN no perfil', com.length.toLocaleString('pt-BR'), `${por.size} VLAN(s)/situações`)}${statCard(sem.length ? 'red' : 'neutral', icAviso, 'ONUs sem VLAN no perfil', sem.length.toLocaleString('pt-BR'), `${onus.filter(o => o.tipoSemVlan === 'padrao').length} perfil padrão (não provisionadas) · ${onus.filter(o => o.tipoSemVlan === 'plataforma').length} SmartOLT/INT6 · ${onus.filter(o => o.tipoSemVlan === 'outro').length} outras`)}${statCard(onus.some(o => o.configFalhou) ? 'red' : 'neutral', icAviso, 'Configuração falhou', onus.filter(o => o.configFalhou).length.toLocaleString('pt-BR'), 'Config Status = Failed')}${statCard(div.length ? 'orange' : 'neutral', icAviso, 'VLAN divergente', div.length.toLocaleString('pt-BR'), 'perfis com números diferentes')}</div>
+        ${titulo('ONUs por VLAN')}<div id="u2-v1"></div>${titulo('Perfis de linha')}<div id="u2-v2"></div>${titulo('Modelos de ONT')}<div id="u2-v3"></div>${titulo('ONUs sem VLAN, VLAN divergente ou configuração que falhou', 'ONU ID a ONU ID, com os perfis')}<div id="u2-v4"></div>`;
       const cols3 = (rot, f) => [{ t: rot, f }, { t: 'ONUs', f: r => r.total }, { t: 'Online', f: r => r.online }, { t: 'Offline', f: r => r.offline }];
       u2kVisao(document.getElementById('u2-v1'), { id: 'u2v1', excel: 'u2000-por-vlan', linhas: () => [...por.values()].sort((x, y) => y.total - x.total), busca: r => r.vlan, cols: [...cols3('VLAN (perfil)', r => r.vlan), { t: 'OLTs', f: r => r.olts.size }, { t: 'Bairros / cidades da lista de VLANs', f: r => r.bairros, s: 'font-size:12px;white-space:normal' }] });
       u2kVisao(document.getElementById('u2-v2'), { id: 'u2v2', excel: 'u2000-perfis', linhas: () => [...perfis.values()].sort((x, y) => y.total - x.total), busca: r => r.perfil, cols: [...cols3('Perfil de linha', r => r.perfil), { t: 'VLAN (perfil)', f: r => r.vlan }] });
       u2kVisao(document.getElementById('u2-v3'), { id: 'u2v3', excel: 'u2000-modelos', linhas: () => [...modelos.values()].sort((x, y) => y.total - x.total), busca: r => r.modelo, cols: cols3('Modelo da ONT', r => r.modelo) });
-      u2kVisao(document.getElementById('u2-v4'), { id: 'u2v4', excel: 'u2000-sem-vlan', linhas: () => onus.filter(o => o.semVlan || o.vlanDiv), busca: o => [o.alias, o.sn, o.olt, o.perfilLinha].join(' '),
+      u2kVisao(document.getElementById('u2-v4'), { id: 'u2v4', excel: 'u2000-sem-vlan', linhas: () => onus.filter(o => o.semVlan || o.vlanDiv || o.configFalhou), busca: o => [o.alias, o.sn, o.olt, o.perfilLinha].join(' '),
         filtros: [{ id: 'olt', rot: 'OLT', valor: o => o.olt }, { id: 'st', rot: 'Status', valor: o => o.status }, { id: 'perfil', rot: 'Perfil de linha', valor: o => o.perfilLinha }],
-        cols: [...u2kColsLoc().map(c => c.t === 'SN (referência)' ? { ...c, t: 'SN' } : c), { t: 'Alias (cliente)', f: o => o.alias, s: 'font-weight:600' }, { t: 'Status', h: u2kBadgeStatus, x: o => (o.status || '') + (o.motivo ? ' · ' + o.motivo : '') }, { t: 'Situação', f: o => o.vlanDiv ? 'VLAN divergente' : 'sem VLAN' }, { t: 'Perfil de linha', f: o => o.perfilLinha, s: 'font-size:11.5px' }, { t: 'Perfil de serviço', f: o => o.perfilServico, s: 'font-size:11.5px' }, { t: 'Modelo', f: o => o.tipo }] });
+        cols: [...u2kColsLoc().map(c => c.t === 'SN (referência)' ? { ...c, t: 'SN' } : c), { t: 'Alias (cliente)', f: o => o.alias, s: 'font-weight:600' }, { t: 'Status', h: u2kBadgeStatus, x: o => (o.status || '') + (o.motivo ? ' · ' + o.motivo : '') }, { t: 'Situação', f: o => o.configFalhou ? 'Configuração falhou' : o.vlanDiv ? 'VLAN divergente' : ({ padrao: 'Perfil padrão — não provisionada', plataforma: 'Plataforma (SmartOLT / INT6) — VLAN no service-port', outro: 'Sem VLAN no perfil' })[o.tipoSemVlan] || '' }, { t: 'Config Status', f: o => o.configStatus }, { t: 'Perfil de linha', f: o => o.perfilLinha, s: 'font-size:11.5px' }, { t: 'Perfil de serviço', f: o => o.perfilServico, s: 'font-size:11.5px' }, { t: 'Modelo', f: o => o.tipo }] });
     }
     function abaAlarmes() {
       const meta = U2K.meta || {}, dsAlm = alm.map(a => a.ultimo).filter(Boolean).sort();
