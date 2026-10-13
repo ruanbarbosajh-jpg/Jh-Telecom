@@ -7671,7 +7671,7 @@ function ativarBotoesAnalista() {
     const titulo = textoDoTitulo(h3);
     if (!h3.querySelector('.btn-ampliar')) h3.appendChild(btn('btn-ampliar btn-ampliar-tit', '⤢ Ampliar', () => ampliarElemento(p, titulo)));
     if (!p.querySelector('.gerar-imagem-btn, .btn-export-img') && !p.hasAttribute('data-sem-imagem')) {
-      const b = btn('secao-toggle gerar-imagem-btn', '🖼 Gerar imagem', () => (tabs.length === 1 && !graf.length && !semAzulCtx(p, titulo))
+      const b = btn('secao-toggle gerar-imagem-btn', '🖼 Gerar imagem', () => (tabs.length === 1 && !graf.length && azulCtx(p, titulo))
         ? imagemPadraoDaTabela(tabs[0], titulo, '', (slugTitulo(titulo) || 'tabela') + '-' + hoje)
         : capturarElementoComoImagem(p, 'imagem-' + (slugTitulo(titulo) || 'painel') + '-' + hoje));
       h3.appendChild(b);
@@ -7710,7 +7710,7 @@ function ativarBotoesAnalista() {
     h.appendChild(btn('secao-toggle gerar-imagem-btn', '🖼 Gerar imagem', () => {
       const tabs = [...box.querySelectorAll('table.data-table')].filter(t => !t.closest('.topico-filtros') && t.querySelector('tbody tr'));
       const temGraf = box.querySelector('[data-grafico], .leaflet-container');
-      if (tabs.length === 1 && !temGraf && !semPadraoAzul(titulo)) { if (!imagemPadraoDaTabela(tabs[0], titulo, '', nome)) toast('Tabela vazia — nada pra gerar.', 'aviso'); }
+      if (tabs.length === 1 && !temGraf && azulCtx(box, titulo)) { if (!imagemPadraoDaTabela(tabs[0], titulo, '', nome)) toast('Tabela vazia — nada pra gerar.', 'aviso'); }
       else capturarElementoComoImagem(box, 'imagem-' + nome);
     }));
   });
@@ -12476,7 +12476,7 @@ function ativarBotoesImagem(raiz) {
     h.appendChild(criarBotaoImg(() => {
       // modo novo (Analista): uma tabela só = imagem no padrão azul-marinho de sempre
       const tabsGrupo = alvos.flatMap(a => [...(a.matches && a.matches('table.data-table') ? [a] : a.querySelectorAll ? a.querySelectorAll('table.data-table') : [])]).filter(t => t.querySelector('tbody tr'));
-      if (modoNovo() && !semPadraoAzul(h.textContent) && tabsGrupo.length === 1 && !alvos.some(a => a.querySelector && a.querySelector('[data-grafico], .leaflet-container'))) {
+      if (modoNovo() && azulCtx(h, h.textContent) && tabsGrupo.length === 1 && !alvos.some(a => a.querySelector && a.querySelector('[data-grafico], .leaflet-container'))) {
         imagemPadraoDaTabela(tabsGrupo[0], textoDoTitulo(h), '', nomeArquivoDe(h.textContent)); return;
       }
       const largura = alvo.clientWidth || 1000;
@@ -12496,7 +12496,7 @@ function ativarBotoesImagem(raiz) {
     if (!h3) return;
     h3.appendChild(criarBotaoImg(() => {
       const tabsP = [...p.querySelectorAll('table.data-table')].filter(t => t.querySelector('tbody tr'));
-      if (modoNovo() && !semAzulCtx(p, h3.textContent) && tabsP.length === 1 && !p.querySelector('[data-grafico], .leaflet-container')) { imagemPadraoDaTabela(tabsP[0], textoDoTitulo(h3), '', nomeArquivoDe(h3.textContent)); return; }
+      if (modoNovo() && azulCtx(p, h3.textContent) && tabsP.length === 1 && !p.querySelector('[data-grafico], .leaflet-container')) { imagemPadraoDaTabela(tabsP[0], textoDoTitulo(h3), '', nomeArquivoDe(h3.textContent)); return; }
       capturarElementoComoImagem(p, nomeArquivoDe(h3.textContent));
     }));
   });
@@ -12527,11 +12527,11 @@ const PALETA_IMG_CLARO  = { fundo: '#ffffff', titulo: '#0d1526', cabFundo: '#e4e
 // Imagem no padrão único do sistema (`baixarTabelaComoImagem`: faixa azul-marinho,
 // cabeçalho branco) a partir de uma tabela da tela — só as linhas visíveis, então
 // respeita o funil das colunas, igual ao Excel. Pedido do cliente 24/09/2026.
-// "Mão de Obra e Produção do Dia" sempre sai com a imagem de antes (captura do visual da tela), nunca no padrão azul-marinho (pedido do cliente, 13/10/2026)
-// tabelas cujo "Gerar imagem" sai como a TELA, não no padrão azul-marinho (pedidos do cliente: Mão de Obra 13/10/2026; Andamento do Prazo por Dia 13/10/2026)
-const semPadraoAzul = t => /M[ãa]o de Obra e Produ[çc][ãa]o do Dia|Andamento do Prazo por Dia/i.test(String(t || ''));
-// o painel de dentro do tópico também segue o tópico (ex.: a tabela do Andamento do Prazo por Dia no modo novo)
-const semAzulCtx = (el, t) => { if (semPadraoAzul(t)) return true; const cx = el && el.closest ? el.closest('.topico-caixa') : null, h = cx ? cx.querySelector(':scope > .section-heading') : null; return !!(h && semPadraoAzul(h.textContent)); };
+// "Gerar imagem" no padrão AZUL-MARINHO só nestas tabelas (13/10/2026, pedido do cliente com a lista): O.S pendentes, Volume total de OS por bairro,
+// Status Detalhado (tipo/cidade/técnico), Serviços do Dia, Retornos do Dia (IFI/IRR) e Prazos do Dia — Detalhado. Todo o resto sai como a TELA (captura).
+// O painel de dentro de um tópico segue o título do tópico (ex.: Relatório do Dia › "Status detalhado" › "Por cidade").
+const comPadraoAzul = t => /O\.?\s?S pendentes|Volume total de OS por bairro|Status Detalhado|Servi[çc]os do Dia|Retornos do Dia|Prazos do Dia/i.test(String(t || ''));
+const azulCtx = (el, t) => { if (comPadraoAzul(t)) return true; const cx = el && el.closest ? el.closest('.topico-caixa') : null, h = cx ? cx.querySelector(':scope > .section-heading') : null; return !!(h && comPadraoAzul(h.textContent)); };
 function imagemPadraoDaTabela(tabela, titulo, subtitulo, nomeArquivo) {
   if (!tabela) return null;
   const cabLinha = [...tabela.querySelectorAll('thead tr')].filter(tr => tr.querySelector('th')).pop();
@@ -13021,6 +13021,8 @@ function htmlAExecutar(aExecutar) {
 function ligarAExecutar(aExecutar, dia) {
   const btnExecImg = document.getElementById('exec-img');
   if (btnExecImg) btnExecImg.addEventListener('click', () => {
+    // modo novo (Analista): o azul-marinho fica só nas tabelas da lista do cliente (comPadraoAzul) — "A Executar" sai como a tela
+    if (modoNovo()) { if (imagemVisualDaTabela(document.getElementById('tab-a-executar'), 'A Executar — por Cidade e Tipo de Serviço · ' + formatDate(dia), 'a-executar-' + dia)) avisoBotao(btnExecImg, `🖼 ${aExecutar.total} O.S`, '🖼 Gerar imagem'); return; }
     const linhasImg = [];
     aExecutar.grupos.forEach(gr => {
       linhasImg.push({ destaque: true, celulas: [gr.cidade, String(gr.concluido), String(gr.pendente), String(gr.total)] });
