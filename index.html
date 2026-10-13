@@ -29053,10 +29053,163 @@ const U2K_ABAS = [
   ['resumo', 'Resumo'], ['sistema', 'Preventiva via sistema'], ['operacional', 'Preventiva operacional'], ['cliente', 'Cliente e monitorar'], ['acomp', 'Acompanhamento OLTs'],
   ['hoje', 'Massivas hoje (por porta)'], ['portas', 'Portas e ONUs'], ['vlan', 'VLAN e perfis'], ['alarmes', 'Alarmes'], ['hist', 'Histórico de falhas'],
 ];
+// ---- BUSCAR ASSINANTE (13/10/2026, pedido do cliente: "coloque em cima um Buscar assinante pelo SN, Alias ou porta" + puxar o nome do cliente do AutoISP) ----
+// Procura nas ONUs importadas (inventário + listas) por SN, nome (alias) ou porta e, em cima de cada ONU achada, junta:
+//  · o que o AutoISP GUARDOU no banco (tabelas monitor_olt_clientes e monitor_olt_base, casando pelo SN curto): nome, contrato, bairro, sinal e data da consulta — o AutoISP está fora do ar, é o que ficou da última coleta;
+//  · o último atendimento da Produção/PCR (pelo contrato do AutoISP; sem ele, pelo nome do alias — aproximado).
+const u2kSnNorm = t => String(t || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+// "48575443A519EAAE(HWTCA519EAAE)" → "HWTCA519EAAE" (o SN curto, como o AutoISP guarda); só os 16 hex → 4 letras do prefixo + 8 últimos
+function u2kSnCurto(sn) {
+  const t = String(sn || ''), par = /\(([A-Za-z0-9]+)\)/.exec(t); if (par) return par[1].toUpperCase();
+  const h = u2kSnNorm(t); if (/^[0-9A-F]{16}$/.test(h)) { const pre = h.slice(0, 8).match(/../g).map(x => String.fromCharCode(parseInt(x, 16))).join(''); if (/^[A-Z]{4}$/.test(pre)) return pre + h.slice(8); }
+  return h;
+}
+const u2kSnLongo = sn => { const m = /^([0-9A-Fa-f]{16})/.exec(String(sn || '').replace(/\(.*$/, '').trim()); return m ? m[1].toUpperCase() : ''; };
+const u2kNomeChave = t => chaveNomeCliente(nomeDaDescricaoOnu(String(t || '').replace(/_/g, ' ')));
+// separa o que foi digitado: porta (0/1/15, 1/15, 0/1/15/20), OLT (san-04, ctl-san-04), contrato (5 a 9 dígitos), SN (hex) e o resto = nome
+function u2kBuscaLocal(q) {
+  const txt = String(q || '').trim(); if (!txt) return { vazio: true, lista: [] };
+  let resto = txt, porta = null, m = /(\d+)\s*\/\s*(\d+)\s*\/\s*(\d+)(?:\s*\/\s*(\d+))?/.exec(resto);
+  if (m) porta = { frame: m[1], slot: m[2], porta: m[3], onu: m[4] || '' };
+  else if ((m = /(?:^|\s)(\d+)\s*\/\s*(\d+)(?=\s|$)/.exec(resto))) porta = { frame: '', slot: m[1], porta: m[2], onu: '' };
+  if (m) resto = resto.replace(m[0], ' ');
+  const olts = [], sns = [], nomes = []; let contrato = '';
+  resto.split(/\s+/).filter(Boolean).forEach(tk => {
+    if (/^[A-Za-z0-9]+(-[A-Za-z0-9]+)+$/.test(tk) && /\d/.test(tk) && /[A-Za-z]/.test(tk)) { olts.push(tk.toUpperCase().split('-')); return; }
+    if (/^\d{5,9}$/.test(tk)) { contrato = tk; return; }
+    const n = u2kSnNorm(tk); if (/\d/.test(n) && /^([0-9A-F]{6,16}|[A-Z]{4}[0-9A-F]{6,8})$/.test(n)) { sns.push(n); return; }
+    nomes.push(tk);
+  });
+  const nk = normalizeHeader, nomesN = nomes.map(t => nk(t.replace(/_/g, ' '))).filter(Boolean);
+  const oltOk = olt => { const partes = String(olt || '').toUpperCase().split('-'); return olts.every(op => op.every(x => partes.some(y => y === x || (/^\d+$/.test(x) && /^\d+$/.test(y) && +x === +y)))); };
+  const criterios = { porta, olts, sns, nomes, contrato };
+  if (!porta && !olts.length && !sns.length && !nomesN.length && !contrato) return { vazio: true, lista: [], criterios };
+  if (!porta && !sns.length && !nomesN.length && !contrato && olts.length) return { vazio: true, lista: [], criterios, dica: 'Só a OLT é pouco: acrescente a porta (1/15), o SN ou o nome.' };
+  let lista = [];
+  if (porta || sns.length || nomesN.length || olts.length) {
+    lista = U2K.onus.filter(o => {
+      if (olts.length && !oltOk(o.olt)) return false;
+      if (porta) { if (String(o.slot) !== porta.slot || String(o.porta) !== porta.porta) return false; if (porta.frame !== '' && String(o.frame || '0') !== porta.frame) return false; if (porta.onu !== '' && String(o.onuId) !== porta.onu) return false; }
+      if (sns.length) { const sn = u2kSnNorm(o.sn); if (!sns.every(x => sn.includes(x))) return false; }
+      if (nomesN.length) { const al = nk(String(o.alias || '').replace(/_/g, ' ')); if (!nomesN.every(x => al.includes(x))) return false; }
+      return true;
+    });
+    if (contrato && !porta && !sns.length && !nomesN.length && !olts.length) lista = [];
+  }
+  return { lista, criterios, nomesN };
+}
+// o que o AutoISP deixou no banco (monitor_olt_clientes = clientes que a JH atende; monitor_olt_base = todos os clientes das OLTs), por SN curto/longo, contrato ou nome
+async function u2kAutoispBusca({ sns = [], contrato = '', nome = '' }) {
+  const saida = { porSn: new Map(), extras: [], aviso: '' };
+  if (!supa) { saida.aviso = 'sem conexão com o banco'; return saida; }
+  const norm = (r, origem) => ({ origem, gpon_id: r.gpon_id || '', serial: u2kSnNorm(r.serial), contrato: r.contrato || '', nome: r.nome || '', estado: r.estado || '', olt: r.olt || '', ponlink: r.ponlink || '', cidade: r.cidade || '', bairro: r.bairro || '', sinal: r.sinal == null ? null : Number(r.sinal), status: r.status || '', acs: r.acs_ultimo_contato || '', checado: r.checado_em || '', refresh: r.refresh_em || '', lat: r.lat == null ? null : Number(r.lat), lng: r.lng == null ? null : Number(r.lng) });
+  const guarda = (r, origem) => { const x = norm(r, origem); if (!x.serial) return; const a = saida.porSn.get(x.serial); if (!a || (origem === 'clientes' && a.origem !== 'clientes')) saida.porSn.set(x.serial, x); return x; };
+  const tabelas = ['monitor_olt_clientes', 'monitor_olt_base'], falhas = [];
+  const rodar = async (consulta) => { for (const t of tabelas) { try { const { data, error } = await consulta(supa.from(t)); if (error) { falhas.push(t + ': ' + String(error.message || '').slice(0, 80)); continue; } (data || []).forEach(r => { const x = guarda(r, t === 'monitor_olt_clientes' ? 'clientes' : 'base'); if (x && (contrato || nome)) saida.extras.push(x); }); } catch (e) { falhas.push(t + ': ' + String((e && e.message) || e).slice(0, 80)); } } };
+  const lista = [...new Set(sns.filter(Boolean))];
+  for (let i = 0; i < lista.length; i += 60) { const parte = lista.slice(i, i + 60); await rodar(q => q.select('*').in('serial', parte)); }
+  if (contrato) await rodar(q => q.select('*').eq('contrato', contrato).limit(20));
+  if (nome) await rodar(q => q.select('*').ilike('nome', '%' + nome.replace(/[%_,()]/g, ' ').trim().split(/\s+/).join('%') + '%').limit(40));
+  if (falhas.length) saida.aviso = 'AutoISP guardado no banco: ' + [...new Set(falhas)].slice(0, 2).join(' · ');
+  return saida;
+}
+// último atendimento (Produção + PCR): por contrato e por nome do cliente
+function u2kIndiceAtend() {
+  const n = (DB.pcr || []).length + (DB.producao || []).length;
+  if (U2K._indAt && U2K._indAtN === n) return U2K._indAt;
+  const porC = new Map(), porN = new Map();
+  const add = (r, nome) => {
+    const dia = String(r.data || '').slice(0, 10); if (!dia) return;
+    const reg = { dia, tipo: r.tipo_atividade || '', tecnico: r.recurso || '', endereco: r.endereco || '', cidade: r.cidade || '', status: r.status || '', contrato: String(r.contrato || '').trim(), nome: nome || '' };
+    const c = reg.contrato; if (/^\d{5,9}$/.test(c)) { const a = porC.get(c) || []; a.push(reg); porC.set(c, a); }
+    const k = u2kNomeChave(nome); if (k) { const a = porN.get(k) || []; a.push(reg); porN.set(k, a); }
+  };
+  (DB.producao || []).forEach(r => add(r, r.nome));
+  (DB.pcr || []).forEach(r => add(r, r.cliente));
+  const ordena = m => m.forEach(a => a.sort((x, y) => y.dia.localeCompare(x.dia)));
+  ordena(porC); ordena(porN);
+  U2K._indAt = { porC, porN }; U2K._indAtN = n;
+  return U2K._indAt;
+}
+function u2kDadosAssinante(o, aut) {
+  const curto = u2kSnCurto(o.sn), longo = u2kSnLongo(o.sn), a = aut.porSn.get(curto) || aut.porSn.get(longo) || null;
+  const ind = u2kIndiceAtend(); let at = [], por = '';
+  const contrato = (a && a.contrato) || '';
+  if (contrato && ind.porC.has(contrato)) { at = ind.porC.get(contrato); por = 'contrato do AutoISP'; }
+  else { const k = u2kNomeChave((a && a.nome) || o.alias); if (k && ind.porN.has(k)) { at = ind.porN.get(k); por = 'nome (aproximado)'; } }
+  return { o, a, at, por, contrato: contrato || (at[0] && at[0].contrato) || '', nome: (a && a.nome) || (u2kAliasVazio(o.alias) ? '' : o.alias) || (at[0] && at[0].nome) || '' };
+}
+function u2kBairroDoEndereco(e) { try { return extrairBairro(e) || ''; } catch (err) { return ''; } }
+function u2kLigarBusca() {
+  const box = document.getElementById('u2-bres'), inp = document.getElementById('u2-bq'); if (!box || !inp) return;
+  let atual = [];
+  const dh = t => t ? new Date(t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  const rotStatus = d => { const o = d.o; return o.status ? `${o.status}${o.motivo ? ' · ' + o.motivo : ''}` : 'sem status'; };
+  const abertos = o => U2K.alarmes.filter(a => !a.limpo && String(a.fonte) === String(o.olt) && String(a.slot) === String(o.slot) && String(a.porta) === String(o.porta) && (String(a.onuId) === String(o.onuId) || a.onuId === ''));
+  const cols = () => [...u2kColsLoc().map(c => ({ ...c, t: c.t === 'SN (referência)' ? 'SN' : c.t, f: d => c.f(d.o) })),
+    { t: 'Cliente', f: d => d.nome, s: 'font-weight:600' }, { t: 'Contrato', f: d => d.contrato }, { t: 'Status agora', f: d => rotStatus(d) },
+    { t: 'Alarmes abertos', f: d => { const n = abertos(d.o).filter(a => a.onuId !== '').length; return n || ''; } },
+    { t: 'VLAN (perfil)', f: d => d.o.vlanPerfil || (d.o.semVlan ? 'sem VLAN' : '') }, { t: 'Modelo', f: d => d.o.tipo },
+    { t: 'Bairro (AutoISP / atend.)', f: d => (d.a && d.a.bairro) || u2kBairroDoEndereco(d.at[0] && d.at[0].endereco) || '' },
+    { t: 'Cidade', f: d => (d.a && d.a.cidade) || (d.at[0] && d.at[0].cidade) || u2kRotCidade(d.o.cidade) || '' },
+    { t: 'Sinal (AutoISP)', f: d => d.a && d.a.sinal != null ? `${d.a.sinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} dBm · ${MO_ROTULO_STATUS[d.a.status] || d.a.status || ''}` : '' },
+    { t: 'AutoISP lido em', f: d => d.a ? dh(d.a.refresh || d.a.checado) : '' },
+    { t: 'Último atendimento', f: d => d.at[0] ? `${formatDate(d.at[0].dia)} · ${d.at[0].tipo || ''}${d.at[0].tecnico ? ' · ' + d.at[0].tecnico : ''}` : '' },
+    { t: '', h: d => `<a href="#" class="u2-ver" data-i="${atual.indexOf(d)}">detalhe</a>`, x: () => '' }];
+  const detalhe = d => {
+    const o = d.o, a = d.a, alm = U2K.alarmes.filter(x => String(x.fonte) === String(o.olt) && String(x.slot) === String(o.slot) && String(x.porta) === String(o.porta) && (String(x.onuId) === String(o.onuId))).sort((x, y) => String(y.ultimo).localeCompare(String(x.ultimo))).slice(0, 15);
+    const hist = U2K.hist.filter(h => String(h.olt) === String(o.olt) && String(h.slot) === String(o.slot) && String(h.porta) === String(o.porta) && String(h.onu_id) === String(o.onuId)).sort((x, y) => String(y.dia).localeCompare(String(x.dia))).slice(0, 10);
+    const linha = (r, v) => v === '' || v == null ? '' : `<div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--border);font-size:13px"><span style="min-width:150px;color:var(--text-muted)">${esc(r)}</span><span style="font-weight:600;word-break:break-word">${esc(String(v))}</span></div>`;
+    const wan = (o.wan || []).filter(w => w.ip || w.vlan).map(w => `${w.servico || 'WAN'}: ${w.ip || '-'}${w.vlan ? ' · VLAN ' + w.vlan : ''}`).join(' | ');
+    const bloco = (tit, corpo) => `<div class="panel" style="flex:1;min-width:280px"><h3 style="margin-top:0">${tit}</h3>${corpo || '<div class="empty">Sem dados.</div>'}</div>`;
+    const tabMini = (cab, linhas) => linhas.length ? `<div class="table-wrap" style="max-height:260px;overflow:auto"><table class="data-table"><thead><tr>${cab.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${linhas.map(l => `<tr>${l.map(c => `<td>${esc(String(c == null ? '' : c))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '';
+    const link = a && a.gpon_id ? `<p style="margin:8px 0 0;font-size:12px"><a href="https://auto.alloha.com/gpon_clients/${encodeURIComponent(a.gpon_id)}" target="_blank" rel="noopener">Abrir no AutoISP ↗</a> (quando voltar a funcionar)</p>` : '';
+    return `<div style="display:flex;flex-wrap:wrap;gap:12px;margin:12px 0">
+      ${bloco('ONU no U2000', linha('OLT', o.olt) + linha('Local (Frame/Slot/Porta · ONU ID)', `${o.frame || '0'}/${o.slot}/${o.porta} · ONU ${o.onuId}`) + linha('SN', o.sn) + linha('Nome na OLT (alias)', o.alias) + linha('Modelo', o.tipo) + linha('Status agora', rotStatus(d)) + linha('Config / operação', [o.configStatus, o.operStatus].filter(Boolean).join(' / ')) + linha('Perfil de linha', o.perfilLinha) + linha('Perfil de serviço', o.perfilServico) + linha('VLAN (perfil)', o.vlanPerfil || (o.semVlan ? 'sem VLAN' : '')) + linha('Bairros dessa VLAN (lista)', (o.bairrosVlan || []).slice(0, 12).join(', ')) + linha('WAN', wan) + linha('Sinal Rx (U2000)', o.rx == null ? '' : o.rx.toLocaleString('pt-BR') + ' dBm'))}
+      ${bloco('Cliente (AutoISP guardado no banco)', a ? linha('Nome', a.nome) + linha('Contrato', a.contrato) + linha('Situação do cadastro', a.estado) + linha('Cidade / bairro', [a.cidade, a.bairro].filter(Boolean).join(' / ')) + linha('OLT / PON (AutoISP)', [a.olt, a.ponlink].filter(Boolean).join(' · ')) + linha('Sinal', a.sinal == null ? '' : `${a.sinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} dBm · ${MO_ROTULO_STATUS[a.status] || a.status || ''}`) + linha('Último contato do equipamento', dh(a.acs)) + linha('Lido em', dh(a.refresh || a.checado)) + linha('Coordenada', a.lat != null && a.lng != null ? `${a.lat}, ${a.lng}` : '') + link : `<div class="empty">Este SN não está nos dados que o AutoISP deixou no banco.</div>`)}
+      ${bloco('Último atendimento (Produção / PCR)' + (d.por ? ` <span style="font-size:11.5px;font-weight:500;color:var(--text-muted)">por ${esc(d.por)}</span>` : ''), tabMini(['Data', 'Serviço', 'Técnico', 'Status', 'Endereço'], d.at.slice(0, 8).map(r => [formatDate(r.dia), r.tipo, r.tecnico, r.status, r.endereco])))}
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px">
+      ${bloco('Alarmes desta ONU', tabMini(['Gravidade', 'Alarme', 'Primeiro', 'Último', 'Vezes', 'Limpo em'], alm.map(x => [x.severidade, x.categoria || x.nome, u2kFmtData(x.primeiro), u2kFmtData(x.ultimo), x.vezes, x.limpo ? u2kFmtData(x.limpo) : 'aberto'])))}
+      ${bloco('Histórico por dia (U2000)', tabMini(['Dia', 'LOS', 'Sem energia', 'Sinal', 'Enlace', 'Outros'], hist.map(h => [h.dia, h.los, h.energia, h.sinal, h.enlace, h.outros])))}
+    </div>`;
+  };
+  const buscar = async () => {
+    const q = inp.value; const loc = u2kBuscaLocal(q);
+    if (!U2K.onus.length) { box.innerHTML = '<div class="empty">Importe o inventário (All GPON ONU) ou uma lista GPON primeiro.</div>'; return; }
+    if (loc.vazio) { box.innerHTML = `<div class="empty">${esc(loc.dica || 'Digite o SN, o nome do cliente ou a porta (0/1/15 · SAN-04 1/15 · 0/1/15/20).')}</div>`; return; }
+    box.innerHTML = '<div class="empty">Buscando…</div>';
+    const c = loc.criterios; let lista = loc.lista, aut0 = { porSn: new Map(), extras: [], aviso: '' };
+    const soNomeOuContrato = !c.porta && !c.olts.length && !c.sns.length;
+    if (soNomeOuContrato && (c.nomes.length || c.contrato)) {
+      aut0 = await u2kAutoispBusca({ contrato: c.contrato, nome: c.nomes.join(' ') });
+      if (aut0.extras.length) { const set = new Set(aut0.extras.map(x => x.serial)), ja = new Set(lista.map(o => o._k)); U2K.onus.forEach(o => { if (!ja.has(o._k) && (set.has(u2kSnNorm(u2kSnCurto(o.sn))) || set.has(u2kSnNorm(u2kSnLongo(o.sn))))) lista.push(o); }); }
+    }
+    const total = lista.length; lista = lista.slice(0, 300);
+    const falta = lista.flatMap(o => [u2kSnNorm(u2kSnCurto(o.sn)), u2kSnNorm(u2kSnLongo(o.sn))]).filter(x => x && !aut0.porSn.has(x));
+    const aut = falta.length ? await u2kAutoispBusca({ sns: falta }) : { porSn: new Map(), extras: [], aviso: '' };
+    aut0.porSn.forEach((v, k) => aut.porSn.set(k, v)); if (!aut.aviso) aut.aviso = aut0.aviso;
+    atual = lista.map(o => u2kDadosAssinante(o, aut));
+    if (!atual.length) { box.innerHTML = `<div class="empty">Nenhuma ONU encontrada para "${esc(q)}".</div>${aut.aviso ? `<p style="font-size:12px;color:var(--text-muted)">${esc(aut.aviso)}</p>` : ''}`; return; }
+    const comNome = atual.filter(d => d.a).length;
+    box.innerHTML = `<p style="font-size:12.5px;color:var(--text-muted);margin:0 0 8px">${total.toLocaleString('pt-BR')} ONU(s) achada(s)${total > atual.length ? ` (mostrando ${atual.length})` : ''} · ${comNome} com dados do AutoISP guardados no banco${aut.aviso ? ' · ' + esc(aut.aviso) : ''}. <button type="button" class="btn-export-xls" id="u2-bxls">⤓ Excel</button></p>${u2kTab('u2-bt', cols(), atual, 300)}<div id="u2-bdet"></div>`;
+    ativarFiltrosDeColuna(box);
+    document.getElementById('u2-bxls').onclick = () => { const cs = cols().filter(x => x.t); exportarQuadroPresenca('u2000-assinantes-' + hojeISOLocal(), cs.map(x => x.t), atual.map(d => cs.map(x => x.x ? x.x(d) : x.f ? x.f(d) : '')), 'U2000'); };
+    if (atual.length <= 3) { document.getElementById('u2-bdet').innerHTML = detalhe(atual[0]); }
+  };
+  document.getElementById('u2-bgo').addEventListener('click', buscar);
+  inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); buscar(); } });
+  box.addEventListener('click', ev => { const a = ev.target.closest('.u2-ver'); if (!a) return; ev.preventDefault(); const d = atual[Number(a.dataset.i)]; if (!d) return; const det = document.getElementById('u2-bdet'); det.innerHTML = detalhe(d); det.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
+}
 function renderU2000() {
   try { if (!U2K.onus.length && !U2K.alarmes.length) { const s = JSON.parse(localStorage.getItem('jh_u2000_v1') || 'null'); if (s) { U2K.onus = s.onus || []; U2K.alarmes = s.alarmes || []; U2K.arquivos = s.arquivos || []; U2K.meta = s.meta || null; u2kConsolidar(); } } } catch (e) { /* sem cache */ }
   U2K.eventos = U2K.eventos || [];
   document.getElementById('content').innerHTML = `
+    <div class="panel" id="u2-busca" style="margin-bottom:1rem">
+      <h3>🔎 Buscar assinante <span style="font-size:12px;font-weight:500;color:var(--text-muted)">pelo SN, pelo nome (alias) ou pela porta</span></h3>
+      <div class="toolbar" style="margin:0;box-shadow:none"><div class="field" style="flex:1;min-width:280px"><label>Buscar</label><input type="text" id="u2-bq" autocomplete="off" placeholder="SN (HWTCA519EAAE) · nome do cliente · porta (0/1/15 · SAN-04 1/15 · 0/1/15/20) · contrato"></div><button class="btn" type="button" id="u2-bgo">Buscar</button></div>
+      <div id="u2-bres" style="margin-top:10px"></div>
+    </div>
     <div class="panel" style="margin-bottom:1rem">
       <h3>🛰 U2000 — OLTs e ONUs da Huawei <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(só do Analista)</span></h3>
       <p style="font-size:13px;color:var(--text-secondary);margin:0 0 10px;line-height:1.55">Arraste aqui o que o U2000 <b>exporta</b> (<b>Save As…</b>): os <b>alarmes</b> (Fault → Browse Current Alarm, filtro <i>Previous: 2 Days</i>) e a <b>lista GPON ONU</b> de cada OLT (aba da OLT → GPON → GPON Management → GPON ONU → All → Find). Reimportar não duplica: cada ONU é guardada pela OLT + frame + slot + porta + ONU ID (e SN), e o histórico por dia fica no banco.</p>
@@ -29064,6 +29217,7 @@ function renderU2000() {
         <button type="button" class="btn-export-xls" id="u2-limpar">🗑 Limpar dados desta aba</button><span id="u2-msg" style="font-size:12.5px;color:var(--text-muted);align-self:center"></span></div>
     </div>
     <div id="u2-corpo"></div>`;
+  u2kLigarBusca();
   document.getElementById('u2-file').addEventListener('change', async ev => {
     const msg = document.getElementById('u2-msg'); const arqs = [...ev.target.files]; if (!arqs.length) return;
     msg.textContent = 'Lendo…'; let tot = 0;
