@@ -28339,7 +28339,8 @@ async function u2kLerArquivo(file) {
   const saida = []; saida.meta = { alarmesLidos: 0, ignorados: 0 };
   for (const linhas of planilhas) {
     const tit = linhas.slice(0, 30).map(l => String(l[0] == null ? '' : l[0])).find(t => /GPON ONU Report/i.test(t));
-    const oltTitulo = tit ? tit.replace(/\s*GPON ONU Report.*$/i, '').replace(/-MA\d+[\w-]*$/i, '').trim() : '';
+    let oltTitulo = tit ? tit.replace(/\s*GPON ONU Report.*$/i, '').replace(/-MA\d+[\w-]*$/i, '').trim() : '';
+    if (/^all$/i.test(oltTitulo)) oltTitulo = '';   // "All GPON ONU Report" = inventário de todas as OLTs (a OLT vem na coluna Device Name), não a lista de uma OLT
     for (let i = 0; i < Math.min(linhas.length, 30); i++) {
       const cab = linhas[i].map(u2kNorm);
       if (cab.filter(Boolean).length < 3) continue;
@@ -28382,6 +28383,8 @@ function u2kJuntar(linhas, nomeArquivo) {
   // a lista GPON é uma foto da OLT: a nova substitui a anterior da mesma OLT (ONU que saiu da OLT não fica pra trás)
   const oltsLista = new Set(linhas.filter(r => !r.alarme && (r.lista || r.deLista)).map(r => r.olt));   // a lista completa (com SN/slot) também substitui a lista simples antiga da OLT
   if (oltsLista.size) { U2K.onus = U2K.onus.filter(o => !(String(o._k).startsWith('lst:') && oltsLista.has(o.olt))); U2K._apagarLst = [...(U2K._apagarLst || []), ...oltsLista]; }
+  const oltsSimples = new Set(linhas.filter(r => !r.alarme && r.lista).map(r => r.olt));
+  if (oltsSimples.size) U2K.onus.forEach(o => { if (oltsSimples.has(o.olt) && !String(o._k).startsWith('lst:') && (o.status || o.motivo)) { o.status = ''; o.motivo = ''; U2K._tocadas.add(o._k); } });
   const idx = new Map(), idxLoc = new Map();
   U2K.onus.forEach((o, i) => { idx.set(o._k, i); if (o.olt && o.onuId !== '' && o.slot) idxLoc.set(locDe(o), i); });
   linhas.forEach(r => {
@@ -28390,9 +28393,11 @@ function u2kJuntar(linhas, nomeArquivo) {
     let i = idx.get(r._k);
     if (i === undefined && r.olt && r.onuId !== '' && r.slot) i = idxLoc.get(locDe(r));
     if (i === undefined) { r.wan = (r.ip || r.vlan || r.servico) ? [{ servico: r.servico, vlan: r.vlan, ip: r.ip, ipStatus: r.ipStatus }] : []; idx.set(r._k, U2K.onus.length); if (r.olt && r.onuId !== '' && r.slot) idxLoc.set(locDe(r), U2K.onus.length); U2K._tocadas.add(r._k); U2K.onus.push(r); novosOnu++; return; }
-    const o = U2K.onus[i]; ['olt', 'frame', 'slot', 'porta', 'onuId', 'alias', 'sn', 'status', 'tipo', 'perfilLinha', 'perfilServico', 'perfilVas', 'configStatus', 'operStatus'].forEach(k => { if (r[k]) o[k] = r[k]; }); if (r.status) o.motivo = r.motivo || '';
+    const o = U2K.onus[i], manterLocal = !r.status && !!o.status && !!o.olt && !!r.olt && o.olt !== r.olt;
+    ['olt', 'frame', 'slot', 'porta', 'onuId', 'alias', 'sn', 'status', 'tipo', 'perfilLinha', 'perfilServico', 'perfilVas', 'configStatus', 'operStatus'].forEach(k => { if (r[k] && !(manterLocal && ['olt', 'frame', 'slot', 'porta', 'onuId'].includes(k))) o[k] = r[k]; }); if (r.status) o.motivo = r.motivo || '';
     if (r.rx != null) o.rx = r.rx; if (r.tx != null) o.tx = r.tx;
     if (r.ip || r.vlan || r.servico) { o.wan = (o.wan || []).filter(x => !(x.servico === r.servico && x.vlan === r.vlan)); o.wan.push({ servico: r.servico, vlan: r.vlan, ip: r.ip, ipStatus: r.ipStatus }); }
+    if (String(o._k).startsWith('lst:') && o.sn) { const novaK = u2kChave(o); if (!idx.has(novaK)) { idx.delete(o._k); o._k = novaK; idx.set(novaK, i); U2K._apagarLst = [...new Set([...(U2K._apagarLst || []), o.olt])]; } }
     U2K._tocadas.add(o._k);
   });
   // a lista de alarmes é uma FOTO do momento: o arquivo novo substitui a anterior
@@ -28407,7 +28412,7 @@ function u2kJuntar(linhas, nomeArquivo) {
   if (oltsLista.size) { u2kInferirPortas(); U2K._snapNovos = (U2K._snapNovos || []).concat(u2kSnapshotsPortas(oltsLista)); }
   U2K.arquivos.unshift({ nome: nomeArquivo, quando: new Date().toISOString(), onus: novosOnu, alarmes: novosAlm });
   u2kConsolidar();
-  try { localStorage.setItem('jh_u2000_v1', JSON.stringify({ onus: U2K.onus, alarmes: U2K.alarmes.slice(0, 3000), arquivos: U2K.arquivos.slice(0, 20), meta: U2K.meta || null })); } catch (e) { /* cheio: fica só na sessão */ }
+  try { if (U2K.onus.length > 20000) { localStorage.removeItem('jh_u2000_v1'); return; } localStorage.setItem('jh_u2000_v1', JSON.stringify({ onus: U2K.onus, alarmes: U2K.alarmes.slice(0, 3000), arquivos: U2K.arquivos.slice(0, 20), meta: U2K.meta || null })); } catch (e) { /* cheio: fica só na sessão */ }
 }
 // cada ONU pode ter várias linhas de WAN (VOIP, TR069/Internet…): fica a de Internet com IP; sem WAN lida = "não lido"
 // cidade da OLT pelo nome (NIU-CTL-SAN-… = Santos, …-GRJ-… = Guarujá, …-SVC-… = São Vicente) e bairros da lista de VLANs que usam aquela VLAN naquela cidade
@@ -28430,8 +28435,14 @@ function u2kInferirPortas() {
     const g = o.grp != null ? Number(o.grp) : Number(String(o._k).split('|')[1]), k = nk(o.olt);
     if (!grupos.has(k)) grupos.set(k, { olt: o.olt, g: new Map() }); const e = grupos.get(k); if (!e.g.has(g)) e.g.set(g, []); e.g.get(g).push(o);
   });
-  if (!grupos.size || !U2K.alarmes.length) return;
+  if (!grupos.size) return;
   const porOlt = new Map();
+  // inventário (arquivo "All GPON ONU"): ONUs com porta real e o mesmo ONU ID + alias da lista simples
+  U2K.onus.forEach(o => {
+    if (String(o._k).startsWith('lst:') || o.slot === '' || o.slot == null || o.onuId === '' || !o.alias || /^-+$/.test(o.alias)) return;
+    const k = nk(o.olt); if (!grupos.has(k)) return; if (!porOlt.has(k)) porOlt.set(k, new Map());
+    const ch = String(o.onuId) + '|' + nk(o.alias), m = porOlt.get(k); if (!m.has(ch)) m.set(ch, new Map()); m.get(ch).set(`${o.frame || 0}|${o.slot}|${o.porta}`, 1);
+  });
   U2K.alarmes.forEach(a => {
     if (a.onuId === '' || a.onuId == null || a.slot === '' || a.slot == null || !a.alias || /^-+$/.test(a.alias)) return;
     const k = nk(a.fonte); if (!grupos.has(k)) return; if (!porOlt.has(k)) porOlt.set(k, new Map());
@@ -28457,8 +28468,26 @@ function u2kInferirPortas() {
     U2K.inferidas.push({ olt: e.olt, grupos: ordem.length, mapeados: porGrupo.size, ancoras: seq.length, onus: [...e.g.values()].reduce((t, l) => t + l.length, 0), onusOk });
   });
 }
+// lista simples (MA5800: Status / ONU ID / Alias) + inventário (porta, SN): depois de achar a porta, o status vai pra ONU do inventário e a linha da lista simples sai (senão a ONU contaria 2 vezes)
+function u2kFundirListasSimples() {
+  const nk = normalizeHeader, porLoc = new Map(), total = new Map(), fundidas = new Map();
+  U2K.onus.forEach(o => { if (String(o._k).startsWith('lst:') || o.slot === '' || o.slot == null || o.onuId === '') return; porLoc.set(`${nk(o.olt)}|${o.frame}/${o.slot}/${o.porta}|${o.onuId}`, o); });
+  if (!porLoc.size) return;
+  U2K.onus.forEach(o => { if (String(o._k).startsWith('lst:')) total.set(o.olt, (total.get(o.olt) || 0) + 1); });
+  const resto = [];
+  U2K.onus.forEach(o => {
+    if (!String(o._k).startsWith('lst:') || o.slot === '' || o.slot == null) { resto.push(o); return; }
+    const d = porLoc.get(`${nk(o.olt)}|${o.frame}/${o.slot}/${o.porta}|${o.onuId}`); if (!d) { resto.push(o); return; }
+    d.status = o.status; d.motivo = o.motivo || ''; if (!d.alias || /^-+$/.test(d.alias)) d.alias = o.alias;
+    (U2K._tocadas = U2K._tocadas || new Set()).add(d._k); fundidas.set(o.olt, (fundidas.get(o.olt) || 0) + 1);
+  });
+  if (resto.length === U2K.onus.length) return;
+  U2K.onus = resto;
+  fundidas.forEach((n, olt) => { U2K._apagarLst = [...new Set([...(U2K._apagarLst || []), olt])]; });
+}
 function u2kConsolidar() {
   u2kInferirPortas();
+  u2kFundirListasSimples();
   U2K.onus.forEach(o => {
     const w = o.wan || [], web = w.find(x => /internet|tr069/i.test(x.servico) && x.ip && /\d/.test(x.ip)) || w.find(x => x.ip && /\d+\.\d+/.test(x.ip));
     o.ipFinal = web ? web.ip : ''; o.vlanFinal = web ? web.vlan : (w[0] ? w[0].vlan : '');
@@ -28479,10 +28508,12 @@ async function u2kSalvarNoBanco() {
   if (!supa) return { ok: false, motivo: 'sem conexão com o banco' };
   const quem = currentUser ? (currentUser.nome || currentUser.login || '') : '';
   try {
+    // apagar as linhas 'lst:' da OLT no banco: as que continuam na memória (grupo sem porta achada) são regravadas logo abaixo
+    (U2K._apagarLst || []).forEach(olt => U2K.onus.forEach(o => { if (String(o._k).startsWith('lst:' + olt + '|')) (U2K._tocadas = U2K._tocadas || new Set()).add(o._k); }));
     for (const olt of (U2K._apagarLst || [])) { const d = await supa.from('u2000_onus').delete().like('chave', 'lst:' + olt + '|%'); if (d.error) return { ok: false, motivo: d.error.message }; }
     U2K._apagarLst = [];
     const chaves = [...(U2K._tocadas || [])], porChave = new Map(U2K.onus.map(o => [o._k, o]));
-    const linhas = chaves.map(k => porChave.get(k)).filter(Boolean).map(o => ({ chave: o._k, olt: o.olt || '', frame: o.frame || '', slot: o.slot || '', porta: o.porta || '', onu_id: o.onuId || '', alias: o.alias || '', sn: o.sn || '',
+    const linhas = [...new Set(chaves)].map(k => porChave.get(k)).filter(Boolean).map(o => ({ chave: o._k, olt: o.olt || '', frame: o.frame || '', slot: o.slot || '', porta: o.porta || '', onu_id: o.onuId || '', alias: o.alias || '', sn: o.sn || '',
       status: o.status || '', rx: o.rx, tx: o.tx, vlan: o.vlanFinal || '', ip: o.ipFinal || '', classe_ip: o.classeIp || '', grupo_rx: o.grupoRx || '', wan: o.wan || [], tipo: o.tipo || '', motivo: o.motivo || '', perfil_linha: o.perfilLinha || '', perfil_servico: o.perfilServico || '', perfil_vas: o.perfilVas || '', config_status: o.configStatus || '', oper_status: o.operStatus || '', importado_em: new Date().toISOString(), importado_por: quem }));
     for (let i = 0; i < linhas.length; i += 500) {
       const { error } = await supa.from('u2000_onus').upsert(linhas.slice(i, i + 500), { onConflict: 'chave' });
@@ -28508,7 +28539,7 @@ async function u2kCarregarDoBanco() {
   if (!supa || U2K._doBanco) return U2K._doBanco ? { ok: true } : { ok: false };
   try {
     const onus = [], alm = [];
-    for (let ini = 0; ini < 40000; ini += 1000) {
+    for (let ini = 0; ini < 150000; ini += 1000) {
       const { data, error } = await supa.from('u2000_onus').select('*').order('chave').range(ini, ini + 999);
       if (error) return { ok: false, motivo: /does not exist|schema cache|PGRST205|42P01/i.test(String(error.message || '')) ? 'tabela' : error.message };
       onus.push(...(data || [])); if (!data || data.length < 1000) break;
@@ -28608,6 +28639,7 @@ async function u2kSalvarEventos() {
     linhas.push(reg); U2K.eventos = U2K.eventos.filter(e => !(e.olt === reg.olt && e.tipo === reg.tipo && e.ini === reg.ini)); U2K.eventos.push(reg);
   });
   U2K._eventosNovos = [];
+  linhas.splice(0, linhas.length, ...new Map(linhas.map(r => [r.olt + '|' + r.tipo + '|' + r.ini, r])).values());   // uma linha por chave (a última tem mais ONUs)
   for (let i = 0; i < linhas.length; i += 300) {
     const { error } = await supa.from('u2000_eventos').upsert(linhas.slice(i, i + 300).map(e => ({ olt: e.olt, tipo: e.tipo, ini: e.ini, fim: e.fim, escopo: e.escopo, onus: e.onus, portas: e.portas, abertas: e.abertas, onde: e.onde, leitura: e.leitura, frame: String(e.frame), slot: String(e.slot), porta: String(e.porta), onu_ref: String(e.onuId), sn_ref: e.sn || '', importado_por: quem })), { onConflict: 'olt,tipo,ini' });
     if (error) return { ok: false, motivo: /does not exist|schema cache|PGRST205|42P01/i.test(String(error.message || '')) ? 'rode o sql/PASSO-52-u2000.sql no Supabase (tabela u2000_eventos)' : error.message };
@@ -28704,7 +28736,7 @@ function u2kMesclaHist(base, novos, marcar) {
 }
 async function u2kSalvarHist() {
   if (!supa) return { ok: true, n: 0 };
-  const m = new Map(U2K.hist.map(h => [u2kChaveHist(h), h])), linhas = [...U2K._histTocadas].map(k => m.get(k)).filter(Boolean);
+  const m = new Map(U2K.hist.map(h => [u2kChaveHist(h), h])), linhas = [...new Set(U2K._histTocadas)].map(k => m.get(k)).filter(Boolean);
   if (!linhas.length) return { ok: true, n: 0 };
   const quem = currentUser ? (currentUser.nome || currentUser.login || '') : '';
   for (let i = 0; i < linhas.length; i += 500) {
@@ -28825,7 +28857,7 @@ function u2kDiagnostico(onus, alm) {
   });
   // porta PON em que 50% ou mais das ONUs (pelo menos 5) estão offline agora, pelo status da lista GPON
   const porPortaOnu = new Map(); onus.forEach(o => { if (o.slot === '' || o.slot == null) return; const k = `${nk(o.olt)}|${o.frame}/${o.slot}/${o.porta}`; if (!porPortaOnu.has(k)) porPortaOnu.set(k, []); porPortaOnu.get(k).push(o); });
-  porPortaOnu.forEach(g => { const off = g.filter(o => o.status === 'Offline'); if (g.length < 5 || off.length / g.length < 0.5) return; const o0 = g[0], en = off.filter(o => o.motivo === 'sem energia').length, fb = off.filter(o => o.motivo === 'fibra').length;
+  porPortaOnu.forEach(gAll => { const g = gAll.filter(o => o.status), off = g.filter(o => o.status === 'Offline'); if (g.length < 5 || off.length / g.length < 0.5) return; const o0 = g[0], en = off.filter(o => o.motivo === 'sem energia').length, fb = off.filter(o => o.motivo === 'fibra').length;
     linhas.push({ olt: o0.olt, frame: o0.frame, slot: o0.slot, porta: o0.porta, onuId: off[0].onuId, alias: '(porta PON)', sn: off[0].sn || '', vlan: '', perfil: '', status: '', motivo: '', n: 0, abertos: 0, cats: {}, catsAb: {}, ultimo: '', desde: '', razao: '', diag: 'ponoff',
       extra: `${off.length} de ${g.length} ONUs offline (${en} sem energia · ${fb} fibra · ${off.length - en - fb} outro motivo) — ONU/SN de referência: uma das offline` }); });
   olts.forEach(e => { if (e.abertos) linhas.push({ olt: e.olt, frame: '', slot: '', porta: '', onuId: '', alias: '(OLT)', sn: '', vlan: '', perfil: '', status: '', motivo: '', n: e.n, abertos: e.abertos, cats: e.cats, catsAb: e.catsAb, ultimo: e.ultimo, desde: e.desde, razao: e.razao, diag: 'olt' }); });
@@ -28835,11 +28867,11 @@ function u2kDiagnostico(onus, alm) {
 // inventário por porta: quantos ONU IDs há em cada porta (pela lista GPON), quantos online/offline, e o que há de alarme
 function u2kInventarioPortas(onus, alm) {
   const nk = normalizeHeader, m = new Map();
-  const novo = (o, temLista) => ({ olt: o.olt, frame: o.frame, slot: o.slot, porta: o.porta, ids: new Set(), online: 0, offEnergia: 0, offFibra: 0, offOutro: 0, desativada: 0, semVlan: 0, vlanDiv: 0, offIds: [], onuId: '', sn: '', alarmesIds: new Set(), abertosIds: new Set(), sinalIds: new Set(), portaAlarme: '', temLista });
+  const novo = (o, temLista) => ({ olt: o.olt, frame: o.frame, slot: o.slot, porta: o.porta, ids: new Set(), online: 0, offEnergia: 0, offFibra: 0, offOutro: 0, desativada: 0, semVlan: 0, vlanDiv: 0, comStatus: 0, offIds: [], onuId: '', sn: '', alarmesIds: new Set(), abertosIds: new Set(), sinalIds: new Set(), portaAlarme: '', temLista });
   onus.forEach(o => {
     if (o.slot === '' || o.slot == null) return;
     const k = `${nk(o.olt)}|${o.frame}/${o.slot}/${o.porta}`; let e = m.get(k); if (!e) { e = novo(o, true); m.set(k, e); }
-    e.ids.add(o.onuId); if (o.semVlan) e.semVlan++; if (o.vlanDiv) e.vlanDiv++;
+    e.ids.add(o.onuId); if (o.semVlan) e.semVlan++; if (o.vlanDiv) e.vlanDiv++; if (o.status) e.comStatus++;
     if (o.status === 'Online') e.online++; else if (o.status === 'Desativada') e.desativada++;
     else if (o.status === 'Offline') { if (o.motivo === 'sem energia') e.offEnergia++; else if (o.motivo === 'fibra') e.offFibra++; else e.offOutro++; e.offIds.push(Number(o.onuId)); if (!e.onuId) { e.onuId = o.onuId; e.sn = o.sn; } }
     if (!e.onuId && !e.sn) { e.refPrimeira = e.refPrimeira || { id: o.onuId, sn: o.sn }; }
@@ -28856,7 +28888,7 @@ function u2kInventarioPortas(onus, alm) {
   lista.forEach(e => {
     if (!e.onuId && e.refPrimeira) { e.onuId = e.refPrimeira.id; e.sn = e.refPrimeira.sn; }
     e.total = e.temLista ? e.ids.size : null; e.offline = e.offEnergia + e.offFibra + e.offOutro; e.idsOff = e.offIds.sort((x, y) => x - y).slice(0, 24).join(', ') + (e.offIds.length > 24 ? ` … (+${e.offIds.length - 24})` : '');
-    e.pctOnline = e.total ? e.online / e.total * 100 : null;
+    e.pctOnline = e.comStatus ? e.online / e.comStatus * 100 : null; e.temStatus = e.comStatus > 0;
   });
   return lista.sort((x, y) => String(x.olt).localeCompare(String(y.olt)) || Number(x.slot) - Number(y.slot) || Number(x.porta) - Number(y.porta));
 }
@@ -28921,6 +28953,7 @@ async function u2kSalvarEventosPorta() {
     linhas.push(reg); U2K.eventosPorta = U2K.eventosPorta.filter(e => !(e.olt === reg.olt && String(e.slot) === String(reg.slot) && String(e.porta) === String(reg.porta) && e.tipo === reg.tipo && e.ini === reg.ini)); U2K.eventosPorta.push(reg);
   });
   U2K._eventosPortaNovos = [];
+  linhas.splice(0, linhas.length, ...new Map(linhas.map(r => [[r.olt, String(r.frame || '0'), r.slot, r.porta, r.tipo, r.ini].join('|'), r])).values());   // uma linha por chave
   for (let i = 0; i < linhas.length; i += 300) {
     const { error } = await supa.from('u2000_eventos_porta').upsert(linhas.slice(i, i + 300).map(e => ({ olt: e.olt, frame: String(e.frame || '0'), slot: String(e.slot), porta: String(e.porta), tipo: e.tipo, ini: e.ini, fim: e.fim, onus: e.onus, total: e.total || 0, pct: e.pct == null ? null : Math.round(e.pct * 10) / 10, abertas: e.abertas, ids: e.ids, onu_ref: String(e.onuId || ''), sn_ref: e.sn || '', importado_por: quem })), { onConflict: 'olt,frame,slot,porta,tipo,ini' });
     if (error) return { ok: false, motivo: /does not exist|schema cache|PGRST205|42P01/i.test(String(error.message || '')) ? 'rode o sql/PASSO-52-u2000.sql no Supabase (tabela u2000_eventos_porta)' : error.message };
@@ -28949,6 +28982,7 @@ function u2kSnapshotsPortas(olts) {
 async function u2kSalvarSnapshots() {
   const novos = U2K._snapNovos || []; if (!supa || !novos.length) return { ok: true };
   const quem = currentUser ? (currentUser.nome || currentUser.login || '') : ''; U2K._snapNovos = [];
+  novos.splice(0, novos.length, ...new Map(novos.map(r => [[r.snap, r.olt, r.frame, r.slot, r.porta].join('|'), r])).values());
   for (let i = 0; i < novos.length; i += 500) {
     const { error } = await supa.from('u2000_portas_hist').upsert(novos.slice(i, i + 500).map(e => ({ ...e, slot: String(e.slot), porta: String(e.porta), importado_por: quem })), { onConflict: 'snap,olt,frame,slot,porta' });
     if (error) return { ok: false, motivo: /does not exist|schema cache|PGRST205|42P01/i.test(String(error.message || '')) ? 'rode o sql/PASSO-52-u2000.sql no Supabase (tabela u2000_portas_hist)' : error.message };
@@ -28995,7 +29029,7 @@ function u2kVisao(el, cfg) {
     ${(cfg.controles || []).map(c => sel('c-' + c.id, c.rot, c.opcoes, est[c.id])).join('')}
     ${filtros.map(f => sel('f-' + f.id, f.rot, f.opcoes, est['f-' + f.id] || '', f.todos || 'Todos')).join('')}
     <div class="field"><label>Buscar</label><input type="text" id="${pre}-q" placeholder="cliente, SN, OLT…" autocomplete="off" value="${esc(est.q || '')}"></div>
-    ${sel('lim', 'Mostrar', [['1000', '1.000'], ['3000', '3.000'], ['10000', '10.000'], ['0', 'Todas']], est.lim || '10000')}
+    ${sel('lim', 'Mostrar', [['1000', '1.000'], ['3000', '3.000'], ['10000', '10.000'], ['0', 'Todas']], est.lim || (base0.length > 3000 ? '3000' : '10000'))}
     <button type="button" class="btn-export-xls" id="${pre}-xls">⤓ Excel (todas as filtradas)</button><span id="${pre}-cont" style="font-size:12px;color:var(--text-muted);align-self:center"></span></div>
     ${cfg.chips ? `<div id="${pre}-chips" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px"></div>` : ''}<div id="${pre}-tab"></div>`;
   const g = id => document.getElementById(`${pre}-${id}`);
@@ -29194,8 +29228,8 @@ function renderU2000() {
       u2kVisao(document.getElementById('u2-p1'), { id: 'u2p', excel: 'u2000-portas', linhas: () => portas, busca: r => [r.olt, r.sn].join(' '),
         filtros: [{ id: 'olt', rot: 'OLT', valor: r => r.olt }, { id: 'slot', rot: 'Slot', valor: r => r.slot }, { id: 'prob', rot: 'Situação', valor: r => r.portaAlarme ? 'Alarme na porta' : r.offline ? 'Tem ONU offline' : r.semVlan ? 'Tem ONU sem VLAN' : r.abertosIds.size ? 'Só alarmes' : 'Sem problema', todos: 'Todas' }],
         cols: [...u2kColsLoc().slice(0, 3), { t: 'Porta', f: r => r.porta }, { t: 'ONU ID (referência)', f: r => r.onuId }, { t: 'SN (referência)', f: r => r.sn, s: 'font-size:11.5px' }, { t: 'ONUs na porta (ONU IDs)', h: r => r.total == null ? '<span style="color:var(--text-muted)">sem lista</span>' : `<b>${r.total}</b>`, x: r => r.total == null ? '' : r.total },
-          { t: 'Online', f: r => r.temLista ? r.online : '' }, { t: '% online', f: r => r.pctOnline == null ? '' : formatPct(r.pctOnline, 0) }, { t: 'Offline', f: r => r.temLista ? r.offline : '' }, { t: 'sem energia', f: r => r.temLista ? r.offEnergia : '' }, { t: 'fibra', f: r => r.temLista ? r.offFibra : '' }, { t: 'outro motivo', f: r => r.temLista ? r.offOutro : '' },
-          { t: 'Desativadas', f: r => r.temLista ? r.desativada : '' }, { t: 'Online sem VLAN', f: r => r.temLista ? r.semVlan : '' }, { t: 'ONU IDs offline', f: r => r.idsOff, s: 'font-size:12px;white-space:normal' }, { t: 'ONUs c/ alarme aberto', f: r => r.abertosIds.size || '' }, { t: 'Sinal ruim (alarme)', f: r => r.sinalIds.size || '' }, { t: 'Alarme da porta', f: r => r.portaAlarme, s: 'font-size:12px;white-space:normal' }] });
+          { t: 'Online', f: r => r.temStatus ? r.online : '' }, { t: '% online', f: r => r.pctOnline == null ? '' : formatPct(r.pctOnline, 0) }, { t: 'Offline', f: r => r.temStatus ? r.offline : '' }, { t: 'sem energia', f: r => r.temStatus ? r.offEnergia : '' }, { t: 'fibra', f: r => r.temStatus ? r.offFibra : '' }, { t: 'outro motivo', f: r => r.temStatus ? r.offOutro : '' },
+          { t: 'Desativadas', f: r => r.temStatus ? r.desativada : '' }, { t: 'ONUs sem status', f: r => r.temLista ? r.total - r.comStatus : '' }, { t: 'Online sem VLAN', f: r => r.temStatus ? r.semVlan : '' }, { t: 'ONU IDs offline', f: r => r.idsOff, s: 'font-size:12px;white-space:normal' }, { t: 'ONUs c/ alarme aberto', f: r => r.abertosIds.size || '' }, { t: 'Sinal ruim (alarme)', f: r => r.sinalIds.size || '' }, { t: 'Alarme da porta', f: r => r.portaAlarme, s: 'font-size:12px;white-space:normal' }] });
       const temRx = onus.some(o => o.rx != null), temIp = onus.some(o => o.ipFinal);
       u2kVisao(document.getElementById('u2-p2'), { id: 'u2o', excel: 'u2000-onus', linhas: () => onus, busca: o => [o.alias, o.sn, o.olt, o.tipo].join(' '),
         filtros: [{ id: 'olt', rot: 'OLT', valor: o => o.olt }, { id: 'cid', rot: 'Cidade', valor: o => u2kRotCidade(o.cidade) || 'sem cidade' }, { id: 'st', rot: 'Status', valor: o => o.status || 'sem status' }, { id: 'vlan', rot: 'VLAN (perfil)', valor: o => o.vlanPerfil || (o.semVlan ? 'sem VLAN' : 'sem perfil') }, { id: 'bairro', rot: 'Bairro (pela VLAN)', valor: o => '', pred: (o, v) => (o.bairrosVlan || []).includes(v), opcoes: [...new Set(VLAN_LISTA.filter(l => l.bairro !== '*').map(l => l.bairro))].sort().map(b => [b, b]) }, { id: 'modelo', rot: 'Modelo da ONT', valor: o => o.tipo }],
@@ -29210,7 +29244,8 @@ function renderU2000() {
       const perfis = new Map(); onus.forEach(o => { const k = o.perfilLinha || 'sem perfil'; let e = perfis.get(k); if (!e) { e = { perfil: k, vlan: o.vlanPerfil || (o.semVlan ? 'sem VLAN' : ''), total: 0, online: 0, offline: 0 }; perfis.set(k, e); } e.total++; if (o.status === 'Online') e.online++; else if (o.status === 'Offline') e.offline++; });
       const modelos = new Map(); onus.forEach(o => { const k = o.tipo || 'sem modelo'; let e = modelos.get(k); if (!e) { e = { modelo: k, total: 0, online: 0, offline: 0 }; modelos.set(k, e); } e.total++; if (o.status === 'Online') e.online++; else if (o.status === 'Offline') e.offline++; });
       // a lista de bairros / VLAN / equipamento (Rev. 03) com quantas ONUs da lista GPON usam a VLAN, nas OLTs da cidade
-      const listaB = VLAN_LISTA.map(l => { const vs = u2kVlans(l.vlan), daVlan = onus.filter(o => o.cidade === l.cidade && vs.includes(o.vlanPerfil)), outros = vs.length ? new Set(vs.flatMap(v => u2kBairrosDaVlan(l.cidade, v))).size - 1 : 0;
+      const idxCV = new Map(); onus.forEach(o => { if (!o.vlanPerfil) return; const k = o.cidade + '|' + o.vlanPerfil; if (!idxCV.has(k)) idxCV.set(k, []); idxCV.get(k).push(o); });
+      const listaB = VLAN_LISTA.map(l => { const vs = u2kVlans(l.vlan), daVlan = [...new Set(vs)].flatMap(v => idxCV.get(l.cidade + '|' + v) || []), outros = vs.length ? new Set(vs.flatMap(v => u2kBairrosDaVlan(l.cidade, v))).size - 1 : 0;
         return { cidade: l.cidade, bairro: l.bairro === '*' ? 'Todos os bairros' : l.bairro, vlan: l.vlan || '(sem VLAN definida)', vs, equip: l.equip, obs: l.obs, total: daVlan.length, online: daVlan.filter(o => o.status === 'Online').length, offline: daVlan.filter(o => o.status === 'Offline').length, olts: [...new Set(daVlan.map(o => o.olt))].join(', '), outros }; });
       el.innerHTML = `${titulo('VLAN e perfis', 'a VLAN da ONU vem do nome do perfil (LINE-INTERNET_NG_316 = VLAN 316); o bairro vem da lista de VLANs, pela VLAN e pela cidade da OLT')}
         <div class="stat-cards" style="margin-bottom:12px">${statCard('blue', icChave, 'ONUs com VLAN no perfil', com.length.toLocaleString('pt-BR'), `${por.size} cidade × VLAN`)}${statCard(sem.length ? 'red' : 'neutral', icAviso, 'ONUs sem VLAN no perfil', sem.length.toLocaleString('pt-BR'), `${onus.filter(o => o.tipoSemVlan === 'padrao').length} perfil padrão (não provisionadas) · ${onus.filter(o => o.tipoSemVlan === 'plataforma').length} SmartOLT/INT6 · ${onus.filter(o => o.tipoSemVlan === 'outro').length} outras`)}${statCard(onus.some(o => o.configFalhou) ? 'red' : 'neutral', icAviso, 'Configuração falhou', onus.filter(o => o.configFalhou).length.toLocaleString('pt-BR'), 'Config Status = Failed')}${statCard(div.length ? 'orange' : 'neutral', icAviso, 'VLAN divergente', div.length.toLocaleString('pt-BR'), 'perfis com números diferentes')}</div>
