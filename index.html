@@ -2299,6 +2299,21 @@
     background: var(--accent-bg); color: var(--accent-solid);
     padding: 3px 9px; border-radius: 7px; border: 1px solid var(--border);
   }
+  /* AMPLIAR (13/10/2026, pedido do cliente: "igual no Power BI, amplia e fica no centro"): o painel/tabela/gráfico vai pra uma janela no centro */
+  .ampliar-fundo { position: fixed; inset: 0; z-index: 5000; background: rgba(2, 6, 23, .72); display: flex; align-items: center; justify-content: center; padding: 18px; }
+  .ampliar-caixa { background: var(--bg-page); border: 1px solid var(--border); border-radius: 14px; width: min(1500px, 97vw); max-height: 94vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0, 0, 0, .45); }
+  .ampliar-topo { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 15px; color: var(--text-primary); }
+  .ampliar-topo .ampliar-fechar { margin-left: auto; }
+  .ampliar-corpo { overflow: auto; padding: 16px; }
+  .ampliar-corpo > .ampliado { margin: 0 !important; width: 100% !important; max-width: none !important; }
+  .ampliado .btn-ampliar { display: none !important; }
+  .ampliado table.data-table { font-size: 14px; }
+  .ampliado .table-wrap { max-height: calc(94vh - 140px) !important; }
+  .ampliado .leaflet-container, .ampliado .mapa-cidades { height: calc(94vh - 170px) !important; }
+  .btn-ampliar { margin-left: 6px; }
+  .btn-ampliar-tit { font-size: 12px; font-weight: 600; padding: 4px 10px; min-height: 28px; border-radius: 6px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text-secondary); cursor: pointer; text-transform: none; letter-spacing: 0; }
+  .btn-ampliar-tit:hover { color: var(--text-primary); border-color: var(--accent); }
+  @media (max-width: 640px) { .ampliar-fundo { padding: 0; } .ampliar-caixa { width: 100vw; max-height: 100vh; height: 100vh; border-radius: 0; } }
   .ini-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(260px, calc((100% - 32px) / 3)), 1fr)); gap: 16px; }   /* no computador sempre 3 por linha ocupando a largura (antes sobravam colunas vazias à direita) */
   .ini-card {
     display: flex; flex-direction: column; gap: 11px; text-align: left;
@@ -7623,6 +7638,20 @@ function textoDoTitulo(el) {
   c.querySelectorAll('button, select, input, .sec-nota, .secao-toggle, .pzand-filtro, .badge, small').forEach(x => x.remove());
   return c.textContent.replace(/\s+/g, ' ').trim();
 }
+// AMPLIAR: leva o próprio elemento (não uma cópia) pra uma janela no centro e devolve ao fechar — filtros, ordenação e Excel continuam funcionando.
+// Gráfico de período redesenha sozinho na largura nova (ResizeObserver do trendChart) e mapa recebe invalidateSize.
+function ampliarElemento(alvo, titulo) {
+  if (!alvo || !alvo.parentNode || document.getElementById('ampliar-fundo')) return;
+  const lugar = document.createComment('ampliar'); alvo.parentNode.insertBefore(lugar, alvo);
+  const fundo = document.createElement('div'); fundo.id = 'ampliar-fundo'; fundo.className = 'ampliar-fundo';
+  fundo.innerHTML = `<div class="ampliar-caixa" role="dialog" aria-modal="true"><div class="ampliar-topo"><b>${esc(titulo || '')}</b><button type="button" class="btn-export-xls ampliar-fechar">✕ Fechar</button></div><div class="ampliar-corpo"></div></div>`;
+  document.body.appendChild(fundo); fundo.querySelector('.ampliar-corpo').appendChild(alvo); alvo.classList.add('ampliado'); document.body.style.overflow = 'hidden';
+  const ajustar = () => setTimeout(() => { alvo.querySelectorAll('*').forEach(e => { if (e._leafletMap) { try { e._leafletMap.invalidateSize(); } catch (x) { /* mapa */ } } }); if (alvo._leafletMap) { try { alvo._leafletMap.invalidateSize(); } catch (x) { /* mapa */ } } }, 120);
+  const tecla = ev => { if (ev.key === 'Escape') fechar(); };
+  function fechar() { document.removeEventListener('keydown', tecla); if (lugar.parentNode) lugar.parentNode.insertBefore(alvo, lugar); lugar.remove(); alvo.classList.remove('ampliado'); fundo.remove(); document.body.style.overflow = ''; ajustar(); }
+  fundo.addEventListener('click', ev => { if (ev.target === fundo || ev.target.closest('.ampliar-fechar')) fechar(); });
+  document.addEventListener('keydown', tecla); ajustar();
+}
 function ativarBotoesAnalista() {
   if (!modoNovo()) return;
   const alvo = document.getElementById('content'); if (!alvo) return;
@@ -7640,8 +7669,9 @@ function ativarBotoesAnalista() {
     const graf = [...p.querySelectorAll('[data-grafico]')], tabs = tabelasDe(p);
     if (!graf.length && !tabs.length) return;
     const titulo = textoDoTitulo(h3);
+    if (!h3.querySelector('.btn-ampliar')) h3.appendChild(btn('btn-ampliar btn-ampliar-tit', '⤢ Ampliar', () => ampliarElemento(p, titulo)));
     if (!p.querySelector('.gerar-imagem-btn, .btn-export-img') && !p.hasAttribute('data-sem-imagem')) {
-      const b = btn('secao-toggle gerar-imagem-btn', '🖼 Gerar imagem', () => (tabs.length === 1 && !graf.length && !semPadraoAzul(titulo))
+      const b = btn('secao-toggle gerar-imagem-btn', '🖼 Gerar imagem', () => (tabs.length === 1 && !graf.length && !semAzulCtx(p, titulo))
         ? imagemPadraoDaTabela(tabs[0], titulo, '', (slugTitulo(titulo) || 'tabela') + '-' + hoje)
         : capturarElementoComoImagem(p, 'imagem-' + (slugTitulo(titulo) || 'painel') + '-' + hoje));
       h3.appendChild(b);
@@ -7657,10 +7687,15 @@ function ativarBotoesAnalista() {
     if (t.classList.contains('hol-tab') || t.closest('.panel') || t.closest('.fora-da-imagem') || !t.querySelector('tbody tr')) return;
     const w = t.closest('.table-wrap') || t;
     const ant = w.previousElementSibling;
-    if (ant && (ant.matches('.btn-export-xls, .btn-xls-auto') || jaTemExcel(ant))) return;
     let titulo = 'tabela', h = w.previousElementSibling;
     for (let k = 0; k < 8 && h; k++, h = h.previousElementSibling) if (h.classList && (h.classList.contains('section-heading') || h.classList.contains('faixa-secao'))) { titulo = textoDoTitulo(h); break; }
-    const box = document.createElement('div'); box.style.margin = '0 0 6px'; box.appendChild(botaoExcelTabela(t, titulo));
+    const botaoAmpliar = () => btn('btn-export-xls btn-ampliar', '⤢ Ampliar', () => ampliarElemento(w, titulo));
+    if (ant && (ant.matches('.btn-export-xls, .btn-xls-auto') || jaTemExcel(ant))) {
+      if (w.closest('.ampliado') || (ant.querySelector && ant.querySelector('.btn-ampliar')) || ant.classList.contains('btn-ampliar')) return;
+      if (ant.matches('.btn-export-xls, .btn-xls-auto')) ant.insertAdjacentElement('afterend', botaoAmpliar()); else ant.appendChild(botaoAmpliar());
+      return;
+    }
+    const box = document.createElement('div'); box.style.margin = '0 0 6px'; box.appendChild(botaoExcelTabela(t, titulo)); box.appendChild(botaoAmpliar());
     w.parentNode.insertBefore(box, w);
   });
   // "Gerar imagem" da caixa inteira do tópico (modelo novo)
@@ -7669,6 +7704,7 @@ function ativarBotoesAnalista() {
   // UMA tabela só, a imagem sai no padrão azul-marinho (`imagemPadraoDaTabela`); com gráfico ou várias tabelas, sai a captura da caixa.
   alvo.querySelectorAll('.topico-caixa > .section-heading').forEach(h => {
     const box = h.parentElement;
+    if (!h.querySelector('.btn-ampliar')) h.appendChild(btn('btn-ampliar btn-ampliar-tit', '⤢ Ampliar', () => ampliarElemento(box, textoDoTitulo(h))));
     if (h.querySelector('.gerar-imagem-btn, .btn-export-img') || box.querySelector('.btn-export-img, [data-gerar-imagem-cartao]')) return;
     const titulo = textoDoTitulo(h), nome = (slugTitulo(titulo) || 'topico') + '-' + hoje;
     h.appendChild(btn('secao-toggle gerar-imagem-btn', '🖼 Gerar imagem', () => {
@@ -12336,13 +12372,20 @@ function capturarElementoComoImagem(elemento, nomeArquivo, aoTerminar) {
           .stat-card .stat-ic, .ph-ic { background: #eaf1ff !important; color: #1d4ed8 !important; }
           table.data-table th { background: #1e3a8a !important; color: #ffffff !important; border-color: #ffffff !important; }
           table.data-table td { background: #ffffff !important; border-color: #e3eaf7 !important; }
-          table.data-table tbody tr:nth-child(even) td { background: #f4f7fd !important; }
           table.data-table tr.total-row td { background: #e3ecfb !important; font-weight: 700; }
           .seta-linha { background: transparent !important; }
           .trend-gridline { stroke: #d6e0f3 !important; }
         `;
         (doc.head || doc.documentElement).appendChild(st);
       }
+      // barrinha colorida ao lado do rótulo (Resumo financeiro do ciclo): é um ::before com position absolute + transform, e o html2canvas
+      // desenha em cima da 1ª letra (13/10/2026, print do cliente: "arrume o traçado, um espaçamento"). No CLONE vira um span de verdade, antes do texto.
+      clone.querySelectorAll('.cmp-dash td.cat-cell').forEach(td => {
+        const cor = ((doc.defaultView || window).getComputedStyle(td, '::before') || {}).backgroundColor || '#b45309';
+        const sp = doc.createElement('span'); sp.style.cssText = `display:inline-block;width:4px;height:14px;border-radius:2px;background:${cor};margin-right:10px;vertical-align:-2px`;
+        td.insertBefore(sp, td.firstChild); td.classList.add('cat-barra-real');
+      });
+      if (clone.querySelector('.cat-barra-real')) { const st2 = doc.createElement('style'); st2.textContent = '.cmp-dash td.cat-barra-real::before { display: none !important; } .cmp-dash td.cat-barra-real { padding-left: 12px !important; }'; (doc.head || doc.documentElement).appendChild(st2); }
       // "Andamento do Prazo por Dia": a imagem deve sair SÓ das tabelas (pedido
       // do cliente 28/09/2026) — tira a faixa de título+filtro De/Até de cada
       // lado (a tabela já tem a faixinha DIA/MÊS própria, ver .pzand-tag) e
@@ -12453,7 +12496,7 @@ function ativarBotoesImagem(raiz) {
     if (!h3) return;
     h3.appendChild(criarBotaoImg(() => {
       const tabsP = [...p.querySelectorAll('table.data-table')].filter(t => t.querySelector('tbody tr'));
-      if (modoNovo() && !semPadraoAzul(h3.textContent) && tabsP.length === 1 && !p.querySelector('[data-grafico], .leaflet-container')) { imagemPadraoDaTabela(tabsP[0], textoDoTitulo(h3), '', nomeArquivoDe(h3.textContent)); return; }
+      if (modoNovo() && !semAzulCtx(p, h3.textContent) && tabsP.length === 1 && !p.querySelector('[data-grafico], .leaflet-container')) { imagemPadraoDaTabela(tabsP[0], textoDoTitulo(h3), '', nomeArquivoDe(h3.textContent)); return; }
       capturarElementoComoImagem(p, nomeArquivoDe(h3.textContent));
     }));
   });
@@ -12485,7 +12528,10 @@ const PALETA_IMG_CLARO  = { fundo: '#ffffff', titulo: '#0d1526', cabFundo: '#e4e
 // cabeçalho branco) a partir de uma tabela da tela — só as linhas visíveis, então
 // respeita o funil das colunas, igual ao Excel. Pedido do cliente 24/09/2026.
 // "Mão de Obra e Produção do Dia" sempre sai com a imagem de antes (captura do visual da tela), nunca no padrão azul-marinho (pedido do cliente, 13/10/2026)
-const semPadraoAzul = t => /M[ãa]o de Obra e Produ[çc][ãa]o do Dia/i.test(String(t || ''));
+// tabelas cujo "Gerar imagem" sai como a TELA, não no padrão azul-marinho (pedidos do cliente: Mão de Obra 13/10/2026; Andamento do Prazo por Dia 13/10/2026)
+const semPadraoAzul = t => /M[ãa]o de Obra e Produ[çc][ãa]o do Dia|Andamento do Prazo por Dia/i.test(String(t || ''));
+// o painel de dentro do tópico também segue o tópico (ex.: a tabela do Andamento do Prazo por Dia no modo novo)
+const semAzulCtx = (el, t) => { if (semPadraoAzul(t)) return true; const cx = el && el.closest ? el.closest('.topico-caixa') : null, h = cx ? cx.querySelector(':scope > .section-heading') : null; return !!(h && semPadraoAzul(h.textContent)); };
 function imagemPadraoDaTabela(tabela, titulo, subtitulo, nomeArquivo) {
   if (!tabela) return null;
   const cabLinha = [...tabela.querySelectorAll('thead tr')].filter(tr => tr.querySelector('th')).pop();
