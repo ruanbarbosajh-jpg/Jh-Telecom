@@ -28339,7 +28339,7 @@ async function u2kLerArquivo(file) {
   const saida = []; saida.meta = { alarmesLidos: 0, ignorados: 0 };
   for (const linhas of planilhas) {
     const tit = linhas.slice(0, 30).map(l => String(l[0] == null ? '' : l[0])).find(t => /GPON ONU Report/i.test(t));
-    const oltTitulo = tit ? tit.replace(/\s*GPON ONU Report.*$/i, '').replace(/-MA\d+\w*$/i, '').trim() : '';
+    const oltTitulo = tit ? tit.replace(/\s*GPON ONU Report.*$/i, '').replace(/-MA\d+[\w-]*$/i, '').trim() : '';
     for (let i = 0; i < Math.min(linhas.length, 30); i++) {
       const cab = linhas[i].map(u2kNorm);
       if (cab.filter(Boolean).length < 3) continue;
@@ -28398,12 +28398,13 @@ function u2kJuntar(linhas, nomeArquivo) {
   // a lista de alarmes é uma FOTO do momento: o arquivo novo substitui a anterior
   if (alarmesNovos.length) {
     U2K.alarmes = alarmesNovos; U2K._alarmesNovos = true;
+    u2kInferirPortas();   // lista simples (MA5800) importada antes dos alarmes: a porta sai agora, pra o total da porta já valer nos eventos
     const snDe = u2kSnPorLoc();
     U2K.hist = u2kMesclaHist(U2K.hist, u2kAgregaDia(alarmesNovos, a => snDe(a.fonte, a.frame, a.slot, a.porta, a.onuId)), true);
     U2K._eventosNovos = u2kEventosMassa(alarmesNovos).map(e => u2kEvFlat(e, snDe));
     U2K._eventosPortaNovos = u2kEventosPorta(alarmesNovos, u2kTotaisPorta(U2K.onus));
   }
-  if (oltsLista.size) U2K._snapNovos = (U2K._snapNovos || []).concat(u2kSnapshotsPortas(oltsLista));
+  if (oltsLista.size) { u2kInferirPortas(); U2K._snapNovos = (U2K._snapNovos || []).concat(u2kSnapshotsPortas(oltsLista)); }
   U2K.arquivos.unshift({ nome: nomeArquivo, quando: new Date().toISOString(), onus: novosOnu, alarmes: novosAlm });
   u2kConsolidar();
   try { localStorage.setItem('jh_u2000_v1', JSON.stringify({ onus: U2K.onus, alarmes: U2K.alarmes.slice(0, 3000), arquivos: U2K.arquivos.slice(0, 20), meta: U2K.meta || null })); } catch (e) { /* cheio: fica só na sessão */ }
@@ -28419,7 +28420,45 @@ function u2kBairrosDaVlan(cidade, vlan) {
   return u2kIdxVlan.get(cidade + '|' + vlan) || [];
 }
 const u2kVlanDe = t => { const m = /[_-](\d{2,4})$/.exec(String(t || '').trim()); return m ? m[1] : ''; };
+// MA5800 (X7 / X15): a lista exporta só Status / ONU ID / Alias, sem Frame, Slot, Porta nem SN. As portas vêm em sequência (o ONU ID recomeça a cada porta); a porta real é
+// deduzida pelos alarmes da MESMA OLT que citam a mesma ONU (ONU ID + nome do cliente) e pela ordem crescente de slot/porta. Só preenche o que tem prova: o grupo sem âncora fica sem porta.
+function u2kInferirPortas() {
+  const nk = normalizeHeader, grupos = new Map(); U2K.inferidas = [];
+  U2K.onus.forEach(o => {
+    if (!String(o._k).startsWith('lst:')) return;
+    o.portaInferida = false; o.frame = ''; o.slot = ''; o.porta = '';
+    const g = o.grp != null ? Number(o.grp) : Number(String(o._k).split('|')[1]), k = nk(o.olt);
+    if (!grupos.has(k)) grupos.set(k, { olt: o.olt, g: new Map() }); const e = grupos.get(k); if (!e.g.has(g)) e.g.set(g, []); e.g.get(g).push(o);
+  });
+  if (!grupos.size || !U2K.alarmes.length) return;
+  const porOlt = new Map();
+  U2K.alarmes.forEach(a => {
+    if (a.onuId === '' || a.onuId == null || a.slot === '' || a.slot == null || !a.alias || /^-+$/.test(a.alias)) return;
+    const k = nk(a.fonte); if (!grupos.has(k)) return; if (!porOlt.has(k)) porOlt.set(k, new Map());
+    const ch = String(a.onuId) + '|' + nk(a.alias), m = porOlt.get(k); if (!m.has(ch)) m.set(ch, new Map()); m.get(ch).set(`${a.frame || 0}|${a.slot}|${a.porta}`, 1);
+  });
+  grupos.forEach((e, k) => {
+    const idx = porOlt.get(k); if (!idx) return;
+    const ordem = [...e.g.keys()].sort((x, y) => x - y), ancoras = [];
+    ordem.forEach(g => {
+      const votos = new Map();
+      e.g.get(g).forEach(o => { if (!o.alias || /^-+$/.test(o.alias)) return; const m = idx.get(String(o.onuId) + '|' + nk(o.alias)); if (m) m.forEach((_, loc) => votos.set(loc, (votos.get(loc) || 0) + 1)); });
+      const v = [...votos.entries()].sort((x, y) => y[1] - x[1]); if (!v.length || (v[1] && v[1][1] === v[0][1])) return;
+      const [f, sl, po] = v[0][0].split('|').map(Number); ancoras.push({ g, f, sl, po, ord: sl * 1000 + po, votos: v[0][1] });
+    });
+    // fica a maior sequência crescente de âncoras (porta nunca volta atrás na lista)
+    const n = ancoras.length, melhor = ancoras.map(() => 1), ant = ancoras.map(() => -1);
+    for (let i = 0; i < n; i++) for (let j = 0; j < i; j++) if (ancoras[j].ord < ancoras[i].ord && melhor[j] + 1 > melhor[i]) { melhor[i] = melhor[j] + 1; ant[i] = j; }
+    let fim = melhor.indexOf(Math.max(...melhor, 0)); const seq = []; while (fim >= 0 && n) { seq.unshift(ancoras[fim]); fim = ant[fim]; }
+    const porGrupo = new Map(); seq.forEach(a => porGrupo.set(a.g, { f: a.f, sl: a.sl, po: a.po }));
+    // grupo entre duas âncoras do mesmo slot sem buraco (diferença de portas = diferença de grupos) recebe a porta do meio
+    for (let i = 0; i + 1 < seq.length; i++) { const x = seq[i], y = seq[i + 1]; if (x.sl === y.sl && y.po - x.po === y.g - x.g) for (let d = 1; d < y.g - x.g; d++) porGrupo.set(x.g + d, { f: x.f, sl: x.sl, po: x.po + d }); }
+    let onusOk = 0; porGrupo.forEach((loc, g) => (e.g.get(g) || []).forEach(o => { o.frame = String(loc.f); o.slot = String(loc.sl); o.porta = String(loc.po); o.portaInferida = true; onusOk++; }));
+    U2K.inferidas.push({ olt: e.olt, grupos: ordem.length, mapeados: porGrupo.size, ancoras: seq.length, onus: [...e.g.values()].reduce((t, l) => t + l.length, 0), onusOk });
+  });
+}
 function u2kConsolidar() {
+  u2kInferirPortas();
   U2K.onus.forEach(o => {
     const w = o.wan || [], web = w.find(x => /internet|tr069/i.test(x.servico) && x.ip && /\d/.test(x.ip)) || w.find(x => x.ip && /\d+\.\d+/.test(x.ip));
     o.ipFinal = web ? web.ip : ''; o.vlanFinal = web ? web.vlan : (w[0] ? w[0].vlan : '');
@@ -29052,6 +29091,7 @@ function renderU2000() {
           ${statCard(abertos.length ? 'orange' : 'neutral', icAviso, 'Alarmes abertos', abertos.length.toLocaleString('pt-BR'), `${alm.length.toLocaleString('pt-BR')} no arquivo${dsAlm.length ? ' · até ' + u2kFmtData(dsAlm[dsAlm.length - 1]).slice(0, 16) : ''}`)}
           ${statCard(evHoje.length ? 'red' : 'neutral', icAviso, `Portas com queda em massa em ${fmtDia(diaRef)}`, evHoje.length.toLocaleString('pt-BR'), diaRef === hoje ? 'hoje' : 'dia mais recente com dados')}
         </div>
+        ${(U2K.inferidas || []).length ? `<p style="font-size:12px;color:var(--text-muted);margin:-4px 0 12px">Lista sem Frame / Slot / Porta (MA5800): a porta foi <b>deduzida</b> pelos alarmes e pela ordem da lista — ${U2K.inferidas.map(i => `${esc(i.olt)}: ${i.mapeados} de ${i.grupos} portas (${fmtN(i.onusOk)} de ${fmtN(i.onus)} ONUs)`).join(' · ')}. Sem SN nessas ONUs; o ideal é exportar a lista com Frame, Slot, Porta e SN.</p>` : ''}
         <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 12px">Arquivos lidos: ${U2K.arquivos.slice(0, 6).map(a => `${esc(a.nome)} (${a.onus} ONU · ${a.alarmes} alarme)`).join(' · ') || '-'}.</p>
         ${titulo('ONUs por OLT', 'contadas pelo ONU ID da lista GPON; OLT sem lista importada aparece sem total')}<div id="u2-r-olt"></div>`;
       u2kVisao(document.getElementById('u2-r-olt'), { id: 'u2r', excel: 'u2000-onus-por-olt', linhas: () => invOlt, busca: r => r.olt,
