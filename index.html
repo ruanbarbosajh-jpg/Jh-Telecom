@@ -8522,6 +8522,7 @@ function navigate(route) {
   agendarAtualizacaoAoVivo(route);
   adicionarBotaoAtualizar(route);
   iniciarFerramentasAnalista();
+  try { mostrarAvisosRevisaoFrota(); } catch (e) { /* aviso não pode derrubar a tela */ }
 }
 // ---------- Filtro por coluna estilo Excel, em TODAS as tabelas ----------
 // Cada cabeçalho ganha um funil. Clicando, abre a lista de valores únicos
@@ -20299,10 +20300,10 @@ function renderFleet() {
       ${linksAgrupados.map(r=>`<tr><td>${esc(r.motorista)}</td><td>${esc(r.placa)}</td><td>${esc(r.supervisor)}</td><td>${esc(r.cidade)}</td><td>${esc(r.locadora)}</td><td>${formatDate(r.vinculacao)}${r.anteriores.length ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Vinculação anterior: ${r.anteriores.map(a=>`${esc(a.placa)} (${formatDate(a.vinculacao)})`).join('; ')}</div>` : ''}</td></tr>`).join('')}
       </tbody></table></div>`;
 
-    const revEl = document.getElementById('fleet-revisao');
+    const revEl = document.getElementById('fleet-revisao'), revComAviso = modoNovo() || revisoes.some(r => r.horario || r.tipo_revisao || r.endereco || r.notificar);
     if (!revisoes.length) revEl.innerHTML = '<div class="empty">Nenhuma revisão programada. Importe a aba "REVISÃO" da planilha de frota.</div>';
     else revEl.innerHTML = `<div class="table-wrap"><table class="data-table"><thead><tr>
-        <th>Condutor</th><th>Placa</th><th>Data da revisão</th><th>Situação</th>${revisoes.some(r=>r.obs)?'<th>Obs.</th>':''}
+        <th>Condutor</th><th>Placa</th><th>Data da revisão</th>${revComAviso ? '<th>Horário</th><th>Tipo</th><th>Endereço</th><th>Avisar</th>' : ''}<th>Situação</th>${revisoes.some(r=>r.obs)?'<th>Obs.</th>':''}
       </tr></thead><tbody>
       ${revisoes.map(r => {
         const d = diasAteRevisao(r);
@@ -20310,7 +20311,7 @@ function renderFleet() {
         const texto = d < 0
           ? `⚠️ venceu há ${-d} dia(s)`
           : d === 0 ? 'é hoje' : `faltam ${d} dia(s)`;
-        return `<tr><td class="cat-cell">${esc(r.condutor) || '-'}</td><td>${esc(r.placa) || '-'}</td><td>${formatDate(r.data_revisao)}</td>
+        return `<tr><td class="cat-cell">${esc(r.condutor) || '-'}</td><td>${esc(r.placa) || '-'}</td><td>${formatDate(r.data_revisao)}</td>${revComAviso ? `<td>${esc(r.horario) || '-'}</td><td>${r.tipo_revisao ? `<span class="badge ${/corretiva/i.test(r.tipo_revisao) ? 'warn' : 'ok'}">${esc(r.tipo_revisao)}</span>` : '-'}</td><td style="white-space:normal;font-size:12.5px">${esc(r.endereco) || '-'}</td><td style="font-size:12.5px">${esc(r.notificar) || '-'}</td>` : ''}
           <td style="color:${cor};font-weight:700">${texto}</td>${revisoes.some(x=>x.obs)?`<td>${esc(r.obs)||''}</td>`:''}</tr>`;
       }).join('')}
       </tbody></table></div>`;
@@ -20354,6 +20355,43 @@ function renderFleet() {
   }
 }
 
+// ===================== AVISO DE REVISÃO DA FROTA (14/10/2026) =====================
+// Pedido do cliente: "um de notificação para os dois supervisores Seba e Matheus... essa notificação aparece diretamente no site como aviso
+// mostrando que um técnico vai ter revisão, 1 dia antes e no próprio dia". Quem foi marcado em "Avisar no sistema" na revisão (frota_revisao.notificar)
+// vê, ao entrar e a cada troca de tela, uma caixa no canto com as revisões de AMANHÃ e de HOJE. "Ciente" esconde aquele aviso naquele dia
+// (localStorage, por pessoa); no dia da revisão ele volta (é outro aviso). O Analista também vê, pra conferir. Precisa do sql/PASSO-53.
+const SUPERVISORES_AVISO_REVISAO = ['Sebastião', 'Matheus'];
+function avisosRevisaoFrota() {
+  if (!currentUser || !Array.isArray(DB.frotaRevisao)) return [];
+  const eu = normalizeHeader(currentUser.nome || currentUser.login || ''), analista = perfilValido(currentUser.role) === 'analista';
+  const hoje = hojeISOLocal(), amanha = isoLocalDe(new Date(Date.parse(hoje + 'T12:00:00') + 86400000));
+  return DB.frotaRevisao.filter(r => {
+    if (r.data_revisao !== hoje && r.data_revisao !== amanha) return false;
+    const quem = String(r.notificar || '').split(/[;,]/).map(x => normalizeHeader(x)).filter(Boolean);
+    return quem.length && (analista || quem.includes(eu));
+  }).map(r => ({ ...r, quando: r.data_revisao === hoje ? 'hoje' : 'amanhã', chaveAviso: `${hoje}|${r.placa}|${r.data_revisao}` }))
+    .sort((a, b) => String(a.data_revisao + (a.horario || '')).localeCompare(String(b.data_revisao + (b.horario || ''))));
+}
+function mostrarAvisosRevisaoFrota() {
+  const velho = document.getElementById('aviso-revisao'); if (velho) velho.remove();
+  const chaveLs = 'jh_revisao_ciente_' + normalizeHeader(currentUser ? (currentUser.nome || currentUser.login || '') : '');
+  let cientes = []; try { cientes = JSON.parse(localStorage.getItem(chaveLs) || '[]'); } catch (e) { cientes = []; }
+  const lista = avisosRevisaoFrota().filter(r => !cientes.includes(r.chaveAviso));
+  if (!lista.length) return;
+  const box = document.createElement('div'); box.id = 'aviso-revisao'; box.setAttribute('role', 'status');
+  box.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:2500;width:min(380px,calc(100vw - 32px));max-height:70vh;overflow:auto;background:var(--card-bg);color:var(--text-primary);border:1px solid var(--border);border-left:5px solid #f59e0b;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.28);padding:14px 16px';
+  box.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="font-size:15px">🔧 Revisão de veículo</b><button type="button" id="aviso-revisao-fechar" aria-label="Fechar" style="margin-left:auto;background:none;border:0;color:var(--text-muted);font-size:18px;cursor:pointer">✕</button></div>`
+    + lista.map(r => `<div style="padding:8px 0;border-top:1px solid var(--border)"><div style="font-weight:700">${r.quando === 'hoje' ? '<span class="badge warn">HOJE</span>' : '<span class="badge amber">AMANHÃ</span>'} ${esc(r.condutor || 'Técnico')} · ${esc(r.placa || '')}</div>
+      <div style="font-size:12.5px;color:var(--text-secondary);margin-top:3px;line-height:1.5">${formatDate(r.data_revisao)}${r.horario ? ' às ' + esc(r.horario) : ''}${r.tipo_revisao ? ' · ' + esc(r.tipo_revisao) : ''}${r.endereco ? '<br>📍 ' + esc(r.endereco) : ''}${r.obs ? '<br>' + esc(r.obs) : ''}</div>
+      <button type="button" class="btn-secundario aviso-revisao-ok" data-k="${esc(r.chaveAviso)}" style="margin-top:6px;padding:4px 12px;font-size:12px">✔ Ciente</button></div>`).join('');
+  document.body.appendChild(box);
+  box.querySelector('#aviso-revisao-fechar').addEventListener('click', () => box.remove());   // fecha só nesta tela; volta na próxima até dar "Ciente"
+  box.querySelectorAll('.aviso-revisao-ok').forEach(b => b.addEventListener('click', () => {
+    cientes = cientes.filter(k => k.slice(0, 10) >= hojeISOLocal()).concat(b.dataset.k);
+    try { localStorage.setItem(chaveLs, JSON.stringify(cientes)); } catch (e) { /* sem armazenamento: some só nesta tela */ }
+    b.closest('div[style*="border-top"]').remove(); if (!box.querySelector('.aviso-revisao-ok')) box.remove();
+  }));
+}
 // ===================== FROTA — CADASTRO DIRETO NO SISTEMA + FOTOS DOS VEÍCULOS (modo novo, 09/10/2026) =====================
 // Pedido do cliente: "quero adicionar a data das revisões, manutenções, multas, desvinculações e troca de veículo direto no sistema, nessa aba
 // da Frota" e "uma caixa para importar fotos do veículo: pede a descrição, o nome do condutor, a placa, a vinculação, e se é só pra adicionar as
@@ -20361,7 +20399,7 @@ function renderFleet() {
 // frota_manutencao, frota_multas, frota_desvinc, frota_troca, frota_links) com a mesma chave, então reimportar a planilha não duplica.
 // As fotos ficam na tabela própria frota_fotos (sql/PASSO-50-frota-fotos.sql), comprimidas no navegador (foto 1100 px + miniatura 240 px).
 const FROTA_FORM = {
-  revisao:    { rot: 'Revisão',          alvo: 'frotaRevisao',    campos: [['data_revisao', 'Data da revisão', 'date', 1], ['obs', 'Observação', 'text']] },
+  revisao:    { rot: 'Revisão',          alvo: 'frotaRevisao',    avisar: true, campos: [['data_revisao', 'Data da revisão', 'date', 1], ['horario', 'Horário', 'time'], ['tipo_revisao', 'Tipo de revisão', 'select', 1, ['Preventiva', 'Corretiva']], ['endereco', 'Endereço da revisão', 'text'], ['obs', 'Observação', 'text']] },
   manutencao: { rot: 'Manutenção',       alvo: 'frotaManutencao', campos: [['servico', 'Serviço', 'text', 1], ['data', 'Data', 'date', 1], ['km', 'KM', 'number'], ['obs', 'Observação', 'text']] },
   multa:      { rot: 'Multa',            alvo: 'frotaMultas',     campos: [['data_infracao', 'Data da infração', 'date', 1], ['valor_multa', 'Valor da multa (R$)', 'number', 1]] },
   desvinc:    { rot: 'Desvinculação',    alvo: 'frotaDesvinc',    campos: [['vinculacao', 'Vinculado desde', 'date'], ['desvinculado', 'Desvinculado em', 'date', 1], ['obs', 'Observação', 'text']] },
@@ -20391,7 +20429,7 @@ function objetoFrotaDoFormulario(tipo, v) {
   const num = x => { const n = Number(String(x || '').replace(',', '.')); return isFinite(n) ? n : 0; };
   const condutor = String(v.condutor || '').trim(), placa = placaNorm(v.placa);
   switch (tipo) {
-    case 'revisao': return { alvo: 'frotaRevisao', obj: { condutor, placa, data_revisao: v.data_revisao, obs: v.obs || '' }, chave: null };
+    case 'revisao': return { alvo: 'frotaRevisao', obj: { condutor, placa, data_revisao: v.data_revisao, horario: v.horario || '', tipo_revisao: v.tipo_revisao || '', endereco: v.endereco || '', notificar: v.notificar || '', obs: v.obs || '' }, chave: null };
     case 'manutencao': return { alvo: 'frotaManutencao', obj: { condutor, placa, servico: v.servico || '', obs: v.obs || '', data: v.data, km: num(v.km) }, chave: `${placa}|${v.data}|${v.servico || ''}` };
     case 'multa': return { alvo: 'frotaMultas', obj: { condutor, placa, data_infracao: v.data_infracao, valor_multa: num(v.valor_multa) }, chave: `${condutor}|${placa}|${v.data_infracao || SEM_DATA_FROTA_UI}` };
     case 'desvinc': return { alvo: 'frotaDesvinc', obj: { condutor, placa, vinculacao: v.vinculacao || null, desvinculado: v.desvinculado, obs: v.obs || '' }, chave: `${condutor}|${placa}|${v.desvinculado || SEM_DATA_FROTA_UI}` };
@@ -20415,7 +20453,8 @@ function abrirModalFrota(tipo, aoSalvar) {
     <p style="margin:0 0 14px;font-size:13px;color:var(--text-secondary)">Entra direto na tabela de ${esc(f.rot.toLowerCase())}s da Frota — a reimportação da planilha não duplica.</p>
     <label>Condutor</label><input type="text" id="fr-condutor" list="fr-condutores" autocomplete="off">
     ${f.semPlaca ? '' : '<label>Placa *</label><input type="text" id="fr-placa" list="fr-placas" autocomplete="off" style="text-transform:uppercase">'}
-    ${f.campos.map(([c, r, t, obr]) => `<label>${esc(r)}${obr ? ' *' : ''}</label><input type="${t}" id="fr-${c}" ${t === 'number' ? 'step="0.01" min="0"' : 'autocomplete="off"'}${/placa/.test(c) ? ' list="fr-placas" style="text-transform:uppercase"' : ''}>`).join('')}
+    ${f.campos.map(([c, r, t, obr, ops]) => `<label>${esc(r)}${obr ? ' *' : ''}</label>${t === 'select' ? `<select id="fr-${c}"><option value="">Escolha…</option>${(ops || []).map(o => `<option>${esc(o)}</option>`).join('')}</select>` : `<input type="${t}" id="fr-${c}" ${t === 'number' ? 'step="0.01" min="0"' : 'autocomplete="off"'}${/placa/.test(c) ? ' list="fr-placas" style="text-transform:uppercase"' : ''}>`}`).join('')}
+    ${f.avisar ? `<label>Avisar no sistema (1 dia antes e no dia)</label><div style="display:flex;gap:18px;flex-wrap:wrap;margin:2px 0 6px">${SUPERVISORES_AVISO_REVISAO.map(n => `<label style="display:flex;align-items:center;gap:6px;font-weight:500;margin:0"><input type="checkbox" class="fr-avisar" value="${esc(n)}" checked style="width:auto;margin:0"> ${esc(n)}</label>`).join('')}</div>` : ''}
     ${listasFrotaHtml()}
     <p id="fr-erro" class="error-msg"></p>
     <div class="modal-acoes"><button type="button" class="btn-secundario" id="fr-cancelar">Cancelar</button><button type="button" class="btn-primario" id="fr-salvar">Salvar</button></div>`;
@@ -20430,6 +20469,7 @@ function abrirModalFrota(tipo, aoSalvar) {
   $('fr-salvar').addEventListener('click', async () => {
     const v = { condutor: co.value, placa: pl ? pl.value : '' };
     f.campos.forEach(([c]) => { v[c] = $('fr-' + c).value; });
+    if (f.avisar) v.notificar = [...document.querySelectorAll('.fr-avisar:checked')].map(x => x.value).join('; ');
     const faltou = f.campos.filter(([c, , , obr]) => obr && !String(v[c] || '').trim()).map(([, r]) => r);
     if (!f.semPlaca && !placaNorm(v.placa)) faltou.unshift('Placa');
     if (faltou.length) { $('fr-erro').textContent = 'Preencha: ' + faltou.join(', ') + '.'; return; }
@@ -20441,6 +20481,7 @@ function abrirModalFrota(tipo, aoSalvar) {
       if (!r.ok) { b.disabled = false; $('fr-erro').style.color = 'var(--danger)'; $('fr-erro').textContent = 'Não consegui salvar: ' + r.aviso; return; }
       fecharModalFrota(); toast(r.local ? 'Salvo só nesta sessão (modo local).' : `${f.rot} registrada.`, r.local ? 'aviso' : 'sucesso');
       if (aoSalvar) aoSalvar();
+      if (tipo === 'revisao') { try { mostrarAvisosRevisaoFrota(); } catch (e) { /* só o aviso */ } }
     } catch (e) { b.disabled = false; $('fr-erro').style.color = 'var(--danger)'; $('fr-erro').textContent = 'Não consegui salvar: ' + String((e && e.message) || e); }
   });
 }
@@ -26462,6 +26503,7 @@ const SAUDE_CHECAGENS_SQL = [
   { passo: 'PASSO-50', rotulo: 'Fotos dos veículos (Frota)', tabela: 'frota_fotos' },
   { passo: 'PASSO-52', rotulo: 'U2000: ONUs e alarmes importados', tabela: 'u2000_onus' },
   { passo: 'PASSO-51', rotulo: 'Gasolina por técnico e ciclo (Importar Excel)', tabela: 'gasolina_ciclo' },
+  { passo: 'PASSO-53', rotulo: 'Revisão da frota: horário, endereço, tipo e aviso aos supervisores', tabela: 'frota_revisao', coluna: 'horario,endereco,tipo_revisao,notificar' },
   { passo: 'PASSO-37', rotulo: 'Ajustes manuais da Folha dos técnicos', tabela: 'folha_pagamento', coluna: 'ajustes' },
   { passo: 'PASSO-37', rotulo: 'Técnicos excluídos da Folha', tabela: 'folha_pagamento_excluidos' },
 ];
