@@ -2885,7 +2885,8 @@ const SUPABASE_TABLES = {
   // aba fica marcada "não persistido" e some ao recarregar — foi exatamente
   // isso que zerou o Total Justificadas em produção (BASE DE DADOS tem tabela
   // e recarrega OK, pleito não tinha e voltava vazio).
-  pleito:          { table: 'pleito',              conflict: 'os,data,abertura,inicio' },
+  // pleito: DESCONSIDERADO em 14/10/2026 (pedido do cliente) — saiu daqui pra não ser baixado em todo login (8,8 MB) e a tabela
+  // foi apagada no banco (sql/PASSO-54). A aba "PRAZO INFORMADO AT-ME (PLEITO)" continua indo pro `prazo` (ver importação).
   // Gestão Presença: quadro de técnicos (roster) + status por dia + log de
   // auditoria (quem alterou o quê). presencaLog é só de INSERT (nunca upsert de
   // verdade) — o "conflict" abaixo só existe pra esse loader genérico conseguir
@@ -7564,7 +7565,9 @@ function importSheet(sheetName, rows) {
   }
   let inserted = 0, errors = 0;
   const insertedObjs = [];
-  for (const row of dataRows) {
+  // pleito desconsiderado (14/10/2026): a aba é lida só pra mandar as linhas de AT-ME pro `prazo` (logo abaixo); não grava em lugar nenhum
+  const pularPleito = target === 'pleito';
+  for (const row of (pularPleito ? [] : dataRows)) {
     // insertRow devolve null quando a linha foi DESCARTADA de propósito (ex.: a
     // linha de total da Folha) — não conta como inserida nem vai pro Supabase.
     try { const obj = insertRow(target, map, row, extra); if (obj) { insertedObjs.push(obj); inserted++; } }
@@ -7572,8 +7575,8 @@ function importSheet(sheetName, rows) {
   }
   const logEntry = { sheet_name: sheetName, target_table: target, row_count: inserted, imported_at: new Date().toLocaleString('pt-BR') };
   DB.importsLog.unshift(logEntry);
-  const syncPromise = syncBatchToSupabase(target, insertedObjs);
-  logImportToSupabase({ ...logEntry, imported_by: currentUser ? (currentUser.nome || currentUser.login) : null });
+  const syncPromise = pularPleito ? Promise.resolve({ ok: true }) : syncBatchToSupabase(target, insertedObjs);
+  if (!pularPleito) logImportToSupabase({ ...logEntry, imported_by: currentUser ? (currentUser.nome || currentUser.login) : null });
 
   // A aba "PRAZO INFORMADO AT-ME (PLEITO)" é a ÚNICA fonte de prazo de ATIVAÇÃO
   // e MUDANÇA DE ENDEREÇO: a "BASE DE DADOS" só traz Reparo Corretivo, e a faixa
@@ -26466,8 +26469,8 @@ const ARQUIVOS_IMPORT = [
 const BACKUP_TABELAS = [
   'base_do_dia', 'chamados_giga', 'clean_up', 'comparativo_financeiro', 'fechamento', 'financeiro',
   'folha_escritorio', 'folha_escritorio_quadro', 'gasolina_ciclo', 'folha_pagamento_excluidos', 'folha_fechamentos', 'folha_historico', 'folha_pagamento', 'frota_desvinc', 'frota_links',
-  'frota_manutencao', 'frota_multas', 'frota_revisao', 'frota_troca', 'imports_log', 'monitor_olt', 'monitor_olt_acompanhar', 'monitor_olt_dia', 'ordens_sp', 'pcr', 'pcr_mo',
-  'pedagio', 'perfis', 'pleito', 'prazo', 'prazo_reparo_dia', 'presenca', 'presenca_escritorio',
+  'frota_manutencao', 'frota_multas', 'frota_revisao', 'frota_troca', 'imports_log', 'monitor_olt_clientes', 'monitor_olt_base', 'u2000_onus', 'u2000_alarmes', 'u2000_dia', 'u2000_eventos', 'u2000_eventos_porta', 'u2000_portas_hist', 'ordens_sp', 'pcr', 'pcr_mo',
+  'pedagio', 'perfis', 'prazo', 'prazo_reparo_dia', 'presenca', 'presenca_escritorio',
   'presenca_escritorio_folgas', 'presenca_escritorio_log', 'presenca_escritorio_pessoas', 'presenca_log',
   'presenca_tecnicos', 'producao', 'valores_ordens', 'valores_sp_historico',
 ];
@@ -26485,19 +26488,10 @@ const SAUDE_CHECAGENS_SQL = [
   { passo: 'PASSO-32', rotulo: 'Histórico de alterações da Folha', tabela: 'folha_historico' },
   { passo: 'PASSO-33', rotulo: 'Trava da importação da PCR', rpc: 'pcr_trava_status', args: { p_token: 'saude' } },
   { passo: 'PASSO-34', rotulo: 'Fechamento do ciclo da Folha', tabela: 'folha_fechamentos' },
-  { passo: 'PASSO-35', rotulo: 'Monitoramento OLT (leituras do AutoISP)', tabela: 'monitor_olt' },
-  { passo: 'PASSO-38', rotulo: 'Coletor do AutoISP — status', tabela: 'monitor_olt_status' },
-  { passo: 'PASSO-38', rotulo: 'Coletor do AutoISP — andamento das ONUs', tabela: 'monitor_olt_onus' },
-  { passo: 'PASSO-38', rotulo: 'Coletor do AutoISP — fechamento do dia', tabela: 'monitor_olt_dia' },
-  { passo: 'PASSO-38', rotulo: 'Coletor do AutoISP — clientes acompanhados', tabela: 'monitor_olt_acompanhar' },
   { passo: 'PASSO-39', rotulo: 'Clientes da JH com o sinal real (Monitoramento OLT)', tabela: 'monitor_olt_clientes' },
-  { passo: 'PASSO-40', rotulo: 'Histórico diário do sinal dos clientes', tabela: 'monitor_olt_hist' },
-  { passo: 'PASSO-40', rotulo: 'Alterações de sinal dos clientes', tabela: 'monitor_olt_alteracoes' },
   { passo: 'PASSO-41', rotulo: 'Coordenada do cliente (mapa da preventiva)', tabela: 'monitor_olt_clientes', coluna: 'lat,lng' },
-  { passo: 'PASSO-41', rotulo: 'Resumos do relatório mensal do Monitoramento', rpc: 'monitor_olt_status_no_dia', args: { p_dia: '2026-10-05' } },
   { passo: 'PASSO-45', rotulo: 'Monitoramento trancado no banco (só quem vê a tela)', rpc: 'pode_monitor_olt', args: {} },
   { passo: 'PASSO-46', rotulo: 'Atualização do sinal da base fora da JH', tabela: 'monitor_olt_base', coluna: 'refresh_em' },
-  { passo: 'PASSO-47', rotulo: 'Sinal dos últimos 7 dias + média de 30 dias', rpc: 'monitor_olt_sinais_7d', args: { p_hoje: '2026-10-07' } },
   { passo: 'PASSO-40', rotulo: 'Sinal de ontem na linha do cliente', tabela: 'monitor_olt_clientes', coluna: 'sinal_ontem,status_ontem,ontem_dia,busca_em' },
   { passo: 'PASSO-36', rotulo: 'Quadro editável de colaboradores do escritório', tabela: 'folha_escritorio_quadro' },
   { passo: 'PASSO-50', rotulo: 'Fotos dos veículos (Frota)', tabela: 'frota_fotos' },
@@ -28980,7 +28974,7 @@ async function u2kSalvarHist() {
     if (error) return { ok: false, motivo: /does not exist|schema cache|PGRST205|42P01/i.test(String(error.message || '')) ? 'rode o sql/PASSO-52-u2000.sql no Supabase (tabela u2000_dia)' : error.message };
   }
   U2K._histTocadas = new Set();
-  if (!U2K._histLimpo) { U2K._histLimpo = true; const corte = new Date(Date.now() - 90 * 86400000); await supa.from('u2000_dia').delete().lt('dia', isoLocalDe(corte)); }   // guarda 90 dias
+  if (!U2K._histLimpo) { U2K._histLimpo = true; const corte = new Date(Date.now() - 60 * 86400000); await supa.from('u2000_dia').delete().lt('dia', isoLocalDe(corte)); }   // guarda 60 dias (o Analítico vai até 60; era 90 — 14/10/2026, espaço do banco)
   return { ok: true, n: linhas.length };
 }
 async function u2kCarregarHist() {
