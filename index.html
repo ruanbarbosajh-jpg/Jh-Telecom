@@ -13737,7 +13737,10 @@ async function pcrConferirEAtualizarTela() {
 // Diferente do botão antigo (tirado em 21/09): fica só nas 3 telas onde a
 // importação acontece, e a tela volta pra MESMA posição de rolagem (o navigate()
 // dá scrollTo(0,0)).
-const ROTAS_COM_BOTAO_ATUALIZAR = new Set(['pcr', 'parcialdia', 'chamadosgiga']);
+// 14/10/2026 (pedido do cliente: "coloque um botão Atualizar, pra quando alguém importar algum arquivo ficar salvo"): o botão vale em TODAS as
+// telas (menos Importar Excel, onde refazer a tela jogaria fora o arquivo escolhido). Ele busca no banco o que outra pessoa importou/gravou
+// depois que esta tela abriu — tabelas com carimbo só o que mudou; as sem carimbo da tela atual, inteiras; o U2000 relê o banco.
+const ROTAS_SEM_BOTAO_ATUALIZAR = new Set(['import']);
 let DADOS_LIDOS_EM = null;          // quando este navegador leu o banco pela última vez
 let ATUALIZANDO_PELO_BOTAO = false;
 function horaCurtaPtBr(ms) { return new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); }
@@ -13754,7 +13757,7 @@ function rotuloBotaoAtualizar(btn, ocupado) {
 function adicionarBotaoAtualizar(route) {
   const antigo = document.getElementById('topo-atualizar');
   if (antigo) antigo.remove();
-  if (!ROTAS_COM_BOTAO_ATUALIZAR.has(route) || !supa) return;
+  if (ROTAS_SEM_BOTAO_ATUALIZAR.has(route) || !supa || !currentUser) return;
   const acoes = document.querySelector('.topbar-actions');
   if (!acoes) return;
   const caixa = document.createElement('div');
@@ -13790,6 +13793,24 @@ async function atualizarPeloBotao() {
       aplicarTabelaCarregada('chamadosGiga', cfg, brutas);
       mudou = true;
     }
+    // todas as tabelas com carimbo (Produção, Prazo, Frota, Pedágio, Folha, Financeiro…): baixa só o que mudou (mesmo caminho do login)
+    AO_VIVO_CHECANDO = false;
+    const mudaram = await conferirProducaoNoBanco();
+    if (mudaram.length) { mudou = true; if (!por) por = ''; }
+    // tabelas SEM carimbo usadas pela tela atual: relê inteiras (são pequenas)
+    const semCarimboDaTela = { cleanup: ['cleanUp'], folha: ['ordensSp', 'valoresSpHistorico', 'folhaHistorico', 'folhaPagamentoExcluidos', 'gasolinaCiclo'], relatoriofin: ['ordensSp', 'valoresSpHistorico'],
+      folhaescritorio: ['folhaEscritorioQuadro'], dashboard: ['gasolinaCiclo'] }[rota] || [];
+    for (const js of semCarimboDaTela) {
+      const cfg = SUPABASE_TABLES[js]; if (!cfg) continue;
+      try { const antes = (DB[js] || []).length; const brutas = await fetchAllRows(cfg.table); if (brutas.length || !antes) { aplicarTabelaCarregada(js, cfg, brutas); mudou = true; } } catch (e) { /* tabela ainda não criada: segue */ }
+    }
+    // U2000 / Analítico: relê ONUs, alarmes e históricos do banco (o que outra pessoa importou)
+    if (rota === 'u2000' || rota === 'relu2000') {
+      ['_doBanco', '_histCarregado', '_eventosCarregados', '_eventosPortaCarregados', '_snapCarregados'].forEach(k => { U2K[k] = false; });
+      mudou = true;
+    }
+    // Frota: as fotos são lidas de novo ao refazer a tela
+    if (rota === 'fleet') mudou = true;
   } catch (e) {
     falhou = true;
     console.error('[atualizar] falhou:', e);
