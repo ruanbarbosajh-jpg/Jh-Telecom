@@ -1856,6 +1856,7 @@
      texto de porcentagem, só a cor+seta) em vez do texto corrido que o
      diffBadge normal usa em outras telas. */
   .cmp-dash .cat-cell { position: relative; padding-left: 30px; }
+  :root[data-estilo="novo"] table.data-table.cmp-dash td.cat-cell { padding-left: 30px; }   /* o padding do modo novo (9px) cobria a barrinha sobre a 1ª letra */
   .cmp-dash .cat-cell::before { content: ''; position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
     width: 4px; height: 14px; border-radius: 2px; background: var(--warn-text); }
   .cmp-dash tr.total-row td.cat-cell::before { background: currentColor; }
@@ -2301,15 +2302,21 @@
   }
   /* AMPLIAR (13/10/2026, pedido do cliente: "igual no Power BI, amplia e fica no centro"): o painel/tabela/gráfico vai pra uma janela no centro */
   .ampliar-fundo { position: fixed; inset: 0; z-index: 5000; background: rgba(2, 6, 23, .72); display: flex; align-items: center; justify-content: center; padding: 18px; }
-  .ampliar-caixa { background: var(--bg-page); border: 1px solid var(--border); border-radius: 14px; width: min(1500px, 97vw); max-height: 94vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0, 0, 0, .45); }
+  .ampliar-caixa { background: var(--bg-page); border: 1px solid var(--border); border-radius: 14px; width: auto; min-width: min(640px, 97vw); max-width: 97vw; max-height: 96vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0, 0, 0, .45); }
+  .ampliar-caixa.ampliar-larga { width: min(1600px, 97vw); }
+  .ampliar-justa .ampliar-corpo > .ampliado { zoom: 1.3; }
+  .ampliar-larga.ampliar-zoom .ampliar-corpo > .ampliado { zoom: 1.15; width: calc(100% / 1.15) !important; }
+  .ampliado table.data-table { width: auto !important; margin: 0 auto; }
+  .ampliado table.data-table td, .ampliado table.data-table th { padding-left: 14px !important; padding-right: 14px !important; }
   .ampliar-topo { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 15px; color: var(--text-primary); }
   .ampliar-topo .ampliar-fechar { margin-left: auto; }
   .ampliar-corpo { overflow: auto; padding: 16px; }
   .ampliar-corpo > .ampliado { margin: 0 !important; width: 100% !important; max-width: none !important; }
   .ampliado .btn-ampliar { display: none !important; }
   .ampliado table.data-table { font-size: 14px; }
-  .ampliado .table-wrap { max-height: calc(94vh - 140px) !important; }
-  .ampliado .leaflet-container, .ampliado .mapa-cidades { height: calc(94vh - 170px) !important; }
+  .ampliado .table-wrap { max-height: calc((96vh - 120px) / 1.3) !important; }
+  .ampliar-larga .ampliado .table-wrap { max-height: calc((96vh - 120px) / 1.15) !important; }
+  .ampliado .leaflet-container, .ampliado .mapa-cidades { height: calc(96vh - 150px) !important; }
   .btn-ampliar { margin-left: 6px; }
   .btn-ampliar-tit { font-size: 12px; font-weight: 600; padding: 4px 10px; min-height: 28px; border-radius: 6px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text-secondary); cursor: pointer; text-transform: none; letter-spacing: 0; }
   .btn-ampliar-tit:hover { color: var(--text-primary); border-color: var(--accent); }
@@ -7645,6 +7652,9 @@ function ampliarElemento(alvo, titulo) {
   const lugar = document.createComment('ampliar'); alvo.parentNode.insertBefore(lugar, alvo);
   const fundo = document.createElement('div'); fundo.id = 'ampliar-fundo'; fundo.className = 'ampliar-fundo';
   fundo.innerHTML = `<div class="ampliar-caixa" role="dialog" aria-modal="true"><div class="ampliar-topo"><b>${esc(titulo || '')}</b><button type="button" class="btn-export-xls ampliar-fechar">✕ Fechar</button></div><div class="ampliar-corpo"></div></div>`;
+  // gráfico ou mapa = janela larga; só tabela = janela do tamanho da tabela (os números não se espalham) com zoom maior. Mapa não leva zoom (o Leaflet erra o clique com zoom de CSS)
+  const temGraf = !!alvo.querySelector('[data-grafico], .leaflet-container'), temMapa = !!alvo.querySelector('.leaflet-container');
+  fundo.querySelector('.ampliar-caixa').classList.add(temGraf ? 'ampliar-larga' : 'ampliar-justa'); if (temGraf && !temMapa) fundo.querySelector('.ampliar-caixa').classList.add('ampliar-zoom');
   document.body.appendChild(fundo); fundo.querySelector('.ampliar-corpo').appendChild(alvo); alvo.classList.add('ampliado'); document.body.style.overflow = 'hidden';
   const ajustar = () => setTimeout(() => { alvo.querySelectorAll('*').forEach(e => { if (e._leafletMap) { try { e._leafletMap.invalidateSize(); } catch (x) { /* mapa */ } } }); if (alvo._leafletMap) { try { alvo._leafletMap.invalidateSize(); } catch (x) { /* mapa */ } } }, 120);
   const tecla = ev => { if (ev.key === 'Escape') fechar(); };
@@ -9911,6 +9921,8 @@ function renderDashboard() {
         const x = descPorTecnico[normalizeHeader(f.tecnico)];
         return a + (x ? (x[campo] || 0) : 0);
       }, 0);
+      // total no FIM da tabela pro Analista (14/10/2026, pedido do cliente: "deixe os totais no final e não no topo")
+      const linhaTotal = tabelaFrotaLinhaTotal(lista, S, alu, somaFolha);
       return `<div class="section-heading sem-toggle">${esc(titulo)}<span class="sec-nota">${esc(nota)}</span></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table dash-tab">
         <thead>
@@ -9920,18 +9932,19 @@ function renderDashboard() {
             <th class="num" title="O que as ordens do técnico renderam para ele, antes de qualquer desconto (coluna VALOR ORDENS) — é o mesmo número do ranking. Os descontos vêm na coluna ao lado.">JH → técnico</th>
             ${temFolha ? '<th class="num">Descontos</th><th class="num">A receber</th>' : ''}
             <th class="num">Aluguel</th><th class="num">Gasolina</th></tr>
-          <tr class="total-row">
-            <td>${lista.length} técnicos</td><td class="num">—</td>
+          ${modoNovo() ? '' : linhaTotal}
+        </thead>
+        <tbody>${lista.map(linhaTec).join('')}${modoNovo() ? linhaTotal : ''}</tbody>
+      </table></div>`;
+    };
+    const tabelaFrotaLinhaTotal = (lista, S, alu, somaFolha) => `<tr class="total-row">
+            <td>${modoNovo() ? 'Total — ' : ''}${lista.length} técnicos</td><td class="num">—</td>
             <td class="num">${S('ativacao').toLocaleString('pt-BR')}</td><td class="num">${S('mc').toLocaleString('pt-BR')}</td>
             <td class="num">${S('me').toLocaleString('pt-BR')}</td><td class="num">${S('reparos').toLocaleString('pt-BR')}</td>
             <td class="num">${S('upgrade').toLocaleString('pt-BR')}</td><td class="num">${S('total_geral').toLocaleString('pt-BR')}</td>
             <td class="num">${formatCurrency(S('valor_pago_giga'))}</td><td class="num">${formatCurrency(S('valor_ordens'))}</td>
             ${temFolha ? `<td class="num">${formatCurrency(somaFolha('total_descontos'))}</td><td class="num">${formatCurrency(somaFolha('total_receber'))}</td>` : ''}
-            <td class="num">${formatCurrency(alu)}</td><td class="num">${formatCurrency(S('gasolina'))}</td></tr>
-        </thead>
-        <tbody>${lista.map(linhaTec).join('')}</tbody>
-      </table></div>`;
-    };
+            <td class="num">${formatCurrency(alu)}</td><td class="num">${formatCurrency(S('gasolina'))}</td></tr>`;
     const tecProprios = ativos.filter(ehFrotaPropria);
     const tecJH = ativos.filter(ehFrotaJH);
     const tecSemFrota = ativos.filter(f => !f.frota);
@@ -12364,7 +12377,9 @@ function capturarElementoComoImagem(elemento, nomeArquivo, aoTerminar) {
       substituirCamposPorTexto(clone);
       // papel AZUL E BRANCO (09/10/2026, pedido do cliente: "no tema claro é azul e branco, tem muito cinza escuro"): cartões, painéis e
       // caixas ficam brancos com borda azul clara, cabeçalho de tabela azul-marinho, linhas alternadas azul bem claro
-      if (modoNovo()) {
+      if (modoNovo() && clone.classList && clone.classList.contains('img-visual-tela')) {
+        const st0 = doc.createElement('style'); st0.textContent = '.table-wrap { background: #ffffff !important; box-shadow: none !important; } table.data-table td { background: #ffffff !important; }'; (doc.head || doc.documentElement).appendChild(st0);
+      } else if (modoNovo()) {
         const st = doc.createElement('style');
         st.textContent = `
           .topico-caixa, .panel, .stat-card, .toolbar, .table-wrap, .iq-card, .pzcard { background: #ffffff !important; border-color: #cfdcf2 !important; box-shadow: none !important; }
@@ -12555,7 +12570,8 @@ function imagemVisualDaTabela(tabela, titulo, nomeArquivo) {
   if (!tabela) return false;
   const bloco = tabela.closest('.table-wrap') || tabela;
   const wrapper = document.createElement('div');
-  wrapper.style.cssText = `position:fixed;top:0;left:-${bloco.clientWidth + 400}px;width:${Math.max(bloco.clientWidth, 480)}px;background:var(--bg-page);padding:16px;`;
+  wrapper.style.cssText = `position:fixed;top:0;left:-${bloco.clientWidth + 400}px;width:${Math.max(bloco.clientWidth, 480)}px;background:${modoNovo() ? '#ffffff' : 'var(--bg-page)'};padding:16px;`;
+  wrapper.classList.add('img-visual-tela');   // o capturar não aplica o papel azul-marinho do modo novo: a imagem sai como a tela, em fundo branco
   const h = document.createElement('div');
   h.className = 'section-heading sem-toggle';
   h.textContent = titulo;
@@ -15837,7 +15853,31 @@ function renderParcialDoDia() {
       .sort((a, b) => b.qtd - a.qtd || a.bairro.localeCompare(b.bairro, 'pt-BR'))
       .slice(0, 10);
 
-    body.innerHTML = `
+    // Mão de Obra e Produção do Dia no TOPO pro Analista (14/10/2026, pedido do cliente); os outros perfis seguem com a ordem de antes
+    const blocoMO = `
+      <div class="section-heading">Mão de Obra e Produção do Dia — ${formatDate(data)}</div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
+        <th>Cidades</th><th>Ativação</th><th>Reparo</th><th>M.E</th><th>M.C</th><th>Upgrade</th><th>Total</th><th>M.O</th><th>Média</th>
+      </tr></thead><tbody>
+        ${linhasMO.map(c=>{
+          if (c.agregado) {
+            return `<tr><td class="cat-cell">${esc(c.cidade)}</td><td>${c.ativacao}</td><td>${c.reparo}</td><td>${c.me}</td><td>${c.mc}</td><td>${c.upgrade}</td><td>${c.total}</td>
+            <td style="color:var(--text-muted)" title="Soma das cidades fora da lista fixa — não tem UMA cidade pra editar o M.O aqui.">${c.mo}</td>
+            <td>${c.mo?(c.total/c.mo).toFixed(1):'-'}</td></tr>`;
+          }
+          const m = moDaCidadeLinha(c.cidade);
+          const chave = data + '|' + c.cidade;
+          const mo = moDoDia(c);
+          return `<tr><td class="cat-cell">${esc(c.cidade)}</td><td>${m.ativacao}</td><td>${m.reparo}</td><td>${m.me}</td><td>${m.mc}</td><td>${m.upgrade}</td><td>${m.total}</td>
+          <td><input type="number" min="0" class="mo-edit" value="${mo}" data-chave="${esc(chave)}" data-cidade="${esc(c.cidade)}" data-total="${m.total}"
+              ${podeEditarMO() ? 'title="Editável — a média recalcula sozinha e o número fica salvo"' : 'readonly disabled title="Só leitura para o perfil Escritório"'}></td>
+          <td data-media="${esc(c.cidade)}">${mo?(m.total/mo).toFixed(1):'-'}</td></tr>`;}).join('')}
+        <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${totais.ativacao}</td><td>${totais.reparo}</td><td>${totais.me}</td><td>${totais.mc}</td><td>${totais.upgrade}</td><td>${totais.total}</td>
+          <td class="mo-total-cel" data-mo-total>${moTotalDia()}</td>
+          <td data-media-total>${moTotalDia()?(totais.total/moTotalDia()).toFixed(1):'-'}</td></tr>
+      </tbody></table></div>
+`;
+    body.innerHTML = `${modoNovo() ? blocoMO : ''}
       <div class="section-heading">Status das Ordens</div>
       <div class="stat-cards stat-cards--7">
         ${statCard('orange', icRelogio, 'Pendentes', statusDasOrdens.pendente)}
@@ -15866,27 +15906,7 @@ function renderParcialDoDia() {
           ${rankingBairroDia.map(b => `<tr><td class="cat-cell">${esc(b.bairro)}</td><td style="font-weight:700">${b.qtd}</td></tr>`).join('')}
         </tbody></table></div>`}
       </div>
-      <div class="section-heading">Mão de Obra e Produção do Dia — ${formatDate(data)}</div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
-        <th>Cidades</th><th>Ativação</th><th>Reparo</th><th>M.E</th><th>M.C</th><th>Upgrade</th><th>Total</th><th>M.O</th><th>Média</th>
-      </tr></thead><tbody>
-        ${linhasMO.map(c=>{
-          if (c.agregado) {
-            return `<tr><td class="cat-cell">${esc(c.cidade)}</td><td>${c.ativacao}</td><td>${c.reparo}</td><td>${c.me}</td><td>${c.mc}</td><td>${c.upgrade}</td><td>${c.total}</td>
-            <td style="color:var(--text-muted)" title="Soma das cidades fora da lista fixa — não tem UMA cidade pra editar o M.O aqui.">${c.mo}</td>
-            <td>${c.mo?(c.total/c.mo).toFixed(1):'-'}</td></tr>`;
-          }
-          const m = moDaCidadeLinha(c.cidade);
-          const chave = data + '|' + c.cidade;
-          const mo = moDoDia(c);
-          return `<tr><td class="cat-cell">${esc(c.cidade)}</td><td>${m.ativacao}</td><td>${m.reparo}</td><td>${m.me}</td><td>${m.mc}</td><td>${m.upgrade}</td><td>${m.total}</td>
-          <td><input type="number" min="0" class="mo-edit" value="${mo}" data-chave="${esc(chave)}" data-cidade="${esc(c.cidade)}" data-total="${m.total}"
-              ${podeEditarMO() ? 'title="Editável — a média recalcula sozinha e o número fica salvo"' : 'readonly disabled title="Só leitura para o perfil Escritório"'}></td>
-          <td data-media="${esc(c.cidade)}">${mo?(m.total/mo).toFixed(1):'-'}</td></tr>`;}).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${totais.ativacao}</td><td>${totais.reparo}</td><td>${totais.me}</td><td>${totais.mc}</td><td>${totais.upgrade}</td><td>${totais.total}</td>
-          <td class="mo-total-cel" data-mo-total>${moTotalDia()}</td>
-          <td data-media-total>${moTotalDia()?(totais.total/moTotalDia()).toFixed(1):'-'}</td></tr>
-      </tbody></table></div>
+${modoNovo() ? '' : blocoMO}
 
       <div class="section-heading">Status Detalhado por Tipo de Serviço ${btnCancelados}<button type="button" class="btn-export-img" id="pd-status-tipo-img">🖼 Gerar imagem</button></div>
       ${verEficiencia ? '<p class="fora-da-imagem" style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px">Taxa de Conclusão e Execução da Caixa são só de consulta na tela — <b>não saem no "Gerar imagem"</b>.</p>' : ''}
@@ -18866,6 +18886,7 @@ function renderRelatorioGeral() {
       ${htmlTabelaMax(mx.lista, minMax, 'rg-tab-max')}
       ${nota(`<b>Conferência:</b> ${mx.somaBate ? '✔ as somas fecham com o MAX em todos os clientes' : '⚠ há cliente em que a soma não bate'} · ${fmtN(g.chamados.linhasLidas)} linhas lidas → ${fmtN(g.chamados.osDistintas)} O.S distintas · fora do período: ${fmtN(mx.info.foraDoPeriodo)} · sem data de abertura: ${fmtN(mx.info.semAbertura)} · sem contrato: ${fmtN(mx.info.semContrato)}.`)}
 
+      <div id="rg-operacional"></div>
       <div class="section-heading">Ordens do período — detalhamento</div>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
         <p style="font-size:13px;color:var(--text-secondary);margin:0">${fmtN(rowsF.length)} registro(s) no filtro${rowsF.length > limiteOrdens ? ` — mostrando os ${limiteOrdens} mais recentes` : ''}.</p>
@@ -18965,6 +18986,10 @@ function renderRelatorioGeral() {
     });
     const selLim = document.getElementById('rg-ord-limite');
     if (selLim) selLim.addEventListener('change', () => { limiteOrdens = parseInt(selLim.value, 10); load(); });
+    // tudo do Relatório Operacional (técnicos × prazo, cidades e período que mais perdem prazo, horário de início, retornos por cidade/ofensor/motivo,
+    // IRR anterior × retorno, produtividade diária e o PowerPoint) — com o mesmo De/Até e as mesmas cidades deste relatório
+    const op = document.getElementById('rg-operacional');
+    if (op) { try { renderReuniaoPrazos({ dentro: op, campoCidades: 'rg-cidades' }); } catch (err) { op.innerHTML = `<div class="panel"><div class="empty">Não consegui montar a parte do Relatório Operacional: ${esc(String(err && err.message || err))}</div></div>`; } }
     posLoadTopicos('relgeral');
   }
 }
@@ -19100,7 +19125,7 @@ function renderRelatorioDoDia() {
 
     // bairros
     const bairros = {}; rows.forEach(r => { const b = (extrairBairro(r.endereco) || 'Não identificado') + (r.cidade ? ' - ' + rotuloCidadeGeral(r.cidade) : ''); bairros[b] = (bairros[b] || 0) + 1; });
-    const bairrosLista = Object.entries(bairros).map(([nome, qtd]) => ({ nome, qtd })).sort((a, b) => b.qtd - a.qtd).slice(0, 10);
+    const bairrosTodos = Object.entries(bairros).map(([nome, qtd]) => ({ nome, qtd })).sort((a, b) => b.qtd - a.qtd || a.nome.localeCompare(b.nome, 'pt-BR'));
 
     // ---- como está o dia × dias anteriores (13/10/2026, pedido do cliente: "relatório do dia com mais gráficos, pra saber como está o dia") ----
     const resumoDe = lst => { const c = lst.filter(r => cls(r) === 'concluido').length, im = lst.filter(r => cls(r) === 'nao_concluido' && !suspensa(r)).length, rep = lst.filter(r => ehServicoReparo(r.tipo_atividade) && r.faixa), np = rep.filter(r => r.faixa === 'ate24').length;
@@ -19150,22 +19175,22 @@ function renderRelatorioDoDia() {
         ${cardCmp('purple', icRelogio, `Reparos no prazo (meta ${formatPct(PRAZO_META, 0)})`, resHoje.prazo, resOntem && resOntem.prazo, media7.prazo, true, true)}
       </div>
       <div class="panels-grid">
-        <div class="panel"><h3>Ritmo do dia — concluídas acumuladas por hora</h3>${nota('Linha azul = hoje; tracejada = média dos dias anteriores no mesmo horário (pela hora do "Fim" do CSV).')}<div id="rd-g-ritmo"></div></div>
+        <div class="panel"><h3>Ritmo do dia — concluídas acumuladas por hora</h3>${nota('Cada ponto é quantas O.S já tinham sido <b>concluídas até aquela hora</b> (vai somando, pela hora do "Fim" no CSV). <b>Linha azul</b> = o dia escolhido; <b>tracejada cinza</b> = a média dos dias anteriores no mesmo horário. Azul <b>acima</b> da cinza = o dia está rendendo mais que o normal; <b>abaixo</b> = está atrasado. Ex.: às 12h a azul em 30 e a cinza em 40 → 10 concluídas a menos que um dia comum até o meio-dia.')}<div id="rd-g-ritmo"></div></div>
         <div class="panel"><h3>Status das ordens agora</h3><div id="rd-g-status"></div></div>
       </div>
       <div class="panels-grid">
         <div class="panel"><h3>Taxa de conclusão por cidade</h3>${nota('Concluídas ÷ (concluídas + improdutivas). Verde ≥ 80%, laranja 55–80%, vermelho &lt; 55%.')}<div id="rd-g-txcid"></div></div>
-        <div class="panel"><h3>Carteira em aberto por cidade</h3>${nota('O.S pendentes + em rota + iniciadas agora.')}<div id="rd-g-abcid"></div></div>
+        <div class="panel"><h3>Reparos no prazo por cidade</h3>${nota(`Reparos já encerrados com faixa de prazo. Verde = na meta (${formatPct(PRAZO_META, 0)}), vermelho = abaixo.`)}<div id="rd-g-prazocid"></div></div>
       </div>
       <div class="panels-grid">
-        <div class="panel"><h3>Serviços do dia por tipo</h3><div id="rd-g-tipo"></div></div>
+        <div class="panel"><h3>Carteira em aberto por cidade</h3>${nota('O.S pendentes + em rota + iniciadas agora.')}<div id="rd-g-abcid"></div></div>
         <div class="panel"><h3>Improdutivas por motivo</h3><div id="rd-g-mot"></div></div>
       </div>
       <div class="panels-grid">
-        <div class="panel"><h3>Reparos no prazo por cidade</h3>${nota(`Reparos já encerrados com faixa de prazo. Meta ${formatPct(PRAZO_META, 0)}.`)}<div id="rd-g-prazocid"></div></div>
-        <div class="panel"><h3>Concluídas por técnico</h3><div id="rd-g-tec"></div></div>
+        <div class="panel"><h3>Serviços do dia por tipo</h3><div id="rd-g-tipo"></div></div>
+        <div class="panel"><h3>Últimos dias — concluídas e improdutivas</h3><div id="rd-g-dias"></div></div>
       </div>
-      <div class="panel"><h3>Últimos dias — concluídas, improdutivas e taxa de conclusão</h3><div id="rd-g-dias"></div></div>
+      <div class="panel"><h3>Concluídas por técnico</h3><div id="rd-g-tec"></div></div>
 
       <div class="section-heading">Pendentes do dia</div>
       <div class="panel"><h3>O.S pendentes — mais urgente primeiro</h3>${xls('rd-xls-pend')}${htmlPendentesDoDia(rows, 'rd-tab-pend')}</div>
@@ -19174,7 +19199,6 @@ function renderRelatorioDoDia() {
       ${nota('Taxa de Conclusão = concluídas ÷ (concluídas + improdutivas). Execução da Caixa = (concluídas + improdutivas + em rota + iniciadas) ÷ essas + pendentes. Cores: conclusão &lt; 55% vermelho, &gt; 80% verde; execução &lt; 60% vermelho, &gt; 80% verde. <b>As duas colunas não saem no "Gerar imagem".</b>')}
       <div class="panel"><h3>Por cidade</h3>${xls('rd-xls-cid')}${tabStatus('rd-tab-cid', 'Cidade', stCidade, totalDe(stCidade))}</div>
       <div class="panel"><h3>Por tipo de serviço</h3>${xls('rd-xls-tipo')}${tabStatus('rd-tab-tipo', 'Serviço', stTipo, totalDe(stTipo))}</div>
-      <div class="panel"><h3>Por técnico</h3>${xls('rd-xls-tec')}${tabStatus('rd-tab-tec', 'Técnico', stTec, totalDe(stTec))}</div>
 
       <div class="section-heading">3. Prazo do dia — reparo (24h)</div>
       ${nota(`Limite = abertura + 24h. "% no prazo" conta só os reparos já encerrados com faixa (meta ${formatPct(PRAZO_META, 0)}). Vencidas e vencendo = reparos ainda pendentes/em rota/iniciados.`)}
@@ -19187,9 +19211,6 @@ function renderRelatorioDoDia() {
       <div class="panel"><h3>Prazo por cidade</h3>${xls('rd-xls-faixa')}
         ${!faixaLista.length ? '<div class="empty">Nenhum reparo encerrado com faixa de prazo.</div>' : `<div class="table-wrap"><table class="data-table" id="rd-tab-faixa"><thead><tr><th>Cidade</th><th>Até 24h</th><th>Até 48h</th><th>Maior que 48h</th><th>Outlier</th><th>Total</th><th>% no prazo</th></tr></thead><tbody>
         ${faixaLista.map(c => `<tr><td class="cat-cell">${esc(c.cidade)}</td><td>${c.ate24}</td><td>${c.ate48}</td><td>${c.maior48}</td><td>${c.outlier}</td><td>${c.total}</td>${tdPct(pctSobre(c.ate24, c.total), PRAZO_META, true)}</tr>`).join('')}</tbody></table></div>`}</div>
-      <div class="panel"><h3>Vencendo agora (reparos em aberto, mais urgente primeiro)</h3>${xls('rd-xls-venc')}
-        ${!abertas.length ? '<div class="empty">Nenhum reparo em aberto.</div>' : `<div class="table-wrap" style="max-height:420px;overflow:auto"><table class="data-table" id="rd-tab-venc"><thead><tr><th>O.S</th><th>Cidade</th><th>Técnico</th><th>Situação</th><th>Limite</th><th>Falta</th></tr></thead><tbody>
-        ${abertas.slice(0, 200).map(r => `<tr><td>${esc(r.os)}</td><td>${esc(rotuloCidadeGeral(r.cidade))}</td><td class="cat-cell">${esc(r.recurso) || '-'}</td><td>${esc(RD_ROTULO[cls(r)])}</td><td>${r.limite ? fmtDT(new Date(r.limite)) : '-'}</td><td style="font-weight:700;color:${r.limite && horasAte(r) < 0 ? 'var(--danger)' : 'inherit'}">${faltaTxt(r)}</td></tr>`).join('')}</tbody></table></div>`}</div>
       <div class="panel"><h3>Reparos encerrados fora do prazo</h3>${xls('rd-xls-fora')}
         ${!fora.length ? '<div class="empty">Nenhum reparo encerrado fora do prazo. 👍</div>' : `<div class="table-wrap" style="max-height:420px;overflow:auto"><table class="data-table" id="rd-tab-fora"><thead><tr><th>O.S</th><th>Cidade</th><th>Técnico</th><th>Faixa</th><th>Abertura</th><th>Tempo até a conclusão</th><th>Motivo da baixa</th></tr></thead><tbody>
         ${fora.map(r => `<tr><td>${esc(r.os)}</td><td>${esc(rotuloCidadeGeral(r.cidade))}</td><td class="cat-cell">${esc(r.recurso) || '-'}</td><td><span class="badge ${(FAIXA_INFO_PRAZO[r.faixa] || {}).classe || 'warn'}">${esc((FAIXA_INFO_PRAZO[r.faixa] || {}).rotulo || r.faixa)}</span></td><td>${r.abertura ? fmtDT(new Date(r.abertura)) : '-'}</td><td>${formatTempoGastoPrazo(r.aging)}</td><td>${esc((r.motivo || '').trim()) || '-'}</td></tr>`).join('')}</tbody></table></div>`}</div>
@@ -19199,9 +19220,15 @@ function renderRelatorioDoDia() {
       <div class="stat-cards">
         ${['pendente', 'em_rota', 'iniciado', 'concluido'].map(b => { const l = retPorSit(b); return statCard(b === 'concluido' ? 'green' : b === 'pendente' ? 'orange' : 'blue', b === 'concluido' ? icOk : icRelogio, `Retornos — ${RD_ROTULO[b]}`, l.length, `IFI ${l.filter(r => r.ifi_irr === 'IFI').length} · IRR ${l.filter(r => r.ifi_irr === 'IRR').length}`); }).join('')}
       </div>
-      ${xls('rd-xls-ret')}
-      ${!retornos.length ? '<div class="panel"><div class="empty">Nenhum cliente do dia voltou dentro da janela de garantia.</div></div>' : `<div class="table-wrap"><table class="data-table" id="rd-tab-ret"><thead><tr><th>IFI/IRR</th><th>O.S</th><th>Contrato</th><th>Cliente</th><th>Cidade</th><th>Situação hoje</th><th>Com quem está hoje</th><th>De quem é o retorno (ofensor)</th><th>Serviço anterior</th><th>Dias</th><th>Restam</th></tr></thead><tbody>
-        ${retornos.map(r => `<tr><td><span class="badge ${r.ifi_irr === 'IFI' ? 'warn' : 'amber'}">${r.ifi_irr}</span></td><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td><td class="cat-cell">${esc(r.cliente)}</td><td>${esc(rotuloCidadeGeral(r.cidade))}</td><td>${esc(RD_ROTULO[cls(r)])}</td><td>${esc(r.tecnico_atual) || '-'}</td><td>${esc(r.ofensor) || '-'}</td><td>${esc(r.tipo_anterior) || '-'}</td><td>${r.dias === null ? '-' : r.dias}</td><td>${r.restam === null ? '-' : r.restam + ' d'}</td></tr>`).join('')}</tbody></table></div>`}
+      ${!retornos.length ? '<div class="panel"><div class="empty">Nenhum cliente do dia voltou dentro da janela de garantia.</div></div>' : `
+      <div class="panels-grid">
+        <div class="panel"><h3>IFI × IRR</h3><div id="rd-g-ret-tipo"></div></div>
+        <div class="panel"><h3>Situação dos retornos agora</h3><div id="rd-g-ret-sit"></div></div>
+      </div>
+      <div class="panels-grid">
+        <div class="panel"><h3>Retornos por cidade</h3><div id="rd-g-ret-cid"></div></div>
+        <div class="panel"><h3>De quem é o retorno (ofensor)</h3>${nota('Quem fez o serviço anterior — o retorno conta para ele.')}<div id="rd-g-ret-of"></div></div>
+      </div>`}
 
       <div class="section-heading">5. Improdutivas do dia</div>
       ${nota('Visitas encerradas como "Não Concluído" (suspensas não entram).')}
@@ -19210,12 +19237,18 @@ function renderRelatorioDoDia() {
         <div class="panel"><h3>Por técnico</h3>${xls('rd-xls-imptec')}${!impTecLista.length ? '<div class="empty">Nenhuma improdutiva.</div>' : `<div class="table-wrap" style="max-height:360px;overflow:auto"><table class="data-table" id="rd-tab-imptec"><thead><tr><th>Posição</th><th>Técnico</th><th>Improdutivas</th></tr></thead><tbody>${impTecLista.map((t, i) => `<tr><td><span class="badge warn">${String(i + 1).padStart(2, '0')}</span></td><td class="cat-cell">${esc(t.nome)}</td><td style="font-weight:700">${t.qtd}</td></tr>`).join('')}</tbody></table></div>`}</div>
       </div>
 
-      <div class="section-heading">6. Concluídas depois das 18h</div>
-      ${!a18Lista.length ? '<div class="panel"><div class="empty">Nenhuma ordem concluída depois das 18h.</div></div>' : `${xls('rd-xls-a18')}<div class="table-wrap"><table class="data-table" id="rd-tab-a18"><thead><tr><th>Técnico</th><th>Concluídas após 18h</th><th>Mais tarde</th></tr></thead><tbody>${a18Lista.map(t => `<tr><td class="cat-cell">${esc(t.nome)}</td><td style="font-weight:700">${t.qtd}</td><td>${hm(t.ultima)}</td></tr>`).join('')}</tbody></table></div>`}
-
-      <div class="section-heading">7. Volume por bairro</div>
-      <div class="panel"><h3>Top 10 bairros do dia</h3><div id="rd-g-bairro"></div></div>`;
-    barsChart('rd-g-bairro', bairrosLista.map(b => ({ label: b.nome, value: b.qtd, display: String(b.qtd) })));
+      <div class="section-heading">6. Volume por bairro</div>
+      <div class="panel"><h3>O.S por bairro</h3>${!bairrosTodos.length ? '<div class="empty">Sem endereço no CSV desse dia.</div>' : `<div class="table-wrap" style="max-height:420px;overflow:auto"><table class="data-table" id="rd-tab-bairro"><thead><tr><th>Bairro - Cidade</th><th>O.S</th></tr></thead><tbody>${bairrosTodos.map(b => `<tr><td class="cat-cell">${esc(b.nome)}</td><td style="font-weight:700">${b.qtd}</td></tr>`).join('')}</tbody></table></div>`}</div>`;
+    if (retornos.length) {
+      const nIfi = retornos.filter(r => r.ifi_irr === 'IFI').length, nIrr = retornos.length - nIfi;
+      donutChart('rd-g-ret-tipo', [{ label: 'IFI (ativação / M.E)', value: nIfi, color: '#dc2626' }, { label: 'IRR (reparo)', value: nIrr, color: '#f59e0b' }].filter(x => x.value), { centroLabel: 'Retornos' });
+      const corSit = { pendente: '#f59e0b', em_rota: '#0ea5e9', iniciado: '#3b82f6', concluido: '#16a34a', nao_concluido: '#dc2626', cancelado: '#94a3b8' };
+      barsChart('rd-g-ret-sit', RD_BUCKETS.map(b => { const l = retornos.filter(r => cls(r) === b); return { label: RD_ROTULO[b], value: l.length, display: `${l.length} (IFI ${l.filter(r => r.ifi_irr === 'IFI').length} · IRR ${l.filter(r => r.ifi_irr === 'IRR').length})`, color: corSit[b] }; }).filter(x => x.value), { semClassificar: true });
+      const porCidR = {}; retornos.forEach(r => { const c = rotuloCidadeGeral(r.cidade); const o = porCidR[c] || (porCidR[c] = { ifi: 0, irr: 0 }); if (r.ifi_irr === 'IFI') o.ifi++; else o.irr++; });
+      barsChart('rd-g-ret-cid', Object.entries(porCidR).map(([c, o]) => ({ label: c, value: o.ifi + o.irr, display: `${o.ifi + o.irr} (IFI ${o.ifi} · IRR ${o.irr})` })).sort((a, b) => b.value - a.value));
+      const porOf = {}; retornos.forEach(r => { const t = r.ofensor || 'Não identificado'; porOf[t] = (porOf[t] || 0) + 1; });
+      barsChart('rd-g-ret-of', Object.entries(porOf).map(([n, v]) => ({ label: n, value: v, display: String(v), color: '#dc2626' })).sort((a, b) => b.value - a.value).slice(0, 12));
+    }
     const lblH = h => String(h).padStart(2, '0') + 'h';
     // a média vai PRIMEIRO: o eixo do gráfico sai da 1ª série, e a de hoje para na hora atual
     trendChart('rd-g-ritmo', [
@@ -19339,7 +19372,7 @@ function horaDeDecimal(dec) {
   if (m === 60) { h++; m = 0; }
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
-function renderReuniaoPrazos() {
+function renderReuniaoPrazos(opcoes) {
   // "Mostrar N" da tabela "Técnicos que mais começam tarde" (30/09/2026,
   // pedido do cliente: "quero que tenha a opção para ver todos os
   // técnicos") — antes vinha sempre cortada em 10 (`.slice(0,10)`) sem jeito
@@ -19349,6 +19382,10 @@ function renderReuniaoPrazos() {
   // idem pras três tabelas novas (02/10/2026): improdutivas, média por técnico/dia
   // e ordens após as 18h por técnico
   let mostrarImprodutivas = 10, mostrarMediaDia = 10, mostrarApos18 = 10;
+  // EMBUTIDO no Relatório Geral (14/10/2026, pedido do cliente: "tudo o que tem no Relatório Operacional passe para o Relatório Geral"): desenha só o corpo
+  // dentro de `opcoes.dentro`, com o De/Até (f-start/f-end) e as cidades (rg-cidades) do Relatório Geral, e tira as seções que o Geral já tem.
+  const embutido = !!(opcoes && opcoes.dentro), campoCid = embutido ? (opcoes.campoCidades || 'rg-cidades') : 'reu-cidades';
+  if (embutido) { opcoes.dentro.innerHTML = '<div id="reu-body"></div>'; load(); return; }
   const { start, end } = defaultMonthPeriod();
   document.getElementById('content').innerHTML = `${periodToolbar(start, end, `
     ${multiCityField('reu-cidades', 'Cidades', { preset: CIDADES_COBRADAS_PRAZO })}
@@ -19362,12 +19399,12 @@ function renderReuniaoPrazos() {
     // prazo, quem tinha PCR/retornos mas ainda não tinha importado a planilha de
     // prazo ficava com ZERO cidade marcada e a tela inteira vazia — achado
     // testando com o CSV real de 21/09/2026.
-    refreshCityField('reu-cidades', [
+    if (!embutido) refreshCityField('reu-cidades', [
       ...DB.prazo.filter(p => inRange(p.data, s, e)),
       ...DB.pcr.filter(p => inRange(p.data, s, e)),
       ...DB.producao.filter(p => inRange(p.data, s, e)),
     ], { label: 'Cidades', presetPadrao: CIDADES_COBRADAS_PRAZO });
-    const cidades = getSelectedCities('reu-cidades');
+    const cidades = getSelectedCities(campoCid);
     // DB.pcr é a única tabela cuja cidade NÃO passa por normalizeCidade (vem do
     // CSV em maiúsculo mas COM acento) — comparar normalizado cobre as três
     // bases sem depender de qual delas passou pela normalização.
@@ -20100,7 +20137,15 @@ function renderReuniaoPrazos() {
       geralTot: { producao: geral.tot.producao, rep: geral.tot.rep, irr: geral.tot.irr, pctIrr: pctSobre(geral.tot.irr, geral.tot.rep) === null ? '-' : formatPct(pctSobre(geral.tot.irr, geral.tot.rep), 2),
         pctPrazo: pctSobre(geral.tot.prazoDentro, geral.tot.prazoTotal) === null ? '-' : formatPct(pctSobre(geral.tot.prazoDentro, geral.tot.prazoTotal), 1), cancelados: geral.tot.cancelados },
     }));
-    posLoadTopicos('reuniaoprazos');
+    if (embutido) {
+      // seções que o Relatório Geral já mostra (mesma conta): saem daqui pra não repetir
+      const repetidas = /^(16|1|5|7|13|15)\.\s|^Deslocamento dos técnicos/;
+      let apagar = false;
+      [...body.children].forEach(el => {
+        if (el.classList && el.classList.contains('section-heading')) apagar = repetidas.test(el.textContent.trim());
+        if (apagar) el.remove();
+      });
+    } else posLoadTopicos('reuniaoprazos');
 
   }
 }
