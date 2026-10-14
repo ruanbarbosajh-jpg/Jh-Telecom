@@ -20253,6 +20253,8 @@ function renderFleet() {
   document.getElementById('f-apply').addEventListener('click', load);
   const refazerFrota = () => { const b = document.getElementById('f-apply'); if (b) b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); };
   const bReg = document.getElementById('fr-registrar'); if (bReg) bReg.addEventListener('click', () => abrirModalVeiculoFrota(refazerFrota));
+  // clique no técnico da tabela "Vínculos condutor / veículo" → ficha completa (14/10/2026); captura antes dos outros cliques da tela
+  document.getElementById('fleet-body').addEventListener('click', ev => { const a = ev.target.closest('a.fr-ficha'); if (!a) return; ev.preventDefault(); ev.stopPropagation(); abrirFichaCondutorFrota(a.dataset.nome); }, true);
   if (modoNovo()) carregarFotosFrota().then(() => { if (document.getElementById('fleet-fotos')) refazerFrota(); });   // pintarFotos mora dentro do load(): refaz a tela com as fotos já carregadas
   load();
   function load() {
@@ -20357,7 +20359,7 @@ function renderFleet() {
     const linksEl = document.getElementById('fleet-links');
     if (!links.length) linksEl.innerHTML = '<div class="empty">Nenhum vínculo encontrado. Importe a aba "FROTA LITORAL".</div>';
     else linksEl.innerHTML = `<div class="table-wrap"><table class="data-table"><thead><tr><th>Motorista</th><th>Placa</th><th>Supervisor</th><th>Cidade</th><th>Locadora</th><th>Vinculação</th></tr></thead><tbody>
-      ${linksAgrupados.map(r=>`<tr><td>${esc(r.motorista)}</td><td>${esc(r.placa)}</td><td>${esc(r.supervisor)}</td><td>${esc(r.cidade)}</td><td>${esc(r.locadora)}</td><td>${formatDate(r.vinculacao)}${r.anteriores.length ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Vinculação anterior: ${r.anteriores.map(a=>`${esc(a.placa)} (${formatDate(a.vinculacao)})`).join('; ')}</div>` : ''}</td></tr>`).join('')}
+      ${linksAgrupados.map(r=>`<tr><td>${r.motorista ? `<a href="#" class="link-os-tec fr-ficha" data-nome="${esc(r.motorista)}" title="Ver tudo sobre o técnico">${esc(r.motorista)}</a>` : '-'}</td><td>${esc(r.placa)}</td><td>${esc(r.supervisor)}</td><td>${esc(r.cidade)}</td><td>${esc(r.locadora)}</td><td>${formatDate(r.vinculacao)}${r.anteriores.length ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Vinculação anterior: ${r.anteriores.map(a=>`${esc(a.placa)} (${formatDate(a.vinculacao)})`).join('; ')}</div>` : ''}</td></tr>`).join('')}
       </tbody></table></div>`;
 
     const revEl = document.getElementById('fleet-revisao'), revComAviso = modoNovo() || revisoes.some(r => r.horario || r.tipo_revisao || r.endereco || r.notificar);
@@ -20707,11 +20709,12 @@ function htmlFotosFrota(fotos) {
 async function abrirFotoFrota(chave, aoMudar) {
   let m = document.getElementById('modal-foto-frota');
   if (!m) { m = document.createElement('div'); m.id = 'modal-foto-frota'; m.className = 'modal-backdrop'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); document.body.appendChild(m); m.addEventListener('click', e => { if (e.target === m) m.classList.remove('active'); }); }
+  document.body.appendChild(m);   // por cima de qualquer outra janela (ex.: a ficha do técnico)
   const meta = FROTA_FOTOS.find(f => f.chave === chave) || {};
   m.innerHTML = `<div class="modal-card modal-largo" style="max-width:900px"><h3 style="margin:0 0 4px">${esc(meta.placa || '')} — ${esc(meta.condutor || '')}</h3>
     <p style="font-size:12.5px;color:var(--text-muted);margin:0 0 10px">${esc(FROTA_TIPO_FOTO[meta.tipo] || '')}${meta.vinculacao ? ' · vinculação ' + formatDate(meta.vinculacao) : ''}${meta.criado_por ? ' · por ' + esc(meta.criado_por) : ''}${meta.descricao ? '<br>' + esc(meta.descricao) : ''}</p>
     <div id="ff-img" style="text-align:center;min-height:120px"><div class="loading">Carregando foto…</div></div>
-    <div class="modal-acoes"><button type="button" class="btn-secundario" id="ff-excluir">🗑 Excluir foto</button><button type="button" class="btn-secundario" id="ff-baixar">⬇ Baixar</button><button type="button" class="btn-primario" id="ff-fechar">Fechar</button></div></div>`;
+    <div class="modal-acoes">${podeEditarFrota() ? '<button type="button" class="btn-secundario" id="ff-excluir">🗑 Excluir foto</button>' : ''}<button type="button" class="btn-secundario" id="ff-baixar">⬇ Baixar</button><button type="button" class="btn-primario" id="ff-fechar">Fechar</button></div></div>`;
   m.classList.add('active');
   const fechar = () => m.classList.remove('active');
   document.getElementById('ff-fechar').addEventListener('click', fechar);
@@ -20719,11 +20722,74 @@ async function abrirFotoFrota(chave, aoMudar) {
   if (supa) { const { data } = await supa.from('frota_fotos').select('foto').eq('chave', chave).maybeSingle(); src = data && data.foto || ''; } else src = meta.foto || meta.miniatura || '';
   document.getElementById('ff-img').innerHTML = src ? `<img src="${src}" style="max-width:100%;max-height:70vh;border-radius:10px">` : '<div class="empty">Foto não encontrada.</div>';
   document.getElementById('ff-baixar').addEventListener('click', () => { if (!src) return; const a = document.createElement('a'); a.href = src; a.download = `${meta.placa || 'veiculo'}-${chave}.jpg`; document.body.appendChild(a); a.click(); a.remove(); });
-  document.getElementById('ff-excluir').addEventListener('click', async () => {
+  const bEx = document.getElementById('ff-excluir'); if (bEx) bEx.addEventListener('click', async () => {
     if (!confirm('Excluir esta foto? Isso não pode ser desfeito.')) return;
     if (supa) { const { error } = await supa.from('frota_fotos').delete().eq('chave', chave); if (error) { toast('Não consegui excluir: ' + error.message, 'aviso'); return; } }
     FROTA_FOTOS = FROTA_FOTOS.filter(f => f.chave !== chave); fechar(); toast('Foto excluída.', 'sucesso'); if (aoMudar) aoMudar();
   });
+}
+
+
+// ===================== FICHA DO TÉCNICO NA FROTA (14/10/2026) =====================
+// Pedido do cliente: "quando eu clicar em algum técnico da tabela Vínculos condutor / veículo quero que apareça tudo sobre ele, até as fotos".
+// Junta, pelo NOME (mesmaPessoa: ignora de/da/dos, typo, grafias conhecidas) e pelas PLACAS que ele teve: vínculo atual e anteriores, trocas,
+// revisões, manutenções, multas, desvinculações, pedágio (passagens em que ele era o condutor), fotos dos veículos e um resumo da produção.
+function abrirFichaCondutorFrota(nome) {
+  if (!nome) return;
+  const eu = n => mesmaPessoa(n, nome);
+  const vinc = DB.frotaLinks.filter(r => eu(r.motorista)).sort((a, b) => String(b.vinculacao || '').localeCompare(String(a.vinculacao || '')));
+  const trocas = DB.frotaTroca.filter(r => eu(r.condutor)).sort((a, b) => String(b.vinc_atual || '').localeCompare(String(a.vinc_atual || '')));
+  const placas = new Set([...vinc.map(r => placaNorm(r.placa)), ...trocas.flatMap(r => [placaNorm(r.placa_atual), placaNorm(r.placa_anterior)])].filter(Boolean));
+  const revis = DB.frotaRevisao.filter(r => eu(r.condutor)).sort((a, b) => String(b.data_revisao || '').localeCompare(String(a.data_revisao || '')));
+  const manut = DB.frotaManutencao.filter(r => eu(r.condutor)).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+  const multas = DB.frotaMultas.filter(r => eu(r.condutor)).sort((a, b) => String(b.data_infracao || '').localeCompare(String(a.data_infracao || '')));
+  const desv = DB.frotaDesvinc.filter(r => eu(r.condutor)).sort((a, b) => String(b.desvinculado || '').localeCompare(String(a.desvinculado || '')));
+  const ped = (DB.pedagio || []).filter(r => eu(r.condutor_atual)).sort((a, b) => String(b.data_transacao + (b.hora || '')).localeCompare(String(a.data_transacao + (a.hora || ''))));
+  const fotos = (FROTA_FOTOS || []).filter(f => eu(f.condutor) || placas.has(placaNorm(f.placa)));
+  const hoje = hojeISOLocal(), d30 = isoLocalDe(new Date(Date.now() - 29 * 86400000));
+  const prod = (DB.producao || []).filter(r => isConcluido(r.status) && eu(r.recurso));
+  const prod30 = prod.filter(r => r.data >= d30 && r.data <= hoje), dias30 = new Set(prod30.map(r => r.data)).size;
+  const ultimaOrdem = prod.reduce((m, r) => r.data > m ? r.data : m, '');
+  const atual = vinc[0] || null;
+  const soma = (l, f) => l.reduce((t, r) => t + (Number(f(r)) || 0), 0);
+  const ped30 = ped.filter(r => r.data_transacao >= d30);
+  const proxRev = revis.filter(r => r.data_revisao >= hoje).sort((a, b) => String(a.data_revisao).localeCompare(String(b.data_revisao)))[0];
+  const tab = (titulo, cab, linhas, vazio) => `<div class="section-heading" style="margin-top:18px">${esc(titulo)} <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(${linhas.length})</span></div>`
+    + (linhas.length ? `<div class="table-wrap"><table class="data-table"><thead><tr>${cab.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${linhas.join('')}</tbody></table></div>` : `<div class="empty" style="padding:10px">${vazio}</div>`);
+  const td = v => `<td>${v == null || v === '' ? '-' : v}</td>`;
+  let m = document.getElementById('modal-ficha-frota');
+  if (!m) { m = document.createElement('div'); m.id = 'modal-ficha-frota'; m.className = 'modal-backdrop'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); document.body.appendChild(m);
+    m.addEventListener('click', e => { if (e.target === m) m.classList.remove('active'); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && m.classList.contains('active') && !document.querySelector('#modal-foto-frota.active')) m.classList.remove('active'); }); }
+  m.innerHTML = `<div class="modal-card modal-largo" style="max-width:1150px">
+    <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap">
+      <div><h3 style="margin:0">${esc(nome)}</h3>
+        <p style="margin:4px 0 0;font-size:13px;color:var(--text-secondary)">${atual ? `Placa atual <b>${esc(atual.placa)}</b> · ${esc(atual.locadora || 'locadora não informada')} · ${esc(atual.cidade || '')}${atual.supervisor ? ' · supervisor ' + esc(atual.supervisor) : ''} · vinculado desde ${formatDate(atual.vinculacao)}` : 'Sem vínculo atual na tabela de Frota'}</p></div>
+      <button type="button" class="btn-secundario" id="ficha-fechar" style="margin-left:auto">✕ Fechar</button>
+    </div>
+    <div class="stat-cards" style="margin-top:14px">
+      ${statCard('blue', icCarro, 'Veículos que já teve', String(placas.size), [...placas].join(' · ') || '-')}
+      ${statCard(proxRev ? 'orange' : 'neutral', icRelogio, 'Próxima revisão', proxRev ? formatDate(proxRev.data_revisao).slice(0, 5) : '-', proxRev ? `${formatDate(proxRev.data_revisao)} ${proxRev.horario || ''} ${proxRev.tipo_revisao || ''}`.trim() : `${revis.length} revisão(ões) no total`)}
+      ${statCard(manut.length ? 'purple' : 'neutral', icChave, 'Manutenções', String(manut.length), manut[0] ? 'última ' + formatDate(manut[0].data) : 'nenhuma')}
+      ${statCard(multas.length ? 'red' : 'green', icAviso, 'Multas', formatCurrency(soma(multas, r => r.valor_multa)), `${multas.length} multa(s)`)}
+      ${statCard('neutral', icMoeda, 'Pedágio (30 dias)', formatCurrency(Math.abs(soma(ped30, r => r.valor))), `${ped30.length} passagem(ns) · total ${formatCurrency(Math.abs(soma(ped, r => r.valor)))}`)}
+      ${statCard('green', icOk, 'Produção (30 dias)', String(prod30.length), `${dias30} dia(s) trabalhado(s)${ultimaOrdem ? ' · última ordem ' + formatDate(ultimaOrdem) : ''}`)}
+    </div>
+    <div class="section-heading" style="margin-top:18px">Fotos dos veículos <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(${fotos.length} — clique pra abrir)</span></div>
+    <div id="ficha-fotos">${fotos.length ? htmlFotosFrota(fotos) : `<div class="empty" style="padding:10px">${FROTA_FOTOS_ERRO ? 'Não consegui carregar as fotos.' : 'Nenhuma foto deste técnico ou das placas dele.'}</div>`}</div>
+    ${tab('Vínculos (atual e anteriores)', ['Placa', 'Locadora', 'Cidade', 'Supervisor', 'Vinculação', 'Situação', 'Observação'], vinc.map((r, i) => `<tr>${td(`<b>${esc(r.placa)}</b>`)}${td(esc(r.locadora))}${td(esc(r.cidade))}${td(esc(r.supervisor))}${td(formatDate(r.vinculacao))}${td(i === 0 ? '<span class="badge ok">Atual</span>' : '<span class="badge neutral">Anterior</span>')}${td(esc(r.observacao))}</tr>`), 'Nenhum vínculo na tabela de Frota.')}
+    ${tab('Trocas de veículo', ['Placa anterior', 'Vinc. anterior', 'Placa atual', 'Vinc. atual', 'KM', 'Locadora', 'Observação'], trocas.map(r => `<tr>${td(esc(r.placa_anterior))}${td(formatDate(r.vinc_anterior))}${td(`<b>${esc(r.placa_atual)}</b>`)}${td(formatDate(r.vinc_atual))}${td(esc(r.km))}${td(esc(r.locadora))}${td(esc(r.obs_checklist))}</tr>`), 'Nenhuma troca registrada.')}
+    ${tab('Revisões', ['Data', 'Horário', 'Tipo', 'Placa', 'Endereço', 'Situação', 'Observação'], revis.map(r => { const d = diasEntre(r.data_revisao, hoje); return `<tr>${td(formatDate(r.data_revisao))}${td(esc(r.horario))}${td(r.tipo_revisao ? `<span class="badge ${/corretiva/i.test(r.tipo_revisao) ? 'warn' : 'ok'}">${esc(r.tipo_revisao)}</span>` : '')}${td(esc(r.placa))}${td(esc(r.endereco))}${td(d < 0 ? `<span style="color:var(--danger);font-weight:700">venceu há ${-d} dia(s)</span>` : d === 0 ? '<b>é hoje</b>' : `faltam ${d} dia(s)`)}${td(esc(r.obs))}</tr>`; }), 'Nenhuma revisão.')}
+    ${tab('Manutenções', ['Data', 'Horário', 'Serviço', 'Placa', 'Endereço / oficina', 'KM', 'Observação'], manut.map(r => `<tr>${td(formatDate(r.data))}${td(esc(r.horario))}${td(esc(r.servico))}${td(esc(r.placa))}${td(esc(r.endereco))}${td(esc(r.km))}${td(esc(r.obs))}</tr>`), 'Nenhuma manutenção.')}
+    ${tab('Multas', ['Data da infração', 'Placa', 'Valor'], multas.map(r => `<tr>${td(formatDate(r.data_infracao))}${td(esc(r.placa))}${td(formatCurrency(r.valor_multa))}</tr>`), 'Nenhuma multa.')}
+    ${tab('Desvinculações', ['Placa', 'Vinculado desde', 'Desvinculado em', 'Observação'], desv.map(r => `<tr>${td(esc(r.placa))}${td(formatDate(r.vinculacao))}${td(formatDate(r.desvinculado))}${td(esc(r.obs))}</tr>`), 'Nenhuma desvinculação.')}
+    ${tab('Pedágio — últimas passagens', ['Data', 'Horário', 'Placa', 'Endereço', 'Valor', 'Status'], ped.slice(0, 60).map(r => `<tr>${td(formatDate(r.data_transacao))}${td(esc(r.hora))}${td(esc(r.placa))}${td(esc(r.endereco))}${td(formatCurrency(Math.abs(Number(r.valor) || 0)))}${td(esc(r.status))}</tr>`), 'Nenhuma passagem com ele como condutor.')}
+    ${ped.length > 60 ? `<p style="font-size:12px;color:var(--text-muted);margin:6px 0 0">Mostrando as 60 mais recentes de ${ped.length}. A tela Pedágio tem todas.</p>` : ''}
+  </div>`;
+  m.classList.add('active');
+  m.querySelector('#ficha-fechar').addEventListener('click', () => m.classList.remove('active'));
+  m.querySelector('#ficha-fotos').addEventListener('click', e => { const f = e.target.closest('.fr-foto'); if (f) abrirFotoFrota(f.dataset.foto, () => abrirFichaCondutorFrota(nome)); });
+  try { ativarFiltrosDeColuna(m); } catch (e) { /* ordenar/filtrar é extra */ }
 }
 
 // ===================== PEDÁGIO =====================
