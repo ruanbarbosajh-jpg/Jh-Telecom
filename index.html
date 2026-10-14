@@ -3826,9 +3826,9 @@ function podeEditarPresencaEscritorio() { return !!currentUser && (currentUser.r
 // Saíram Produção, Ofensor (resumo/indicadores IFI-IRR), Reunião Técnica e
 // Comparativo de Prazo — ficou só a lista abaixo. Rota nova nasce FECHADA.
 const ROTAS_SO_PERMITIDAS = {
-  gestao: ['inicio', 'reuniaoprazos', 'dashboard', 'fleet', 'toll', 'prazo', 'parcialdia'],
+  gestao: ['inicio', 'reuniaoprazos', 'dashboard', 'fleet', 'toll', 'prazo', 'parcialdia', 'u2000', 'relu2000'],
   escritorio: ['inicio', 'cleanup', 'table', 'prazo', 'prazoativacao', 'parcialdia',
-               'pcr', 'chamadosgiga', 'ofensoresprazo', 'certificacoes'],
+               'pcr', 'chamadosgiga', 'ofensoresprazo', 'certificacoes', 'u2000', 'relu2000'],
 };
 function podeAcessar(role, route) {
   // Presença (Técnicos + Escritório): oculta pra TODO MUNDO, sem exceção,
@@ -3852,7 +3852,9 @@ function podeAcessar(role, route) {
   // páginas de área (Dashboards / Operação / Monitoramento) só existem pra ele. Os outros perfis seguem com o sistema de antes.
   if (perfil === 'analista') { if (ROTAS_FORA_DO_MODO_NOVO.has(route)) return false; }
   // modo novo liberado pra todos (14/10/2026): Relatório Geral (pedido expresso de 14/10) e U2000/Analítico (o banco só libera o Analista) seguem só dele
-  else if (route === 'relgeral' || route === 'u2000' || route === 'relu2000') return false;
+  // U2000 (Monitoramento OLTs e ONUs Huawei) e Analítico LIBERADOS pra todos os logins em 14/10/2026 (pedido do cliente: "libere o monitoramento
+  // para os logins"); o banco acompanha pelo sql/PASSO-56 (pode_monitor_olt() = qualquer perfil). Relatório Geral segue só do Analista.
+  else if (route === 'relgeral') return false;
   // páginas de área: qualquer login (cada uma só mostra as telas que o perfil pode abrir)
   if (route.startsWith('area_')) return true;
   // Relatório do Dia = Parcial do Dia + PCR: vale pra quem vê a Parcial do Dia
@@ -8306,7 +8308,7 @@ const DESCRICAO_ROTAS = {
   monitorolt: 'Sinal real dos clientes atendidos pela JH e as OLTs das 6 cidades, lidos do AutoISP da Alloha, pra preventiva.',
   relmonitorolt: 'Relatório mensal do Monitoramento OLT: sinal dos clientes, melhorias, chamados e tempo até o chamado.',
   relu2000: 'Relatório do U2000: massivas por dia, OLTs e portas que mais caem, tempo até resolver, VLANs e bairros afetados, e mapas.',
-  u2000: 'OLTs, ONUs e alarmes lidos das exportações do U2000 (Huawei): status, sinal Rx, VLAN e IP. Aba separada, só do Analista.',
+  u2000: 'OLTs, ONUs e alarmes lidos das exportações do U2000 (Huawei): status, sinal Rx, VLAN e IP. Aba separada.',
 };
 // Lê o MENU LATERAL pra descobrir ícone, nome e área de cada rota. Fazendo
 // assim, uma rota nova entra no Menu Inicial só de existir no menu — não tem
@@ -29982,7 +29984,7 @@ function renderU2000() {
       <div id="u2-bres" style="margin-top:10px"></div>
     </div>
     <div class="panel" style="margin-bottom:1rem">
-      <h3>🛰 Monitoramento OLTs e ONUs (Huawei) <span style="font-size:12px;font-weight:500;color:var(--text-muted)">(só do Analista)</span></h3>
+      <h3>🛰 Monitoramento OLTs e ONUs (Huawei)</h3>
       <p style="font-size:13px;color:var(--text-secondary);margin:0 0 10px;line-height:1.55">Arraste aqui o que o U2000 <b>exporta</b> (<b>Save As…</b>): os <b>alarmes</b> (Fault → Browse Current Alarm, filtro <i>Previous: 2 Days</i>) e a <b>lista GPON ONU</b> de cada OLT (aba da OLT → GPON → GPON Management → GPON ONU → All → Find). Reimportar não duplica: cada ONU é guardada pela OLT + frame + slot + porta + ONU ID (e SN), e o histórico por dia fica no banco.</p>
       <div class="toolbar" style="margin:0;box-shadow:none">${campoArquivo('u2-file', 'Exportação do U2000', '.xlsx,.xls,.csv,.txt', ' multiple')}
         <button type="button" class="btn-export-xls" id="u2-limpar">🗑 Limpar dados desta aba</button><span id="u2-msg" style="font-size:12.5px;color:var(--text-muted);align-self:center"></span></div>
