@@ -3851,8 +3851,12 @@ function podeAcessar(role, route) {
   // estiver pronto eu liberar para os outros"): a Produção, os 4 Comparativos e o Gerar Relatório saíram só pro Analista e as 3
   // páginas de área (Dashboards / Operação / Monitoramento) só existem pra ele. Os outros perfis seguem com o sistema de antes.
   if (perfil === 'analista') { if (ROTAS_FORA_DO_MODO_NOVO.has(route)) return false; }
-  // Relatório Geral e Relatório do Dia: telas novas, só do Analista enquanto o cliente valida
-  else if (route.startsWith('area_') || route === 'reldia' || route === 'relgeral' || route === 'u2000' || route === 'relu2000') return false;
+  // modo novo liberado pra todos (14/10/2026): Relatório Geral (pedido expresso de 14/10) e U2000/Analítico (o banco só libera o Analista) seguem só dele
+  else if (route === 'relgeral' || route === 'u2000' || route === 'relu2000') return false;
+  // páginas de área: qualquer login (cada uma só mostra as telas que o perfil pode abrir)
+  if (route.startsWith('area_')) return true;
+  // Relatório do Dia = Parcial do Dia + PCR: vale pra quem vê a Parcial do Dia
+  if (route === 'reldia') return podeAcessar(role, 'parcialdia');
   // Perfil com lista de PERMISSÃO (Gestão): só entra o que está na lista.
   // ROUTE_PERMISSIONS é lista de BLOQUEIO — tela nova nasce liberada pra todo
   // mundo até alguém bloquear. Pra um perfil que o cliente quer "só estas
@@ -8156,11 +8160,14 @@ function abrirDetalheLupa(tipo, chave) {
 // ===================== MODO NOVO — SÓ O ANALISTA (08/10/2026) =====================
 // O sistema vai ser dividido em 3 áreas na vitrine: Dashboards, Operação e Monitoramento OLTs - ONUs. Enquanto o cliente
 // valida, TUDO que for novo vale só pro login Analista (modoNovo); os outros perfis seguem com o menu e as telas de antes.
-const modoNovo = () => !!(currentUser && perfilValido(currentUser.role) === 'analista');
+// LIBERADO pra todos os logins em 14/10/2026 (pedido do cliente: "libere as atualizações agora para os outros logins"). Antes: só o Analista.
+// Continuam SÓ do Analista, por pedido expresso: Relatório Geral, U2000/Analítico (o banco também só libera o Analista), alterar a Frota,
+// Saúde/Importar (listas de bloqueio) e as colunas Taxa de Conclusão/Execução da Caixa (ehAnalista). Cada perfil continua vendo só as telas dele.
+const modoNovo = () => !!currentUser;
 // saíram do sistema (só do Analista): Produção (o conteúdo foi pro Relatório Geral), os 4 Comparativos e o "Gerar Relatório"
 const ROTAS_FORA_DO_MODO_NOVO = new Set(['production', 'cmpproducao', 'cmpifiirr', 'cmpprazo', 'comparisons', 'relatorios']);
 const ESTRUTURA_NOVA = [
-  { id: 'dashboards', rota: 'area_dashboards', nome: 'Dashboards', grupos: [{ nome: '', rotas: ['reuniaoprazos', 'relgeral', 'reldia', 'dashboard'] }],
+  { id: 'dashboards', rota: 'area_dashboards', nome: 'Dashboards', grupos: [{ nome: 'Relatórios', rotas: ['reuniaoprazos', 'relgeral', 'reldia', 'dashboard'] }, { nome: 'Produção e comparativos', rotas: ['production', 'cmpproducao', 'cmpifiirr', 'cmpprazo', 'comparisons', 'relatorios'] }],
     desc: 'Relatório Operacional, Relatório Geral, Relatório do Dia (Parcial do Dia + PCR) e o Dashboard de eficiência.',
     icone: '<svg viewBox="0 0 18 18"><rect x="1.5" y="1.5" width="6.2" height="6.2" rx="1.2"/><rect x="10.3" y="1.5" width="6.2" height="6.2" rx="1.2"/><rect x="1.5" y="10.3" width="6.2" height="6.2" rx="1.2"/><rect x="10.3" y="10.3" width="6.2" height="6.2" rx="1.2"/></svg>' },
   { id: 'operacao', rota: 'area_operacao', nome: 'Operação', resto: true,
@@ -8335,12 +8342,12 @@ function renderInicioNovo() {
       <h1 class="ini-titulo">JH <b>OPERATIONS</b></h1>
       <p class="ini-sub">Escolha por onde começar.</p>
     </div>
-    <div class="ini-areas">${ESTRUTURA_NOVA.map(a => `
+    <div class="ini-areas">${ESTRUTURA_NOVA.filter(a => rotasDaAreaNova(a).length).map(a => `
       <button type="button" class="ini-card ini-area ${classeDaArea(a.id)}" data-rota="${esc(a.rota)}">
         <span class="ini-card-ic">${a.icone}</span><h3>${esc(a.nome)}</h3><p>${esc(a.desc)}</p>
         <span class="ini-card-rodape"><span class="ini-tag">${rotasDaAreaNova(a).length} telas</span><span class="ini-seta"><svg viewBox="0 0 18 18"><line x1="4" y1="14" x2="14" y2="4"/><path d="M6.5 4H14v7.5"/></svg></span></span>
       </button>`).join('')}</div>
-    ${primeiroNome ? `<p style="margin-top:26px;font-size:var(--fs-sm);color:var(--text-muted);text-align:center">Você está como <strong style="color:var(--text-secondary)">${esc(primeiroNome)}</strong> (modo novo — só o seu login enxerga estas áreas por enquanto).</p>` : ''}`;
+    ${primeiroNome ? `<p style="margin-top:26px;font-size:var(--fs-sm);color:var(--text-muted);text-align:center">Você está como <strong style="color:var(--text-secondary)">${esc(primeiroNome)}</strong>.</p>` : ''}`;
   document.querySelector('.ini-areas').addEventListener('click', e => { const c = e.target.closest('.ini-card'); if (c) navigate(c.dataset.rota); });
 }
 function renderInicio() {
