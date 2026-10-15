@@ -29687,6 +29687,19 @@ const u2kDur = ms => { if (!(ms > 0)) return ''; const m = Math.round(ms / 60000
 // Cliente da porta com massiva: o contrato vem do AutoISP guardado (pelo SN) ou, sem ele, o nome do alias. Chamado = reparo da Produção/PCR aberto entre 1 h antes
 // do início da massiva e a janela escolhida. IFI/IRR: a coluna oficial da Produção; sem ela, o último serviço concluído antes do reparo (mesma régua do sistema).
 // Usado pelo Analítico e pela aba "Cliente e monitorar"; `calcular()` pode ser chamado de novo (o contrato chega do AutoISP em segundo plano).
+const u2kTipoMassiva = t => String(t).startsWith('Porta PON') ? 'PON sem sinal' : String(t).startsWith('Sem energia') ? 'Sem energia' : 'LOS / fibra';
+// fim da massiva: o último encerramento dos alarmes; "Em aberto" enquanto a porta ainda tem alarme (mesma regra das abas de massiva)
+const u2kFimMassiva = e => (e.abertas > 0 && (String(e.tipo).startsWith('Porta PON') || e.abertas >= 5 || e.abertas * 2 >= e.onus)) ? 'Em aberto' : u2kFmtData(e.resolvidoEm || e.fim);
+const u2kFmtChamado = (t, comHora) => t ? new Date(t).toLocaleString('pt-BR', comHora ? { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' } : { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
+function u2kColsChamadosMassiva(cidDe) {
+  return [{ t: 'IFI / IRR', h: r => r.marcaPot ? `<span class="badge ${r.marca ? (r.marcaPot === 'IFI' ? 'warn' : 'amber') : 'neutral'}" title="${r.marca ? 'o chamado foi concluído: virou retorno' : 'só vira IFI / IRR se o chamado for concluído'}" style="white-space:normal">${esc(r.rotulo)}</span>` : '<span style="color:var(--text-muted)">não</span>', x: r => r.rotulo, s: 'white-space:normal;min-width:130px' },
+    { t: 'Cliente', f: r => r.cliente, s: 'font-weight:600' }, { t: 'Contrato', f: r => r.contrato }, { t: 'Cidade', f: cidDe }, { t: 'Bairro', f: r => r.bairro },
+    { t: 'Porta da massiva (frame/slot/porta)', h: r => `<b>${esc(u2kPortaCompleta(r.ev))}</b>`, x: r => u2kPortaCompleta(r.ev) }, { t: 'OLT', f: r => r.o.olt }, { t: 'ONU do cliente', f: r => `ONU ${r.o.onuId}`, x: r => r.o.onuId }, { t: 'SN', f: r => u2kSnCurto(r.o.sn), s: 'font-size:11.5px' },
+    { t: 'Tipo da massiva', f: r => u2kTipoMassiva(r.ev.tipo) }, { t: 'Clientes afetados na massiva', h: r => `<b>${r.ev.onus}</b>`, x: r => r.ev.onus }, { t: 'Massiva começou', f: r => u2kFmtData(r.ev.ini) }, { t: 'Massiva terminou', f: r => u2kFimMassiva(r.ev) },
+    { t: 'Chamado (O.S)', f: r => r.x.os }, { t: 'Abertura do chamado', f: r => u2kFmtChamado(r.x.t, true) }, { t: 'Situação do chamado', h: r => `<span class="badge ${r.sitTxt === 'Concluído' ? 'ok' : r.sitTxt === 'Cancelado' ? 'neutral' : 'amber'}">${r.sitTxt}</span>`, x: r => r.sitTxt },
+    { t: 'Concluído / cancelado em', f: r => r.x.sit === 'concluido' || r.x.sit === 'cancelado' || r.x.sit === 'nao_concluido' ? u2kFmtChamado(r.x.fimT, r.x.fimHora) : '' },
+    { t: 'Depois da massiva', f: r => r.horas < 0 ? 'antes (até 1 h)' : u2kDur(r.horas * 3600000) || '0min' }, { t: 'Técnico do chamado', f: r => r.x.tecnico }, { t: 'Ofensor (serviço anterior)', f: r => r.ofensor }, { t: 'Fonte', f: r => r.x.fonte }];
+}
 function u2kChamadosMassivas(onus, eventos, desde, janelaMs) {
   const nk = normalizeHeader, tms = x => Date.parse(String(x || '').replace(' ', 'T')) || 0, ind = u2kIndiceAtend();
     const evPorPorta = new Map(); eventos.forEach(e => { const k = `${nk(e.olt)}|${e.slot}|${e.porta}`; if (!evPorPorta.has(k)) evPorPorta.set(k, []); evPorPorta.get(k).push(e); });
@@ -29695,9 +29708,13 @@ function u2kChamadosMassivas(onus, eventos, desde, janelaMs) {
     const addRep = (r, fonte, nome) => {
       if (!ehServicoReparo(r.tipo_atividade)) return; const dia = String(r.data || '').slice(0, 10); if (!dia || dia < desde) return;
       let t = r.abertura ? (r.abertura instanceof Date ? +r.abertura : (Date.parse(String(r.abertura).replace(' ', 'T')) || 0)) : 0; if (!t) t = Date.parse(dia + 'T12:00:00');
-      const x = { fonte, os: String(r.os || ''), contrato: String(r.contrato || '').trim(), nomeK: u2kNomeChave(nome), nome: nome || '', t, dia, tecnico: r.recurso || '', endereco: r.endereco || '', cidade: r.cidade || '', ifi: /^(IFI|IRR)$/i.test(String(r.ifi_irr || '').trim()) ? String(r.ifi_irr).trim().toUpperCase() : '', ofensor: r.ofensor || '' };
+      // 15/10/2026: situação do chamado (só CONCLUÍDO vira IFI/IRR; cancelado / não concluído não) e a data em que foi concluído ou cancelado
+      const sit = classifyStatusGranular(r.status), fimHora = r.encerramento instanceof Date && !isNaN(r.encerramento), fimT = fimHora ? +r.encerramento : Date.parse(dia + 'T12:00:00');
+      const x = { fonte, os: String(r.os || ''), contrato: String(r.contrato || '').trim(), nomeK: u2kNomeChave(nome), nome: nome || '', t, dia, sit, fimT, fimHora: sit === 'concluido' && fimHora, tecnico: r.recurso || '', endereco: r.endereco || '', cidade: r.cidade || '', ifi: /^(IFI|IRR)$/i.test(String(r.ifi_irr || '').trim()) ? String(r.ifi_irr).trim().toUpperCase() : '', ofensor: r.ofensor || '' };
       const k = x.os && !/^0+$/.test(x.os) ? 'os:' + x.os : 'x:' + x.contrato + '|' + dia + '|' + x.nomeK, a = repPorOs.get(k);
-      if (!a) repPorOs.set(k, x); else { a.t = Math.min(a.t, x.t); if (!a.ifi && x.ifi) { a.ifi = x.ifi; a.ofensor = x.ofensor; } if (!a.endereco) a.endereco = x.endereco; }
+      if (!a) repPorOs.set(k, x); else { a.t = Math.min(a.t, x.t); if (!a.ifi && x.ifi) { a.ifi = x.ifi; a.ofensor = x.ofensor; } if (!a.endereco) a.endereco = x.endereco;
+        // a O.S pode ter várias tentativas: concluída vale sobre as outras; senão vale a mais recente
+        if ((x.sit === 'concluido' && a.sit !== 'concluido') || (a.sit !== 'concluido' && x.dia > a.dia)) { a.sit = x.sit; a.fimT = x.fimT; a.fimHora = x.fimHora; a.dia = x.dia; } }
     };
     DB.producao.forEach(r => addRep(r, 'Produção', r.nome)); DB.pcr.forEach(r => addRep(r, 'PCR', r.cliente));
     const repC = new Map(), repN = new Map(); repPorOs.forEach(x => { if (x.contrato) { if (!repC.has(x.contrato)) repC.set(x.contrato, []); repC.get(x.contrato).push(x); } if (x.nomeK) { if (!repN.has(x.nomeK)) repN.set(x.nomeK, []); repN.get(x.nomeK).push(x); } });
@@ -29714,7 +29731,9 @@ function u2kChamadosMassivas(onus, eventos, desde, janelaMs) {
           if (!marca) { const at = (x.contrato && ind.porC.get(x.contrato)) || (x.nomeK && ind.porN.get(x.nomeK)) || [];
             const ant = at.find(a => isConcluido(a.status) && a.dia <= x.dia && String(a.os) !== x.os && !(a.dia === x.dia && ehServicoReparo(a.tipo)));
             if (ant) { const m = classificaRetorno(ant.tipo, diasEntre(x.dia, ant.dia)); if (m === 'IFI' || m === 'IRR') { marca = m; ofensor = ant.tecnico; } } }
-          res.push({ o, ev, x, marca, ofensor: ofensor || '', cliente: (aut && aut.nome) || x.nome || o.alias || '', contrato: contrato || x.contrato,
+          const sitTxt = { concluido: 'Concluído', cancelado: 'Cancelado', nao_concluido: 'Não concluído' }[x.sit] || 'Em aberto', virou = x.sit === 'concluido' && !!marca;
+          const rotulo = marca ? (virou ? `${marca} concluído` : `${marca} ${sitTxt.toLowerCase()}`) : 'Não é IFI / IRR';
+          res.push({ o, ev, x, marca: virou ? marca : '', marcaPot: marca || '', rotulo, sitTxt, ofensor: ofensor || '', cliente: (aut && aut.nome) || x.nome || o.alias || '', contrato: contrato || x.contrato,
             bairro: (aut && aut.bairro) || u2kBairroDoEndereco(x.endereco) || '', cidade: (aut && aut.cidade) || x.cidade || u2kRotCidade(o.cidade), horas: (x.t - tms(ev.ini)) / 3600000 });
         });
       });
@@ -29860,11 +29879,7 @@ function renderRelU2000() {
       tab('ru-ret-bai', [{ t: 'Bairro - Cidade', f: a => a.nome, s: 'font-weight:600' }, ...colsQ], porBairro);
       tab('ru-ret-of', [{ t: 'Ofensor (fez o serviço anterior)', f: a => a.nome, s: 'font-weight:600' }, { t: 'IFI', f: a => a.ifi || '' }, { t: 'IRR', f: a => a.irr || '' }, { t: 'Total', f: a => a.ifi + a.irr }], porOf);
       tab('ru-ret-tec', [{ t: 'Técnico do chamado', f: a => a.nome, s: 'font-weight:600' }, ...colsQ], porTecRep);
-      tab('ru-ret-cli', [{ t: 'IFI / IRR', h: r => r.marca ? `<span class="badge ${r.marca === 'IFI' ? 'warn' : 'amber'}">${r.marca}</span>` : '<span style="color:var(--text-muted)">não</span>', x: r => r.marca || 'não' },
-        { t: 'Cliente', f: r => r.cliente, s: 'font-weight:600' }, { t: 'Contrato', f: r => r.contrato }, { t: 'Cidade', f: r => r.cidade }, { t: 'Bairro', f: r => r.bairro },
-        { t: 'OLT', f: r => r.o.olt }, { t: 'Porta / ONU', f: r => `${r.o.frame || 0}/${r.o.slot}/${r.o.porta} · ONU ${r.o.onuId}` }, { t: 'SN', f: r => u2kSnCurto(r.o.sn), s: 'font-size:11.5px' },
-        { t: 'Massiva', f: r => `${tipoCurto(r.ev.tipo)} · ${u2kFmtData(r.ev.ini)}`, s: 'font-size:12px;white-space:normal' }, { t: 'Chamado (O.S)', f: r => r.x.os }, { t: 'Abertura do chamado', f: r => new Date(r.x.t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) },
-        { t: 'Depois da massiva', f: r => r.horas < 0 ? 'antes (até 1 h)' : u2kDur(r.horas * 3600000) || '0min' }, { t: 'Técnico do chamado', f: r => r.x.tecnico }, { t: 'Ofensor', f: r => r.ofensor }, { t: 'Fonte', f: r => r.x.fonte }],
+      tab('ru-ret-cli', u2kColsChamadosMassiva(r => r.cidade),
         res.slice().sort((a, b) => (b.marca ? 1 : 0) - (a.marca ? 1 : 0) || b.x.t - a.x.t));
       // mapa: bolha por bairro (coordenada do bairro; sem ela, o centro da cidade, tracejado)
       const el = document.getElementById('ru-ret-mapa');
@@ -30204,7 +30219,7 @@ function renderU2000() {
       el.innerHTML = titulo(tit, sub) + (grupo === 'sistema' ? U2K_EXPLICA_ENLACE : '') + `<p id="u2-dcli" style="font-size:12.5px;color:var(--text-secondary);margin:-4px 0 10px;line-height:1.5"></p><div id="u2-d"></div>`
         + (grupo === 'sistema' ? titulo('Clientes ativos (últimos 90 dias) — estão na OLT, online e provisionados?', 'cliente não provisionado não aparece online nem com sinal: aqui saem os contratos atendidos que NÃO estão online e com perfil de internet') + '<div id="u2-ativos"></div>' : '')
         // 15/10/2026 (pedido do cliente): abaixo da tabela de "Cliente e monitorar", os clientes que abriram chamado por causa da massiva, com a coluna IFI / IRR
-        + (grupo === 'cliente' ? titulo('Clientes que abriram chamado por causa da massiva', 'reparo aberto de 1 h antes do início da massiva até a janela escolhida, por clientes das portas com massiva; a coluna IFI / IRR diz se o chamado virou retorno') + `<p style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px">Cliente achado pelo contrato do AutoISP guardado (pelo SN) ou, sem ele, pelo nome do alias igual ao da Produção/PCR (aproximado). IFI/IRR = coluna oficial da Produção ou, sem ela, o último serviço concluído antes do reparo (IFI até ${JANELA_IFI} dias de ativação/M.E; IRR até ${JANELA_IRR} dias de reparo).</p><div id="u2-cham"></div>` : '');
+        + (grupo === 'cliente' ? titulo('Clientes que abriram chamado por causa da massiva', 'reparo aberto de 1 h antes do início da massiva até a janela escolhida, por clientes das portas com massiva; a coluna IFI / IRR diz se o chamado virou retorno') + `<p style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px">Cliente achado pelo contrato do AutoISP guardado (pelo SN) ou, sem ele, pelo nome do alias igual ao da Produção/PCR (aproximado). <b>Massiva</b> = 5 ou mais clientes da mesma porta que caíram ao mesmo tempo (mesma data e horário), por padrão em LOS. <b>IFI / IRR</b> = coluna oficial da Produção ou, sem ela, o último serviço concluído antes do reparo (IFI até ${JANELA_IFI} dias de ativação/M.E; IRR até ${JANELA_IRR} dias de reparo) — <b>só vira IFI / IRR se o chamado foi concluído</b>; chamado cancelado ou não concluído aparece escrito como "IFI cancelado", "IRR não concluído" etc., e não conta como retorno.</p><div id="u2-cham"></div>` : '');
       const grupos = grupo === 'cliente' ? ['cliente'] : [grupo], base = diag.filter(r => grupos.includes(r.info.aba));
       const montar = () => { base.forEach(r => { r.cli = u2kDadosCliente(r.sn, r.alias); }); return grupo === 'cliente' ? base.filter(r => r.cli.risco) : base; };
       let todas = montar();
@@ -30226,18 +30241,15 @@ function renderU2000() {
         const box = document.getElementById('u2-cham'); if (!box) return;
         const tipoCurto = t => String(t).startsWith('Porta PON') ? 'PON sem sinal' : String(t).startsWith('Sem energia') ? 'Sem energia' : 'LOS / fibra', cidDe = r => (r.cidade && (u2kRotCidade(moChaveCid(r.cidade)) || r.cidade)) || 'sem cidade';
         u2kVisao(box, { id: 'u2cham', excel: 'u2000-chamados-por-massiva', busca: r => [r.cliente, r.contrato, r.o.olt, r.o.sn, r.x.os, r.bairro].join(' '),
-          controles: [{ id: 'per', rot: 'Massivas dos últimos', opcoes: [['3', '3 dias'], ['7', '7 dias'], ['15', '15 dias'], ['30', '30 dias']], padrao: '7' }, { id: 'jan', rot: 'Chamado até', opcoes: [['24', '24 horas depois'], ['72', '3 dias depois'], ['168', '7 dias depois']], padrao: '72' }],
+          controles: [{ id: 'per', rot: 'Massivas dos últimos', opcoes: [['3', '3 dias'], ['7', '7 dias'], ['15', '15 dias'], ['30', '30 dias']], padrao: '7' }, { id: 'tipo', rot: 'Tipo de massiva', opcoes: [['los', 'LOS / fibra (padrão)'], ['todas', 'Todas (inclui sem energia)']], padrao: 'los' }, { id: 'jan', rot: 'Chamado até', opcoes: [['24', '24 horas depois'], ['72', '3 dias depois'], ['168', '7 dias depois']], padrao: '72' }],
           linhas: est => {
-            const chave = `${est.per}|${est.jan}|${U2K._autLoc ? U2K._autLoc.size : 0}`; if (cacheCham && cacheCham.chave === chave) return cacheCham.res;
-            const desde = isoLocalDe(new Date(Date.now() - (Number(est.per) - 1) * 86400000)), evs = evPorta.filter(e => String(e.ini).slice(0, 10) >= desde && String(e.ini).slice(0, 10) <= hoje);
+            const chave = `${est.per}|${est.tipo}|${est.jan}|${U2K._autLoc ? U2K._autLoc.size : 0}`; if (cacheCham && cacheCham.chave === chave) return cacheCham.res;
+            const desde = isoLocalDe(new Date(Date.now() - (Number(est.per) - 1) * 86400000)), evs = evPorta.filter(e => String(e.ini).slice(0, 10) >= desde && String(e.ini).slice(0, 10) <= hoje
+              && (e.onus >= 5 || (String(e.tipo).startsWith('Porta PON') && e.total >= 5)) && (est.tipo === 'todas' || u2kTipoMassiva(e.tipo) !== 'Sem energia'));
             const res = u2kChamadosMassivas(onus, evs, desde, Number(est.jan) * 3600000).calcular().sort((a, b) => (b.marca ? 1 : 0) - (a.marca ? 1 : 0) || b.x.t - a.x.t);
             cacheCham = { chave, res }; return res; },
-          filtros: [{ id: 'ifi', rot: 'IFI / IRR', valor: r => r.marca || 'Não', opcoes: [['IFI', 'IFI'], ['IRR', 'IRR'], ['Não', 'Não virou retorno']] }, { id: 'olt', rot: 'OLT', valor: r => r.o.olt }, { id: 'cid', rot: 'Cidade', valor: cidDe }], chips: { filtro: 'ifi' },
-          cols: [{ t: 'IFI / IRR', h: r => r.marca ? `<span class="badge ${r.marca === 'IFI' ? 'warn' : 'amber'}">${r.marca}</span>` : '<span style="color:var(--text-muted)">não</span>', x: r => r.marca || 'não' },
-            { t: 'Cliente', f: r => r.cliente, s: 'font-weight:600' }, { t: 'Contrato', f: r => r.contrato }, { t: 'Cidade', f: cidDe }, { t: 'Bairro', f: r => r.bairro },
-            { t: 'OLT', f: r => r.o.olt }, { t: 'Porta / ONU', f: r => `${r.o.frame || 0}/${r.o.slot}/${r.o.porta} · ONU ${r.o.onuId}` }, { t: 'SN', f: r => u2kSnCurto(r.o.sn), s: 'font-size:11.5px' },
-            { t: 'Massiva', f: r => `${tipoCurto(r.ev.tipo)} · ${u2kFmtData(r.ev.ini)}`, s: 'font-size:12px;white-space:normal' }, { t: 'Chamado (O.S)', f: r => r.x.os }, { t: 'Abertura do chamado', f: r => new Date(r.x.t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) },
-            { t: 'Depois da massiva', f: r => r.horas < 0 ? 'antes (até 1 h)' : u2kDur(r.horas * 3600000) || '0min' }, { t: 'Técnico do chamado', f: r => r.x.tecnico }, { t: 'Ofensor (serviço anterior)', f: r => r.ofensor }, { t: 'Fonte', f: r => r.x.fonte }] });
+          filtros: [{ id: 'ifi', rot: 'IFI / IRR', valor: r => r.marcaPot ? r.rotulo : 'Não', opcoes: ['IFI concluído', 'IRR concluído', 'IFI cancelado', 'IFI não concluído', 'IFI em aberto', 'IRR cancelado', 'IRR não concluído', 'IRR em aberto', 'Não'].map(v => [v, v === 'Não' ? 'Não é IFI / IRR' : v]) }, { id: 'sitch', rot: 'Situação do chamado', valor: r => r.sitTxt }, { id: 'olt', rot: 'OLT', valor: r => r.o.olt }, { id: 'cid', rot: 'Cidade', valor: cidDe }], chips: { filtro: 'ifi' },
+          cols: u2kColsChamadosMassiva(cidDe) });
       };
       pintarCham();
       if (sns.length) u2kAutPorSn(sns).then(qtd => { if (!qtd || U2K._aba !== aba0 || !document.getElementById('u2-d')) return; todas = montar(); nota(); desenhar(); pintarCham(); });
