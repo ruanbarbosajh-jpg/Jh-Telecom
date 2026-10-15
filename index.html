@@ -20703,9 +20703,21 @@ function abrirModalVeiculoFrota(aoSalvar) {
       : t === 'novo' ? '<label>Locadora</label><input type="text" id="fv-loc" autocomplete="off"><label>Cidade</label><input type="text" id="fv-cid" autocomplete="off"><label>Supervisor</label><input type="text" id="fv-sup" autocomplete="off">' : '';
     const pa = $('fv-pant'), l = frotaVinculoDoCondutor($('fv-condutor').value); if (pa && l && !pa.value) pa.value = l.placa || '';
   };
-  $('fv-tipo').addEventListener('change', extra); extra();
-  $('fv-condutor').addEventListener('change', () => { const l = frotaVinculoDoCondutor($('fv-condutor').value); if (l && !$('fv-placa').value && $('fv-tipo').value === 'fotos') $('fv-placa').value = l.placa || ''; extra(); });
-  $('fv-placa').addEventListener('change', () => { const l = frotaVinculoDaPlaca($('fv-placa').value); if (l && !$('fv-condutor').value) $('fv-condutor').value = l.motorista || ''; if (l && !$('fv-vinc').value && $('fv-tipo').value === 'fotos') $('fv-vinc').value = l.vinculacao || ''; });
+  // 15/10/2026 (pedido do cliente: "para adicionar as fotos a data de vinculação é puxada automaticamente"): em "Apenas adicionar fotos" a data de
+  // vinculação vem do vínculo atual (pela placa; sem placa, pelo condutor) e acompanha a troca de condutor/placa; se a pessoa digitar outra data,
+  // o sistema para de sobrescrever (data-auto vazio).
+  const autoVinc = () => {
+    const v = $('fv-vinc');
+    if ($('fv-tipo').value !== 'fotos') { if (v.dataset.auto === '1') { v.value = ''; v.dataset.auto = ''; } return; }
+    if (v.value && v.dataset.auto !== '1') return;
+    const l = ($('fv-placa').value.trim() && frotaVinculoDaPlaca($('fv-placa').value)) || frotaVinculoDoCondutor($('fv-condutor').value);
+    if (l && l.vinculacao) { v.value = l.vinculacao; v.dataset.auto = '1'; }
+    else if (v.dataset.auto === '1') { v.value = ''; v.dataset.auto = ''; }
+  };
+  $('fv-vinc').addEventListener('input', () => { $('fv-vinc').dataset.auto = ''; });
+  $('fv-tipo').addEventListener('change', () => { extra(); autoVinc(); }); extra();
+  $('fv-condutor').addEventListener('change', () => { const l = frotaVinculoDoCondutor($('fv-condutor').value); if (l && !$('fv-placa').value && $('fv-tipo').value === 'fotos') $('fv-placa').value = l.placa || ''; extra(); autoVinc(); });
+  $('fv-placa').addEventListener('change', () => { const l = frotaVinculoDaPlaca($('fv-placa').value); if (l && !$('fv-condutor').value) $('fv-condutor').value = l.motorista || ''; autoVinc(); });
   $('fv-fotos').addEventListener('change', () => { const pv = $('fv-previa'); pv.innerHTML = ''; [...$('fv-fotos').files].forEach(f => { const im = document.createElement('img'); im.src = URL.createObjectURL(f); im.style.cssText = 'width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--border)'; pv.appendChild(im); }); });
   $('fv-cancelar').addEventListener('click', fecharModalFrota);
   $('fv-condutor').focus();
