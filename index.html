@@ -20357,13 +20357,14 @@ function renderFleet() {
       .filter(r => matchC(r.condutor) && matchP(r.placa) && r.data_revisao)
       .sort((a,b) => String(a.data_revisao).localeCompare(String(b.data_revisao)));
     const diasAteRevisao = r => diasEntre(r.data_revisao, hojeISO);
-    const revVencidas = revisoes.filter(r => diasAteRevisao(r) < 0);
-    const revProximas = revisoes.filter(r => { const d = diasAteRevisao(r); return d >= 0 && d <= 15; });
+    const revVencidas = revisoes.filter(r => !revisaoEncerrada(r) && diasAteRevisao(r) < 0);
+    const revProximas = revisoes.filter(r => { const d = diasAteRevisao(r); return !revisaoEncerrada(r) && d >= 0 && d <= 15; });
     const totalMultas = multas.reduce((a,r)=>a+r.valor_multa,0);
 
     const body = document.getElementById('fleet-body');
     const add = t => modoNovo() && podeEditarFrota() ? `<button type="button" class="btn-secundario fr-add" data-fr="${t}">➕ Adicionar</button>` : '';
     const acoesFrota = (tipo, k) => `<button type="button" class="btn-icon fr-editar" data-fr="${tipo}" data-k="${esc(k || '')}" title="Editar" aria-label="Editar" style="padding:3px 8px">✎</button> <button type="button" class="btn-icon fr-excluir" data-fr="${tipo}" data-k="${esc(k || '')}" title="Excluir" aria-label="Excluir" style="padding:3px 8px;color:var(--danger)">🗑</button>`;
+    const statusRevisaoBtns = r => ['Realizado', 'Reagendado', 'Falta'].map(st => `<button type="button" class="btn-secundario fr-status" data-st="${st}" data-k="${esc(`${r.placa}|${r.data_revisao}`)}" title="${r.status === st ? 'Clique de novo para desfazer' : 'Marcar como ' + st}" style="padding:3px 9px;font-size:12px;${r.status === st ? 'background:var(--accent-bg);border-color:var(--accent);color:var(--accent);font-weight:700' : ''}">${st === 'Realizado' ? '✔ Realizado' : st === 'Reagendado' ? '↻ Reagendado' : '✖ Falta'}</button>`).join(' ');
     const trocas = modoNovo() ? DB.frotaTroca.filter(r => matchC(r.condutor) && (matchP(r.placa_atual) || matchP(r.placa_anterior)) && dataOk(r.vinc_atual)).sort((a, b) => String(b.vinc_atual || '').localeCompare(String(a.vinc_atual || ''))) : [];
     body.innerHTML = `
       <div class="cards-grid">
@@ -20425,7 +20426,9 @@ function renderFleet() {
           ? `⚠️ venceu há ${-d} dia(s)`
           : d === 0 ? 'é hoje' : `faltam ${d} dia(s)`;
         return `<tr><td class="cat-cell">${esc(r.condutor) || '-'}</td><td>${esc(r.placa) || '-'}</td><td>${formatDate(r.data_revisao)}</td>${revComAviso ? `<td>${esc(r.horario) || '-'}</td><td>${r.tipo_revisao ? `<span class="badge ${/corretiva/i.test(r.tipo_revisao) ? 'warn' : 'ok'}">${esc(r.tipo_revisao)}</span>` : '-'}</td><td style="white-space:normal;font-size:12.5px">${esc(r.endereco) || '-'}</td><td style="font-size:12.5px">${esc(r.notificar) || '-'}</td>` : ''}
-          <td style="color:${cor};font-weight:700">${texto}</td>${revisoes.some(x=>x.obs)?`<td>${esc(r.obs)||''}</td>`:''}${podeEditarFrota() ? `<td class="fora-da-imagem" style="white-space:nowrap">${acoesFrota('revisao', `${r.placa}|${r.data_revisao}`)}</td>` : ''}</tr>`;
+          <td style="font-weight:700">${r.status === 'Realizado' ? `<span class="badge ok">✔ Realizado${r.status_em ? ' em ' + formatDate(String(r.status_em).slice(0, 10)) : ''}</span>`
+            : r.status === 'Falta' ? `<span class="badge warn">✖ Falta${r.status_em ? ' em ' + formatDate(String(r.status_em).slice(0, 10)) : ''}</span>`
+            : `${r.status === 'Reagendado' ? `<span class="badge amber">↻ Reagendado${r.reagendado_de ? ' (de ' + formatDate(r.reagendado_de) + ')' : ''}</span><br>` : ''}<span style="color:${cor}">${texto}</span>`}${r.status_obs ? `<div style="font-size:12px;font-weight:500;white-space:normal;margin-top:3px;color:var(--text-secondary)">${esc(r.status_obs)}</div>` : ''}${r.status_por ? `<div style="font-size:11px;font-weight:500;color:var(--text-muted)">${esc(r.status_por)}</div>` : ''}</td>${revisoes.some(x=>x.obs)?`<td>${esc(r.obs)||''}</td>`:''}${podeEditarFrota() ? `<td class="fora-da-imagem" style="white-space:nowrap">${statusRevisaoBtns(r)} ${acoesFrota('revisao', `${r.placa}|${r.data_revisao}`)}</td>` : ''}</tr>`;
       }).join('')}
       </tbody></table></div>`;
 
@@ -20457,6 +20460,12 @@ function renderFleet() {
         ${trocas.map(r => `<tr><td class="cat-cell">${esc(r.condutor)}</td><td>${esc(r.placa_anterior) || '-'}</td><td>${formatDate(r.vinc_anterior)}</td><td>${esc(r.placa_atual)}</td><td>${formatDate(r.vinc_atual)}</td><td>${esc(r.km) || '-'}</td><td>${esc(r.locadora) || '-'}</td><td style="white-space:normal;font-size:12px">${esc(r.obs_checklist) || ''}</td>${podeEditarFrota() ? `<td class="fora-da-imagem" style="white-space:nowrap">${acoesFrota('troca', r.chave)}</td>` : ''}</tr>`).join('')}</tbody></table></div>`;
       pintarFotos();
       body.onclick = async ev => {
+        const stb = ev.target.closest('.fr-status');
+        if (stb) {
+          const reg = DB.frotaRevisao.find(r => chaveRegistroFrota('frotaRevisao', r) === stb.dataset.k);
+          if (!reg) { toast('Revisão não encontrada (clique em Filtrar).', 'aviso'); return; }
+          marcarSituacaoRevisao(reg, stb.dataset.st, refazerFrota); return;
+        }
         const ed = ev.target.closest('.fr-editar, .fr-excluir');
         if (ed) {
           const alvo = FROTA_FORM[ed.dataset.fr].alvo, reg = DB[alvo].find(r => chaveRegistroFrota(alvo, r) === ed.dataset.k);
@@ -20492,6 +20501,9 @@ const SUPERVISORES_AVISO_REVISAO = ['Sebastião', 'Matheus'];
 // Só o Analista agenda revisão/manutenção e altera a Frota (14/10/2026, pedido do cliente). No banco a trava é o sql/PASSO-55
 // (pode_editar_frota()): os outros perfis só LEEM as tabelas frota_*.
 const podeEditarFrota = () => !!currentUser && perfilValido(currentUser.role) === 'analista';
+// situação da revisão (16/10/2026, pedido do cliente: "nas revisões coloque botão de realizado, reagendado, falta"): vazio = agendada;
+// Realizado e Falta encerram a revisão (não vencem nem avisam); Reagendado = nova data (a mesma revisão, com `reagendado_de` guardando a original)
+const revisaoEncerrada = r => ['Realizado', 'Falta'].includes(r && r.status);
 function avisosRevisaoFrota() {
   if (!currentUser) return [];
   const eu = normalizeHeader(currentUser.nome || currentUser.login || ''), analista = perfilValido(currentUser.role) === 'analista';
@@ -20500,7 +20512,7 @@ function avisosRevisaoFrota() {
   // quando é AGENDADO (data mais pra frente), 1 dia antes (AMANHÃ) e no dia (HOJE). Cada um precisa do seu "Ciente".
   const itens = [];
   const juntar = (lista, tipo, campoData) => (lista || []).forEach(r => {
-    const d = r[campoData]; if (!d || d < hoje) return;
+    const d = r[campoData]; if (!d || d < hoje || revisaoEncerrada(r)) return;
     const quem = String(r.notificar || '').split(/[;,]/).map(x => normalizeHeader(x)).filter(Boolean);
     if (!quem.length || !(analista || quem.includes(eu))) return;
     const fase = d === hoje ? 'hoje' : d === amanha ? 'amanhã' : 'agendada';
@@ -20537,7 +20549,7 @@ function mostrarAvisosRevisaoFrota() {
 // frota_manutencao, frota_multas, frota_desvinc, frota_troca, frota_links) com a mesma chave, então reimportar a planilha não duplica.
 // As fotos ficam na tabela própria frota_fotos (sql/PASSO-50-frota-fotos.sql), comprimidas no navegador (foto 1100 px + miniatura 240 px).
 const FROTA_FORM = {
-  revisao:    { rot: 'Revisão',          alvo: 'frotaRevisao',    avisar: true, campos: [['data_revisao', 'Data da revisão', 'date', 1], ['horario', 'Horário', 'time'], ['tipo_revisao', 'Tipo de revisão', 'select', 1, ['Preventiva', 'Corretiva']], ['endereco', 'Endereço da revisão', 'text'], ['obs', 'Observação', 'text']] },
+  revisao:    { rot: 'Revisão',          alvo: 'frotaRevisao',    avisar: true, campos: [['data_revisao', 'Data da revisão', 'date', 1], ['horario', 'Horário', 'time'], ['tipo_revisao', 'Tipo de revisão', 'select', 1, ['Preventiva', 'Corretiva']], ['endereco', 'Endereço da revisão', 'text'], ['status', 'Situação (vazio = agendada)', 'select', 0, ['Realizado', 'Reagendado', 'Falta']], ['status_obs', 'Observação do que foi feito na revisão', 'text'], ['obs', 'Observação', 'text']] },
   manutencao: { rot: 'Manutenção',       alvo: 'frotaManutencao', avisar: true, campos: [['servico', 'Serviço', 'text', 1], ['data', 'Data', 'date', 1], ['horario', 'Horário', 'time'], ['endereco', 'Endereço / oficina', 'text'], ['km', 'KM', 'number'], ['obs', 'Observação', 'text']] },
   multa:      { rot: 'Multa',            alvo: 'frotaMultas',     campos: [['data_infracao', 'Data da infração', 'date', 1], ['valor_multa', 'Valor da multa (R$)', 'number', 1]] },
   desvinc:    { rot: 'Desvinculação',    alvo: 'frotaDesvinc',    campos: [['vinculacao', 'Vinculado desde', 'date'], ['desvinculado', 'Desvinculado em', 'date', 1], ['obs', 'Observação', 'text']] },
@@ -20585,11 +20597,51 @@ async function excluirRegistroFrota(alvo, reg) {
   reindexarFrota(alvo);
   return { ok: true };
 }
+// Realizado / Reagendado / Falta (16/10/2026): cada botão abre uma janelinha que pede a OBSERVAÇÃO do que foi feito (pedido do cliente: "e uma observação do
+// que foi feito na revisão"); Reagendado pede também a nova data e MOVE a revisão pra ela (a data original fica em `reagendado_de`). Clicar de novo na
+// situação já marcada desfaz.
+async function marcarSituacaoRevisao(reg, st, aoMudar) {
+  if (!podeEditarFrota()) { toast('Só o Analista altera a Frota.', 'aviso'); return; }
+  if (reg.status === st) {
+    if (!confirm(`Desfazer "${st}" desta revisão?`)) return;
+    const obj = { ...reg, status: '', status_em: '', status_por: '', status_obs: '' };
+    const r = await gravarRegistroFrota('frotaRevisao', obj, null);
+    if (!r.ok) { toast('Não consegui salvar: ' + r.aviso, 'erro'); return; }
+    const ix = DB_INDEX.frotaRevisao.get(`${reg.placa}|${reg.data_revisao}`); if (ix != null) DB.frotaRevisao[ix] = { ...DB.frotaRevisao[ix], status: '', status_em: '', status_por: '', status_obs: '' };
+    toast('Situação desfeita.', 'sucesso'); if (aoMudar) aoMudar(); try { mostrarAvisosRevisaoFrota(); } catch (e) { /* só o aviso */ }
+    return;
+  }
+  abrirModalSituacaoRevisao(reg, st, aoMudar);
+}
+function abrirModalSituacaoRevisao(reg, st, aoMudar) {
+  const m = document.getElementById('modal-tecnico'); if (!m) return;
+  const ico = { Realizado: '✔', Reagendado: '↻', Falta: '✖' }[st], rotObs = { Realizado: 'O que foi feito na revisão', Reagendado: 'Motivo do reagendamento / observação', Falta: 'Motivo da falta / observação' }[st];
+  m.querySelector('.mt-corpo').innerHTML = `<h3 style="margin:0 0 4px">${ico} Revisão — ${esc(st)}</h3>
+    <p style="margin:0 0 12px;font-size:13px;color:var(--text-secondary)">${esc(reg.condutor || '')} · ${esc(reg.placa)} · marcada para <b>${formatDate(reg.data_revisao)}</b>${reg.horario ? ' às ' + esc(reg.horario) : ''}${st === 'Reagendado' ? '. A revisão passa para a nova data e fica marcada como <b>Reagendado</b> (a data original fica guardada).' : '.'}</p>
+    ${st === 'Reagendado' ? `<label>Nova data *</label><input type="date" id="rs-data"><label>Novo horário</label><input type="time" id="rs-hora" value="${esc(reg.horario || '')}">` : ''}
+    <label>${rotObs}${st === 'Realizado' ? '' : ' *'}</label><textarea id="rs-obs" rows="3" style="width:100%;resize:vertical" placeholder="${st === 'Realizado' ? 'Ex.: troca de óleo e filtros, pneus calibrados, sem pendências…' : 'Ex.: técnico em atendimento, oficina sem vaga…'}"></textarea>
+    <p id="rs-erro" class="error-msg"></p><div class="modal-acoes"><button type="button" class="btn-secundario" id="rs-cancelar">Cancelar</button><button type="button" class="btn-primario" id="rs-salvar">${esc(st === 'Reagendado' ? 'Reagendar' : 'Marcar como ' + st)}</button></div>`;
+  m.classList.add('active');
+  document.getElementById('rs-cancelar').addEventListener('click', fecharModalFrota);
+  document.getElementById('rs-salvar').addEventListener('click', async () => {
+    const er = document.getElementById('rs-erro'), obs = document.getElementById('rs-obs').value.trim(), nova = st === 'Reagendado' ? document.getElementById('rs-data').value : '';
+    if (st === 'Reagendado') { if (!nova) { er.textContent = 'Informe a nova data.'; return; } if (nova === reg.data_revisao) { er.textContent = 'A nova data é igual à atual.'; return; } }
+    if (st !== 'Realizado' && !obs) { er.textContent = 'Escreva a observação.'; return; }
+    er.style.color = ''; er.textContent = 'Salvando…';
+    const quem = currentUser ? (currentUser.nome || currentUser.login || '') : '', agora = new Date().toISOString();
+    const novo = { ...reg, status: st, status_em: agora, status_por: quem, status_obs: obs };
+    if (st === 'Reagendado') { novo.data_revisao = nova; novo.horario = document.getElementById('rs-hora').value || ''; novo.reagendado_de = reg.reagendado_de || reg.data_revisao;
+      const rx = await excluirRegistroFrota('frotaRevisao', reg); if (!rx.ok) { er.style.color = 'var(--danger)'; er.textContent = 'Não consegui trocar a data: ' + rx.aviso; return; } }
+    const r = await gravarRegistroFrota('frotaRevisao', novo, null); if (!r.ok) { er.style.color = 'var(--danger)'; er.textContent = 'Não consegui salvar: ' + r.aviso; return; }
+    const ix = DB_INDEX.frotaRevisao.get(`${novo.placa}|${novo.data_revisao}`); if (ix != null) DB.frotaRevisao[ix] = { ...DB.frotaRevisao[ix], ...novo };
+    fecharModalFrota(); toast(st === 'Reagendado' ? 'Revisão reagendada.' : `Revisão marcada como ${st}.`, 'sucesso'); if (aoMudar) aoMudar(); try { mostrarAvisosRevisaoFrota(); } catch (e) { /* só o aviso */ }
+  });
+}
 function objetoFrotaDoFormulario(tipo, v) {
   const num = x => { const n = Number(String(x || '').replace(',', '.')); return isFinite(n) ? n : 0; };
   const condutor = String(v.condutor || '').trim(), placa = placaNorm(v.placa);
   switch (tipo) {
-    case 'revisao': return { alvo: 'frotaRevisao', obj: { condutor, placa, data_revisao: v.data_revisao, horario: v.horario || '', tipo_revisao: v.tipo_revisao || '', endereco: v.endereco || '', notificar: v.notificar || '', obs: v.obs || '' }, chave: null };
+    case 'revisao': return { alvo: 'frotaRevisao', obj: { condutor, placa, data_revisao: v.data_revisao, horario: v.horario || '', tipo_revisao: v.tipo_revisao || '', endereco: v.endereco || '', notificar: v.notificar || '', obs: v.obs || '', status: v.status || '', status_obs: v.status_obs || '' }, chave: null };
     case 'manutencao': return { alvo: 'frotaManutencao', obj: { condutor, placa, servico: v.servico || '', obs: v.obs || '', data: v.data, km: num(v.km), horario: v.horario || '', endereco: v.endereco || '', notificar: v.notificar || '' }, chave: `${placa}|${v.data}|${v.servico || ''}` };
     case 'vinculo': return { alvo: 'frotaLinks', obj: { motorista: condutor, placa, supervisor: v.supervisor || '', cidade: v.cidade || '', locadora: v.locadora || '', vinculacao: v.vinculacao || null, observacao: v.observacao || '' }, chave: placa };
     case 'multa': return { alvo: 'frotaMultas', obj: { condutor, placa, data_infracao: v.data_infracao, valor_multa: num(v.valor_multa) }, chave: `${condutor}|${placa}|${v.data_infracao || SEM_DATA_FROTA_UI}` };
@@ -26485,7 +26537,7 @@ function renderPainelBI(alvoId = 'content') {
     const linksFrota = DB.frotaLinks.filter(r => cidades.includes(r.cidade));
     const locadoraMap = {}; linksFrota.forEach(r => { const l = r.locadora || 'Não informado'; locadoraMap[l] = (locadoraMap[l] || 0) + 1; });
     const hojeISO = hojeISOLocal();
-    const revVencidas = (DB.frotaRevisao || []).filter(r => r.data_revisao && diasEntre(r.data_revisao, hojeISO) < 0).length;
+    const revVencidas = (DB.frotaRevisao || []).filter(r => r.data_revisao && !revisaoEncerrada(r) && diasEntre(r.data_revisao, hojeISO) < 0).length;
 
     // ---------- Pedágio ----------
     const pedRows = DB.pedagio.filter(r => inRange(r.data_transacao, s, e));
@@ -26777,6 +26829,7 @@ const SAUDE_CHECAGENS_SQL = [
   { passo: 'PASSO-52', rotulo: 'U2000: ONUs e alarmes importados', tabela: 'u2000_onus' },
   { passo: 'PASSO-51', rotulo: 'Gasolina por técnico e ciclo (Importar Excel)', tabela: 'gasolina_ciclo' },
   { passo: 'PASSO-53', rotulo: 'Revisão da frota: horário, endereço, tipo e aviso aos supervisores', tabela: 'frota_revisao', coluna: 'horario,endereco,tipo_revisao,notificar' },
+  { passo: 'PASSO-57', rotulo: 'Revisão da frota: situação (Realizado, Reagendado, Falta)', tabela: 'frota_revisao', coluna: 'status,status_em,status_por,status_obs,reagendado_de' },
   { passo: 'PASSO-55', rotulo: 'Manutenção da frota com aviso + Frota só o Analista altera', tabela: 'frota_manutencao', coluna: 'horario,endereco,notificar' },
   { passo: 'PASSO-55', rotulo: 'Trava da Frota (só o Analista grava)', rpc: 'pode_editar_frota', args: {} },
   { passo: 'PASSO-37', rotulo: 'Ajustes manuais da Folha dos técnicos', tabela: 'folha_pagamento', coluna: 'ajustes' },
@@ -32157,8 +32210,8 @@ const REPORT_SECTIONS = [
       // "Frota — Resumo" marcado estourava ReferenceError e derrubava o PDF inteiro.
       const hojeRev = hojeISOLocal();
       const revisoes = (DB.frotaRevisao || []).filter(r => r.data_revisao);
-      const revVencidas = revisoes.filter(r => diasEntre(r.data_revisao, hojeRev) < 0);
-      const revProximas = revisoes.filter(r => { const d = diasEntre(r.data_revisao, hojeRev); return d >= 0 && d <= 15; });
+      const revVencidas = revisoes.filter(r => !revisaoEncerrada(r) && diasEntre(r.data_revisao, hojeRev) < 0);
+      const revProximas = revisoes.filter(r => { const d = diasEntre(r.data_revisao, hojeRev); return !revisaoEncerrada(r) && d >= 0 && d <= 15; });
       if (!links.length && !maint.length && !multas.length && !desvinc.length) return null;
       const totalMultas = multas.reduce((a,r)=>a+(r.valor_multa||0),0);
       const byCondutor = {}; multas.forEach(r => { const c = r.condutor || 'Não informado'; byCondutor[c] = (byCondutor[c]||0)+(r.valor_multa||0); });
