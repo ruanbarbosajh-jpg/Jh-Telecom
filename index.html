@@ -20542,7 +20542,7 @@ const FROTA_FORM = {
   troca:      { rot: 'Troca de veículo', alvo: 'frotaTroca', semPlaca: true, campos: [['placa_anterior', 'Placa anterior', 'text'], ['vinc_anterior', 'Vinculação anterior', 'date'], ['placa_atual', 'Placa atual (nova)', 'text', 1], ['vinc_atual', 'Vinculação atual', 'date', 1], ['km', 'KM', 'number'], ['locadora', 'Locadora', 'text'], ['obs_checklist', 'Observação / checklist', 'text']] },
 };
 const SEM_DATA_FROTA_UI = 'sem-data';
-const FROTA_TIPO_FOTO = { fotos: 'Só fotos', troca: 'Troca de veículo', troca_periodo: 'Troca por período', novo: 'Carro novo' };
+const FROTA_TIPO_FOTO = { fotos: 'Só fotos', troca: 'Troca de veículo', troca_periodo: 'Troca por período', novo: 'Carro novo', desvinculacao: 'Desvinculação' };
 let FROTA_FOTOS = [], FROTA_FOTOS_ERRO = '';
 const placaNorm = p => String(p || '').replace(/\s+/g, '').toUpperCase();
 function frotaVinculoDoCondutor(condutor) {
@@ -20681,9 +20681,9 @@ function abrirModalVeiculoFrota(aoSalvar) {
   const m = document.getElementById('modal-tecnico'); if (!m) return;
   m.querySelector('.mt-corpo').innerHTML = `
     <h3 style="margin:0 0 4px">📷 Fotos e registro do veículo</h3>
-    <p style="margin:0 0 12px;font-size:13px;color:var(--text-secondary)">Escolha o que é: só adicionar fotos, troca de veículo, troca por período determinado ou carro novo. Troca de veículo e carro novo também atualizam o vínculo do condutor.</p>
+    <p style="margin:0 0 12px;font-size:13px;color:var(--text-secondary)">Escolha o que é: só adicionar fotos, desvinculação (fotos da devolução do veículo), troca de veículo, troca por período determinado ou carro novo. Troca de veículo e carro novo também atualizam o vínculo do condutor; a desvinculação registra a data na tabela de Desvinculações.</p>
     <label>O que você está registrando? *</label>
-    <select id="fv-tipo"><option value="fotos">Apenas adicionar fotos</option><option value="troca">Troca de veículo</option><option value="troca_periodo">Troca por período determinado</option><option value="novo">Carro novo</option></select>
+    <select id="fv-tipo"><option value="fotos">Apenas adicionar fotos</option><option value="desvinculacao">Desvinculação (fotos da devolução)</option><option value="troca">Troca de veículo</option><option value="troca_periodo">Troca por período determinado</option><option value="novo">Carro novo</option></select>
     <label>Nome do condutor *</label><input type="text" id="fv-condutor" list="fr-condutores" autocomplete="off">
     <label>Placa *</label><input type="text" id="fv-placa" list="fr-placas" autocomplete="off" style="text-transform:uppercase">
     <label>Vinculação (data) *</label><input type="date" id="fv-vinc">
@@ -20698,7 +20698,8 @@ function abrirModalVeiculoFrota(aoSalvar) {
   const $ = id => document.getElementById(id);
   const extra = () => {
     const t = $('fv-tipo').value;
-    $('fv-extra').innerHTML = t === 'troca' ? '<label>Placa do veículo anterior</label><input type="text" id="fv-pant" list="fr-placas" autocomplete="off" style="text-transform:uppercase"><label>Locadora do veículo novo</label><input type="text" id="fv-loc" autocomplete="off">'
+    $('fv-extra').innerHTML = t === 'desvinculacao' ? `<label>Desvinculado em *</label><input type="date" id="fv-desv" value="${hojeISOLocal()}">`
+      : t === 'troca' ? '<label>Placa do veículo anterior</label><input type="text" id="fv-pant" list="fr-placas" autocomplete="off" style="text-transform:uppercase"><label>Locadora do veículo novo</label><input type="text" id="fv-loc" autocomplete="off">'
       : t === 'troca_periodo' ? '<label>Troca de * </label><input type="date" id="fv-de"><label>até *</label><input type="date" id="fv-ate"><label>Placa do veículo que ele deixa</label><input type="text" id="fv-pant" list="fr-placas" autocomplete="off" style="text-transform:uppercase">'
       : t === 'novo' ? '<label>Locadora</label><input type="text" id="fv-loc" autocomplete="off"><label>Cidade</label><input type="text" id="fv-cid" autocomplete="off"><label>Supervisor</label><input type="text" id="fv-sup" autocomplete="off">' : '';
     const pa = $('fv-pant'), l = frotaVinculoDoCondutor($('fv-condutor').value); if (pa && l && !pa.value) pa.value = l.placa || '';
@@ -20708,7 +20709,7 @@ function abrirModalVeiculoFrota(aoSalvar) {
   // o sistema para de sobrescrever (data-auto vazio).
   const autoVinc = () => {
     const v = $('fv-vinc');
-    if ($('fv-tipo').value !== 'fotos') { if (v.dataset.auto === '1') { v.value = ''; v.dataset.auto = ''; } return; }
+    if (!['fotos', 'desvinculacao'].includes($('fv-tipo').value)) { if (v.dataset.auto === '1') { v.value = ''; v.dataset.auto = ''; } return; }
     if (v.value && v.dataset.auto !== '1') return;
     const l = ($('fv-placa').value.trim() && frotaVinculoDaPlaca($('fv-placa').value)) || frotaVinculoDoCondutor($('fv-condutor').value);
     if (l && l.vinculacao) { v.value = l.vinculacao; v.dataset.auto = '1'; }
@@ -20716,7 +20717,7 @@ function abrirModalVeiculoFrota(aoSalvar) {
   };
   $('fv-vinc').addEventListener('input', () => { $('fv-vinc').dataset.auto = ''; });
   $('fv-tipo').addEventListener('change', () => { extra(); autoVinc(); }); extra();
-  $('fv-condutor').addEventListener('change', () => { const l = frotaVinculoDoCondutor($('fv-condutor').value); if (l && !$('fv-placa').value && $('fv-tipo').value === 'fotos') $('fv-placa').value = l.placa || ''; extra(); autoVinc(); });
+  $('fv-condutor').addEventListener('change', () => { const l = frotaVinculoDoCondutor($('fv-condutor').value); if (l && !$('fv-placa').value && ['fotos', 'desvinculacao'].includes($('fv-tipo').value)) $('fv-placa').value = l.placa || ''; extra(); autoVinc(); });
   $('fv-placa').addEventListener('change', () => { const l = frotaVinculoDaPlaca($('fv-placa').value); if (l && !$('fv-condutor').value) $('fv-condutor').value = l.motorista || ''; autoVinc(); });
   $('fv-fotos').addEventListener('change', () => { const pv = $('fv-previa'); pv.innerHTML = ''; [...$('fv-fotos').files].forEach(f => { const im = document.createElement('img'); im.src = URL.createObjectURL(f); im.style.cssText = 'width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--border)'; pv.appendChild(im); }); });
   $('fv-cancelar').addEventListener('click', fecharModalFrota);
@@ -20728,12 +20729,18 @@ function abrirModalVeiculoFrota(aoSalvar) {
     if (!condutor || !placa || !vinc) { er.textContent = 'Informe o condutor, a placa e a data de vinculação.'; return; }
     if (tipo === 'troca_periodo' && (!g('fv-de') || !g('fv-ate') || g('fv-ate') < g('fv-de'))) { er.textContent = 'Informe o período da troca (a data final não pode ser antes da inicial).'; return; }
     const arquivos = [...$('fv-fotos').files];
-    if (tipo === 'fotos' && !arquivos.length) { er.textContent = 'Escolha ao menos uma foto.'; return; }
+    if ((tipo === 'fotos' || tipo === 'desvinculacao') && !arquivos.length) { er.textContent = 'Escolha ao menos uma foto.'; return; }
+    if (tipo === 'desvinculacao' && !g('fv-desv')) { er.textContent = 'Informe a data da desvinculação.'; return; }
     b.disabled = true; er.style.color = ''; er.textContent = 'Salvando…';
     const avisos = [];
     try {
       const vAnt = frotaVinculoDoCondutor(condutor), placaAnt = placaNorm(g('fv-pant')) || (vAnt && placaNorm(vAnt.placa) !== placa ? placaNorm(vAnt.placa) : '');
-      if (tipo === 'troca') {
+      if (tipo === 'desvinculacao') {
+        // 15/10/2026 (pedido do cliente: "adicione no registrar fotos a opção de desvinculação, para adicionar as fotos de desvinculação"):
+        // grava a desvinculação (mesma tabela e chave da planilha / da aba Desvinculações) e guarda as fotos como "Desvinculação"
+        const d = objetoFrotaDoFormulario('desvinc', { condutor, placa, vinculacao: vinc, desvinculado: g('fv-desv'), obs: desc || 'Desvinculação (registrada no sistema, com fotos)' });
+        const r = await gravarRegistroFrota(d.alvo, d.obj, d.chave); if (!r.ok) avisos.push(r.aviso);
+      } else if (tipo === 'troca') {
         const o = objetoFrotaDoFormulario('troca', { condutor, placa_anterior: placaAnt, vinc_anterior: vAnt ? vAnt.vinculacao : '', placa_atual: placa, vinc_atual: vinc, locadora: g('fv-loc'), obs_checklist: desc });
         let r = await gravarRegistroFrota(o.alvo, o.obj, o.chave); if (!r.ok) avisos.push(r.aviso);
         if (placaAnt) { const d = objetoFrotaDoFormulario('desvinc', { condutor, placa: placaAnt, vinculacao: vAnt ? vAnt.vinculacao : '', desvinculado: vinc, obs: 'Troca de veículo (registrada no sistema)' }); r = await gravarRegistroFrota(d.alvo, d.obj, d.chave); if (!r.ok) avisos.push(r.aviso); }
@@ -20751,7 +20758,7 @@ function abrirModalVeiculoFrota(aoSalvar) {
       for (const f of arquivos) {
         er.textContent = `Salvando fotos… ${salvas + 1} de ${arquivos.length}`;
         const foto = await comprimirImagemFrota(f, 1100, 0.68), miniatura = await comprimirImagemFrota(f, 240, 0.6);
-        const reg = { chave: 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), placa, condutor, tipo, descricao: desc, vinculacao: vinc || null, nome_arquivo: f.name, miniatura, foto,
+        const reg = { chave: 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), placa, condutor, tipo, descricao: (tipo === 'desvinculacao' ? `Desvinculado em ${formatDate(g('fv-desv'))}.${desc ? ' ' + desc : ''}` : desc), vinculacao: vinc || null, nome_arquivo: f.name, miniatura, foto,
           criado_por: currentUser ? (currentUser.nome || currentUser.login || '') : '', criado_em: new Date().toISOString() };
         if (supa) { const { error } = await supa.from('frota_fotos').insert(reg); if (error) { avisos.push(/does not exist|schema cache|PGRST205|42P01/i.test(String(error.message || '')) ? 'a tabela de fotos ainda não existe (rode o sql/PASSO-50-frota-fotos.sql)' : error.message); break; } }
         FROTA_FOTOS.unshift({ ...reg, foto: undefined }); salvas++;
