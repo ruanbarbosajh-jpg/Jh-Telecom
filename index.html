@@ -13846,6 +13846,7 @@ async function atualizarPeloBotao() {
     // U2000 / Analítico: relê ONUs, alarmes e históricos do banco (o que outra pessoa importou)
     if (rota === 'u2000' || rota === 'relu2000') {
       ['_doBanco', '_histCarregado', '_eventosCarregados', '_eventosPortaCarregados', '_snapCarregados'].forEach(k => { U2K[k] = false; });
+      u2kCacheDescartar();
       mudou = true;
     }
     // Frota: as fotos são lidas de novo ao refazer a tela
@@ -29674,11 +29675,13 @@ function u2kOnusProblema(onus, alm) {
 }
 // onde fica a ONU: coordenada/bairro guardados do AutoISP (pelo SN, U2K._autLoc) → senão a área do bairro da VLAN (aproximado: a VLAN serve vários bairros)
 async function u2kLocalizarAutoisp(itens, progresso) {
+  await u2kCacheLer();
   U2K._autLoc = U2K._autLoc || new Map();
   const falta = [...new Set(itens.map(it => u2kSnNorm(u2kSnCurto(it.o.sn))).filter(sn => sn && !U2K._autLoc.has(sn)))];
   for (let i = 0; i < falta.length; i += 60) {
     const parte = falta.slice(i, i + 60), r = await u2kAutoispBusca({ sns: parte });
     parte.forEach(sn => U2K._autLoc.set(sn, r.porSn.get(sn) || null));
+    if (!r.aviso) u2kCacheSalvarAutLoc();
     if (progresso) progresso(Math.min(falta.length, i + 60), falta.length);
   }
   itens.forEach(it => { it.aut = U2K._autLoc.get(u2kSnNorm(u2kSnCurto(it.o.sn))) || null; });
@@ -30014,13 +30017,47 @@ function renderRelU2000() {
 // ---- dados do CLIENTE de uma ONU (14/10/2026, pedido do cliente: "coloque os dados do cliente que tinha no AutoISP: telefone, endereço, contrato ou O.S"
 // e "em Cliente e monitorar só os que podem gerar IFI ou IRR"). Contrato: o que o AutoISP guardou pro SN (U2K._autLoc); sem ele, o último atendimento
 // com o mesmo nome do alias. Endereço, O.S e técnico: do último atendimento (Produção/PCR). TELEFONE não existe no sistema (a coleta do AutoISP descarta dado pessoal).
+// CÓPIA NO NAVEGADOR (16/10/2026, pedido do cliente: "os clientes do monitoramento precisam carregar toda hora e não ficam salvos"): o que o AutoISP guardou por SN
+// (U2K._autLoc) e a lista de clientes ativos (U2K._cliAtivos) viviam só na memória — a cada F5 eram até ~100 consultas + 11 páginas de 1.000 clientes de novo. Agora vão
+// pro IndexedDB (cacheLer/cacheGravar) e valem 12 h; o botão 🔄 Atualizar do topo descarta a cópia. Falha de rede NÃO é gravada (senão "não achei" ficaria preso 12 h).
+const U2K_CACHE_VALIDADE_MS = 12 * 3600 * 1000;
+function u2kCacheLer() {
+  if (U2K._cacheLido) return U2K._cacheLido;
+  U2K._cacheLido = (async () => {
+    try {
+      const a = await cacheLer('u2k_autloc');
+      if (a && a.v === 1 && Array.isArray(a.d) && Date.now() - a.t < U2K_CACHE_VALIDADE_MS) {
+        U2K._autLoc = U2K._autLoc || new Map(); U2K._autLocT = a.t;
+        a.d.forEach(([k, v]) => { if (!U2K._autLoc.has(k)) U2K._autLoc.set(k, v); });
+      }
+      const c = await cacheLer('u2k_cliativos');
+      if (c && c.v === 1 && Array.isArray(c.d) && c.d.length && Date.now() - c.t < U2K_CACHE_VALIDADE_MS && !U2K._cliAtivos) U2K._cliAtivos = c.d;
+    } catch (e) { /* sem IndexedDB: segue sem cópia */ }
+  })();
+  return U2K._cacheLido;
+}
+function u2kCacheSalvarAutLoc() {
+  clearTimeout(U2K._cacheTimer);
+  U2K._cacheTimer = setTimeout(() => {
+    if (!U2K._autLoc || !U2K._autLoc.size) return;
+    U2K._autLocT = U2K._autLocT || Date.now();
+    cacheGravar('u2k_autloc', { v: 1, t: U2K._autLocT, d: [...U2K._autLoc] }).catch(() => {});
+  }, 1500);
+}
+function u2kCacheDescartar() {
+  U2K._autLoc = null; U2K._autLocT = null; U2K._cliAtivos = null; U2K._cacheLido = null; clearTimeout(U2K._cacheTimer);
+  cacheGravar('u2k_autloc', null).catch(() => {}); cacheGravar('u2k_cliativos', null).catch(() => {});
+}
 async function u2kAutPorSn(sns, progresso, limite) {
+  await u2kCacheLer();
   U2K._autLoc = U2K._autLoc || new Map();
   const falta = [...new Set(sns.map(sn => u2kSnNorm(u2kSnCurto(sn))).filter(x => x && !U2K._autLoc.has(x)))].slice(0, limite || 6000);
   for (let i = 0; i < falta.length; i += 60) {
     const parte = falta.slice(i, i + 60); let r = null;
     try { r = await u2kAutoispBusca({ sns: parte }); } catch (e) { r = null; }
+    // consulta que falhou (r nulo ou com aviso) vale só nesta sessão; a que respondeu entra na cópia do navegador
     parte.forEach(sn => U2K._autLoc.set(sn, r ? (r.porSn.get(sn) || null) : null));
+    if (r && !r.aviso) u2kCacheSalvarAutLoc();
     if (progresso) progresso(Math.min(falta.length, i + 60), falta.length);
   }
   return falta.length;
@@ -30047,14 +30084,17 @@ const u2kColsCliente = (comRisco) => [
 // busque os nossos clientes ativos dos últimos 90 dias e veja se têm sinal / estão online"). Base: monitor_olt_clientes (contratos que a JH atendeu, com o SN que o
 // AutoISP achou) → a ONU no U2000 pelo SN curto. "Navegando" = online + IP de navegação; o IP NÃO vem no export do U2000, então aqui é online/sinal/perfil.
 async function u2kCarregarClientesAtivos() {
+  await u2kCacheLer();
   if (U2K._cliAtivos) return U2K._cliAtivos;
   if (!supa) return [];
-  const todos = [];
+  const todos = []; let falhou = false;
   for (let ini = 0; ini < 30000; ini += 1000) {
-    let r; try { r = await supa.from('monitor_olt_clientes').select('contrato,serial,nome,cidade,bairro,estado,gpon_id,olt,ponlink').order('contrato').range(ini, ini + 999); } catch (e) { break; }
-    if (r.error || !Array.isArray(r.data)) break; todos.push(...r.data); if (r.data.length < 1000) break;
+    let r; try { r = await supa.from('monitor_olt_clientes').select('contrato,serial,nome,cidade,bairro,estado,gpon_id,olt,ponlink').order('contrato').range(ini, ini + 999); } catch (e) { falhou = true; break; }
+    if (r.error || !Array.isArray(r.data)) { falhou = true; break; } todos.push(...r.data); if (r.data.length < 1000) break;
   }
-  U2K._cliAtivos = todos; return todos;
+  U2K._cliAtivos = todos;
+  if (!falhou && todos.length) cacheGravar('u2k_cliativos', { v: 1, t: Date.now(), d: todos }).catch(() => {});
+  return todos;
 }
 function u2kPintarClientesAtivos(box, onus) {
   if (!box) return;
