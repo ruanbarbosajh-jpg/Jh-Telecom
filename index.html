@@ -18409,7 +18409,7 @@ function indicadorDoTecnico(t) {
   return { texto: ifiFora && irrFora ? 'IFI e IRR fora' : (ifiFora ? 'IFI fora' : 'IRR fora'), classe: 'warn' };
 }
 
-function htmlTabelaTecnicosGeral(tecs, tot, idTab) {
+function htmlTabelaTecnicosGeral(tecs, tot, idTab, inicio, fim) {
   if (!tecs.length) return '<div class="empty">Sem produção nesse período/cidades.</div>';
   const cidadePrincipal = t => { const e = Object.entries(t.porCidade).sort((a, b) => b[1] - a[1])[0]; return e ? e[0] : '-'; };
   const linhas = tecs.map(t => {
@@ -18422,7 +18422,9 @@ function htmlTabelaTecnicosGeral(tecs, tot, idTab) {
     if (pI !== null && pI > BONUS_IFI_MAX) motivos.push(`% IFI ${formatPct(pI, 2)} (máx. ${formatPct(BONUS_IFI_MAX, 2)})`);
     if (pR !== null && pR > BONUS_IRR_MAX) motivos.push(`% IRR ${formatPct(pR, 2)} (máx. ${formatPct(BONUS_IRR_MAX, 2)})`);
     const bonusTd = motivos.length ? `<td><span class="badge warn" title="${esc(motivos.join(' · '))}" style="cursor:help">INAPTO</span></td>` : `<td><span class="badge ok" title="${BONUS_DIAS_MIN}+ dias, IFI e IRR dentro da meta">APTO</span></td>`;
-    return `<tr><td class="cat-cell">${esc(t.nome)}</td><td>${esc(cidadePrincipal(t))}</td>
+    // FROTA (16/10/2026, pedido do cliente): mesma conta da Folha — quem está na tabela de Frota usa carro da empresa (JH); o resto é PRÓPRIO (ou PRÓPRIO NOVO)
+    const fr = String(frotaDoTecnico(t.nome, inicio, fim) || ''), frTd = !fr ? '<td>-</td>' : /jh/.test(normalizeHeader(fr)) ? '<td><span class="badge azul" title="carro da empresa (Frota)">FROTA</span></td>' : `<td><span class="badge neutral" title="carro do próprio técnico${/nov/.test(normalizeHeader(fr)) ? ' (carro novo)' : ''}">PRÓPRIO${/nov/.test(normalizeHeader(fr)) ? ' NOVO' : ''}</span></td>`;
+    return `<tr><td class="cat-cell">${esc(t.nome)}</td><td>${esc(cidadePrincipal(t))}</td>${frTd}
       <td style="font-weight:700">${fmtN(t.producao)}</td><td>${t.dias.size || '-'}</td><td>${t.dias.size ? fmtDec(t.producao / t.dias.size) : '-'}</td>
       <td>${fmtN(t.ativ)}</td><td>${fmtN(t.me)}</td><td>${fmtN(t.rep)}</td><td>${fmtN(t.mc + t.upg + t.outro)}</td>
       <td>${fmtN(t.ifi)}</td>${tdPct(pI, BONUS_IFI_MAX, false)}<td>${fmtN(t.irr)}</td>${tdPct(pR, BONUS_IRR_MAX, false)}
@@ -18431,9 +18433,9 @@ function htmlTabelaTecnicosGeral(tecs, tot, idTab) {
   }).join('');
   const pI = pctSobre(tot.ifi, tot.ativ + tot.me), pR = pctSobre(tot.irr, tot.rep), pPz = pctSobre(tot.prazoDentro, tot.prazoTotal);
   return `<div class="table-wrap"><table class="data-table" id="${idTab}"><thead><tr>
-    <th>Técnico</th><th>Cidade principal</th><th>Produção</th><th>Dias trab.</th><th>Produtividade (ord./dia)</th><th>Ativação</th><th>M.E</th><th>Reparos</th><th>Outros (M.C/Upg.)</th>
+    <th>Técnico</th><th>Cidade principal</th><th>Frota / próprio</th><th>Produção</th><th>Dias trab.</th><th>Produtividade (ord./dia)</th><th>Ativação</th><th>M.E</th><th>Reparos</th><th>Outros (M.C/Upg.)</th>
     <th>IFI</th><th>% IFI</th><th>IRR</th><th>% IRR</th><th>Indicador</th><th>Bônus</th><th>Reparos ≤ 24h</th></tr></thead><tbody>${linhas}
-    <tr class="total-row"><td class="cat-cell">Total</td><td>-</td><td>${fmtN(tot.producao)}</td><td>${fmtN(tot.tecDias)}</td><td>${tot.tecDias ? fmtDec(tot.producao / tot.tecDias) : '-'}</td>
+    <tr class="total-row"><td class="cat-cell">Total</td><td>-</td><td>-</td><td>${fmtN(tot.producao)}</td><td>${fmtN(tot.tecDias)}</td><td>${tot.tecDias ? fmtDec(tot.producao / tot.tecDias) : '-'}</td>
       <td>${fmtN(tot.ativ)}</td><td>${fmtN(tot.me)}</td><td>${fmtN(tot.rep)}</td><td>${fmtN(tot.mc + tot.upg + tot.outro)}</td>
       <td>${fmtN(tot.ifi)}</td><td>${pI === null ? '-' : formatPct(pI, 2)}</td><td>${fmtN(tot.irr)}</td><td>${pR === null ? '-' : formatPct(pR, 2)}</td><td>-</td><td>-</td><td>${pPz === null ? '-' : formatPct(pPz, 2)}</td></tr>
     </tbody></table></div>`;
@@ -18884,7 +18886,7 @@ function renderRelatorioGeral() {
       <div class="section-heading">Produção por técnico</div>
       ${nota(`Produção = ordens concluídas de técnico (Produção do sistema). Produtividade = produção ÷ dias em que concluiu ao menos uma. IFI/IRR contam para o <b>ofensor</b>: % IFI sobre ativações + M.E (meta ≤ ${formatPct(BONUS_IFI_MAX, 2)}), % IRR sobre reparos (meta ≤ ${formatPct(BONUS_IRR_MAX, 2)}). "Reparos ≤ 24h" vem da planilha de prazos (meta ${formatPct(PRAZO_META, 0)}). <b>Bônus</b>: APTO = ${BONUS_DIAS_MIN} dias trabalhados ou mais, com % IFI e % IRR dentro da meta; do contrário INAPTO (passe o mouse para ver o motivo). Vale para o período escolhido — o bônus oficial da Folha é calculado no mês.`)}
       ${xls('rg-xls-tec')}
-      ${htmlTabelaTecnicosGeral(g.tecnicos, t, 'rg-tab-tecnicos')}
+      ${htmlTabelaTecnicosGeral(g.tecnicos, t, 'rg-tab-tecnicos', s, e)}
 
       <div class="section-heading">Produção geral por cidade</div>
       ${nota('IRR/IFI por cidade usam a base da própria cidade. "O.S no período", cancelados e improdutivas são contados por O.S única (Produção + CSV da PCR).')}
