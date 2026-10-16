@@ -20374,7 +20374,7 @@ function renderFleet() {
         ${metricCard('Revisões vencidas', revVencidas.length, revVencidas.length > 0)}
         ${metricCard('Revisões em até 15 dias', revProximas.length, revProximas.length > 0)}
       </div>
-      <div class="section-heading">Vínculos condutor / veículo</div>
+      <div class="section-heading">Vínculos condutor / veículo ${add('vinculo')}</div>
       <div class="panel" style="margin-bottom:1.5rem"><div id="fleet-links"></div></div>
       <div class="section-heading">Revisões Programadas ${add('revisao')}</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
@@ -20409,8 +20409,8 @@ function renderFleet() {
 
     const linksEl = document.getElementById('fleet-links');
     if (!links.length) linksEl.innerHTML = '<div class="empty">Nenhum vínculo encontrado. Importe a aba "FROTA LITORAL".</div>';
-    else linksEl.innerHTML = `<div class="table-wrap"><table class="data-table"><thead><tr><th>Motorista</th><th>Placa</th><th>Supervisor</th><th>Cidade</th><th>Locadora</th><th>Vinculação</th></tr></thead><tbody>
-      ${linksAgrupados.map(r=>`<tr><td>${r.motorista ? `<a href="#" class="link-os-tec fr-ficha" data-nome="${esc(r.motorista)}" title="Ver tudo sobre o técnico">${esc(r.motorista)}</a>` : '-'}</td><td>${esc(r.placa)}</td><td>${esc(r.supervisor)}</td><td>${esc(r.cidade)}</td><td>${esc(r.locadora)}</td><td>${formatDate(r.vinculacao)}${r.anteriores.length ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Vinculação anterior: ${r.anteriores.map(a=>`${esc(a.placa)} (${formatDate(a.vinculacao)})`).join('; ')}</div>` : ''}</td></tr>`).join('')}
+    else linksEl.innerHTML = `<div class="table-wrap"><table class="data-table"><thead><tr><th>Motorista</th><th>Placa</th><th>Supervisor</th><th>Cidade</th><th>Locadora</th><th>Vinculação</th>${podeEditarFrota() ? '<th class="fora-da-imagem">Ações</th>' : ''}</tr></thead><tbody>
+      ${linksAgrupados.map(r=>`<tr><td>${r.motorista ? `<a href="#" class="link-os-tec fr-ficha" data-nome="${esc(r.motorista)}" title="Ver tudo sobre o técnico">${esc(r.motorista)}</a>` : '-'}</td><td>${esc(r.placa)}</td><td>${esc(r.supervisor)}</td><td>${esc(r.cidade)}</td><td>${esc(r.locadora)}</td><td>${formatDate(r.vinculacao)}${r.anteriores.length ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Vinculação anterior: ${r.anteriores.map(a=>`${esc(a.placa)} (${formatDate(a.vinculacao)})${podeEditarFrota() && a.chave ? ` <button type="button" class="btn-icon fr-excluir fora-da-imagem" data-fr="vinculo" data-k="${esc(a.chave)}" title="Excluir este vínculo antigo" aria-label="Excluir vínculo antigo" style="padding:0 5px;color:var(--danger)">🗑</button>` : ''}`).join('; ')}</div>` : ''}</td>${podeEditarFrota() ? `<td class="fora-da-imagem" style="white-space:nowrap">${acoesFrota('vinculo', r.chave)}</td>` : ''}</tr>`).join('')}
       </tbody></table></div>`;
 
     const revEl = document.getElementById('fleet-revisao'), revComAviso = modoNovo() || revisoes.some(r => r.horario || r.tipo_revisao || r.endereco || r.notificar);
@@ -20439,30 +20439,32 @@ function renderFleet() {
     const multasEl = document.getElementById('fleet-multas');
     if (!multas.length) { multasEl.innerHTML = '<div class="empty">Nenhuma multa registrada. Importe a aba "MULTAS".</div>'; }
     else {
-      multasEl.innerHTML = `<div class="table-wrap"><table class="data-table"><thead><tr><th>Condutor</th><th>Placa</th><th>Data</th><th>Valor</th></tr></thead><tbody>
-      ${multas.map(r=>`<tr><td>${esc(r.condutor)}</td><td>${esc(r.placa)}</td><td>${formatDate(r.data_infracao)}</td><td>${formatCurrency(r.valor_multa)}</td></tr>`).join('')}
+      multasEl.innerHTML = `<div class="table-wrap"><table class="data-table"><thead><tr><th>Condutor</th><th>Placa</th><th>Data</th><th>Valor</th>${podeEditarFrota() ? '<th class="fora-da-imagem">Ações</th>' : ''}</tr></thead><tbody>
+      ${multas.map(r=>`<tr><td>${esc(r.condutor)}</td><td>${esc(r.placa)}</td><td>${formatDate(r.data_infracao)}</td><td>${formatCurrency(r.valor_multa)}</td>${podeEditarFrota() ? `<td class="fora-da-imagem" style="white-space:nowrap">${acoesFrota('multa', r.chave)}</td>` : ''}</tr>`).join('')}
       </tbody></table></div>`;
     }
 
     const desvincEl = document.getElementById('fleet-desvinc');
     if (!desvinc.length) desvincEl.innerHTML = '<div class="empty">Nenhuma desvinculação registrada.</div>';
-    else desvincEl.innerHTML = `<div class="table-wrap"><table class="data-table"><thead><tr><th>Condutor</th><th>Placa</th><th>Vinculação</th><th>Desvinculado em</th><th>Obs.</th></tr></thead><tbody>
-      ${desvinc.map(r=>`<tr><td>${esc(r.condutor)}</td><td>${esc(r.placa)}</td><td>${formatDate(r.vinculacao)}</td><td>${formatDate(r.desvinculado)}</td><td>${esc(r.obs)}</td></tr>`).join('')}
+    else desvincEl.innerHTML = `<div class="table-wrap"><table class="data-table"><thead><tr><th>Condutor</th><th>Placa</th><th>Vinculação</th><th>Desvinculado em</th><th>Obs.</th>${podeEditarFrota() ? '<th class="fora-da-imagem">Ações</th>' : ''}</tr></thead><tbody>
+      ${desvinc.map(r=>`<tr><td>${esc(r.condutor)}</td><td>${esc(r.placa)}</td><td>${formatDate(r.vinculacao)}</td><td>${formatDate(r.desvinculado)}</td><td>${esc(r.obs)}</td>${podeEditarFrota() ? `<td class="fora-da-imagem" style="white-space:nowrap">${acoesFrota('desvinc', r.chave)}</td>` : ''}</tr>`).join('')}
       </tbody></table></div>`;
 
     // ---- modo novo: trocas de veículo, fotos e os botões "➕ Adicionar" ----
     if (modoNovo()) {
       const trEl = document.getElementById('fleet-trocas');
-      if (trEl) trEl.innerHTML = !trocas.length ? '<div class="empty">Nenhuma troca de veículo registrada.</div>' : `<div class="table-wrap"><table class="data-table"><thead><tr><th>Condutor</th><th>Placa anterior</th><th>Vinc. anterior</th><th>Placa atual</th><th>Vinc. atual</th><th>KM</th><th>Locadora</th><th>Observação</th></tr></thead><tbody>
-        ${trocas.map(r => `<tr><td class="cat-cell">${esc(r.condutor)}</td><td>${esc(r.placa_anterior) || '-'}</td><td>${formatDate(r.vinc_anterior)}</td><td>${esc(r.placa_atual)}</td><td>${formatDate(r.vinc_atual)}</td><td>${esc(r.km) || '-'}</td><td>${esc(r.locadora) || '-'}</td><td style="white-space:normal;font-size:12px">${esc(r.obs_checklist) || ''}</td></tr>`).join('')}</tbody></table></div>`;
+      if (trEl) trEl.innerHTML = !trocas.length ? '<div class="empty">Nenhuma troca de veículo registrada.</div>' : `<div class="table-wrap"><table class="data-table"><thead><tr><th>Condutor</th><th>Placa anterior</th><th>Vinc. anterior</th><th>Placa atual</th><th>Vinc. atual</th><th>KM</th><th>Locadora</th><th>Observação</th>${podeEditarFrota() ? '<th class="fora-da-imagem">Ações</th>' : ''}</tr></thead><tbody>
+        ${trocas.map(r => `<tr><td class="cat-cell">${esc(r.condutor)}</td><td>${esc(r.placa_anterior) || '-'}</td><td>${formatDate(r.vinc_anterior)}</td><td>${esc(r.placa_atual)}</td><td>${formatDate(r.vinc_atual)}</td><td>${esc(r.km) || '-'}</td><td>${esc(r.locadora) || '-'}</td><td style="white-space:normal;font-size:12px">${esc(r.obs_checklist) || ''}</td>${podeEditarFrota() ? `<td class="fora-da-imagem" style="white-space:nowrap">${acoesFrota('troca', r.chave)}</td>` : ''}</tr>`).join('')}</tbody></table></div>`;
       pintarFotos();
       body.onclick = async ev => {
         const ed = ev.target.closest('.fr-editar, .fr-excluir');
         if (ed) {
-          const alvo = ed.dataset.fr === 'revisao' ? 'frotaRevisao' : 'frotaManutencao', reg = DB[alvo].find(r => chaveRegistroFrota(alvo, r) === ed.dataset.k);
+          const alvo = FROTA_FORM[ed.dataset.fr].alvo, reg = DB[alvo].find(r => chaveRegistroFrota(alvo, r) === ed.dataset.k);
           if (!reg) { toast('Registro não encontrado (a tela pode estar desatualizada — clique em Filtrar).', 'aviso'); return; }
           if (ed.classList.contains('fr-editar')) { abrirModalFrota(ed.dataset.fr, refazerFrota, reg); return; }
-          const rot = alvo === 'frotaRevisao' ? `a revisão de ${reg.placa} em ${formatDate(reg.data_revisao)}` : `a manutenção "${reg.servico || ''}" de ${reg.placa} em ${formatDate(reg.data)}`;
+          const rot = ({ frotaRevisao: () => `a revisão de ${reg.placa} em ${formatDate(reg.data_revisao)}`, frotaManutencao: () => `a manutenção "${reg.servico || ''}" de ${reg.placa} em ${formatDate(reg.data)}`,
+            frotaLinks: () => `o vínculo de ${reg.motorista || 'sem condutor'} com a placa ${reg.placa}`, frotaMultas: () => `a multa de ${reg.condutor} (${reg.placa}) em ${formatDate(reg.data_infracao)}`,
+            frotaDesvinc: () => `a desvinculação de ${reg.condutor} (${reg.placa}) em ${formatDate(reg.desvinculado)}`, frotaTroca: () => `a troca de veículo de ${reg.condutor} (${reg.placa_atual}) em ${formatDate(reg.vinc_atual)}` })[alvo]();
           if (!confirm(`Excluir ${rot}? Não dá pra desfazer.`)) return;
           const rx = await excluirRegistroFrota(alvo, reg);
           if (!rx.ok) { toast('Não consegui excluir: ' + rx.aviso, 'erro'); return; }
@@ -20539,6 +20541,7 @@ const FROTA_FORM = {
   manutencao: { rot: 'Manutenção',       alvo: 'frotaManutencao', avisar: true, campos: [['servico', 'Serviço', 'text', 1], ['data', 'Data', 'date', 1], ['horario', 'Horário', 'time'], ['endereco', 'Endereço / oficina', 'text'], ['km', 'KM', 'number'], ['obs', 'Observação', 'text']] },
   multa:      { rot: 'Multa',            alvo: 'frotaMultas',     campos: [['data_infracao', 'Data da infração', 'date', 1], ['valor_multa', 'Valor da multa (R$)', 'number', 1]] },
   desvinc:    { rot: 'Desvinculação',    alvo: 'frotaDesvinc',    campos: [['vinculacao', 'Vinculado desde', 'date'], ['desvinculado', 'Desvinculado em', 'date', 1], ['obs', 'Observação', 'text']] },
+  vinculo:    { rot: 'Vínculo',          alvo: 'frotaLinks',      campos: [['supervisor', 'Supervisor', 'text'], ['cidade', 'Cidade', 'text'], ['locadora', 'Locadora', 'text'], ['vinculacao', 'Vinculação', 'date'], ['observacao', 'Observação', 'text']] },
   troca:      { rot: 'Troca de veículo', alvo: 'frotaTroca', semPlaca: true, campos: [['placa_anterior', 'Placa anterior', 'text'], ['vinc_anterior', 'Vinculação anterior', 'date'], ['placa_atual', 'Placa atual (nova)', 'text', 1], ['vinc_atual', 'Vinculação atual', 'date', 1], ['km', 'KM', 'number'], ['locadora', 'Locadora', 'text'], ['obs_checklist', 'Observação / checklist', 'text']] },
 };
 const SEM_DATA_FROTA_UI = 'sem-data';
@@ -20570,6 +20573,7 @@ function reindexarFrota(alvo) {
 // apaga 1 registro de revisão/manutenção (14/10/2026, pedido do cliente: "seja possível editar as revisões ou deletar") — só o Analista
 async function excluirRegistroFrota(alvo, reg) {
   if (!podeEditarFrota()) return { ok: false, aviso: 'só o Analista altera a Frota' };
+  if (alvo !== 'frotaRevisao' && !reg.chave) return { ok: false, aviso: 'este registro não tem chave (reimporte a planilha para ele ganhar uma)' };
   const k = chaveRegistroFrota(alvo, reg);
   if (supa) {
     let q = supa.from(SUPABASE_TABLES[alvo].table).delete();
@@ -20587,6 +20591,7 @@ function objetoFrotaDoFormulario(tipo, v) {
   switch (tipo) {
     case 'revisao': return { alvo: 'frotaRevisao', obj: { condutor, placa, data_revisao: v.data_revisao, horario: v.horario || '', tipo_revisao: v.tipo_revisao || '', endereco: v.endereco || '', notificar: v.notificar || '', obs: v.obs || '' }, chave: null };
     case 'manutencao': return { alvo: 'frotaManutencao', obj: { condutor, placa, servico: v.servico || '', obs: v.obs || '', data: v.data, km: num(v.km), horario: v.horario || '', endereco: v.endereco || '', notificar: v.notificar || '' }, chave: `${placa}|${v.data}|${v.servico || ''}` };
+    case 'vinculo': return { alvo: 'frotaLinks', obj: { motorista: condutor, placa, supervisor: v.supervisor || '', cidade: v.cidade || '', locadora: v.locadora || '', vinculacao: v.vinculacao || null, observacao: v.observacao || '' }, chave: placa };
     case 'multa': return { alvo: 'frotaMultas', obj: { condutor, placa, data_infracao: v.data_infracao, valor_multa: num(v.valor_multa) }, chave: `${condutor}|${placa}|${v.data_infracao || SEM_DATA_FROTA_UI}` };
     case 'desvinc': return { alvo: 'frotaDesvinc', obj: { condutor, placa, vinculacao: v.vinculacao || null, desvinculado: v.desvinculado, obs: v.obs || '' }, chave: `${condutor}|${placa}|${v.desvinculado || SEM_DATA_FROTA_UI}` };
     case 'troca': { const pa = placaNorm(v.placa_atual);
@@ -20607,7 +20612,7 @@ function abrirModalFrota(tipo, aoSalvar, existente) {
   const m = document.getElementById('modal-tecnico'); if (!m) return;
   m.querySelector('.mt-corpo').innerHTML = `
     <h3 style="margin:0 0 4px">${existente ? '✎ Editar ' + esc(f.rot.toLowerCase()) : '➕ ' + esc(f.rot)}</h3>
-    <p style="margin:0 0 14px;font-size:13px;color:var(--text-secondary)">Entra direto na tabela de ${esc(f.rot.toLowerCase())}s da Frota — a reimportação da planilha não duplica.</p>
+    <p style="margin:0 0 14px;font-size:13px;color:var(--text-secondary)">${existente ? 'Altera' : 'Entra'} direto na tabela de ${esc(f.rot.toLowerCase())}s da Frota — a reimportação da planilha não duplica.</p>
     <label>Condutor</label><input type="text" id="fr-condutor" list="fr-condutores" autocomplete="off">
     ${f.semPlaca ? '' : '<label>Placa *</label><input type="text" id="fr-placa" list="fr-placas" autocomplete="off" style="text-transform:uppercase">'}
     ${f.campos.map(([c, r, t, obr, ops]) => `<label>${esc(r)}${obr ? ' *' : ''}</label>${t === 'select' ? `<select id="fr-${c}"><option value="">Escolha…</option>${(ops || []).map(o => `<option>${esc(o)}</option>`).join('')}</select>` : `<input type="${t}" id="fr-${c}" ${t === 'number' ? 'step="0.01" min="0"' : 'autocomplete="off"'}${/placa/.test(c) ? ' list="fr-placas" style="text-transform:uppercase"' : ''}>`}`).join('')}
@@ -20624,7 +20629,7 @@ function abrirModalFrota(tipo, aoSalvar, existente) {
   co.addEventListener('change', () => { const l = frotaVinculoDoCondutor(co.value); if (!l) return; if (pl && !pl.value) pl.value = l.placa || ''; const pa = $('fr-placa_anterior'); if (pa && !pa.value) { pa.value = l.placa || ''; const va = $('fr-vinc_anterior'); if (va && !va.value && l.vinculacao) va.value = l.vinculacao; } });
   // edição: preenche com o registro escolhido
   if (existente) {
-    co.value = existente.condutor || ''; if (pl) pl.value = existente.placa || '';
+    co.value = existente.condutor || existente.motorista || ''; if (pl) pl.value = existente.placa || '';
     f.campos.forEach(([c]) => { const el = $('fr-' + c); if (el && existente[c] != null) el.value = existente[c]; });
     if (f.avisar) { const quem = String(existente.notificar || '').split(/[;,]/).map(x => normalizeHeader(x)).filter(Boolean);
       document.querySelectorAll('.fr-avisar').forEach(cb => { cb.checked = quem.includes(normalizeHeader(cb.value)); }); }
@@ -20784,7 +20789,8 @@ async function abrirFotoFrota(chave, aoMudar) {
   m.innerHTML = `<div class="modal-card modal-largo" style="max-width:900px"><h3 style="margin:0 0 4px">${esc(meta.placa || '')} — ${esc(meta.condutor || '')}</h3>
     <p style="font-size:12.5px;color:var(--text-muted);margin:0 0 10px">${esc(FROTA_TIPO_FOTO[meta.tipo] || '')}${meta.vinculacao ? ' · vinculação ' + formatDate(meta.vinculacao) : ''}${meta.criado_por ? ' · por ' + esc(meta.criado_por) : ''}${meta.descricao ? '<br>' + esc(meta.descricao) : ''}</p>
     <div id="ff-img" style="text-align:center;min-height:120px"><div class="loading">Carregando foto…</div></div>
-    <div class="modal-acoes">${podeEditarFrota() ? '<button type="button" class="btn-secundario" id="ff-excluir">🗑 Excluir foto</button>' : ''}<button type="button" class="btn-secundario" id="ff-baixar">⬇ Baixar</button><button type="button" class="btn-primario" id="ff-fechar">Fechar</button></div></div>`;
+    <div id="ff-form"></div>
+    <div class="modal-acoes">${podeEditarFrota() ? '<button type="button" class="btn-secundario" id="ff-editar">✎ Editar</button><button type="button" class="btn-secundario" id="ff-excluir">🗑 Excluir foto</button>' : ''}<button type="button" class="btn-secundario" id="ff-baixar">⬇ Baixar</button><button type="button" class="btn-primario" id="ff-fechar">Fechar</button></div></div>`;
   m.classList.add('active');
   const fechar = () => m.classList.remove('active');
   document.getElementById('ff-fechar').addEventListener('click', fechar);
@@ -20792,6 +20798,28 @@ async function abrirFotoFrota(chave, aoMudar) {
   if (supa) { const { data } = await supa.from('frota_fotos').select('foto').eq('chave', chave).maybeSingle(); src = data && data.foto || ''; } else src = meta.foto || meta.miniatura || '';
   document.getElementById('ff-img').innerHTML = src ? `<img src="${src}" style="max-width:100%;max-height:70vh;border-radius:10px">` : '<div class="empty">Foto não encontrada.</div>';
   document.getElementById('ff-baixar').addEventListener('click', () => { if (!src) return; const a = document.createElement('a'); a.href = src; a.download = `${meta.placa || 'veiculo'}-${chave}.jpg`; document.body.appendChild(a); a.click(); a.remove(); });
+  // editar os dados da foto (16/10/2026, pedido do cliente: "precisa ser editável e opção para deletar nas opções que tem em Frota") — só o Analista
+  const bEd = document.getElementById('ff-editar'); if (bEd) bEd.addEventListener('click', () => {
+    const fm = document.getElementById('ff-form'); if (fm.innerHTML) { fm.innerHTML = ''; return; }
+    fm.innerHTML = `<div style="text-align:left;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px">
+      <label>Condutor</label><input type="text" id="ffe-condutor" list="fr-condutores" autocomplete="off" value="${esc(meta.condutor || '')}">
+      <label>Placa</label><input type="text" id="ffe-placa" list="fr-placas" autocomplete="off" style="text-transform:uppercase" value="${esc(meta.placa || '')}">
+      <label>Tipo</label><select id="ffe-tipo">${Object.entries(FROTA_TIPO_FOTO).map(([k, t]) => `<option value="${k}"${k === meta.tipo ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>
+      <label>Vinculação (data)</label><input type="date" id="ffe-vinc" value="${esc(meta.vinculacao || '')}">
+      <label>Descrição</label><textarea id="ffe-desc" rows="2" style="width:100%;resize:vertical">${esc(meta.descricao || '')}</textarea>
+      ${listasFrotaHtml()}<p id="ffe-erro" class="error-msg"></p>
+      <div class="modal-acoes"><button type="button" class="btn-secundario" id="ffe-cancelar">Cancelar</button><button type="button" class="btn-primario" id="ffe-salvar">Salvar alterações</button></div></div>`;
+    document.getElementById('ffe-cancelar').addEventListener('click', () => { fm.innerHTML = ''; });
+    document.getElementById('ffe-salvar').addEventListener('click', async () => {
+      const g = id => document.getElementById(id).value.trim(), er = document.getElementById('ffe-erro');
+      const nov = { condutor: g('ffe-condutor'), placa: placaNorm(g('ffe-placa')), tipo: g('ffe-tipo'), vinculacao: g('ffe-vinc') || null, descricao: g('ffe-desc') };
+      if (!nov.placa) { er.textContent = 'Informe a placa.'; return; }
+      er.style.color = ''; er.textContent = 'Salvando…';
+      if (supa) { const { error } = await supa.from('frota_fotos').update(nov).eq('chave', chave); if (error) { er.style.color = 'var(--danger)'; er.textContent = 'Não consegui salvar: ' + error.message; return; } }
+      Object.assign(meta, nov); const ix = FROTA_FOTOS.findIndex(f => f.chave === chave); if (ix >= 0) Object.assign(FROTA_FOTOS[ix], nov);
+      toast('Foto alterada.', 'sucesso'); if (aoMudar) aoMudar(); abrirFotoFrota(chave, aoMudar);
+    });
+  });
   const bEx = document.getElementById('ff-excluir'); if (bEx) bEx.addEventListener('click', async () => {
     if (!confirm('Excluir esta foto? Isso não pode ser desfeito.')) return;
     if (supa) { const { error } = await supa.from('frota_fotos').delete().eq('chave', chave); if (error) { toast('Não consegui excluir: ' + error.message, 'aviso'); return; } }
