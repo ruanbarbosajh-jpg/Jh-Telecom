@@ -13106,10 +13106,11 @@ function montarAExecutar(rows) {
   aExecutar.total = aExecutar.grupos.reduce((a, g) => a + g.total, 0);
   return aExecutar;
 }
-function htmlAExecutar(aExecutar) {
+function htmlAExecutar(aExecutar, extraTitulo) {
   return `
       <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <span>A Executar — por Cidade e Tipo de Serviço</span>
+        ${extraTitulo || ''}
         <button type="button" class="btn-export-img" id="exec-img">🖼 Gerar imagem</button>
       </div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
@@ -15749,6 +15750,8 @@ function linhasMaoDeObraFixas(cidadesList, moDaCidadeLinha, moDoDia) {
   if (!soma.total) return fixas;
   return [...fixas, { cidade: 'Outras Cidades', agregado: true, ...soma }];
 }
+// período escolhido em cada tabela da Parcial do Dia (chave = seção; '' = manhã e tarde) — fica enquanto o sistema está aberto
+const PD_PERIODO = {};
 function renderParcialDoDia() {
   // Os dias vêm da BASE DO DIA (xlsx) e também do CSV de atividades importado
   // aqui ou na PCR — assim o dia importado hoje já aparece na lista.
@@ -15760,16 +15763,12 @@ function renderParcialDoDia() {
     <div class="toolbar">
       <div class="field"><label>Data</label><input type="date" id="f-data" value="${dataPadrao}"></div>
       ${multiCityField('pd-cidades', 'Cidades')}
-      <div class="field"><label>Período do prazo</label><select id="pd-periodo">
-        <option value="">Manhã e tarde</option><option value="MANHÃ">Só manhã</option><option value="TARDE">Só tarde</option>
-      </select></div>
       <button class="btn" id="f-apply">Filtrar</button>
     </div>
     <p id="pd-msg" style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">O CSV de atividades é importado na aba PCR — o que for importado lá já aparece aqui, sem precisar importar de novo.</p>
     <div id="pd-body"></div>`;
   wireMultiCityField('pd-cidades');
   document.getElementById('f-apply').addEventListener('click', load);
-  document.getElementById('pd-periodo').addEventListener('change', () => load());
   // Coluna "Cancelado" das tabelas de status nasce OCULTA (pedido do cliente
   // 21/09/2026); o botão pequeno do título reexibe. Declarado ANTES do load()
   // porque ele roda logo abaixo (let depois cairia na zona morta temporal).
@@ -15786,29 +15785,21 @@ function renderParcialDoDia() {
     // "Efetividade" ficavam zerados mesmo depois de importar o CSV na PCR.
     // (uma linha por O.S — o CSV repete a mesma ordem quando ela é remanejada).
     const doCsv = linhasDoCsvPorDia(data);
-    const universoBruto = doCsv.length ? doCsv : DB.baseDoDia.filter(r => r.data === data);
-    // FILTRO DE PERÍODO (19/10/2026, pedido do cliente: "um filtro de período pra saber se as
-    // pendentes são manhã ou tarde ... em todas as tabelas"). Vale pra TODA a tela porque tudo
-    // sai de `rows`/`reparoDia`. O período é o REAL: pela hora do TEMPO LIMITE (abertura + 24h
-    // no reparo, 36h em ativação e M.E.; < 12h = manhã), o mesmo da PCR — não o turno gravado.
-    // Ordem sem abertura no CSV não tem limite, então não tem período e fica de fora do filtro.
-    const fPeriodo = (document.getElementById('pd-periodo') || {}).value || '';
-    const noPeriodo = r => !fPeriodo || normalizeHeader(r.periodo || '') === normalizeHeader(fPeriodo);
-    const universo = universoBruto.filter(noPeriodo);
-    const semPeriodoNoDia = fPeriodo ? universoBruto.filter(r => !r.periodo).length : 0;
-    // a lista de cidades segue o dia INTEIRO (senão a cidade sumiria do filtro quando o período não tem ordem dela)
-    refreshCityField('pd-cidades', [...universoBruto, ...DB.prazoReparoDia.filter(r=>diaDoRelatorioReparo(r)===data)], { label: 'Cidades' });
+    const universo = doCsv.length ? doCsv : DB.baseDoDia.filter(r => r.data === data);
+    refreshCityField('pd-cidades', [...universo, ...DB.prazoReparoDia.filter(r=>diaDoRelatorioReparo(r)===data)], { label: 'Cidades' });
     const cidades = getSelectedCities('pd-cidades');
     const rows = universo.filter(r => cidades.includes(r.cidade));
-    const reparoDiaPreCheck = DB.prazoReparoDia.filter(r => diaDoRelatorioReparo(r) === data && cidades.includes(r.cidade) && noPeriodo(r));
-    const elMsgPd = document.getElementById('pd-msg');
-    if (elMsgPd) elMsgPd.innerHTML = fPeriodo
-      ? `<b>Só ${fPeriodo === 'MANHÃ' ? 'manhã' : 'tarde'}</b>: ordens cujo prazo vencia ${fPeriodo === 'MANHÃ' ? 'antes das 12h' : 'a partir das 12h'} (hora do tempo limite) — vale pra todas as tabelas desta tela.`
-        + (semPeriodoNoDia ? ` ${semPeriodoNoDia} ordem(ns) do dia sem hora de abertura no CSV não têm período e ficam de fora.` : '')
-        + ' A M.O digitada é do dia inteiro, por isso fica só-leitura (mostra a contagem do período).'
-      : 'O CSV de atividades é importado na aba PCR — o que for importado lá já aparece aqui, sem precisar importar de novo.';
+    const reparoDiaPreCheck = DB.prazoReparoDia.filter(r => diaDoRelatorioReparo(r) === data && cidades.includes(r.cidade));
+    // FILTRO DE PERÍODO POR TABELA (19/10/2026, pedido do cliente: "o botão de período ao lado dos outros, dentro da própria
+    // tabela e não no topo"). Cada seção tem o SEU seletor (Manhã e tarde / Só manhã / Só tarde) e recalcula só a si mesma
+    // a partir de `rows`; o estado fica em PD_PERIODO[seção]. Período = o REAL, pela hora do TEMPO LIMITE (abertura + 24 h no
+    // reparo, 36 h em ativação e M.E.; < 12 h = manhã), o mesmo da PCR — não o turno gravado. Ordem sem abertura no CSV não
+    // tem limite, logo não tem período: só aparece em "Manhã e tarde".
+    const perDe = sec => PD_PERIODO[sec] || '';
+    const rowsDe = sec => perDe(sec) ? rows.filter(r => normalizeHeader(r.periodo || '') === normalizeHeader(perDe(sec))) : rows;
+    const seletorPeriodo = sec => `<select class="btn-mini pd-per fora-da-imagem" data-sec="${sec}" title="Período do prazo: só vale pra esta tabela. Manhã = prazo vencia antes das 12h; tarde = a partir das 12h (hora do tempo limite)">
+      <option value="">Manhã e tarde</option><option value="MANHÃ"${perDe(sec) === 'MANHÃ' ? ' selected' : ''}>Só manhã</option><option value="TARDE"${perDe(sec) === 'TARDE' ? ' selected' : ''}>Só tarde</option></select>`;
     const body = document.getElementById('pd-body');
-    if (!rows.length && !reparoDiaPreCheck.length && fPeriodo && universoBruto.length) { body.innerHTML = `<div class="panel"><div class="empty">Nenhuma ordem de ${fPeriodo === 'MANHÃ' ? 'manhã' : 'tarde'} nessa data e cidades. Escolha "Manhã e tarde" para ver o dia inteiro.</div></div>`; return; }
     if (!rows.length && !reparoDiaPreCheck.length) { body.innerHTML = '<div class="panel"><div class="empty">Sem dados para essa data. Importe o CSV de atividades no campo acima, ou a aba "BASE DO DIA" / "PRAZO REPARO DO DIA" (PRAZOS_ESCRITÓRIO.xlsx) em "Importar Excel".</div></div>'; return; }
 
     // ---- Tabela 1: Mão de obra e produção do dia por cidade ----
@@ -15824,10 +15815,11 @@ function renderParcialDoDia() {
     // 28/08/2026: quem já saiu pra rota ou já começou o atendimento também é
     // mão de obra empregada naquele momento, não "não conta mais".
     const ABERTAS_MO = ['pendente', 'em_rota', 'iniciado'];
-    const rowsPendentesMO = rows.filter(r => ABERTAS_MO.includes(classifyStatusGranular(r.status)));
+    const rowsMO = rowsDe('mo');
+    const rowsPendentesMO = rowsMO.filter(r => ABERTAS_MO.includes(classifyStatusGranular(r.status)));
     // dia sem NENHUMA ordem em aberto (base de fim de dia, tudo já encerrado):
     // usa todas as ordens do dia, pra tabela não ficar em branco
-    const universoMO = rowsPendentesMO.length ? rowsPendentesMO : rows;
+    const universoMO = rowsPendentesMO.length ? rowsPendentesMO : rowsMO;
     const porCidadeMO = {};
     universoMO.forEach(r => {
       const c = r.cidade || 'Não informado';
@@ -15862,7 +15854,7 @@ function renderParcialDoDia() {
     }, {ativacao:0,reparo:0,me:0,mc:0,upgrade:0,total:0,mo:0});
     // M.O corrigida à mão — a mesma memória usada na PCR (dia + cidade), então
     // o número que o coordenador ajusta numa tela vale na outra
-    const moDoDia = c => { const k = data + '|' + c.cidade; return (!fPeriodo && MO_MANUAL[k] !== undefined) ? MO_MANUAL[k] : moDaCidadeLinha(c.cidade).tecnicos.size; };
+    const moDoDia = c => { const k = data + '|' + c.cidade; return (!perDe('mo') && MO_MANUAL[k] !== undefined) ? MO_MANUAL[k] : moDaCidadeLinha(c.cidade).tecnicos.size; };
     const moTotalDia = () => cidadesList.reduce((a,c)=>a + moDoDia(c), 0);
     // Linhas da tabela "Mão de Obra e Produção do Dia" em ordem fixa — as
     // outras tabelas da tela (Status Detalhado, Prazo, Faixa) continuam
@@ -15871,7 +15863,7 @@ function renderParcialDoDia() {
 
     // ---- Tabela 2: Prazo geral do dia por cidade ----
     // fonte preferida: aba "PRAZO REPARO DO DIA" (já vem com NO PRAZO/FORA DO PRAZO prontos)
-    const reparoDia = DB.prazoReparoDia.filter(r => diaDoRelatorioReparo(r) === data && cidades.includes(r.cidade) && noPeriodo(r));
+    const reparoDia = DB.prazoReparoDia.filter(r => diaDoRelatorioReparo(r) === data && cidades.includes(r.cidade));
     const usaPrazoReparoDia = reparoDia.length > 0;
     const isWithin24 = st => /ate 24|até 24/i.test(st||'');
     const temPrazo = usaPrazoReparoDia || rows.some(r => r.status_prazo);
@@ -16005,12 +15997,12 @@ function renderParcialDoDia() {
     const thStatus = b => `<th>${bucketLabel[b]}</th>`;
     const btnCancelados = `<button type="button" class="btn-mini pd-toggle-cancelados">${canceladosVisiveis ? 'Ocultar cancelados' : 'Mostrar cancelados'}</button>`;
     const statusTable = tiposFixos.map(([label,re]) => {
-      const linhas = rows.filter(r => re.test(normalizeHeader(r.tipo_atividade)));
+      const linhas = rowsDe('tipo').filter(r => re.test(normalizeHeader(r.tipo_atividade)));
       const linha = { label, total: linhas.length };
       buckets.forEach(b => linha[b] = linhas.filter(r=>classifyStatusGranular(r.status)===b).length);
       return linha;
     });
-    const totalStatus = { label:'TOTAL', total: rows.length };
+    const totalStatus = { label:'TOTAL', total: rowsDe('tipo').length };
     buckets.forEach(b => totalStatus[b] = statusTable.reduce((a,l)=>a+l[b],0));
     // "Gerar imagem" no mesmo padrão azul-marinho do Remanejamento/A Executar
     // (pedido do cliente 23/09/2026: "deixe todos os gerar imagem nesse mesmo
@@ -16056,11 +16048,14 @@ function renderParcialDoDia() {
 
     // ---- Tabela 4: status detalhado por cidade (mesmos baldes, agrupado por cidade em vez de tipo) ----
     const statusPorCidadeTable = cidadesList.map(c => {
-      const linhas = rows.filter(r => (r.cidade || 'Não informado') === c.cidade);
+      const linhas = rowsDe('cidade').filter(r => (r.cidade || 'Não informado') === c.cidade);
       const linha = { label: c.cidade, total: linhas.length };
       buckets.forEach(b => linha[b] = linhas.filter(r=>classifyStatusGranular(r.status)===b).length);
       return linha;
     });
+    // total PRÓPRIO da tabela por cidade (cada tabela tem o seu período, então não dá pra reaproveitar o totalStatus do tipo)
+    const totalStatusCidade = { label:'TOTAL', total: statusPorCidadeTable.reduce((a,l)=>a+l.total,0) };
+    buckets.forEach(b => totalStatusCidade[b] = statusPorCidadeTable.reduce((a,l)=>a+l[b],0));
 
     // ---- Tabela: status detalhado por técnico (mesmos baldes, agrupado por técnico) ----
     // Filtro de Tipo de Serviço (pedido do cliente 09/09/2026, depois trocado
@@ -16076,7 +16071,7 @@ function renderParcialDoDia() {
     const tiposTecMarcados = document.getElementById('pd-tec-tipo-panel') ? getMultiSelectValues('pd-tec-tipo') : nomesTiposTec;
     const todosTiposTecMarcados = tiposTecMarcados.length === nomesTiposTec.length;
     const regexTiposTec = tiposFixos.filter(([l]) => tiposTecMarcados.includes(l)).map(([, re]) => re);
-    const rowsPorTecnico = todosTiposTecMarcados ? rows : rows.filter(r => regexTiposTec.some(re => re.test(normalizeHeader(r.tipo_atividade))));
+    const rowsPorTecnico = todosTiposTecMarcados ? rowsDe('tec') : rowsDe('tec').filter(r => regexTiposTec.some(re => re.test(normalizeHeader(r.tipo_atividade))));
     const porTecnicoStatus = {};
     rowsPorTecnico.forEach(r => { if (ehRecursoTecnico(r.recurso)) (porTecnicoStatus[r.recurso] = porTecnicoStatus[r.recurso] || []).push(r); });
     const statusPorTecnicoTable = Object.keys(porTecnicoStatus).sort((a,b)=>porTecnicoStatus[b].length-porTecnicoStatus[a].length).map(t => {
@@ -16095,21 +16090,22 @@ function renderParcialDoDia() {
     // Só existe quando a fonte do dia É o CSV (doCsv.length) — é o caso que foi
     // pedido. A BASE DO DIA (fallback de manhã) não tem esse detalhe linha a
     // linha no mesmo formato, então não faz sentido fingir a mesma tabela ali.
-    const servicosDoDia = !doCsv.length ? [] : [...rows].sort((a,b) =>
+    const temServicos = doCsv.length > 0;
+    const servicosDoDia = !temServicos ? [] : [...rowsDe('serv')].sort((a,b) =>
       String(a.cidade||'').localeCompare(String(b.cidade||'')) ||
       String(a.recurso||'').localeCompare(String(b.recurso||'')) ||
       String(a.os||'').localeCompare(String(b.os||'')));
     // Status do "Serviços do Dia" com uma cor por situação (pedido explícito):
     // em rota = amarelo, pendente = laranja — diferente do statusBadge() padrão
     // (só 2 cores, ok/warn), usado nas outras tabelas do sistema.
-    const aExecutar = montarAExecutar(rows);
+    const aExecutar = montarAExecutar(rowsDe('aexec'));
     const CLASSE_BADGE_SERVICO = { concluido:'ok', cancelado:'warn', nao_concluido:'warn', em_rota:'amber', pendente:'laranja', iniciado:'azul' };
     const badgeServicoDia = status => `<span class="badge ${CLASSE_BADGE_SERVICO[classifyStatusGranular(status)] || 'neutral'}">${esc(status) || '-'}</span>`;
 
     // "Status das Ordens" (30/09/2026, pedido do cliente — mesmo card que
     // entrou em PCR, ver renderPCR). Sem "Backlog" (pedido explícito).
     const statusDasOrdens = { pendente: 0, concluido: 0, iniciado: 0, em_rota: 0, nao_concluido: 0, suspenso: 0, cancelado: 0 };
-    rows.forEach(r => {
+    rowsDe('cards').forEach(r => {
       let b = classifyStatusGranular(r.status);
       if (/suspen/i.test(r.status || '')) b = 'suspenso';
       if (statusDasOrdens[b] !== undefined) statusDasOrdens[b]++;
@@ -16122,7 +16118,7 @@ function renderParcialDoDia() {
     // então ganha ordenar por coluna sozinha; caixa com altura fixa pra
     // rolar em vez de esticar a página, igual outras listas Top N do sistema.
     const porBairroDia = {};
-    rows.forEach(r => {
+    rowsDe('bairro').forEach(r => {
       // "Bairro - Cidade" (09/10/2026, pedido do cliente): o mesmo nome de bairro existe em mais de uma cidade
       const b = (extrairBairro(r.endereco) || 'Não informado') + (r.cidade ? ' - ' + rotuloCidadeGeral(r.cidade) : '');
       porBairroDia[b] = (porBairroDia[b] || 0) + 1;
@@ -16134,7 +16130,7 @@ function renderParcialDoDia() {
 
     // Mão de Obra e Produção do Dia no TOPO pro Analista (14/10/2026, pedido do cliente); os outros perfis seguem com a ordem de antes
     const blocoMO = `
-      <div class="section-heading">Mão de Obra e Produção do Dia — ${formatDate(data)}</div>
+      <div class="section-heading">Mão de Obra e Produção do Dia — ${formatDate(data)} ${seletorPeriodo('mo')}</div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
         <th>Cidades</th><th>Ativação</th><th>Reparo</th><th>M.E</th><th>M.C</th><th>Upgrade</th><th>Total</th><th>M.O</th><th>Média</th>
       </tr></thead><tbody>
@@ -16149,7 +16145,7 @@ function renderParcialDoDia() {
           const mo = moDoDia(c);
           return `<tr><td class="cat-cell">${esc(c.cidade)}</td><td>${m.ativacao}</td><td>${m.reparo}</td><td>${m.me}</td><td>${m.mc}</td><td>${m.upgrade}</td><td>${m.total}</td>
           <td><input type="number" min="0" class="mo-edit" value="${mo}" data-chave="${esc(chave)}" data-cidade="${esc(c.cidade)}" data-total="${m.total}"
-              ${fPeriodo ? 'readonly disabled title="Com filtro de período a M.O é só a contagem do período — tire o filtro pra editar a M.O do dia"' : podeEditarMO() ? 'title="Editável — a média recalcula sozinha e o número fica salvo"' : 'readonly disabled title="Só leitura para o perfil Escritório"'}></td>
+              ${perDe('mo') ? 'readonly disabled title="Com filtro de período a M.O é só a contagem do período — volte pra Manhã e tarde pra editar a M.O do dia"' : podeEditarMO() ? 'title="Editável — a média recalcula sozinha e o número fica salvo"' : 'readonly disabled title="Só leitura para o perfil Escritório"'}></td>
           <td data-media="${esc(c.cidade)}">${mo?(m.total/mo).toFixed(1):'-'}</td></tr>`;}).join('')}
         <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${totais.ativacao}</td><td>${totais.reparo}</td><td>${totais.me}</td><td>${totais.mc}</td><td>${totais.upgrade}</td><td>${totais.total}</td>
           <td class="mo-total-cel" data-mo-total>${moTotalDia()}</td>
@@ -16157,7 +16153,7 @@ function renderParcialDoDia() {
       </tbody></table></div>
 `;
     body.innerHTML = `${modoNovo() ? blocoMO : ''}
-      <div class="section-heading">Status das Ordens</div>
+      <div class="section-heading">Status das Ordens ${seletorPeriodo('cards')}</div>
       <div class="stat-cards stat-cards--7">
         ${statCard('orange', icRelogio, 'Pendentes', statusDasOrdens.pendente)}
         ${statCard('green', icOk, 'Concluídas', statusDasOrdens.concluido)}
@@ -16169,15 +16165,15 @@ function renderParcialDoDia() {
       </div>
 
       <div class="stat-cards">
-        ${statCard('neutral', icPasta, 'Total O.S no dia', rows.length)}
+        ${statCard('neutral', icPasta, 'Total O.S no dia', rowsDe('cards').length)}
         ${statCard('blue', icPessoas, 'Mão de obra (técnicos)', moTotalDia())}
         ${statCard('purple', icBarras, 'Média por técnico', moTotalDia() ? (totais.total/moTotalDia()).toFixed(1) : '0')}
       </div>
 
-      ${modoNovo() ? `<div class="section-heading">Pendentes do dia</div><div class="panel"><h3>O.S pendentes — mais urgente primeiro</h3>${htmlPendentesDoDia(rows, 'pd-tab-pend')}</div>` : ''}
+      ${modoNovo() ? `<div class="section-heading">Pendentes do dia ${seletorPeriodo('pend')}</div><div class="panel"><h3>O.S pendentes — mais urgente primeiro</h3>${htmlPendentesDoDia(rowsDe('pend'), 'pd-tab-pend')}</div>` : ''}
       <div class="section-heading">Volume por Bairro</div>
       <div class="panel" style="margin-bottom:1.5rem">
-        <h3 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Volume total de OS por bairro <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">Top 10</span></h3>
+        <h3 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Volume total de OS por bairro <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">Top 10</span> ${seletorPeriodo('bairro')}</h3>
         ${!rankingBairroDia.length ? '<div class="empty">Sem Endereço importado nesse dia — o bairro vem do CSV de atividades (PCR).</div>' : `
         <div class="table-wrap" style="max-height:360px;overflow:auto"><table class="data-table"><thead><tr>
           <th>Bairro - Cidade</th><th>OS</th>
@@ -16187,7 +16183,7 @@ function renderParcialDoDia() {
       </div>
 ${modoNovo() ? '' : blocoMO}
 
-      <div class="section-heading">Status Detalhado por Tipo de Serviço ${btnCancelados}<button type="button" class="btn-export-img" id="pd-status-tipo-img">🖼 Gerar imagem</button></div>
+      <div class="section-heading">Status Detalhado por Tipo de Serviço ${btnCancelados}${seletorPeriodo('tipo')}<button type="button" class="btn-export-img" id="pd-status-tipo-img">🖼 Gerar imagem</button></div>
       ${verEficiencia ? '<p class="fora-da-imagem" style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px">Taxa de Conclusão e Execução da Caixa são só de consulta na tela — <b>não saem no "Gerar imagem"</b>.</p>' : ''}
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="tab-status-tipo"><thead><tr>
         <th>Serviços</th>${bucketsTabela.map(thStatus).join('')}<th>Total O.S</th>${verEficiencia ? '<th style="text-align:center">Taxa de Conclusão</th><th style="text-align:center">Execução da Caixa</th>' : ''}
@@ -16198,7 +16194,7 @@ ${modoNovo() ? '' : blocoMO}
         <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalVisivel(totalStatus)}</td>${verEficiencia ? `<td style="text-align:center;${corConclusao(totalStatus)}">${formatPct(conclusao(totalStatus), 1)}</td><td style="text-align:center;${corExecucaoCaixa(totalStatus)}">${formatPct(execucaoCaixa(totalStatus), 1)}</td>` : ''}</tr>
       </tbody></table></div>
 
-      <div class="section-heading">Status Detalhado por Cidade ${btnCancelados}<button type="button" class="btn-export-img" id="pd-status-cidade-img">🖼 Gerar imagem</button></div>
+      <div class="section-heading">Status Detalhado por Cidade ${btnCancelados}${seletorPeriodo('cidade')}<button type="button" class="btn-export-img" id="pd-status-cidade-img">🖼 Gerar imagem</button></div>
       ${verEficiencia ? '<p class="fora-da-imagem" style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px">Taxa de Conclusão e Execução da Caixa são só de consulta na tela — <b>não saem no "Gerar imagem"</b>.</p>' : ''}
       <div class="table-wrap"><table class="data-table" id="tab-status-cidade"><thead><tr>
         <th>Cidades</th>${bucketsTabela.map(thStatus).join('')}<th>Total O.S</th>${verEficiencia ? '<th style="text-align:center">Taxa de Conclusão</th><th style="text-align:center">Execução da Caixa</th>' : ''}
@@ -16206,13 +16202,14 @@ ${modoNovo() ? '' : blocoMO}
         ${statusPorCidadeTable.map(l=>{
           return `<tr><td class="cat-cell">${l.label}</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, l[b])}">${l[b]}</td>`).join('')}<td>${totalVisivel(l)}</td>${verEficiencia ? `<td style="text-align:center;${corConclusao(l)}">${formatPct(conclusao(l), 1)}</td><td style="text-align:center;${corExecucaoCaixa(l)}">${formatPct(execucaoCaixa(l), 1)}</td>` : ''}</tr>`;
         }).join('')}
-        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatus[b])}">${totalStatus[b]}</td>`).join('')}<td>${totalVisivel(totalStatus)}</td>${verEficiencia ? `<td style="text-align:center;${corConclusao(totalStatus)}">${formatPct(conclusao(totalStatus), 1)}</td><td style="text-align:center;${corExecucaoCaixa(totalStatus)}">${formatPct(execucaoCaixa(totalStatus), 1)}</td>` : ''}</tr>
+        <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatusCidade[b])}">${totalStatusCidade[b]}</td>`).join('')}<td>${totalVisivel(totalStatusCidade)}</td>${verEficiencia ? `<td style="text-align:center;${corConclusao(totalStatusCidade)}">${formatPct(conclusao(totalStatusCidade), 1)}</td><td style="text-align:center;${corExecucaoCaixa(totalStatusCidade)}">${formatPct(execucaoCaixa(totalStatusCidade), 1)}</td>` : ''}</tr>
       </tbody></table></div>
 
       <div class="section-heading">Status Detalhado por Técnico ${btnCancelados}</div>
       ${verEficiencia ? '<p class="fora-da-imagem" style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px">Taxa de Conclusão e Execução da Caixa são só de consulta na tela — <b>não saem no "Gerar imagem"</b>.</p>' : ''}
       <div class="toolbar" style="margin-bottom:12px">
         ${multiSelectField('pd-tec-tipo', 'Tipo de Serviço', nomesTiposTec, { noun: 'tipo(s)', allLabel: 'Todos os tipos', preset: tiposTecMarcados })}
+        <div class="field"><label>Período do prazo</label>${seletorPeriodo('tec')}</div>
         <button class="btn" id="pd-tec-tipo-aplicar">Aplicar</button>
         <button type="button" class="btn-export-img" id="pd-tec-img">🖼 Gerar imagem</button>
       </div>
@@ -16225,8 +16222,8 @@ ${modoNovo() ? '' : blocoMO}
         <tr class="total-row"><td class="cat-cell">TOTAL</td>${bucketsTabela.map(b=>`<td style="${bucketColor(b, totalStatusTecnico[b])}">${totalStatusTecnico[b]}</td>`).join('')}<td>${totalVisivel(totalStatusTecnico)}</td>${verEficiencia ? `<td style="text-align:center;${corConclusao(totalStatusTecnico)}">${formatPct(conclusao(totalStatusTecnico), 1)}</td><td style="text-align:center;${corExecucaoCaixa(totalStatusTecnico)}">${formatPct(execucaoCaixa(totalStatusTecnico), 1)}</td>` : ''}</tr>
       </tbody></table></div>
 
-      ${!servicosDoDia.length ? '' : `
-      <div class="section-heading">Serviços do Dia <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(${servicosDoDia.length} O.S — do CSV importado na PCR)</span><button type="button" class="btn-export-img" id="pd-servicos-img">🖼 Gerar imagem</button></div>
+      ${!temServicos ? '' : `
+      <div class="section-heading">Serviços do Dia <span style="font-weight:500;font-size:12.5px;color:var(--text-muted)">(${servicosDoDia.length} O.S — do CSV importado na PCR)</span>${seletorPeriodo('serv')}<button type="button" class="btn-export-img" id="pd-servicos-img">🖼 Gerar imagem</button></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="tab-servicos-dia"><thead><tr>
         <th>O.S</th><th>Cliente</th><th>Contrato</th><th>Técnico</th><th>Cidade</th><th>Tipo de Serviço</th><th>Status</th><th>Motivo</th><th>Abertura</th><th>Limite</th>
       </tr></thead><tbody>
@@ -16234,7 +16231,7 @@ ${modoNovo() ? '' : blocoMO}
       </tbody></table></div>`}
 
 
-      ${htmlAExecutar(aExecutar)}
+      ${htmlAExecutar(aExecutar, seletorPeriodo('aexec'))}
 
       <div class="section-heading">Gerar imagem (PNG) — Remanejamento por tipo de serviço</div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">
@@ -16320,6 +16317,10 @@ ${modoNovo() ? '' : blocoMO}
       canceladosVisiveis = !canceladosVisiveis;
       load();
     }));
+    document.querySelectorAll('#pd-body .pd-per').forEach(sel => sel.addEventListener('change', () => {
+      PD_PERIODO[sel.dataset.sec] = sel.value;
+      load();
+    }));
 
     // ---- Status Detalhado por Técnico: filtro de Tipo de Serviço (múltipla
     // escolha, mesmo componente do Clean Up/Financeiro) + imagem ----
@@ -16345,7 +16346,7 @@ ${modoNovo() ? '' : blocoMO}
     });
     const btnStatusCidadeImg = document.getElementById('pd-status-cidade-img');
     if (btnStatusCidadeImg) btnStatusCidadeImg.addEventListener('click', () => {
-      imagemStatusPorBalde('Status Detalhado por Cidade', 'Cidades', statusPorCidadeTable, totalStatus, 'status-por-cidade-' + data, 'tab-status-cidade');
+      imagemStatusPorBalde('Status Detalhado por Cidade', 'Cidades', statusPorCidadeTable, totalStatusCidade, 'status-por-cidade-' + data, 'tab-status-cidade');
       avisoBotao(btnStatusCidadeImg, '🖼 baixado', '🖼 Gerar imagem');
     });
     // "Serviços do Dia" é lista crua (uma linha por O.S, sem baldes/total) —
