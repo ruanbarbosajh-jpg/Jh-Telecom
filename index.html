@@ -13443,6 +13443,138 @@ function importarCsvPCR(texto) {
   const syncPromise = sincronizarPCR(out, [...diasDoArquivo]);
   return { total: out.length, dias: [...diasDoArquivo].sort(), quando, syncPromise };
 }
+// ===================== CSV DO DIA ANTERIOR → PRODUÇÃO + PRAZO (19/10/2026) =====================
+// Pedido do cliente: "quero que tenha importar CSV pros logins adicionarem as ordens concluídas do dia anterior — domingo eu, Analista,
+// não trabalho e não tem como importar o CSV e a planilha referente a sábado; esse importar seria pra aparecer os dados normal, os retornos,
+// prazos, pra não depender só de mim. Quando eu importar as planilhas elas sobrescrevem". Nesse domingo um retorno não apareceu porque a Produção
+// (o histórico do contrato) não tinha as ordens de sábado: a planilha BASE_CONCLUIDOS / PRAZOS ainda não tinha sido importada.
+// Como funciona: lê o MESMO CSV de atividades da PCR, pega só as ordens CONCLUÍDAS de técnico e grava em `producao` e `prazo` — com os mesmos campos
+// que a planilha traz (inclusive a mesma forma do "Início"), então a planilha oficial, quando for importada, cai na MESMA linha
+// (mesma O.S + data + técnico + início = mesma visita) e sobrescreve os campos; não duplica.
+//  · O retorno (IFI/IRR) é calculado aqui, com a regra do sistema (classificaRetorno): ordem de REPARO cujo serviço anterior (a última ordem concluída
+//    do mesmo contrato em dia ANTERIOR, olhando Produção + PCR + o próprio arquivo) foi Ativação/M. Endereço (≤ 15 dias → IFI) ou Reparo (≤ 30 → IRR);
+//    o OFENSOR é o técnico daquela ordem anterior. Sem ordem anterior no histórico, o retorno fica em branco (não afirma "primeira visita").
+//  · O.S que JÁ está na base no mesmo dia (veio da planilha) NÃO é tocada: a planilha oficial manda.
+//  · Prazo: aging = encerramento − abertura; faixa pela régua do serviço (24h reparo / 36h ativação e M. Endereço), texto igual ao da planilha.
+// Por enquanto só o Analista (pedido do cliente); pra liberar pros outros logins, trocar só esta linha:
+const podeImportarConcluidas = () => ehAnalista();
+const TEXTO_FAIXA_PRAZO = { ate24: 'ATÉ 24hrs', ate36: 'ATÉ 36hrs', ate48: 'ATÉ 48Hrs', maior48: 'MAIOR QUE 48Hrs', outlier: 'OUTLIERES' };
+// data+hora → número de série do Excel como TEXTO (é como a planilha de prazos chega em tempo_limite)
+const serialExcelDeData = d => String((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()) - Date.UTC(1899, 11, 30)) / 86400000);
+function planejarConcluidasDoCsv(texto) {
+  const linhas = parseCSV(texto);
+  if (linhas.length < 2) return { erro: 'CSV vazio ou sem linhas de dados.' };
+  const cab = linhas[0].map(normalizeHeader), col = nome => cab.lastIndexOf(nome);   // "Tipo de Atividade" repete: a última vale
+  const iData = col('data'), iAbert = col('data abertura chamado'), iFim = col('fim'), iStatus = col('status da atividade'), iCidade = col('cidade'),
+    iRec = col('recurso'), iOS = col('ordem de servico'), iCtt = col('numero do contrato'), iNome = col('nome'), iTipo = col('tipo de atividade'),
+    iMotivo = col('motivo de encerramento das atividades'), iInicio = col('inicio'), iEnd = col('endereco');
+  if (iData < 0 || iOS < 0 || iStatus < 0 || iRec < 0) return { erro: 'Não encontrei as colunas "Data", "Status da Atividade", "Recurso" e "Ordem de Serviço" nesse CSV.' };
+  const itens = [];
+  for (const l of linhas.slice(1)) {
+    const status = (l[iStatus] || '').trim(), recurso = (l[iRec] || '').trim();
+    if (!isConcluido(status) || !ehRecursoTecnico(recurso)) continue;      // só concluída de técnico (linha de limpeza de rota não conta)
+    const dataDia = pcrParseDataDia(l[iData]); if (!dataDia) continue;
+    const dataISO = isoLocalDe(dataDia), os = normalizeChaveOS(l[iOS]), tipo = (l[iTipo] || '').trim();
+    const abertura = iAbert >= 0 ? pcrParseAbertura(l[iAbert], dataDia) : null;
+    const hIni = iInicio >= 0 ? pcrParseHora(l[iInicio]) : null, hFim = iFim >= 0 ? pcrParseHora(l[iFim]) : null;
+    // "Início" como a planilha traz (fração do dia, em texto) — decide se 2 linhas da mesma O.S são a MESMA visita (ver ehVisitaNova)
+    const inicio = hIni ? String((hIni.h * 60 + hIni.m) / 1440) : '';
+    const prod = { recurso, data: dataISO, mes: MESES_PT[dataDia.getMonth()], status, cidade: (l[iCidade] || '').trim(), tipo_atividade: tipo, os, contrato: (l[iCtt] || '').trim(),
+      repetida: '', ofensor: '', tipo_ordem: '', data_ordem_anterior: '', dias: '', ifi_irr: '', motivo: iMotivo >= 0 ? (l[iMotivo] || '').trim() : '',
+      nome: iNome >= 0 ? (l[iNome] || '').trim() : '', inicio, endereco: iEnd >= 0 ? (l[iEnd] || '').trim() : '',
+      abertura: aberturaDaProducao(iAbert >= 0 ? l[iAbert] : '', dataISO) };
+    let prazo = null;
+    const ehAt = ehPrazoDeAtivacao({ tipo_atividade: tipo }, true);
+    if (ehServicoReparo(tipo) || ehAt) {
+      const enc = hFim ? new Date(dataDia.getFullYear(), dataDia.getMonth(), dataDia.getDate(), hFim.h, hFim.m) : null;
+      let aging = (abertura && enc) ? (enc - abertura) / 86400000 : null;
+      if (aging !== null && aging < 0) aging = null;                         // hora de Fim antes da abertura = erro do CSV; não classifica
+      const faixa = faixaPorAging(aging, ehAt ? PRAZO_ATIVACAO_HORAS : 24);
+      prazo = { recurso, data: dataISO, mes: MESES_PT[dataDia.getMonth()].toUpperCase(), status, cidade: prod.cidade, os, contrato: prod.contrato,
+        // a planilha calcula TEMPO LIMITE = abertura + 24h (também na aba de ativação); o período manhã/tarde sai da hora dele
+        tempo_limite: abertura ? serialExcelDeData(new Date(abertura.getTime() + 24 * 3600000)) : '', encerramento: enc ? fmtDT(enc) : '',
+        aging, status_prazo: faixa ? TEXTO_FAIXA_PRAZO[faixa] : '', tipo_atividade: tipo, inicio };
+    }
+    itens.push({ prod, prazo });
+  }
+  // HISTÓRICO de ordens concluídas por contrato: Produção + PCR (dias importados por CSV) + este arquivo
+  const hist = {}, vistos = new Set();
+  const add = (contrato, o) => {
+    if (!contrato || !o.data) return;
+    const k = `${contrato}|${normalizeChaveOS(o.os)}|${o.data}`; if (vistos.has(k)) return; vistos.add(k);
+    (hist[contrato] = hist[contrato] || []).push(o);
+  };
+  DB.producao.forEach(p => { if (isConcluido(p.status)) add(p.contrato, { data: p.data, recurso: p.recurso, tipo: p.tipo_atividade, os: p.os }); });
+  DB.pcr.forEach(p => { if (isConcluido(p.status) && ehRecursoTecnico(p.recurso)) add(p.contrato, { data: p.data, recurso: p.recurso, tipo: p.tipo_atividade, os: p.os }); });
+  itens.forEach(({ prod }) => add(prod.contrato, { data: prod.data, recurso: prod.recurso, tipo: prod.tipo_atividade, os: prod.os }));
+  Object.values(hist).forEach(l => l.sort((a, b) => a.data.localeCompare(b.data)));
+  const jaTem = (tabela, indice, linha) => { const i = indice.get(chaveOSdaLinha(linha.os, linha)); return i !== undefined && !!tabela[i] && tabela[i].data === linha.data; };
+  const plano = { novasProducao: [], novasPrazo: [], jaNaProducao: 0, jaNoPrazo: 0, retornos: { IFI: 0, IRR: 0, DESC: 0 }, dias: [...new Set(itens.map(x => x.prod.data))].sort(), total: itens.length };
+  itens.forEach(({ prod, prazo }) => {
+    if (jaTem(DB.producao, DB_INDEX.producao, prod)) plano.jaNaProducao++;
+    else {
+      // retorno: só REPARO, e só quando existe ordem anterior (de OUTRO dia) do mesmo contrato no histórico
+      if (ehServicoReparo(prod.tipo_atividade) && prod.contrato) {
+        const ant = (hist[prod.contrato] || []).filter(p => p.data < prod.data && normalizeChaveOS(p.os) !== prod.os);
+        if (ant.length) {
+          const prev = ant[ant.length - 1], dias = diasEntre(prod.data, prev.data), marca = classificaRetorno(prev.tipo, dias);
+          prod.tipo_ordem = prev.tipo || ''; prod.data_ordem_anterior = prev.data; prod.dias = String(dias); prod.ifi_irr = marca;
+          if (marca === 'IFI' || marca === 'IRR') prod.ofensor = prev.recurso || '';
+          if (marca) plano.retornos[marca]++;
+        }
+      }
+      plano.novasProducao.push(prod);
+    }
+    if (prazo) { if (jaTem(DB.prazo, DB_INDEX.prazo, prazo)) plano.jaNoPrazo++; else plano.novasPrazo.push(prazo); }
+  });
+  return plano;
+}
+// grava o plano na memória (mesmas regras de mescla das planilhas) e no Supabase; devolve { producao, prazo, syncPromise }
+function aplicarConcluidasDoCsv(plano, nomeArquivo) {
+  const optsOS = { ignoreIf: ehLimpezaCanceladaAposConcluido, venceSempre: ehConclusaoChegando, novaVisitaSe: ehVisitaNova };
+  const objsProd = plano.novasProducao.map(o => upsertRowByDate(DB.producao, DB_INDEX.producao, chaveOSdaLinha(o.os, o), o, 'data', optsOS)).filter(Boolean);
+  const objsPrazo = plano.novasPrazo.map(o => upsertRowByDate(DB.prazo, DB_INDEX.prazo, chaveOSdaLinha(o.os, o), o, 'data', optsOS)).filter(Boolean);
+  const quando = new Date().toLocaleString('pt-BR'), quem = currentUser ? (currentUser.nome || currentUser.login) : null;
+  [['producao', objsProd], ['prazo', objsPrazo]].forEach(([tabela, objs]) => {
+    if (!objs.length) return;
+    const log = { sheet_name: `CSV do dia anterior (${nomeArquivo || 'concluídas'}) → ${tabela}`, target_table: tabela, row_count: objs.length, imported_at: quando };
+    DB.importsLog.unshift(log); logImportToSupabase({ ...log, imported_by: quem });
+  });
+  const syncPromise = Promise.all([objsProd.length ? syncBatchToSupabase('producao', objsProd) : { ok: true }, objsPrazo.length ? syncBatchToSupabase('prazo', objsPrazo) : { ok: true }])
+    .then(rs => rs.find(r => r && r.ok === false) || { ok: true });
+  return { producao: objsProd.length, prazo: objsPrazo.length, syncPromise };
+}
+// painel da PCR: escolhe o CSV → mostra o que vai entrar → confirma → grava
+function ligarImportarConcluidas() {
+  const inp = document.getElementById('pcr-conc-file'), msg = document.getElementById('pcr-conc-msg');
+  if (!inp || !msg) return;
+  inp.addEventListener('change', ev => {
+    const f = ev.target.files[0]; if (!f) return;
+    msg.innerHTML = 'Lendo ' + esc(f.name) + '…';
+    const leitor = new FileReader();
+    leitor.onload = () => {
+      const plano = planejarConcluidasDoCsv(String(leitor.result));
+      ev.target.value = '';
+      if (plano.erro) { msg.innerHTML = `<span style="color:var(--danger)">${esc(plano.erro)}</span>`; return; }
+      if (!plano.total) { msg.innerHTML = '<span style="color:var(--warn-text)">Esse CSV não tem nenhuma ordem CONCLUÍDA de técnico.</span>'; return; }
+      const novas = plano.novasProducao.length, ret = plano.retornos, diasTxt = plano.dias.map(formatDate).join(', ');
+      if (!novas && !plano.novasPrazo.length) { msg.innerHTML = `<span style="color:var(--text-secondary)">Nada a adicionar: as ${plano.total} concluída(s) de ${esc(diasTxt)} já estão na Produção${plano.jaNoPrazo ? ' e nos Prazos' : ''}.</span>`; return; }
+      const pergunta = `Adicionar as ordens CONCLUÍDAS de ${diasTxt}?\n\n• Produção: ${novas} nova(s)${plano.jaNaProducao ? ` (${plano.jaNaProducao} já estavam e ficam como estão)` : ''}\n• Retornos: ${ret.IFI} IFI e ${ret.IRR} IRR${ret.DESC ? ` (${ret.DESC} fora da janela)` : ''}\n• Prazos: ${plano.novasPrazo.length} nova(s)\n\nQuando você importar as planilhas oficiais, elas sobrescrevem esses dados.`;
+      if (!confirm(pergunta)) { msg.innerHTML = '<span style="color:var(--text-muted)">Cancelado — nada foi gravado.</span>'; return; }
+      const r = aplicarConcluidasDoCsv(plano, f.name);
+      const resumo = `<span style="color:var(--success)">${r.producao} ordem(ns) na Produção (${ret.IFI} IFI, ${ret.IRR} IRR) e ${r.prazo} nos Prazos — ${esc(diasTxt)}</span>`;
+      msg.innerHTML = resumo + (supa ? ' — <span style="color:var(--text-muted)">salvando no Supabase…</span>' : '');
+      r.syncPromise.then(res => {
+        const el = document.getElementById('pcr-conc-msg'); if (!el) return;
+        el.innerHTML = resumo + ' — ' + (res && res.ok ? '<span style="color:var(--success)">salvo no Supabase (fica pra todo mundo)</span>'
+          : `<span style="color:var(--danger)">não consegui salvar no Supabase: ${esc((res && res.error && res.error.message) || 'erro desconhecido')} — vale só nesta sessão</span>`);
+      });
+    };
+    leitor.onerror = () => { msg.innerHTML = '<span style="color:var(--danger)">Não consegui ler o arquivo.</span>'; };
+    leitor.readAsText(f, 'utf-8');
+  });
+}
+
 // Salva as linhas do PCR no Supabase e limpa as linhas ANTIGAS daquele mesmo dia
 // que não vieram no arquivo novo (ordem que sumiu do relatório do dia). O upsert
 // vem primeiro de propósito: se a rede cair no meio, o pior caso é sobrar linha
@@ -14140,7 +14272,12 @@ function renderPCR() {
     </div>
     <p id="pcr-msg" style="font-size:13px;color:var(--text-secondary);margin:0 0 6px"></p>
     <p id="pcr-atualizado" style="font-size:13px;margin:0 0 1rem"></p>
+    ${podeImportarConcluidas() ? `<div class="panel" id="pcr-conc" style="margin:0 0 1rem"><h3 style="margin:0 0 6px;font-size:15px">📥 Concluídas do dia anterior → Produção, Retornos e Prazos</h3>
+      <p style="font-size:12.5px;color:var(--text-secondary);margin:0 0 10px;line-height:1.55">Use quando as planilhas do dia ainda não foram importadas (ex.: sábado, com o Analista fora). Entram só as ordens <b>concluídas</b> do CSV: a Produção ganha as ordens com o IFI/IRR já calculado e os Prazos ganham a faixa. O que já está na base não é tocado, e as planilhas oficiais, quando importadas, <b>sobrescrevem</b>.</p>
+      <div class="toolbar" style="margin:0 0 6px">${campoArquivo('pcr-conc-file', 'CSV do dia anterior', '.csv,text/csv')}</div>
+      <p id="pcr-conc-msg" style="font-size:13px;margin:0;color:var(--text-secondary)"></p></div>` : ''}
     <div id="pcr-body"></div>`;
+  ligarImportarConcluidas();
 
   document.getElementById('pcr-file').addEventListener('change', ev => {
     const f = ev.target.files[0];
