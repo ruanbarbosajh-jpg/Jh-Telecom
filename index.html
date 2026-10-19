@@ -4591,6 +4591,28 @@ async function abrirSistema(user) {
   recolherMenuLateralNoLogin();
   navigate(rotaDeEntrada(user));
   mostrarAvisoSupabase();
+  try { mostrarBalaoCsvEscritorio(); } catch (e) { /* o balão não pode derrubar o login */ }
+}
+// BALÃO DO ESCRITÓRIO (19/10/2026, pedido do cliente): ao logar, explica que o CSV de atividades da PCR atualiza os retornos e prazos do dia
+// anterior quando o Analista não importou as planilhas. Uma vez por login (a chave some no "Sair"); "Entendi" fecha, "Ir para a PCR" leva à tela.
+const CHAVE_BALAO_CSV = 'jh_balao_csv_escritorio';
+function mostrarBalaoCsvEscritorio() {
+  const velho = document.getElementById('balao-csv'); if (velho) velho.remove();
+  if (!currentUser || perfilValido(currentUser.role) !== 'escritorio') return;
+  try { if (sessionStorage.getItem(CHAVE_BALAO_CSV)) return; } catch (e) { /* sem sessionStorage: mostra sempre */ }
+  const box = document.createElement('div'); box.id = 'balao-csv'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', 'Como atualizar retornos e prazos');
+  box.style.cssText = 'position:fixed;top:78px;right:18px;z-index:2600;width:min(420px,calc(100vw - 32px));max-height:80vh;overflow:auto;background:var(--card-bg);color:var(--text-primary);border:1px solid var(--accent);border-left:5px solid var(--accent);border-radius:12px;padding:16px 18px;box-shadow:0 10px 32px rgba(0,0,0,.35);font-size:13.5px;line-height:1.55';
+  box.innerHTML = `<div style="font-size:15px;font-weight:800;margin-bottom:8px">📥 O Analista não importou as planilhas?</div>
+    <p style="margin:0 0 8px">Você pode usar o <b>CSV de atividades</b> (aba <b>PCR</b>) para atualizar os <b>retornos e prazos do dia anterior</b>, até o Analista importar as planilhas oficiais — elas sobrescrevem depois.</p>
+    <ul style="margin:0 0 12px;padding-left:18px">
+      <li>Não precisa ser só as concluídas: importe o <b>CSV completo</b>, do jeito que sai do sistema.</li>
+      <li>Tem que ser o CSV do <b>dia anterior</b> (o de hoje ainda não fechou o dia).</li>
+    </ul>
+    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button type="button" class="btn-mini" id="balao-csv-ir">Ir para a PCR</button><button type="button" class="btn" id="balao-csv-ok">Entendi</button></div>`;
+  document.body.appendChild(box);
+  const fechar = () => { try { sessionStorage.setItem(CHAVE_BALAO_CSV, '1'); } catch (e) { /* só conveniência */ } box.remove(); };
+  document.getElementById('balao-csv-ok').addEventListener('click', fechar);
+  document.getElementById('balao-csv-ir').addEventListener('click', () => { fechar(); navigate('pcr'); });
 }
 // Onde abrir depois do login: a ÚLTIMA tela que esse perfil viu (guardada em
 // navigate()), se ainda existir e ainda for permitida pra ele — senão cai no
@@ -4666,6 +4688,8 @@ async function doLogin() {
   btn.disabled = false; btn.textContent = 'Entrar';
 }
 document.getElementById('logout-btn').addEventListener('click', async () => {
+  try { sessionStorage.removeItem(CHAVE_BALAO_CSV); } catch (e) { /* só conveniência */ }
+  const balaoCsv = document.getElementById('balao-csv'); if (balaoCsv) balaoCsv.remove();
   if (USA_AUTH) { try { await supa.auth.signOut(); } catch (e) {} }
   document.getElementById('app-shell').classList.remove('active');
   document.getElementById('login-screen').style.display = 'flex';
@@ -13468,13 +13492,13 @@ function importarCsvPCR(texto) {
 //    o OFENSOR é o técnico daquela ordem anterior. Sem ordem anterior no histórico, o retorno fica em branco (não afirma "primeira visita").
 //  · O.S que JÁ está na base no mesmo dia (veio da planilha) NÃO é tocada: a planilha oficial manda.
 //  · Prazo: aging = encerramento − abertura; faixa pela régua do serviço (24h reparo / 36h ativação e M. Endereço), texto igual ao da planilha.
-// Começou só do Analista (pedido do cliente, 19/10/2026) e foi liberado pra TODOS os logins no mesmo dia ("pode liberar a atualização pros demais logins"):
-// quem tem a PCR vê o painel. Pra voltar a ser só do Analista, trocar por ehAnalista().
-const podeImportarConcluidas = () => !!currentUser;
+// 19/10/2026: começou como um painel separado ("Concluídas do dia anterior") e o cliente pediu pra TIRAR e usar o próprio CSV de atividades
+// da PCR: ao importar esse CSV, os dias JÁ ENCERRADOS (anteriores a hoje) também são gravados na Produção e no Prazo, automaticamente
+// (`complementarProducaoDoCsv`, chamada pelo handler do #pcr-file). O dia de HOJE não entra (ainda não terminou; a planilha oficial vem depois).
 const TEXTO_FAIXA_PRAZO = { ate24: 'ATÉ 24hrs', ate36: 'ATÉ 36hrs', ate48: 'ATÉ 48Hrs', maior48: 'MAIOR QUE 48Hrs', outlier: 'OUTLIERES' };
 // data+hora → número de série do Excel como TEXTO (é como a planilha de prazos chega em tempo_limite)
 const serialExcelDeData = d => String((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()) - Date.UTC(1899, 11, 30)) / 86400000);
-function planejarConcluidasDoCsv(texto) {
+function planejarConcluidasDoCsv(texto, opts = {}) {
   const linhas = parseCSV(texto);
   if (linhas.length < 2) return { erro: 'CSV vazio ou sem linhas de dados.' };
   const cab = linhas[0].map(normalizeHeader), col = nome => cab.lastIndexOf(nome);   // "Tipo de Atividade" repete: a última vale
@@ -13488,6 +13512,7 @@ function planejarConcluidasDoCsv(texto) {
     if (!isConcluido(status) || !ehRecursoTecnico(recurso)) continue;      // só concluída de técnico (linha de limpeza de rota não conta)
     const dataDia = pcrParseDataDia(l[iData]); if (!dataDia) continue;
     const dataISO = isoLocalDe(dataDia), os = normalizeChaveOS(l[iOS]), tipo = (l[iTipo] || '').trim();
+    if (opts.antesDe && dataISO >= opts.antesDe) continue;                  // só dias já encerrados (o de hoje ainda está andando)
     const abertura = iAbert >= 0 ? pcrParseAbertura(l[iAbert], dataDia) : null;
     const hIni = iInicio >= 0 ? pcrParseHora(l[iInicio]) : null, hFim = iFim >= 0 ? pcrParseHora(l[iFim]) : null;
     // "Início" como a planilha traz (fração do dia, em texto) — decide se 2 linhas da mesma O.S são a MESMA visita (ver ehVisitaNova)
@@ -13542,6 +13567,16 @@ function planejarConcluidasDoCsv(texto) {
   });
   return plano;
 }
+// Chamada pelo import do CSV da PCR: grava na Produção/Prazo as concluídas dos dias anteriores a hoje. Nunca derruba o import da PCR.
+// Devolve { producao, prazo, retornos, dias, syncPromise } ou null (nada a adicionar / erro).
+function complementarProducaoDoCsv(texto, nomeArquivo) {
+  try {
+    const plano = planejarConcluidasDoCsv(texto, { antesDe: hojeISOLocal() });
+    if (plano.erro || (!plano.novasProducao.length && !plano.novasPrazo.length)) return null;
+    const r = aplicarConcluidasDoCsv(plano, nomeArquivo);
+    return { ...r, retornos: plano.retornos, dias: plano.dias };
+  } catch (e) { console.warn('complementarProducaoDoCsv:', e); return null; }
+}
 // grava o plano na memória (mesmas regras de mescla das planilhas) e no Supabase; devolve { producao, prazo, syncPromise }
 function aplicarConcluidasDoCsv(plano, nomeArquivo) {
   const optsOS = { ignoreIf: ehLimpezaCanceladaAposConcluido, venceSempre: ehConclusaoChegando, novaVisitaSe: ehVisitaNova };
@@ -13557,37 +13592,6 @@ function aplicarConcluidasDoCsv(plano, nomeArquivo) {
     .then(rs => rs.find(r => r && r.ok === false) || { ok: true });
   return { producao: objsProd.length, prazo: objsPrazo.length, syncPromise };
 }
-// painel da PCR: escolhe o CSV → mostra o que vai entrar → confirma → grava
-function ligarImportarConcluidas() {
-  const inp = document.getElementById('pcr-conc-file'), msg = document.getElementById('pcr-conc-msg');
-  if (!inp || !msg) return;
-  inp.addEventListener('change', ev => {
-    const f = ev.target.files[0]; if (!f) return;
-    msg.innerHTML = 'Lendo ' + esc(f.name) + '…';
-    const leitor = new FileReader();
-    leitor.onload = () => {
-      const plano = planejarConcluidasDoCsv(String(leitor.result));
-      ev.target.value = '';
-      if (plano.erro) { msg.innerHTML = `<span style="color:var(--danger)">${esc(plano.erro)}</span>`; return; }
-      if (!plano.total) { msg.innerHTML = '<span style="color:var(--warn-text)">Esse CSV não tem nenhuma ordem CONCLUÍDA de técnico.</span>'; return; }
-      const novas = plano.novasProducao.length, ret = plano.retornos, diasTxt = plano.dias.map(formatDate).join(', ');
-      if (!novas && !plano.novasPrazo.length) { msg.innerHTML = `<span style="color:var(--text-secondary)">Nada a adicionar: as ${plano.total} concluída(s) de ${esc(diasTxt)} já estão na Produção${plano.jaNoPrazo ? ' e nos Prazos' : ''}.</span>`; return; }
-      const pergunta = `Adicionar as ordens CONCLUÍDAS de ${diasTxt}?\n\n• Produção: ${novas} nova(s)${plano.jaNaProducao ? ` (${plano.jaNaProducao} já estavam e ficam como estão)` : ''}\n• Retornos: ${ret.IFI} IFI e ${ret.IRR} IRR${ret.DESC ? ` (${ret.DESC} fora da janela)` : ''}\n• Prazos: ${plano.novasPrazo.length} nova(s)\n\nQuando você importar as planilhas oficiais, elas sobrescrevem esses dados.`;
-      if (!confirm(pergunta)) { msg.innerHTML = '<span style="color:var(--text-muted)">Cancelado — nada foi gravado.</span>'; return; }
-      const r = aplicarConcluidasDoCsv(plano, f.name);
-      const resumo = `<span style="color:var(--success)">${r.producao} ordem(ns) na Produção (${ret.IFI} IFI, ${ret.IRR} IRR) e ${r.prazo} nos Prazos — ${esc(diasTxt)}</span>`;
-      msg.innerHTML = resumo + (supa ? ' — <span style="color:var(--text-muted)">salvando no Supabase…</span>' : '');
-      r.syncPromise.then(res => {
-        const el = document.getElementById('pcr-conc-msg'); if (!el) return;
-        el.innerHTML = resumo + ' — ' + (res && res.ok ? '<span style="color:var(--success)">salvo no Supabase (fica pra todo mundo)</span>'
-          : `<span style="color:var(--danger)">não consegui salvar no Supabase: ${esc((res && res.error && res.error.message) || 'erro desconhecido')} — vale só nesta sessão</span>`);
-      });
-    };
-    leitor.onerror = () => { msg.innerHTML = '<span style="color:var(--danger)">Não consegui ler o arquivo.</span>'; };
-    leitor.readAsText(f, 'utf-8');
-  });
-}
-
 // Salva as linhas do PCR no Supabase e limpa as linhas ANTIGAS daquele mesmo dia
 // que não vieram no arquivo novo (ordem que sumiu do relatório do dia). O upsert
 // vem primeiro de propósito: se a rede cair no meio, o pior caso é sobrar linha
@@ -14285,12 +14289,7 @@ function renderPCR() {
     </div>
     <p id="pcr-msg" style="font-size:13px;color:var(--text-secondary);margin:0 0 6px"></p>
     <p id="pcr-atualizado" style="font-size:13px;margin:0 0 1rem"></p>
-    ${podeImportarConcluidas() ? `<div class="panel" id="pcr-conc" style="margin:0 0 1rem"><h3 style="margin:0 0 6px;font-size:15px">📥 Concluídas do dia anterior → Produção, Retornos e Prazos</h3>
-      <p style="font-size:12.5px;color:var(--text-secondary);margin:0 0 10px;line-height:1.55">Use quando as planilhas do dia ainda não foram importadas (ex.: sábado, com o Analista fora). Entram só as ordens <b>concluídas</b> do CSV: a Produção ganha as ordens com o IFI/IRR já calculado e os Prazos ganham a faixa. O que já está na base não é tocado, e as planilhas oficiais, quando importadas, <b>sobrescrevem</b>.</p>
-      <div class="toolbar" style="margin:0 0 6px">${campoArquivo('pcr-conc-file', 'CSV do dia anterior', '.csv,text/csv')}</div>
-      <p id="pcr-conc-msg" style="font-size:13px;margin:0;color:var(--text-secondary)"></p></div>` : ''}
     <div id="pcr-body"></div>`;
-  ligarImportarConcluidas();
 
   document.getElementById('pcr-file').addEventListener('change', ev => {
     const f = ev.target.files[0];
@@ -14307,15 +14306,18 @@ function renderPCR() {
       if (r.erro || !r.syncPromise) pcrTravaSoltar();
       else r.syncPromise.then(pcrTravaSoltar, pcrTravaSoltar);
       if (r.erro) { msg.innerHTML = `<span style="color:var(--danger)">${r.erro}</span>`; return; }
+      // dias já encerrados (anteriores a hoje) também vão pra Produção/Prazo: retornos e prazos do dia anterior ficam certos sem depender da planilha
+      const comp = complementarProducaoDoCsv(String(leitor.result), f.name);
       renderPCR();
+      const compTxt = comp ? ` <span style="color:var(--success)">· Produção/Prazo atualizados com as concluídas de ${comp.dias.map(formatDate).join(', ')} (${comp.producao} ordem(ns), ${comp.retornos.IFI} IFI, ${comp.retornos.IRR} IRR)</span>` : '';
       const msg2 = document.getElementById('pcr-msg');
-      msg2.innerHTML = `<span style="color:var(--success)">${r.total} atividades importadas de ${f.name}</span>`
+      msg2.innerHTML = `<span style="color:var(--success)">${r.total} atividades importadas de ${f.name}</span>${compTxt}`
         + (supa ? ' — <span style="color:var(--text-muted)">salvando no Supabase...</span>' : '');
       // o salvamento roda em segundo plano; a tela já está montada, só o aviso muda
       if (r.syncPromise) r.syncPromise.then(res => {
         const el = document.getElementById('pcr-msg');
         if (!el) return;
-        el.innerHTML = `<span style="color:var(--success)">${r.total} atividades importadas de ${f.name}</span> — `
+        el.innerHTML = `<span style="color:var(--success)">${r.total} atividades importadas de ${f.name}</span>${compTxt} — `
           + (res && res.ok
             ? '<span style="color:var(--success)">salvo no Supabase (fica disponível pra todo mundo)</span>'
             : `<span style="color:var(--danger)">${ehAnalista()
