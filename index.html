@@ -20675,7 +20675,17 @@ function renderFleet() {
 // mostrando que um técnico vai ter revisão, 1 dia antes e no próprio dia". Quem foi marcado em "Avisar no sistema" na revisão (frota_revisao.notificar)
 // vê, ao entrar e a cada troca de tela, uma caixa no canto com as revisões de AMANHÃ e de HOJE. "Ciente" esconde aquele aviso naquele dia
 // (localStorage, por pessoa); no dia da revisão ele volta (é outro aviso). O Analista também vê, pra conferir. Precisa do sql/PASSO-53.
-const SUPERVISORES_AVISO_REVISAO = ['Sebastião', 'Matheus'];
+// 19/10/2026 (pedido do cliente: "adicione no agendamento do frota todos logins"): o agendamento oferece TODOS os logins (USERS), não só os
+// dois supervisores. Marcando todos grava "Todos" em `notificar` (vale também pra login criado depois); marcando só alguns grava os nomes
+// e o aviso aparece só pra esses (o Analista vê tudo, pra conferir). Nome vem de USERS[].nome — o mesmo `currentUser.nome` do login.
+const SUPERVISORES_AVISO_REVISAO = ['Sebastião', 'Matheus'];   // (histórico: eram os únicos da lista)
+const loginsParaAviso = () => [...new Set(USERS.map(u => u.nome))];
+const avisaLogin = (notificar, nome) => {
+  const quem = String(notificar || '').split(/[;,]/).map(x => normalizeHeader(x)).filter(Boolean);
+  // agendamento antigo (até 19/10/2026) guardava exatamente "Sebastião; Matheus" e o aviso já aparecia pra todos os logins: continua valendo pra todos
+  const legado = quem.length === 2 && quem.includes('sebastiao') && quem.includes('matheus');
+  return legado || quem.includes('todos') || quem.includes(normalizeHeader(nome || ''));
+};
 // Só o Analista agenda revisão/manutenção e altera a Frota (14/10/2026, pedido do cliente). No banco a trava é o sql/PASSO-55
 // (pode_editar_frota()): os outros perfis só LEEM as tabelas frota_*.
 const podeEditarFrota = () => !!currentUser && perfilValido(currentUser.role) === 'analista';
@@ -20690,9 +20700,11 @@ function avisosRevisaoFrota() {
   const itens = [];
   const juntar = (lista, tipo, campoData) => (lista || []).forEach(r => {
     const d = r[campoData]; if (!d || d < hoje || revisaoEncerrada(r)) return;
-    // 19/10/2026 (pedido do cliente: "libere para todos os avisos"): o aviso aparece pra QUALQUER login. Só agendamento feito no sistema
-    // (com "Avisar" marcado = `notificar` preenchido) avisa; linha vinda da planilha, sem isso, continua sem aviso (senão inundaria a tela).
-    if (!String(r.notificar || '').split(/[;,]/).map(x => normalizeHeader(x)).filter(Boolean).length) return;
+    // 19/10/2026: qualquer login pode ser marcado no agendamento ("Todos" = todos os logins). Só agendamento feito no sistema
+    // (`notificar` preenchido) avisa; linha vinda da planilha, sem isso, continua sem aviso (senão inundaria a tela).
+    // O Analista vê todos os avisos (pra conferir o que foi agendado); os demais, só os que marcaram o login deles.
+    if (!String(r.notificar || '').trim()) return;
+    if (perfilValido(currentUser.role) !== 'analista' && !avisaLogin(r.notificar, currentUser.nome || currentUser.login)) return;
     const fase = d === hoje ? 'hoje' : d === amanha ? 'amanhã' : 'agendada';
     itens.push({ ...r, tipo, data: d, quando: fase, chaveAviso: `${fase}|${tipo}|${r.placa}|${d}|${r.servico || ''}` });
   });
@@ -20846,7 +20858,7 @@ function abrirModalFrota(tipo, aoSalvar, existente) {
     <label>Condutor</label><input type="text" id="fr-condutor" list="fr-condutores" autocomplete="off">
     ${f.semPlaca ? '' : '<label>Placa *</label><input type="text" id="fr-placa" list="fr-placas" autocomplete="off" style="text-transform:uppercase">'}
     ${f.campos.map(([c, r, t, obr, ops]) => `<label>${esc(r)}${obr ? ' *' : ''}</label>${t === 'select' ? `<select id="fr-${c}"><option value="">Escolha…</option>${(ops || []).map(o => `<option>${esc(o)}</option>`).join('')}</select>` : `<input type="${t}" id="fr-${c}" ${t === 'number' ? 'step="0.01" min="0"' : 'autocomplete="off"'}${/placa/.test(c) ? ' list="fr-placas" style="text-transform:uppercase"' : ''}>`}`).join('')}
-    ${f.avisar ? `<label>Avisar os supervisores no sistema (ao agendar, 1 dia antes e no dia)</label><div style="display:flex;gap:18px;flex-wrap:wrap;margin:2px 0 6px">${SUPERVISORES_AVISO_REVISAO.map(n => `<label style="display:flex;align-items:center;gap:6px;font-weight:500;margin:0"><input type="checkbox" class="fr-avisar" value="${esc(n)}" checked style="width:auto;margin:0"> ${esc(n)}</label>`).join('')}</div>` : ''}
+    ${f.avisar ? `<label>Avisar no sistema (ao agendar, 1 dia antes e no dia)</label><div style="display:flex;gap:18px;flex-wrap:wrap;margin:2px 0 6px"><label style="display:flex;align-items:center;gap:6px;font-weight:700;margin:0"><input type="checkbox" id="fr-avisar-todos" checked style="width:auto;margin:0"> Todos os logins</label>${loginsParaAviso().map(n => `<label style="display:flex;align-items:center;gap:6px;font-weight:500;margin:0"><input type="checkbox" class="fr-avisar" value="${esc(n)}" checked style="width:auto;margin:0"> ${esc(n)}</label>`).join('')}</div>` : ''}
     ${listasFrotaHtml()}
     <p id="fr-erro" class="error-msg"></p>
     <div class="modal-acoes"><button type="button" class="btn-secundario" id="fr-cancelar">Cancelar</button><button type="button" class="btn-primario" id="fr-salvar">Salvar</button></div>`;
@@ -20862,13 +20874,22 @@ function abrirModalFrota(tipo, aoSalvar, existente) {
     co.value = existente.condutor || existente.motorista || ''; if (pl) pl.value = existente.placa || '';
     f.campos.forEach(([c]) => { const el = $('fr-' + c); if (el && existente[c] != null) el.value = existente[c]; });
     if (f.avisar) { const quem = String(existente.notificar || '').split(/[;,]/).map(x => normalizeHeader(x)).filter(Boolean);
-      document.querySelectorAll('.fr-avisar').forEach(cb => { cb.checked = quem.includes(normalizeHeader(cb.value)); }); }
+      document.querySelectorAll('.fr-avisar').forEach(cb => { cb.checked = quem.includes('todos') || quem.includes(normalizeHeader(cb.value)); }); }
+  }
+  if (f.avisar) {
+    // "Todos os logins" marca/desmarca todos; desmarcar um tira a marca de "Todos"
+    const todos = $('fr-avisar-todos'), caixas = () => [...document.querySelectorAll('.fr-avisar')];
+    const sincroniza = () => { todos.checked = caixas().every(c => c.checked); };
+    todos.addEventListener('change', () => caixas().forEach(c => { c.checked = todos.checked; }));
+    caixas().forEach(c => c.addEventListener('change', sincroniza));
+    sincroniza();
   }
   co.focus();
   $('fr-salvar').addEventListener('click', async () => {
     const v = { condutor: co.value, placa: pl ? pl.value : '' };
     f.campos.forEach(([c]) => { v[c] = $('fr-' + c).value; });
-    if (f.avisar) v.notificar = [...document.querySelectorAll('.fr-avisar:checked')].map(x => x.value).join('; ');
+    if (f.avisar) { const marcados = [...document.querySelectorAll('.fr-avisar:checked')].map(x => x.value);
+      v.notificar = marcados.length === document.querySelectorAll('.fr-avisar').length ? 'Todos' : marcados.join('; '); }
     const faltou = f.campos.filter(([c, , , obr]) => obr && !String(v[c] || '').trim()).map(([, r]) => r);
     if (!f.semPlaca && !placaNorm(v.placa)) faltou.unshift('Placa');
     if (faltou.length) { $('fr-erro').textContent = 'Preencha: ' + faltou.join(', ') + '.'; return; }
