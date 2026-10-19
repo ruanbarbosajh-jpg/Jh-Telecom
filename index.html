@@ -20525,15 +20525,15 @@ const podeEditarFrota = () => !!currentUser && perfilValido(currentUser.role) ==
 const revisaoEncerrada = r => ['Realizado', 'Falta'].includes(r && r.status);
 function avisosRevisaoFrota() {
   if (!currentUser) return [];
-  const eu = normalizeHeader(currentUser.nome || currentUser.login || ''), analista = perfilValido(currentUser.role) === 'analista';
   const hoje = hojeISOLocal(), amanha = isoLocalDe(new Date(Date.parse(hoje + 'T12:00:00') + 86400000));
   // 3 avisos por agendamento (14/10/2026, pedido do cliente: "toda vez que agendar uma manutenção os supervisores sejam avisados automaticamente"):
   // quando é AGENDADO (data mais pra frente), 1 dia antes (AMANHÃ) e no dia (HOJE). Cada um precisa do seu "Ciente".
   const itens = [];
   const juntar = (lista, tipo, campoData) => (lista || []).forEach(r => {
     const d = r[campoData]; if (!d || d < hoje || revisaoEncerrada(r)) return;
-    const quem = String(r.notificar || '').split(/[;,]/).map(x => normalizeHeader(x)).filter(Boolean);
-    if (!quem.length || !(analista || quem.includes(eu))) return;
+    // 19/10/2026 (pedido do cliente: "libere para todos os avisos"): o aviso aparece pra QUALQUER login. Só agendamento feito no sistema
+    // (com "Avisar" marcado = `notificar` preenchido) avisa; linha vinda da planilha, sem isso, continua sem aviso (senão inundaria a tela).
+    if (!String(r.notificar || '').split(/[;,]/).map(x => normalizeHeader(x)).filter(Boolean).length) return;
     const fase = d === hoje ? 'hoje' : d === amanha ? 'amanhã' : 'agendada';
     itens.push({ ...r, tipo, data: d, quando: fase, chaveAviso: `${fase}|${tipo}|${r.placa}|${d}|${r.servico || ''}` });
   });
