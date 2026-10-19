@@ -15760,12 +15760,16 @@ function renderParcialDoDia() {
     <div class="toolbar">
       <div class="field"><label>Data</label><input type="date" id="f-data" value="${dataPadrao}"></div>
       ${multiCityField('pd-cidades', 'Cidades')}
+      <div class="field"><label>Período do prazo</label><select id="pd-periodo">
+        <option value="">Manhã e tarde</option><option value="MANHÃ">Só manhã</option><option value="TARDE">Só tarde</option>
+      </select></div>
       <button class="btn" id="f-apply">Filtrar</button>
     </div>
     <p id="pd-msg" style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">O CSV de atividades é importado na aba PCR — o que for importado lá já aparece aqui, sem precisar importar de novo.</p>
     <div id="pd-body"></div>`;
   wireMultiCityField('pd-cidades');
   document.getElementById('f-apply').addEventListener('click', load);
+  document.getElementById('pd-periodo').addEventListener('change', () => load());
   // Coluna "Cancelado" das tabelas de status nasce OCULTA (pedido do cliente
   // 21/09/2026); o botão pequeno do título reexibe. Declarado ANTES do load()
   // porque ele roda logo abaixo (let depois cairia na zona morta temporal).
@@ -15782,12 +15786,29 @@ function renderParcialDoDia() {
     // "Efetividade" ficavam zerados mesmo depois de importar o CSV na PCR.
     // (uma linha por O.S — o CSV repete a mesma ordem quando ela é remanejada).
     const doCsv = linhasDoCsvPorDia(data);
-    const universo = doCsv.length ? doCsv : DB.baseDoDia.filter(r => r.data === data);
-    refreshCityField('pd-cidades', [...universo, ...DB.prazoReparoDia.filter(r=>diaDoRelatorioReparo(r)===data)], { label: 'Cidades' });
+    const universoBruto = doCsv.length ? doCsv : DB.baseDoDia.filter(r => r.data === data);
+    // FILTRO DE PERÍODO (19/10/2026, pedido do cliente: "um filtro de período pra saber se as
+    // pendentes são manhã ou tarde ... em todas as tabelas"). Vale pra TODA a tela porque tudo
+    // sai de `rows`/`reparoDia`. O período é o REAL: pela hora do TEMPO LIMITE (abertura + 24h
+    // no reparo, 36h em ativação e M.E.; < 12h = manhã), o mesmo da PCR — não o turno gravado.
+    // Ordem sem abertura no CSV não tem limite, então não tem período e fica de fora do filtro.
+    const fPeriodo = (document.getElementById('pd-periodo') || {}).value || '';
+    const noPeriodo = r => !fPeriodo || normalizeHeader(r.periodo || '') === normalizeHeader(fPeriodo);
+    const universo = universoBruto.filter(noPeriodo);
+    const semPeriodoNoDia = fPeriodo ? universoBruto.filter(r => !r.periodo).length : 0;
+    // a lista de cidades segue o dia INTEIRO (senão a cidade sumiria do filtro quando o período não tem ordem dela)
+    refreshCityField('pd-cidades', [...universoBruto, ...DB.prazoReparoDia.filter(r=>diaDoRelatorioReparo(r)===data)], { label: 'Cidades' });
     const cidades = getSelectedCities('pd-cidades');
     const rows = universo.filter(r => cidades.includes(r.cidade));
-    const reparoDiaPreCheck = DB.prazoReparoDia.filter(r => diaDoRelatorioReparo(r) === data && cidades.includes(r.cidade));
+    const reparoDiaPreCheck = DB.prazoReparoDia.filter(r => diaDoRelatorioReparo(r) === data && cidades.includes(r.cidade) && noPeriodo(r));
+    const elMsgPd = document.getElementById('pd-msg');
+    if (elMsgPd) elMsgPd.innerHTML = fPeriodo
+      ? `<b>Só ${fPeriodo === 'MANHÃ' ? 'manhã' : 'tarde'}</b>: ordens cujo prazo vencia ${fPeriodo === 'MANHÃ' ? 'antes das 12h' : 'a partir das 12h'} (hora do tempo limite) — vale pra todas as tabelas desta tela.`
+        + (semPeriodoNoDia ? ` ${semPeriodoNoDia} ordem(ns) do dia sem hora de abertura no CSV não têm período e ficam de fora.` : '')
+        + ' A M.O digitada é do dia inteiro, por isso fica só-leitura (mostra a contagem do período).'
+      : 'O CSV de atividades é importado na aba PCR — o que for importado lá já aparece aqui, sem precisar importar de novo.';
     const body = document.getElementById('pd-body');
+    if (!rows.length && !reparoDiaPreCheck.length && fPeriodo && universoBruto.length) { body.innerHTML = `<div class="panel"><div class="empty">Nenhuma ordem de ${fPeriodo === 'MANHÃ' ? 'manhã' : 'tarde'} nessa data e cidades. Escolha "Manhã e tarde" para ver o dia inteiro.</div></div>`; return; }
     if (!rows.length && !reparoDiaPreCheck.length) { body.innerHTML = '<div class="panel"><div class="empty">Sem dados para essa data. Importe o CSV de atividades no campo acima, ou a aba "BASE DO DIA" / "PRAZO REPARO DO DIA" (PRAZOS_ESCRITÓRIO.xlsx) em "Importar Excel".</div></div>'; return; }
 
     // ---- Tabela 1: Mão de obra e produção do dia por cidade ----
@@ -15841,7 +15862,7 @@ function renderParcialDoDia() {
     }, {ativacao:0,reparo:0,me:0,mc:0,upgrade:0,total:0,mo:0});
     // M.O corrigida à mão — a mesma memória usada na PCR (dia + cidade), então
     // o número que o coordenador ajusta numa tela vale na outra
-    const moDoDia = c => { const k = data + '|' + c.cidade; return MO_MANUAL[k] !== undefined ? MO_MANUAL[k] : moDaCidadeLinha(c.cidade).tecnicos.size; };
+    const moDoDia = c => { const k = data + '|' + c.cidade; return (!fPeriodo && MO_MANUAL[k] !== undefined) ? MO_MANUAL[k] : moDaCidadeLinha(c.cidade).tecnicos.size; };
     const moTotalDia = () => cidadesList.reduce((a,c)=>a + moDoDia(c), 0);
     // Linhas da tabela "Mão de Obra e Produção do Dia" em ordem fixa — as
     // outras tabelas da tela (Status Detalhado, Prazo, Faixa) continuam
@@ -15850,7 +15871,7 @@ function renderParcialDoDia() {
 
     // ---- Tabela 2: Prazo geral do dia por cidade ----
     // fonte preferida: aba "PRAZO REPARO DO DIA" (já vem com NO PRAZO/FORA DO PRAZO prontos)
-    const reparoDia = DB.prazoReparoDia.filter(r => diaDoRelatorioReparo(r) === data && cidades.includes(r.cidade));
+    const reparoDia = DB.prazoReparoDia.filter(r => diaDoRelatorioReparo(r) === data && cidades.includes(r.cidade) && noPeriodo(r));
     const usaPrazoReparoDia = reparoDia.length > 0;
     const isWithin24 = st => /ate 24|até 24/i.test(st||'');
     const temPrazo = usaPrazoReparoDia || rows.some(r => r.status_prazo);
@@ -16128,7 +16149,7 @@ function renderParcialDoDia() {
           const mo = moDoDia(c);
           return `<tr><td class="cat-cell">${esc(c.cidade)}</td><td>${m.ativacao}</td><td>${m.reparo}</td><td>${m.me}</td><td>${m.mc}</td><td>${m.upgrade}</td><td>${m.total}</td>
           <td><input type="number" min="0" class="mo-edit" value="${mo}" data-chave="${esc(chave)}" data-cidade="${esc(c.cidade)}" data-total="${m.total}"
-              ${podeEditarMO() ? 'title="Editável — a média recalcula sozinha e o número fica salvo"' : 'readonly disabled title="Só leitura para o perfil Escritório"'}></td>
+              ${fPeriodo ? 'readonly disabled title="Com filtro de período a M.O é só a contagem do período — tire o filtro pra editar a M.O do dia"' : podeEditarMO() ? 'title="Editável — a média recalcula sozinha e o número fica salvo"' : 'readonly disabled title="Só leitura para o perfil Escritório"'}></td>
           <td data-media="${esc(c.cidade)}">${mo?(m.total/mo).toFixed(1):'-'}</td></tr>`;}).join('')}
         <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${totais.ativacao}</td><td>${totais.reparo}</td><td>${totais.me}</td><td>${totais.mc}</td><td>${totais.upgrade}</td><td>${totais.total}</td>
           <td class="mo-total-cel" data-mo-total>${moTotalDia()}</td>
