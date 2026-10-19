@@ -1065,6 +1065,9 @@
   .stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; margin-bottom: 1.5rem; }
   .stat-card { background: var(--card-bg); border: 1px solid var(--border); border-left: 4px solid var(--stat-cor); border-radius: 14px; padding: 16px 20px; min-width: 0; transition: transform .15s ease, box-shadow .15s ease; }
   .stat-card:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(0,0,0,.14); }
+  .stat-card--clicavel { cursor: pointer; }
+  .stat-card--clicavel:hover { border-color: var(--stat-cor); }
+  .stat-card--clicavel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   /* Ícone do LADO do título/número (30/09/2026, pedido do cliente: "quero que o
      titulo e numero fiquem do lado do icone e nao em baixo") — antes o ícone
      ficava em cima, empilhado com o texto abaixo; `.stat-top` vira uma LINHA
@@ -2810,6 +2813,8 @@
       <a data-route="prazo"><i class="nav-ic"><svg viewBox="0 0 18 18"><circle cx="9" cy="9.5" r="6.8"/><line x1="9" y1="9.5" x2="9" y2="5.7"/><line x1="9" y1="9.5" x2="11.6" y2="11.3"/></svg></i><span class="nav-txt">Prazo (Reparo 24h)</span></a>
       <a data-route="prazoativacao"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="7" y1="1.6" x2="11" y2="1.6"/><line x1="9" y1="1.6" x2="9" y2="3.6"/><circle cx="9" cy="10.6" r="6.3"/><line x1="9" y1="10.6" x2="9" y2="7.3"/><line x1="9" y1="10.6" x2="11.3" y2="12"/></svg></i><span class="nav-txt">Prazo Ativações (36h)</span></a>
       <a data-route="parcialdia"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2" y="3.8" width="14" height="12" rx="1.5"/><line x1="2" y1="7.2" x2="16" y2="7.2"/><line x1="5.5" y1="1.8" x2="5.5" y2="4.8"/><line x1="12.5" y1="1.8" x2="12.5" y2="4.8"/><path d="M5.7 11.2 7.4 12.9 11 9"/></svg></i><span class="nav-txt">Parcial do Dia</span></a>
+      <a data-route="prazosesc"><i class="nav-ic"><svg viewBox="0 0 18 18"><circle cx="9" cy="9.5" r="6.8"/><line x1="9" y1="9.5" x2="9" y2="5.7"/><line x1="9" y1="9.5" x2="11.6" y2="11.3"/></svg></i><span class="nav-txt">Prazos</span></a>
+      <a data-route="retornosesc"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M3 9a6 6 0 0 1 10.4-4.1L15 6.5"/><path d="M15 2.8v3.7h-3.7"/><path d="M15 9a6 6 0 0 1-10.4 4.1L3 11.5"/><path d="M3 15.2v-3.7h3.7"/></svg></i><span class="nav-txt">Retornos</span></a>
       <a data-route="pcr"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M1.5 9.3h3.3l1.5-5 3 10 1.5-5h5.7"/></svg></i><span class="nav-txt">PCR</span></a>
       <a data-route="chamadosgiga"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2" y="3" width="14" height="12" rx="1.5"/><line x1="2" y1="6.6" x2="16" y2="6.6"/><line x1="5.5" y1="1.3" x2="5.5" y2="4.3"/><line x1="12.5" y1="1.3" x2="12.5" y2="4.3"/><line x1="9" y1="10" x2="9" y2="10.02"/><line x1="9" y1="8.6" x2="9" y2="9.3"/></svg></i><span class="nav-txt">Chamados em Aberto (GIGA)</span></a>
       <a data-route="ofensoresprazo"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="4" y1="1.8" x2="4" y2="16.2"/><path d="M4 2.8h10l-2.6 3.5L14 9.8H4"/></svg></i><span class="nav-txt">Ofensores de Prazo</span></a>
@@ -3841,7 +3846,7 @@ function podeEditarPresencaEscritorio() { return !!currentUser && (currentUser.r
 const ROTAS_SO_PERMITIDAS = {
   gestao: ['inicio', 'reuniaoprazos', 'dashboard', 'fleet', 'toll', 'prazo', 'parcialdia', 'u2000', 'relu2000'],
   escritorio: ['inicio', 'cleanup', 'table', 'prazo', 'prazoativacao', 'parcialdia',
-               'pcr', 'chamadosgiga', 'ofensoresprazo', 'certificacoes', 'u2000', 'relu2000'],
+               'pcr', 'chamadosgiga', 'ofensoresprazo', 'certificacoes', 'u2000', 'relu2000', 'prazosesc', 'retornosesc'],
 };
 function podeAcessar(role, route) {
   // Presença (Técnicos + Escritório): oculta pra TODO MUNDO, sem exceção,
@@ -3871,7 +3876,10 @@ function podeAcessar(role, route) {
   // páginas de área: qualquer login (cada uma só mostra as telas que o perfil pode abrir)
   if (route.startsWith('area_')) return true;
   // Relatório do Dia = Parcial do Dia + PCR: vale pra quem vê a Parcial do Dia
-  if (route === 'reldia') return podeAcessar(role, 'parcialdia');
+  // ESCRITÓRIO (19/10/2026, pedido do cliente): sem os Dashboards (o Relatório do Dia saiu), e duas abas só dele: "Prazos" e "Retornos"
+  // (feedback das atendentes: "os dados estão muito separados e em abas diferentes" — prazo do dia numa aba, prazo pendente na PCR...).
+  if (route === 'prazosesc' || route === 'retornosesc') return perfil === 'escritorio';
+  if (route === 'reldia') return perfil !== 'escritorio' && podeAcessar(role, 'parcialdia');
   // Perfil com lista de PERMISSÃO (Gestão): só entra o que está na lista.
   // ROUTE_PERMISSIONS é lista de BLOQUEIO — tela nova nasce liberada pra todo
   // mundo até alguém bloquear. Pra um perfil que o cliente quer "só estas
@@ -8230,7 +8238,8 @@ const ESTRUTURA_NOVA = [
   { id: 'operacao', rota: 'area_operacao', nome: 'Operação', resto: true,
     grupos: [
       { nome: 'Técnicos e qualidade', rotas: ['acomtec', 'ofensor', 'table'] },
-      { nome: 'Prazos', rotas: ['prazo', 'prazoativacao', 'ofensoresprazo'] },
+      { nome: 'Prazos', rotas: ['prazosesc', 'prazo', 'prazoativacao', 'ofensoresprazo'] },
+      { nome: 'Retornos', rotas: ['retornosesc'] },
       { nome: 'PCR e Parcial', rotas: ['pcr', 'parcialdia', 'chamadosgiga'] },
       { nome: 'Certificação e Clean Up', rotas: ['certificacoes', 'cleanup'] },
     ],
@@ -8342,6 +8351,8 @@ const DESCRICAO_ROTAS = {
   prazoativacao: 'Cumprimento do prazo de 36h em ativações e mudanças de endereço.',
   parcialdia: 'Fechamento do dia: mão de obra, status das ordens e imagem do remanejamento.',
   pcr: 'Prazo em tempo real: o que está vencendo agora e quem está em rota.',
+  prazosesc: 'Só prazos, tudo numa aba: prazo do dia por cidade, o que está vencendo agora e os prazos do dia, ordem por ordem.',
+  retornosesc: 'Só retornos: IFI e IRR do dia, de quem é cada retorno e quanto falta da janela.',
   ofensoresprazo: 'Quem mais estourou prazo no período, por técnico e por cidade.',
   reldia: 'Relatório do dia (Parcial do Dia + PCR): status das ordens, status detalhado, prazo do reparo, retornos IFI/IRR, improdutivas, ordens após as 18h e bairros.',
   relgeral: 'Relatório geral: produção por técnico (dias, produtividade, IFI/IRR, prazo), produção por cidade, gráficos da operação e MAX de chamados por cliente.',
@@ -8492,7 +8503,9 @@ const PAGES = {
   prazo: { title: 'Prazo — Reparo (24h)', render: renderPrazo },
   prazoativacao: { title: 'Prazo Ativações (36h)', render: renderPrazoAtivacao },
   parcialdia: { title: 'Parcial do Dia', render: renderParcialDoDia },
-  pcr: { title: 'PCR — Prazo Controle Real', render: renderPCR },
+  pcr: { title: 'PCR — Prazo Controle Real', render: () => renderPCR() },
+  prazosesc: { title: 'Prazos', render: () => renderPCR('prazos') },
+  retornosesc: { title: 'Retornos', render: () => renderPCR('retornos') },
   chamadosgiga: { title: 'Chamados em Aberto (GIGA)', render: renderChamadosGiga },
   ofensoresprazo: { title: 'Ofensores de Prazo', render: renderOfensoresPrazo },
   certificacoes: { title: 'Certificações', render: renderCertificacoes },
@@ -13891,7 +13904,7 @@ function agendarAtualizacaoAoVivo(route) {
 }
 // Telas que leem DB.pcr — só nelas vale ficar conferindo (quando a conferência
 // automática estiver ligada de novo).
-const ROTAS_COM_PCR = new Set(['pcr', 'parcialdia', 'chamadosgiga', 'reuniaoprazos', 'relgeral', 'reldia']);
+const ROTAS_COM_PCR = new Set(['pcr', 'parcialdia', 'chamadosgiga', 'reuniaoprazos', 'relgeral', 'reldia', 'prazosesc', 'retornosesc']);
 let PCR_POLL_TIMER = null;
 function agendarConferenciaPCR(route) {
   if (PCR_POLL_TIMER) { clearInterval(PCR_POLL_TIMER); PCR_POLL_TIMER = null; }
@@ -14265,8 +14278,69 @@ const icAtivacao = '<svg viewBox="0 0 18 18"><path d="M6.5 2.4v3.3M11.5 2.4v3.3"
 const icComodo = '<svg viewBox="0 0 18 18"><path d="M2.4 8.4 9 2.8l6.6 5.6"/><path d="M4.2 7.4v7.3h9.6V7.4"/><path d="M7.6 14.7v-4h2.8v4"/></svg>';
 const icEndereco = '<svg viewBox="0 0 18 18"><path d="M9 16.2s5-4.5 5-8.6a5 5 0 0 0-10 0c0 4.1 5 8.6 5 8.6Z"/><circle cx="9" cy="7.6" r="1.8"/></svg>';
 const icUpgrade = '<svg viewBox="0 0 18 18"><path d="M5.5 15V3.5M3 6l2.5-2.5L8 6"/><path d="M12.5 3v11.5M10 12l2.5 2.5L15 12"/></svg>';
-const statCard = (cor, icon, label, value, sub) => `<div class="stat-card stat-card--${cor}"><div class="stat-top"><div class="stat-ic">${icon}</div><div class="stat-text"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div></div>${sub ? `<div class="stat-sub">${sub}</div>` : ''}</div>`;
-function renderPCR() {
+// CARTÃO CLICÁVEL (19/10/2026, pedido do cliente: "quando clicar nos cards quero que apareça as ordens referentes"): o 6º parâmetro de
+// statCard é a chave de uma lista registrada por `cartaoLista(chave, título, linhas, sub)`; clicar (ou Enter) no cartão abre a janela com as
+// ordens daquele número (O.S, contrato, cliente, cidade, bairro, tipo, técnico, status, período da ordem, abertura, limite), com filtro por
+// coluna, filtro de tipo de serviço e Excel. Lista vazia = cartão normal (sem clique). A lista é refeita a cada desenho da tela.
+const CARTOES_LISTA = {};
+const cartaoLista = (chave, titulo, linhas, sub) => { if (!linhas || !linhas.length) { delete CARTOES_LISTA[chave]; return ''; } CARTOES_LISTA[chave] = { titulo, linhas, sub: sub || '' }; return chave; };
+// separa as ordens nos mesmos baldes dos cartões de "Status das Ordens" (suspensa = texto do status; improdutiva não inclui suspensa)
+function ordensPorStatusCartao(linhas) {
+  const o = { pendente: [], concluido: [], iniciado: [], em_rota: [], nao_concluido: [], suspenso: [], cancelado: [] };
+  (linhas || []).forEach(r => { let b = classifyStatusGranular(r.status); if (/suspen/i.test(r.status || '')) b = 'suspenso'; if (o[b]) o[b].push(r); });
+  return o;
+}
+function abrirOrdensDoCartao(chave) {
+  const it = CARTOES_LISTA[chave]; if (!it) return;
+  const colunas = ['O.S', 'Contrato', 'Cliente', 'Cidade', 'Bairro', 'Tipo de serviço', 'Técnico', 'Status', 'Período da ordem', 'Abertura', 'Limite'];
+  const t = x => x ? fmtDT(new Date(x)) : '-';
+  const ordenadas = [...it.linhas].sort((a, b) => (a.limite ? +new Date(a.limite) : Infinity) - (b.limite ? +new Date(b.limite) : Infinity) || String(a.os).localeCompare(String(b.os)));
+  const linhas = ordenadas.map(r => ({ tipo: rotuloTipoServico(r.tipo_atividade) || '-', celulas: [esc(r.os) || '-', esc(r.contrato) || '-', esc(r.cliente || r.nome || '') || '-', esc(rotuloCidadeGeral(r.cidade)) || '-',
+    esc(extrairBairro(r.endereco) || '') || '-', esc(rotuloTipoServico(r.tipo_atividade) || '') || '-', esc(r.recurso) || '-', esc(r.status) || '-', esc(r.periodo_sistema || r.periodo || '') || '-', t(r.abertura), t(r.limite)] }));
+  abrirModalLista(it.titulo, it.sub, colunas, linhas, { colTipo: 5, nome: slugTitulo(it.titulo) });
+}
+document.addEventListener('click', e => { const c = e.target.closest && e.target.closest('.stat-card[data-lista]'); if (c) abrirOrdensDoCartao(c.dataset.lista); });
+document.addEventListener('keydown', e => { if (e.key !== 'Enter') return; const c = e.target.closest && e.target.closest('.stat-card[data-lista]'); if (c) abrirOrdensDoCartao(c.dataset.lista); });
+const statCard = (cor, icon, label, value, sub, lista) => `<div class="stat-card stat-card--${cor}${lista ? ' stat-card--clicavel' : ''}"${lista ? ` data-lista="${esc(lista)}" tabindex="0" role="button" title="Clique para ver as ordens"` : ''}><div class="stat-top"><div class="stat-ic">${icon}</div><div class="stat-text"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div></div>${sub ? `<div class="stat-sub">${sub}</div>` : ''}</div>`;
+// MODOS DA PCR (19/10/2026, Escritório): 'prazos' = só prazos (cartões de prazo + prazo do dia por cidade + "Prazos do Dia — Detalhado"),
+// 'retornos' = só "Retornos do Dia (IFI / IRR)", 'resto' = a PCR do Escritório SEM prazos e retornos (que agora têm aba própria).
+// Sem modo (todos os outros perfis) a PCR continua inteira. O desenho é o mesmo: só se tira da tela o que não é do assunto.
+function aplicarModoPCR(body, modo, htmlCartaoDia) {
+  if (!modo) return;
+  const cartao = rot => [...body.querySelectorAll('.stat-card')].find(c => (c.querySelector('.stat-label') || {}).textContent === rot);
+  const ROTULOS_PRAZO = ['Já vencidas', 'Vencem em até 2h', 'Reparos em aberto'];
+  const cartoesPrazo = ROTULOS_PRAZO.map(cartao).filter(Boolean);
+  // agrupa pelos títulos de seção: cada título vai até o próximo
+  const grupos = []; let atual = { chave: 'topo', nos: [] }; grupos.push(atual);
+  [...body.children].forEach(n => {
+    if (n.classList && n.classList.contains('section-heading')) {
+      const t = n.textContent.trim();
+      const chave = /^Status das Ordens/.test(t) ? 'status' : /^Técnicos/.test(t) ? 'tecnicos' : /^Retornos do Dia/.test(t) ? 'retornos'
+        : /^Prazos do Dia/.test(t) ? 'prazos' : /^Mapa/.test(t) ? 'mapa' : /^Hist/.test(t) ? 'hist' : 'outro';
+      atual = { chave, nos: [n] }; grupos.push(atual);
+    } else atual.nos.push(n);
+  });
+  const manter = { prazos: ['prazos'], retornos: ['retornos'], resto: ['topo', 'status', 'tecnicos', 'mapa', 'hist', 'outro'] }[modo] || [];
+  if (modo === 'prazos') {
+    // os 3 cartões de prazo sobem pro topo da aba, junto com o prazo do dia por cidade
+    const topo = document.createElement('div');
+    topo.innerHTML = `<div class="section-heading">Situação dos prazos</div><div class="stat-cards"></div>${htmlCartaoDia || ''}`;
+    const caixa = topo.querySelector('.stat-cards');
+    cartoesPrazo.forEach(c => caixa.appendChild(c.cloneNode(true)));
+    if (!cartoesPrazo.length) caixa.remove();
+    const g = grupos.find(x => x.chave === 'prazos');
+    grupos.forEach(x => { if (!manter.includes(x.chave)) x.nos.forEach(n => n.remove()); });
+    if (g && g.nos[0] && g.nos[0].parentNode) while (topo.firstChild) g.nos[0].parentNode.insertBefore(topo.firstChild, g.nos[0]);
+    else while (topo.firstChild) body.appendChild(topo.firstChild);
+    return;
+  }
+  grupos.forEach(x => { if (!manter.includes(x.chave)) x.nos.forEach(n => n.remove()); });
+  if (modo === 'resto') cartoesPrazo.forEach(c => c.remove());   // prazo mora na aba Prazos
+}
+function renderPCR(modoArg) {
+  // modo: 'prazos' | 'retornos' (abas do Escritório); sem argumento, o Escritório fica com a PCR sem prazos/retornos e os outros perfis com a PCR inteira
+  const modo = typeof modoArg === 'string' ? modoArg : (currentUser && perfilValido(currentUser.role) === 'escritorio' ? 'resto' : '');
+  const soUmAssunto = modo === 'prazos' || modo === 'retornos';
   if (PCR_LIVE_TIMER) { clearInterval(PCR_LIVE_TIMER); PCR_LIVE_TIMER = null; }
   const dias = [...new Set(DB.pcr.map(r => r.data))].sort().reverse();
   // Card "Última importação" ao lado do filtro (30/09/2026, pedido do
@@ -14279,7 +14353,7 @@ function renderPCR() {
   const ultimaGeral = ultimaAtualizacaoPCR();
   document.getElementById('content').innerHTML = `
     <div class="toolbar">
-      <div class="field">${campoArquivo('pcr-file', 'CSV de atividades', '.csv,text/csv')}</div>
+      <div class="field"${soUmAssunto ? ' style="display:none"' : ''}>${campoArquivo('pcr-file', 'CSV de atividades', '.csv,text/csv')}</div>
       ${dias.length ? `<div class="field"><label>Dia</label><select id="pcr-dia">${dias.map(d=>`<option value="${d}">${formatDate(d)}</option>`).join('')}</select></div>` : ''}
       ${dias.length ? `<div class="field"><label>Período do prazo</label><select id="pcr-periodo">
         <option value="">Manhã e tarde</option><option value="MANHÃ">Só manhã</option><option value="TARDE">Só tarde</option>
@@ -14308,7 +14382,7 @@ function renderPCR() {
       if (r.erro) { msg.innerHTML = `<span style="color:var(--danger)">${r.erro}</span>`; return; }
       // dias já encerrados (anteriores a hoje) também vão pra Produção/Prazo: retornos e prazos do dia anterior ficam certos sem depender da planilha
       const comp = complementarProducaoDoCsv(String(leitor.result), f.name);
-      renderPCR();
+      renderPCR(modo);
       const compTxt = comp ? ` <span style="color:var(--success)">· Produção/Prazo atualizados com as concluídas de ${comp.dias.map(formatDate).join(', ')} (${comp.producao} ordem(ns), ${comp.retornos.IFI} IFI, ${comp.retornos.IRR} IRR)</span>` : '';
       const msg2 = document.getElementById('pcr-msg');
       msg2.innerHTML = `<span style="color:var(--success)">${r.total} atividades importadas de ${f.name}</span>${compTxt}`
@@ -14721,33 +14795,30 @@ function renderPCR() {
     // em `nao_concluido` por padrão) — reaproveita o MESMO truque que
     // `imagemRemanejamento` já usa pra separar: classifica normal e troca
     // pra 'suspenso' se o texto bruto do status bater `/suspen/i`.
-    const statusDasOrdens = { concluido: 0, iniciado: 0, em_rota: 0, nao_concluido: 0, suspenso: 0, cancelado: 0 };
-    rows.forEach(r => {
-      let b = classifyStatusGranular(r.status);
-      if (/suspen/i.test(r.status || '')) b = 'suspenso';
-      if (statusDasOrdens[b] !== undefined) statusDasOrdens[b]++;
-    });
+    const ordensStatus = ordensPorStatusCartao(rows);
+    const statusDasOrdens = {}; Object.keys(ordensStatus).forEach(k => { statusDasOrdens[k] = ordensStatus[k].length; });
+    const subDia = formatDate(dia);
 
     body.innerHTML = `
       <div class="section-heading">Status das Ordens</div>
       <div class="stat-cards stat-cards--6">
-        ${statCard('green', icOk, 'Concluídas', statusDasOrdens.concluido)}
-        ${statCard('blue', icPlay, 'Iniciadas', statusDasOrdens.iniciado)}
-        ${statCard('orange', icRota, 'Em Rota', statusDasOrdens.em_rota)}
-        ${statCard('red', icAviso, 'Improdutivas', statusDasOrdens.nao_concluido)}
-        ${statCard('purple', icPausa, 'Suspensas', statusDasOrdens.suspenso)}
-        ${statCard('neutral', icX, 'Canceladas', statusDasOrdens.cancelado)}
+        ${statCard('green', icOk, 'Concluídas', statusDasOrdens.concluido, '', cartaoLista('pcr|conc', 'Concluídas', ordensStatus.concluido, subDia))}
+        ${statCard('blue', icPlay, 'Iniciadas', statusDasOrdens.iniciado, '', cartaoLista('pcr|inic', 'Iniciadas', ordensStatus.iniciado, subDia))}
+        ${statCard('orange', icRota, 'Em Rota', statusDasOrdens.em_rota, '', cartaoLista('pcr|rota', 'Em Rota', ordensStatus.em_rota, subDia))}
+        ${statCard('red', icAviso, 'Improdutivas', statusDasOrdens.nao_concluido, '', cartaoLista('pcr|improd', 'Improdutivas', ordensStatus.nao_concluido, subDia))}
+        ${statCard('purple', icPausa, 'Suspensas', statusDasOrdens.suspenso, '', cartaoLista('pcr|susp', 'Suspensas', ordensStatus.suspenso, subDia))}
+        ${statCard('neutral', icX, 'Canceladas', statusDasOrdens.cancelado, '', cartaoLista('pcr|canc', 'Canceladas', ordensStatus.cancelado, subDia))}
       </div>
 
       <!-- "Concluídas" aparecia duas vezes (aqui e em Status das Ordens, mesmo
            número) — o de cima basta. Os cinco que sobram dividem UMA grade só,
            pra não ficar linha com 2 cartões e meia tela vazia. -->
       <div class="stat-cards">
-        ${statCard('neutral', icPasta, 'Total de O.S no dia', rows.length)}
-        ${statCard('orange', icRelogio, 'Pendentes agora', rowsPendentes.length)}
-        ${statCard(vencidas.length > 0 ? 'red' : 'neutral', icAviso, 'Já vencidas', vencidas.length)}
-        ${statCard(vence2h.length > 0 ? 'orange' : 'neutral', icRelogio, 'Vencem em até 2h', vence2h.length)}
-        ${statCard('blue', icChave, 'Reparos em aberto', abertasOrdenadas.length)}
+        ${statCard('neutral', icPasta, 'Total de O.S no dia', rows.length, '', cartaoLista('pcr|total', 'Total de O.S no dia', rows, subDia))}
+        ${statCard('orange', icRelogio, 'Pendentes agora', rowsPendentes.length, '', cartaoLista('pcr|pend', 'Pendentes agora', rowsPendentes, subDia))}
+        ${statCard(vencidas.length > 0 ? 'red' : 'neutral', icAviso, 'Já vencidas', vencidas.length, '', cartaoLista('pcr|venc', 'Reparos já vencidos', vencidas, subDia))}
+        ${statCard(vence2h.length > 0 ? 'orange' : 'neutral', icRelogio, 'Vencem em até 2h', vence2h.length, '', cartaoLista('pcr|venc2h', 'Reparos que vencem em até 2h', vence2h, subDia))}
+        ${statCard('blue', icChave, 'Reparos em aberto', abertasOrdenadas.length, '', cartaoLista('pcr|aberto', 'Reparos em aberto', abertasOrdenadas, subDia))}
       </div>
 
       <!-- "Vencendo Agora" e "Prazos do Dia — Detalhado" eram duas tabelas
@@ -14862,6 +14933,10 @@ function renderPCR() {
           <td>${h.quem || '-'}</td></tr>`).join('')}
       </tbody></table></div>
     `;
+
+    // aba só de prazos: o prazo do DIA por cidade (CSV) entra junto com o prazo pendente — antes ficava na aba Prazo — Reparo
+    aplicarModoPCR(body, modo, modo === 'prazos' ? montarPrazoReparoDoDia(dia, [...new Set(DB.pcr.filter(r => r.data === dia).map(r => r.cidade).filter(Boolean))]) : '');
+    if (modo === 'prazos') wireGerarImagemCartaoPrazo();
 
     // clicar no dia do histórico troca o filtro pra ele
     document.querySelectorAll('.link-dia-pcr').forEach(a => a.addEventListener('click', ev => {
@@ -16120,12 +16195,9 @@ function renderParcialDoDia() {
 
     // "Status das Ordens" (30/09/2026, pedido do cliente — mesmo card que
     // entrou em PCR, ver renderPCR). Sem "Backlog" (pedido explícito).
-    const statusDasOrdens = { pendente: 0, concluido: 0, iniciado: 0, em_rota: 0, nao_concluido: 0, suspenso: 0, cancelado: 0 };
-    rowsDe('cards').forEach(r => {
-      let b = classifyStatusGranular(r.status);
-      if (/suspen/i.test(r.status || '')) b = 'suspenso';
-      if (statusDasOrdens[b] !== undefined) statusDasOrdens[b]++;
-    });
+    const ordensStatus = ordensPorStatusCartao(rowsDe('cards'));
+    const statusDasOrdens = {}; Object.keys(ordensStatus).forEach(k => { statusDasOrdens[k] = ordensStatus[k].length; });
+    const subDia = formatDate(data) + (perDe('cards') ? ' · só ' + (perDe('cards') === 'MANHÃ' ? 'manhã' : 'tarde') : '');
 
     // "Volume por Bairro" (30/09/2026, pedido do cliente, print de outro
     // sistema com uma tabela assim) — contagem simples de O.S do dia por
@@ -16171,17 +16243,17 @@ function renderParcialDoDia() {
     body.innerHTML = `${modoNovo() ? blocoMO : ''}
       <div class="section-heading">Status das Ordens ${seletorPeriodo('cards')}</div>
       <div class="stat-cards stat-cards--7">
-        ${statCard('orange', icRelogio, 'Pendentes', statusDasOrdens.pendente)}
-        ${statCard('green', icOk, 'Concluídas', statusDasOrdens.concluido)}
-        ${statCard('blue', icPlay, 'Iniciadas', statusDasOrdens.iniciado)}
-        ${statCard('orange', icRota, 'Em Rota', statusDasOrdens.em_rota)}
-        ${statCard('red', icAviso, 'Improdutivas', statusDasOrdens.nao_concluido)}
-        ${statCard('purple', icPausa, 'Suspensas', statusDasOrdens.suspenso)}
-        ${statCard('neutral', icX, 'Canceladas', statusDasOrdens.cancelado)}
+        ${statCard('orange', icRelogio, 'Pendentes', statusDasOrdens.pendente, '', cartaoLista('pd|pend', 'Pendentes', ordensStatus.pendente, subDia))}
+        ${statCard('green', icOk, 'Concluídas', statusDasOrdens.concluido, '', cartaoLista('pd|conc', 'Concluídas', ordensStatus.concluido, subDia))}
+        ${statCard('blue', icPlay, 'Iniciadas', statusDasOrdens.iniciado, '', cartaoLista('pd|inic', 'Iniciadas', ordensStatus.iniciado, subDia))}
+        ${statCard('orange', icRota, 'Em Rota', statusDasOrdens.em_rota, '', cartaoLista('pd|rota', 'Em Rota', ordensStatus.em_rota, subDia))}
+        ${statCard('red', icAviso, 'Improdutivas', statusDasOrdens.nao_concluido, '', cartaoLista('pd|improd', 'Improdutivas', ordensStatus.nao_concluido, subDia))}
+        ${statCard('purple', icPausa, 'Suspensas', statusDasOrdens.suspenso, '', cartaoLista('pd|susp', 'Suspensas', ordensStatus.suspenso, subDia))}
+        ${statCard('neutral', icX, 'Canceladas', statusDasOrdens.cancelado, '', cartaoLista('pd|canc', 'Canceladas', ordensStatus.cancelado, subDia))}
       </div>
 
       <div class="stat-cards">
-        ${statCard('neutral', icPasta, 'Total O.S no dia', rowsDe('cards').length)}
+        ${statCard('neutral', icPasta, 'Total O.S no dia', rowsDe('cards').length, '', cartaoLista('pd|total', 'Total de O.S no dia', rowsDe('cards'), subDia))}
         ${statCard('blue', icPessoas, 'Mão de obra (técnicos)', moTotalDia())}
         ${statCard('purple', icBarras, 'Média por técnico', moTotalDia() ? (totais.total/moTotalDia()).toFixed(1) : '0')}
       </div>
@@ -19373,7 +19445,9 @@ function renderRelatorioDoDia() {
     if (!rows.length) { body.innerHTML = '<div class="panel"><div class="empty">Sem atividades do CSV nesse dia/cidades. Importe o CSV de atividades na aba PCR.</div></div>'; posLoadTopicos('reldia'); return; }
     const cls = r => classifyStatusGranular(r.status);
     const suspensa = r => /suspen/i.test(r.status || '');
-    const nB = b => rows.filter(r => cls(r) === b && !(b === 'nao_concluido' && suspensa(r))).length;
+    const rowsB = b => rows.filter(r => cls(r) === b && !(b === 'nao_concluido' && suspensa(r)));
+    const nB = b => rowsB(b).length;
+    const subRd = formatDate(dia);
     const nSusp = rows.filter(suspensa).length;
     const tecnicos = new Set(rows.filter(r => ehRecursoTecnico(r.recurso)).map(r => r.recurso));
     const concluidas = rows.filter(r => cls(r) === 'concluido');
@@ -19457,16 +19531,16 @@ function renderRelatorioDoDia() {
       <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">${esc(diaSemanaCompleto(dia))}, ${formatDate(dia)} · ${rows.length} O.S (uma linha por O.S do CSV) · ${tecnicos.size} técnico(s) em campo</div>
       <div class="section-heading">1. Status das ordens</div>
       <div class="stat-cards stat-cards--6">
-        ${statCard('green', icOk, 'Concluídas', nB('concluido'))}
-        ${statCard('blue', icPlay, 'Iniciadas', nB('iniciado'))}
-        ${statCard('orange', icRota, 'Em Rota', nB('em_rota'))}
-        ${statCard('red', icAviso, 'Improdutivas', nB('nao_concluido'))}
-        ${statCard('purple', icPausa, 'Suspensas', nSusp)}
-        ${statCard('neutral', icX, 'Canceladas', nB('cancelado'))}
+        ${statCard('green', icOk, 'Concluídas', nB('concluido'), '', cartaoLista('rd|conc', 'Concluídas', rowsB('concluido'), subRd))}
+        ${statCard('blue', icPlay, 'Iniciadas', nB('iniciado'), '', cartaoLista('rd|inic', 'Iniciadas', rowsB('iniciado'), subRd))}
+        ${statCard('orange', icRota, 'Em Rota', nB('em_rota'), '', cartaoLista('rd|rota', 'Em Rota', rowsB('em_rota'), subRd))}
+        ${statCard('red', icAviso, 'Improdutivas', nB('nao_concluido'), '', cartaoLista('rd|improd', 'Improdutivas', rowsB('nao_concluido'), subRd))}
+        ${statCard('purple', icPausa, 'Suspensas', nSusp, '', cartaoLista('rd|susp', 'Suspensas', rows.filter(suspensa), subRd))}
+        ${statCard('neutral', icX, 'Canceladas', nB('cancelado'), '', cartaoLista('rd|canc', 'Canceladas', rowsB('cancelado'), subRd))}
       </div>
       <div class="stat-cards">
-        ${statCard('neutral', icPasta, 'Total de O.S no dia', rows.length)}
-        ${statCard('blue', icRelogio, 'Pendentes agora', nB('pendente'))}
+        ${statCard('neutral', icPasta, 'Total de O.S no dia', rows.length, '', cartaoLista('rd|total', 'Total de O.S no dia', rows, subRd))}
+        ${statCard('blue', icRelogio, 'Pendentes agora', nB('pendente'), '', cartaoLista('rd|pend', 'Pendentes agora', rowsB('pendente'), subRd))}
         ${statCard('blue', icPessoas, 'Técnicos em campo', tecnicos.size)}
         ${statCard('purple', icBarras, 'Média por técnico', tecnicos.size ? fmtDec(concluidas.filter(r => ehRecursoTecnico(r.recurso)).length / tecnicos.size) : '-', 'concluídas ÷ técnicos')}
       </div>
@@ -19509,9 +19583,9 @@ function renderRelatorioDoDia() {
       ${nota(`Limite = abertura + 24h. "% no prazo" conta só os reparos já encerrados com faixa (meta ${formatPct(PRAZO_META, 0)}). Vencidas e vencendo = reparos ainda pendentes/em rota/iniciados.`)}
       <div class="stat-cards">
         ${statCard(pPrazo !== null && pPrazo >= PRAZO_META ? 'green' : 'red', icOk, `% no prazo · meta ${formatPct(PRAZO_META, 0)}`, pPrazo === null ? '-' : formatPct(pPrazo, 1), `${noPrazo.length} de ${encerradas.length} reparos encerrados`)}
-        ${statCard(vencidas.length ? 'red' : 'neutral', icAviso, 'Já vencidas', vencidas.length)}
-        ${statCard(vence2h.length ? 'orange' : 'neutral', icRelogio, 'Vencem em até 2h', vence2h.length)}
-        ${statCard('blue', icChave, 'Reparos em aberto', abertas.length)}
+        ${statCard(vencidas.length ? 'red' : 'neutral', icAviso, 'Já vencidas', vencidas.length, '', cartaoLista('rd|venc', 'Reparos já vencidos', vencidas, subRd))}
+        ${statCard(vence2h.length ? 'orange' : 'neutral', icRelogio, 'Vencem em até 2h', vence2h.length, '', cartaoLista('rd|venc2h', 'Reparos que vencem em até 2h', vence2h, subRd))}
+        ${statCard('blue', icChave, 'Reparos em aberto', abertas.length, '', cartaoLista('rd|aberto', 'Reparos em aberto', abertas, subRd))}
       </div>
       <div class="panel"><h3>Prazo por cidade</h3>${xls('rd-xls-faixa')}
         ${!faixaLista.length ? '<div class="empty">Nenhum reparo encerrado com faixa de prazo.</div>' : `<div class="table-wrap"><table class="data-table" id="rd-tab-faixa"><thead><tr><th>Cidade</th><th>Até 24h</th><th>Até 48h</th><th>Maior que 48h</th><th>Outlier</th><th>Total</th><th>% no prazo</th></tr></thead><tbody>
