@@ -15793,12 +15793,14 @@ function renderParcialDoDia() {
     const reparoDiaPreCheck = DB.prazoReparoDia.filter(r => diaDoRelatorioReparo(r) === data && cidades.includes(r.cidade));
     // FILTRO DE PERÍODO POR TABELA (19/10/2026, pedido do cliente: "o botão de período ao lado dos outros, dentro da própria
     // tabela e não no topo"). Cada seção tem o SEU seletor (Manhã e tarde / Só manhã / Só tarde) e recalcula só a si mesma
-    // a partir de `rows`; o estado fica em PD_PERIODO[seção]. Período = o REAL, pela hora do TEMPO LIMITE (abertura + 24 h no
-    // reparo, 36 h em ativação e M.E.; < 12 h = manhã), o mesmo da PCR — não o turno gravado. Ordem sem abertura no CSV não
-    // tem limite, logo não tem período: só aparece em "Manhã e tarde".
+    // a partir de `rows`; o estado fica em PD_PERIODO[seção]. Período = o da ORDEM (o turno que o sistema gravou pra ordem — coluna
+    // "Intervalo de Tempo" do CSV, `periodo_sistema`, igual à coluna "Período da Ordem" da PCR), NÃO o do prazo/abertura do chamado
+    // (a 1ª versão usava a hora do tempo limite; o cliente corrigiu em 19/10/2026). Ordem sem esse campo só aparece em "Manhã e tarde".
     const perDe = sec => PD_PERIODO[sec] || '';
-    const rowsDe = sec => perDe(sec) ? rows.filter(r => normalizeHeader(r.periodo || '') === normalizeHeader(perDe(sec))) : rows;
-    const seletorPeriodo = sec => `<select class="btn-mini pd-per fora-da-imagem" data-sec="${sec}" title="Período do prazo: só vale pra esta tabela. Manhã = prazo vencia antes das 12h; tarde = a partir das 12h (hora do tempo limite)">
+    // CSV: `periodo_sistema`; na BASE DO DIA (planilha, fallback da manhã) o turno vem em `periodo`
+    const periodoDaOrdem = r => doCsv.length ? (r.periodo_sistema || '') : (r.periodo || '');
+    const rowsDe = sec => perDe(sec) ? rows.filter(r => normalizeHeader(periodoDaOrdem(r)) === normalizeHeader(perDe(sec))) : rows;
+    const seletorPeriodo = sec => `<select class="btn-mini pd-per fora-da-imagem" data-sec="${sec}" title="Período da ordem (turno marcado no sistema): só vale pra esta tabela">
       <option value="">Manhã e tarde</option><option value="MANHÃ"${perDe(sec) === 'MANHÃ' ? ' selected' : ''}>Só manhã</option><option value="TARDE"${perDe(sec) === 'TARDE' ? ' selected' : ''}>Só tarde</option></select>`;
     const body = document.getElementById('pd-body');
     if (!rows.length && !reparoDiaPreCheck.length) { body.innerHTML = '<div class="panel"><div class="empty">Sem dados para essa data. Importe o CSV de atividades no campo acima, ou a aba "BASE DO DIA" / "PRAZO REPARO DO DIA" (PRAZOS_ESCRITÓRIO.xlsx) em "Importar Excel".</div></div>'; return; }
@@ -16210,7 +16212,7 @@ ${modoNovo() ? '' : blocoMO}
       ${verEficiencia ? '<p class="fora-da-imagem" style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px">Taxa de Conclusão e Execução da Caixa são só de consulta na tela — <b>não saem no "Gerar imagem"</b>.</p>' : ''}
       <div class="toolbar" style="margin-bottom:12px">
         ${multiSelectField('pd-tec-tipo', 'Tipo de Serviço', nomesTiposTec, { noun: 'tipo(s)', allLabel: 'Todos os tipos', preset: tiposTecMarcados })}
-        <div class="field"><label>Período do prazo</label>${seletorPeriodo('tec')}</div>
+        <div class="field"><label>Período da ordem</label>${seletorPeriodo('tec')}</div>
         <button class="btn" id="pd-tec-tipo-aplicar">Aplicar</button>
         <button type="button" class="btn-export-img" id="pd-tec-img">🖼 Gerar imagem</button>
       </div>
