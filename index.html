@@ -12275,9 +12275,20 @@ function classificaRetorno(tipoAnterior, dias) {
 // Histórico de conclusões por CONTRATO, a partir da base de produção — é com
 // ele que descobrimos quem atendeu o cliente da última vez (o "ofensor").
 function historicoPorContrato() {
-  const h = {};
+  const h = {}, vistos = new Set();
   DB.producao.forEach(p => {
     if (!p.contrato || !p.data || !isConcluido(p.status)) return;
+    vistos.add(`${p.os}|${p.data}`);
+    (h[p.contrato] = h[p.contrato] || []).push(p);
+  });
+  // 19/10/2026 (pedido do cliente: "no dia 18 não atualizei a planilha de retorno e não apareceu um retorno do dia 17 — se eu importar o CSV de
+  // atividades os retornos aparecem até eu importar a planilha oficial?"): o histórico também olha as ordens CONCLUÍDAS do CSV da PCR. Antes só
+  // a Produção (planilha) valia, então um serviço anterior feito depois da última planilha importada não existia pro sistema e o retorno sumia da
+  // PCR até alguém importar a planilha. Ordem que já está na Produção no mesmo dia não entra de novo; a planilha oficial continua mandando
+  // (quem tem IFI/IRR/tipo anterior gravado na Produção nem passa por aqui — ver retornosDoDiaCalc).
+  DB.pcr.forEach(p => {
+    if (!p.contrato || !p.data || !isConcluido(p.status) || !ehRecursoTecnico(p.recurso)) return;
+    const k = `${p.os}|${p.data}`; if (vistos.has(k)) return; vistos.add(k);
     (h[p.contrato] = h[p.contrato] || []).push(p);
   });
   Object.values(h).forEach(l => l.sort((a,b) => a.data.localeCompare(b.data)));
