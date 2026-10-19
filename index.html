@@ -1312,9 +1312,9 @@
   table.data-table#folha-tab tbody tr[data-tr-chave] { cursor: pointer; }
   .folha-auto { border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; }
   .folha-auto:hover { color: var(--accent); }
-  .folha-auto-aj { border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; }
-  .folha-auto-aj:hover { color: var(--accent); }
-  .folha-auto-aj[hidden] { display: none; }
+  .folha-auto-aj, .folha-tarifa-reset { border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; }
+  .folha-auto-aj:hover, .folha-tarifa-reset:hover { color: var(--accent); }
+  .folha-auto-aj[hidden], .folha-tarifa-reset[hidden] { display: none; }
   input.folha-edit-moeda.folha-sem-destaque.tem-valor { color: inherit; font-weight: 400; }
   /* card pequeno (ex.: "Última importação") vai pro canto DIREITO da barra */
   .toolbar > .stat-card--compacto { margin-left: auto; }
@@ -4816,9 +4816,51 @@ const DESCONTOS_RETORNO_FIXOS = [
 // recente (chamador que só quer mostrar o preço "atual", sem contexto de período).
 function valoresVigentesEm(dataISO) {
   if (!dataISO) return VALORES_ORDENS_FIXOS;
+  return aplicarTarifasDoCiclo(valoresContratoEm(dataISO), dataISO);
+}
+// a tabela de CONTRATO que vale na data, sem nenhum ajuste de ciclo
+function valoresContratoEm(dataISO) {
   let escolhida = VALORES_ORDENS_HISTORICO[0].valores;
   for (const v of VALORES_ORDENS_HISTORICO) { if (v.vigenciaDesde <= dataISO) escolhida = v.valores; else break; }
   return escolhida;
+}
+// ---- TARIFAS EDITÁVEIS POR CICLO (19/10/2026, pedido do cliente: "na folha quero poder editar os valores" — inclusive a tabela
+// "Valores por ordem"): o contrato (VALORES_ORDENS_HISTORICO) continua sendo o PADRÃO; o que for digitado no painel da Folha vale SÓ pro
+// ciclo escolhido (GIGA paga, técnico normal, técnico 26 dias e desconto da GIGA por retorno). Mora no MESMO histórico do valor de SP
+// (DB.valoresSpHistorico, só INSERT, sem tabela nova): tipo = "tarifa|<Tipo de serviço>|giga|normal|d26" ou "tarifa|Desconto IFI|giga";
+// vale o último registro de cada (ciclo, tipo); registro com `padrao` volta ao contrato. O ciclo é achado pela DATA (valoresVigentesEm),
+// então tudo que lê tarifa por data (Folha, holerite, receita do Dashboard) enxerga a mesma tabela.
+const TARIFA_CAMPOS = ['giga', 'normal', 'd26'];
+let _TARIFAS_IDX = { ref: null, n: -1, lista: [] };
+function tarifasDosCiclos() {
+  const h = DB.valoresSpHistorico;
+  if (!h || !h.length) return [];
+  if (_TARIFAS_IDX.ref === h && _TARIFAS_IDX.n === h.length) return _TARIFAS_IDX.lista;
+  const regs = h.filter(x => String(x.tipo || '').startsWith('tarifa|')).sort((a, b) => String(a.alterado_em).localeCompare(String(b.alterado_em)));
+  const por = new Map();
+  regs.forEach(x => { let m = por.get(x.periodo); if (!m) { m = new Map(); por.set(x.periodo, m); } if (x.padrao) m.delete(x.tipo); else m.set(x.tipo, Number(x.valor)); });
+  const lista = [...por].map(([periodo, valores]) => ({ ...datasDoPeriodoFolha(periodo), periodo, valores, cache: new Map() })).filter(x => x.inicio && x.valores.size);
+  _TARIFAS_IDX = { ref: h, n: h.length, lista };
+  return lista;
+}
+function aplicarTarifasDoCiclo(base, dataISO) {
+  const idx = tarifasDosCiclos();
+  if (!idx.length) return base;
+  const c = idx.find(x => dataISO >= x.inicio && dataISO <= x.fim);
+  if (!c) return base;
+  let m = c.cache.get(base);
+  if (!m) {
+    m = base.map(v => { const o = { ...v }; TARIFA_CAMPOS.forEach(cp => { const x = c.valores.get(`tarifa|${v.label}|${cp}`); if (x !== undefined) o[cp] = x; }); return o; });
+    c.cache.set(base, m);
+  }
+  return m;
+}
+// desconto que a GIGA faz por retorno (IFI / IRR) no ciclo que contém a data; o contrato é R$ 107,00
+function descontoGigaEm(tipo, dataISO) {
+  const d = DESCONTOS_RETORNO_FIXOS[tipo === 'ifi' ? 0 : 1];
+  const c = dataISO ? tarifasDosCiclos().find(x => dataISO >= x.inicio && dataISO <= x.fim) : null;
+  const v = c ? c.valores.get(`tarifa|${d.label}|giga`) : undefined;
+  return v !== undefined ? v : d.giga;
 }
 function linhaValorOrdem(tipoAtividade, dataISO) {
   const t = normalizeHeader(tipoAtividade);
@@ -10870,7 +10912,25 @@ function ajusteFolha(l, chave) {
   const v = ajustesDaLinha(l)[chave];
   return v === undefined || v === null || v === '' ? null : v;
 }
-function temAjusteQuebra(l) { return TIPOS_FOLHA.some(t => ajusteFolha(l, 'q_' + t.chave) !== null); }
+// 19/10/2026 (pedido do cliente: "na folha de pagamento quero que seja possível editar os valores também"): além da quantidade, dá pra digitar
+// os VALORES em R$ — todos guardados em `ajustes` (jsonb), sem coluna nova:
+//   v_<tipo>          valor em R$ de um tipo de serviço (v_ativacao, v_reparo...) — vale por cima de quantidade × tarifa
+//   valor_ordens      total das ordens em R$ — vale por cima da soma dos tipos
+//   total_descontos   total dos descontos em R$ — vale por cima da soma dos descontos
+//   total_receber     total a receber em R$ — vale por cima de ordens + aluguel + empréstimo − descontos
+// Chave ausente = automático (↺ volta). Cada nível vence o de baixo: total_receber > (valor_ordens/total_descontos) > v_<tipo> > q_<tipo> > cálculo.
+function temAjusteQtd(l) { return TIPOS_FOLHA.some(t => ajusteFolha(l, 'q_' + t.chave) !== null); }
+function temAjusteValorTipo(l) { return TIPOS_FOLHA.some(t => ajusteFolha(l, 'v_' + t.chave) !== null); }
+function temAjusteQuebra(l) { return temAjusteQtd(l) || temAjusteValorTipo(l); }
+// chave de ajuste cujo valor é DINHEIRO (formata como R$ no histórico e na tela)
+function chaveAjusteMoeda(k) { return k.startsWith('desc_') || k.startsWith('v_') || k === 'valor_ordens' || k === 'total_descontos' || k === 'total_receber'; }
+// aplica por cima de uma linha JÁ calculada os valores digitados à mão (valor das ordens e total de descontos) e refaz o total a receber
+function aplicarAjustesDeValor(linha) {
+  const vo = ajusteFolha(linha, 'valor_ordens'); if (vo !== null) linha.valor_total_ordens = Math.max(0, Number(vo) || 0);
+  const td = ajusteFolha(linha, 'total_descontos'); if (td !== null) linha.total_descontos = Math.max(0, Number(td) || 0);
+  linha.total_receber = totalReceberFolha(linha);
+  return linha;
+}
 function temAjusteRetorno(l) { return ['qtd_ifi', 'qtd_irr', 'desc_ifi', 'desc_irr'].some(k => ajusteFolha(l, k) !== null); }
 // Refaz o que depende dos ajustes numa linha JÁ montada (sem gravar): serviços → total/valor das ordens;
 // retornos → desconto, % e totais; desconto digitado por cima; total a receber.
@@ -10889,6 +10949,7 @@ function recalcularLinhaAjustada(linha) {
   if (ajusteFolha(linha, 'desc_irr') !== null) linha.desc_irr = Math.max(0, Number(ajusteFolha(linha, 'desc_irr')) || 0);
   linha.total_descontos = CAMPOS_TODO_DESCONTO_FOLHA.reduce((a, c) => a + (Number(linha[c]) || 0), 0);
   linha.total_receber = totalReceberFolha(linha);
+  aplicarAjustesDeValor(linha);
   linha._recalculado = true;   // % IFI/IRR agora em porcentagem (0,82 = 0,82%), não fração da planilha
   return linha;
 }
@@ -11062,6 +11123,8 @@ function aplicarDescontoRetorno(linha, janela) {
 // assim que ele aparece nos PROVENTOS do holerite em papel.
 function totalReceberFolha(linha) {
   const n = v => Number(v) || 0;
+  const man = ajusteFolha(linha, 'total_receber');          // total a receber digitado à mão vence a conta
+  if (man !== null) return n(man);
   return n(linha.valor_total_ordens) + n(linha.valor_aluguel) + n(linha.emprestimo) - n(linha.total_descontos);
 }
 // `retornos` (opcional) = { inicio, fim } — quando vem preenchido, a quantidade
@@ -11167,6 +11230,7 @@ function recalcularCampoFolha(linhaAtual, campo, valor) {
       aplicarDescontoRetorno(linha, janela);
     }
   }
+  aplicarAjustesDeValor(linha);   // valores digitados à mão (valor das ordens / total de descontos / total a receber) continuam valendo
   return linha;
 }
 // ---- FECHAMENTO DO CICLO DA FOLHA (02/10/2026) ----
@@ -22754,7 +22818,7 @@ function despesasAutomaticasDoPeriodoCalc(rotulo) {
   //  • CICLOS ANTERIORES: preço da faixa do ofensor (cálculo de cima). `info.retornos` mantém o
   //    detalhe por ofensor.
   if (inicio >= GIGA107_A_PARTIR_DE) {
-    const giga107 = Math.max(...DESCONTOS_RETORNO_FIXOS.map(d => d.giga));
+    const gigaIfi = descontoGigaEm('ifi', inicio), gigaIrr = descontoGigaEm('irr', inicio), giga107 = gigaIfi;
     const folhaGiga = (DB.folhaPagamento || []).filter(l => l.retorno_origem === 'giga' && (() => {
       const j = datasDoPeriodoFolha(l.periodo); return j.inicio && overlaps(j.inicio, j.fim, inicio, fim);
     })());
@@ -22765,8 +22829,8 @@ function despesasAutomaticasDoPeriodoCalc(rotulo) {
       qtdFinal = { ifi: info.retornos.qtdIfi, irr: info.retornos.qtdIrr, origem: 'sistema' };
     }
     if (qtdFinal) {
-      valores['IFI'] = qtdFinal.ifi * giga107; valores['IRR'] = qtdFinal.irr * giga107;
-      info.giga107 = { ...qtdFinal, valorPorRetorno: giga107 };
+      valores['IFI'] = qtdFinal.ifi * gigaIfi; valores['IRR'] = qtdFinal.irr * gigaIrr;
+      info.giga107 = { ...qtdFinal, valorPorRetorno: giga107, valorPorRetornoIfi: gigaIfi, valorPorRetornoIrr: gigaIrr };
     }
   }
   const daPlanilha = valoresDoComparativoFin(rotulo);
@@ -23159,7 +23223,7 @@ function renderFinance() {
       let t = '';
       if (cat === 'Imposto Nota') t = `${formatPct(ALIQUOTA_IMPOSTO_NOTA * 100, 0)} da receita das ordens`;
       else if (auto.info.daPlanilha && auto.info.daPlanilha[cat]) t = 'valor da planilha de Comparação';
-      else if (auto.info.giga107) { const g = auto.info.giga107; t = `${cat === 'IFI' ? g.ifi : g.irr} retorno(s) × ${formatCurrency(g.valorPorRetorno)} (desconto da GIGA)${g.origem === 'giga' ? '' : ' — contagem do sistema'}`; }
+      else if (auto.info.giga107) { const g = auto.info.giga107; t = `${cat === 'IFI' ? g.ifi : g.irr} retorno(s) × ${formatCurrency(cat === 'IFI' ? g.valorPorRetornoIfi : g.valorPorRetornoIrr)} (desconto da GIGA)${g.origem === 'giga' ? '' : ' — contagem do sistema'}`; }
       else if (auto.info.retornos) { const r = auto.info.retornos; t = `${cat === 'IFI' ? r.qtdIfi : r.qtdIrr} retorno(s) do ciclo × preço da faixa do ofensor`; }
       return `<small class="fin-auto" style="color:var(--text-muted);font-weight:400"> · automático${t ? ' — ' + t : ''}</small>`;
     };
@@ -23863,26 +23927,46 @@ function painelValoresPorOrdemFolha(fimISO, periodo) {
   const achar = re => tabela.find(v => re.test(normalizeHeader(v.label)));
   const ativ = achar(/ativa/), rep = achar(/reparo/);
   const linhasDesc = [
-    { rot: 'Desconto de IFI (retorno de ativação / M. endereço)', giga: DESCONTOS_RETORNO_FIXOS[0].giga, normal: ativ ? ativ.normal : DESCONTOS_RETORNO_FIXOS[0].tecnico, d26: ativ ? ativ.d26 : DESCONTOS_RETORNO_FIXOS[0].tecnico },
-    { rot: 'Desconto de IRR (retorno de reparo)', giga: DESCONTOS_RETORNO_FIXOS[1].giga, normal: rep ? rep.normal : DESCONTOS_RETORNO_FIXOS[1].tecnico, d26: rep ? rep.d26 : DESCONTOS_RETORNO_FIXOS[1].tecnico },
+    { rot: 'Desconto de IFI (retorno de ativação / M. endereço)', item: 'Desconto IFI', giga: descontoGigaEm('ifi', fimISO), normal: ativ ? ativ.normal : DESCONTOS_RETORNO_FIXOS[0].tecnico, d26: ativ ? ativ.d26 : DESCONTOS_RETORNO_FIXOS[0].tecnico },
+    { rot: 'Desconto de IRR (retorno de reparo)', item: 'Desconto IRR', giga: descontoGigaEm('irr', fimISO), normal: rep ? rep.normal : DESCONTOS_RETORNO_FIXOS[1].tecnico, d26: rep ? rep.d26 : DESCONTOS_RETORNO_FIXOS[1].tecnico },
   ];
+  // 19/10/2026: as tarifas viram campos (RH/Analista, ciclo aberto) — valem SÓ pro ciclo escolhido; o contrato continua sendo o padrão (↺)
+  const jTar = datasDoPeriodoFolha(periodo);
+  const editavel = !!periodo && !!jTar.inicio && podeEditarFolhaPagamento() && !folhaFechada(periodo);
+  const cicloTarifa = tarifasDosCiclos().find(x => x.periodo === periodo);
+  const ajustada = (item, campo) => !!(cicloTarifa && cicloTarifa.valores.has(`tarifa|${item}|${campo}`));
+  const campoTarifa = (item, campo, valor, estilo) => {
+    if (!editavel) return moeda(valor);
+    const c = Math.round((Number(valor) || 0) * 100);
+    return `<span style="white-space:nowrap"><input type="text" inputmode="decimal" class="folha-edit folha-edit-tarifa${ajustada(item, campo) ? ' folha-manual' : ''}"
+      data-item="${esc(item)}" data-campo="${campo}" data-centavos="${c}" data-orig="${c}" value="${formatCurrency(c / 100)}" style="width:104px;text-align:right${estilo ? ';' + estilo : ''}"
+      title="Digite a tarifa deste ciclo; ↺ volta ao valor do contrato"><button type="button" class="folha-tarifa-reset" data-item="${esc(item)}" data-campo="${campo}"
+      title="Voltar ao valor do contrato"${ajustada(item, campo) ? '' : ' hidden'}>↺</button></span>`;
+  };
+  const histTarifas = periodo ? (DB.valoresSpHistorico || []).filter(x => x.periodo === periodo && String(x.tipo || '').startsWith('tarifa|'))
+    .sort((a, b) => String(b.alterado_em).localeCompare(String(a.alterado_em))) : [];
   const sp = periodo && typeof valorSpDoPeriodo === 'function' ? [
     { rot: 'Ativação — São Paulo', v: valorSpDoPeriodo(periodo, 'ativacao_sp') },
     { rot: 'Mudança de Endereço — São Paulo', v: valorSpDoPeriodo(periodo, 'mudanca_endereco_sp') },
   ] : [];
-  return `<div class="panel" style="margin-bottom:1.5rem">
+  return `<div class="panel" id="fol-tarifas" data-periodo="${esc(periodo || '')}" style="margin-bottom:1.5rem">
     <h3>Valores por ordem<span style="font-size:12px;font-weight:400;color:var(--text-muted)"> — tabela de contrato${desde ? ' em vigor desde ' + formatDate(desde) : ''}${periodo ? ' · ' + esc(periodo) : ''}</span></h3>
     <div class="table-wrap"><table class="data-table"><thead><tr>
       <th>Tipo de serviço</th><th>GIGA paga à JH</th><th>Técnico — normal</th><th>Técnico — 26 dias ou mais (APTO)</th>
     </tr></thead><tbody>
-      ${tabela.map(v => `<tr><td class="cat-cell">${esc(v.label)}</td><td>${moeda(v.giga)}</td><td>${moeda(v.normal)}</td><td>${moeda(v.d26)}</td></tr>`).join('')}
-      ${linhasDesc.map(d => `<tr><td class="cat-cell" style="color:var(--danger)">${esc(d.rot)}</td><td style="color:var(--danger)">−${moeda(d.giga)}</td><td style="color:var(--danger)">−${moeda(d.normal)}</td><td style="color:var(--danger)">−${moeda(d.d26)}</td></tr>`).join('')}
+      ${tabela.map(v => `<tr><td class="cat-cell">${esc(v.label)}</td><td>${campoTarifa(v.label, 'giga', v.giga)}</td><td>${campoTarifa(v.label, 'normal', v.normal)}</td><td>${campoTarifa(v.label, 'd26', v.d26)}</td></tr>`).join('')}
+      ${linhasDesc.map(d => `<tr><td class="cat-cell" style="color:var(--danger)">${esc(d.rot)}</td><td style="color:var(--danger)">${editavel ? '−' + campoTarifa(d.item, 'giga', d.giga, 'color:var(--danger)') : '−' + moeda(d.giga)}</td><td style="color:var(--danger)">−${moeda(d.normal)}</td><td style="color:var(--danger)">−${moeda(d.d26)}</td></tr>`).join('')}
       ${sp.map(x => `<tr><td class="cat-cell">${esc(x.rot)}</td><td>-</td><td colspan="2" style="text-align:center">${moeda(x.v)} <span style="color:var(--text-muted);font-size:12px">(valor único, editável no painel de São Paulo)</span></td></tr>`).join('')}
     </tbody></table></div>
     <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;line-height:1.5">
       <b>Normal</b> = o que a JH paga ao técnico por ordem concluída. <b>26 dias</b> = tarifa do técnico <b>APTO</b>: 26 dias ou mais trabalhados <u>e</u> IFI ≤ ${formatPct(2.5, 2)} <u>e</u> IRR ≤ ${formatPct(4.5, 2)}; quem não atinge recebe a tarifa normal.
       Nos descontos, a coluna <b>GIGA</b> é o que a GIGA desconta da JH por retorno e as outras duas são o que sai do técnico (pela faixa dele).
+      ${editavel ? '<br><b>Editável:</b> o que você digitar vale <u>só neste ciclo</u> (o contrato continua sendo o padrão — o ↺ volta a ele) e refaz a folha do ciclo. A coluna "GIGA paga" também muda a receita deste ciclo no Dashboard. Os descontos do técnico acompanham as tarifas de Ativação e Reparo.' : (periodo && folhaFechada(periodo) ? '<br>Ciclo fechado: as tarifas não podem ser alteradas.' : '')}
     </p>
+    ${histTarifas.length ? `<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--text-secondary)">Tarifas alteradas neste ciclo (${histTarifas.length})</summary>
+      <div class="table-wrap" style="margin-top:8px"><table class="data-table"><thead><tr><th>Quando</th><th>Tarifa</th><th>De</th><th>Para</th><th>Quem</th></tr></thead><tbody>
+      ${histTarifas.slice(0, 40).map(x => { const [, item, campo] = String(x.tipo).split('|'); return `<tr><td>${esc(new Date(x.alterado_em).toLocaleString('pt-BR'))}</td><td>${esc(item)} — ${esc(TARIFA_ROTULO[campo] || campo)}</td><td>${formatCurrency(Number(x.anterior))}</td><td style="font-weight:700">${formatCurrency(Number(x.valor))}${x.padrao ? ' <span class="badge neutral">contrato</span>' : ''}</td><td>${esc(x.alterado_por || '-')}</td></tr>`; }).join('')}
+      </tbody></table></div></details>` : ''}
   </div>`;
 }
 // ===== ADICIONAR / EDITAR / EXCLUIR TÉCNICO NA FOLHA (05/10/2026) =====
@@ -24225,7 +24309,7 @@ function renderFolhaPagamento(modo) {
     }
     const fechadoSp = !!folhaFechada(per);
     const pode = podeEditarFolhaPagamento() && !fechadoSp;
-    const hist = [...DB.valoresSpHistorico].sort((a, b) => String(b.alterado_em).localeCompare(String(a.alterado_em)));
+    const hist = DB.valoresSpHistorico.filter(x => !String(x.tipo || '').startsWith('tarifa|')).sort((a, b) => String(b.alterado_em).localeCompare(String(a.alterado_em)));
     const qtdSp = {};
     DB.folhaPagamento.filter(l => l.periodo === per).forEach(l => {
       const apto = /apto/i.test(l.bonus || '') && !/inapto/i.test(l.bonus || '');
@@ -24433,6 +24517,7 @@ function renderFolhaPagamento(modo) {
           linha.total_receber = totalReceberFolha(linha);
         }
       }
+      aplicarAjustesDeValor(linha);   // por último: o que foi digitado à mão (R$) vence todo o cálculo
       rows[i] = linha;
     });
     const totalReceber = rows.reduce((a,r)=>a+r.total_receber,0);
@@ -24799,6 +24884,11 @@ function renderFolhaPagamento(modo) {
       const set = (sel, txt) => { const el = tr.querySelector(sel); if (el) el.textContent = txt; };
       set('.folha-total-descontos', formatCurrency(linha.total_descontos));
       set('.folha-total-receber', formatCurrency(linha.total_receber));
+      // total de descontos / total a receber / valor das ordens viraram CAMPOS (19/10/2026): atualiza o valor mostrado neles
+      [['total_descontos', linha.total_descontos], ['total_receber', linha.total_receber], ['valor_ordens', linha.valor_total_ordens]].forEach(([k, v]) => {
+        const inp = tr.querySelector(`input[data-ajuste="${k}"]`); if (!inp || document.activeElement === inp) return;
+        const c = Math.round((Number(v) || 0) * 100); inp.dataset.centavos = c; inp.value = formatCurrency(c / 100);
+      });
     };
     const linhaDoCampo = el => ranking.find(x => x.tecnico === el.dataset.tecnico && x.periodo === el.dataset.periodo);
     const aplicarEdicao = (el, campo, valor, de, para) => {
@@ -24842,7 +24932,9 @@ function renderFolhaPagamento(modo) {
     const valorAtualAj = (linha, chave) => {
       if (chave.startsWith('q_')) return quebraPorTipoDaLinha(linha, aptoDe(linha))[chave.slice(2)] || 0;
       if (chave === 'bonus') return linha.bonus;
-      if (chave.startsWith('desc_')) return formatCurrency(Number(linha[chave]) || 0);
+      if (chave.startsWith('v_')) return formatCurrency(Number(quebraPorTipoDaLinha(linha, aptoDe(linha))[chave]) || 0);
+      if (chave === 'valor_ordens') return formatCurrency(Number(linha.valor_total_ordens) || 0);
+      if (chave.startsWith('desc_') || chave === 'total_descontos' || chave === 'total_receber') return formatCurrency(Number(linha[chave]) || 0);
       return linha[chave] ?? 0;
     };
     const refletirAjuste = (tr, linha) => {
@@ -24852,7 +24944,7 @@ function renderFolhaPagamento(modo) {
       tr.querySelectorAll('.folha-valor-tipo[data-tipo]').forEach(span => { const v = q['v_' + span.dataset.tipo]; span.textContent = v ? formatCurrency(v) : '-'; });
       set('.folha-valor-ordens', formatCurrency(linha.valor_total_ordens));
       tr.querySelectorAll('input[data-ajuste]').forEach(inp => {
-        const k = inp.dataset.ajuste, v = k.startsWith('q_') ? (q[k.slice(2)] || 0) : linha[k];
+        const k = inp.dataset.ajuste, v = k.startsWith('q_') ? (q[k.slice(2)] || 0) : k.startsWith('v_') ? (q[k] || 0) : k === 'valor_ordens' ? linha.valor_total_ordens : linha[k];
         if (inp.classList.contains('folha-edit-aj-moeda')) { const c = Math.round((Number(v) || 0) * 100); inp.dataset.centavos = c; inp.value = formatCurrency(c / 100); }
         else if (document.activeElement !== inp) inp.value = v ?? 0;
         inp.classList.toggle('folha-manual', ajusteFolha(linha, k) !== null);
@@ -24874,7 +24966,7 @@ function renderFolhaPagamento(modo) {
       if (valor === null) { delete linha.ajustes[chave]; precisaRecarregar = true; } else linha.ajustes[chave] = valor;
       if (!Object.keys(linha.ajustes).length) linha.ajustes = null;
       recalcularLinhaAjustada(linha);
-      anotar(linha, el, de, valor === null ? 'automático' : (chave.startsWith('desc_') ? formatCurrency(valor) : valor));
+      anotar(linha, el, de, valor === null ? 'automático' : (chaveAjusteMoeda(chave) ? formatCurrency(valor) : valor));
       const tr = el.closest('tr');
       refletirAjuste(tr, linha);
       marcarPendente(linha, tr);
@@ -24889,6 +24981,28 @@ function renderFolhaPagamento(modo) {
     });
     document.querySelectorAll('button.folha-auto-aj').forEach(btn => {
       btn.addEventListener('click', () => aplicarAjuste(btn, btn.dataset.ajuste, null));
+    });
+    // ---- tarifas do ciclo (painel "Valores por ordem", 19/10/2026) ----
+    const gravarTarifa = async (el, item, campo, valor, padrao) => {
+      const painel = el.closest('#fol-tarifas'); if (!painel) return;
+      const per = painel.dataset.periodo;
+      if (pendentes.size && !confirm('Há alterações não salvas na tabela da folha. Mudar a tarifa refaz a tela e elas se perdem.\n\nContinuar?')) {
+        if (el.tagName === 'INPUT') { el.dataset.centavos = el.dataset.orig; el.value = formatCurrency((parseInt(el.dataset.orig || '0', 10)) / 100); }
+        return;
+      }
+      const r = await salvarTarifaCiclo(per, item, campo, valor, padrao);
+      if (r.fechada) { toast('Ciclo fechado — as tarifas não podem ser alteradas.', 'aviso'); load(); return; }
+      if (!r.mudou) { load(); return; }
+      toast(`Tarifa ${item} (${TARIFA_ROTULO[campo] || campo}) alterada neste ciclo — ${r.alteradas || 0} linha(s) da folha refeita(s).`, 'ok', 3000);
+      load();
+      if (r.sync && r.sync.ok === false) toast('Tarifa aplicada nesta tela, mas não consegui salvar no banco' + (ehAnalista() && r.sync.error ? ': ' + r.sync.error.message : '') + '.', 'aviso', 6000);
+    };
+    document.querySelectorAll('input.folha-edit-tarifa').forEach(inp => {
+      inp.addEventListener('input', () => formatarMoedaInput(inp));
+      inp.addEventListener('change', () => gravarTarifa(inp, inp.dataset.item, inp.dataset.campo, (parseInt(inp.dataset.centavos || '0', 10)) / 100, false));
+    });
+    document.querySelectorAll('button.folha-tarifa-reset').forEach(btn => {
+      btn.addEventListener('click', () => gravarTarifa(btn, btn.dataset.item, btn.dataset.campo, null, true));
     });
     // "Parcela X" — texto livre, não mexe em nenhum total (só marca pendente).
     document.querySelectorAll('input.folha-edit-parcela').forEach(inp => {
@@ -25133,6 +25247,7 @@ async function reaplicarOrdensNaFolha(periodo) {
     if (l.total_ordens === total && Math.abs((Number(l.valor_total_ordens) || 0) - valor) < 0.005) return;
     const nova = { ...l, total_ordens: total, valor_total_ordens: valor };
     nova.total_receber = totalReceberFolha(nova);
+    aplicarAjustesDeValor(nova);
     DB.folhaPagamento[i] = nova;
     alteradas.push(nova);
   });
@@ -25182,6 +25297,36 @@ async function salvarValorSp(periodo, chave, valor, ehPadrao) {
     rotulo: desc ? 'Desconsiderar SP' : 'Valor ' + SP_ROTULO[chave],
     de: desc ? (anterior === 1 ? 'ligado' : 'desligado') : formatCurrency(anterior),
     para: desc ? (valor === 1 ? 'ligado' : 'desligado') : formatCurrency(valor) }]);
+  const r = await reaplicarOrdensNaFolha(periodo);
+  return { mudou: true, sync, alteradas: r.alteradas };
+}
+// salva UMA tarifa do ciclo (item = "Ativação", "Reparo"... ou "Desconto IFI"/"Desconto IRR"; campo = giga | normal | d26). `ehPadrao` (ou valor igual
+// ao do contrato) apaga o ajuste e volta ao contrato. Refaz as linhas já gravadas do ciclo e registra no histórico da Folha.
+function valorTarifaContrato(item, campo, dataISO) {
+  if (/^Desconto (IFI|IRR)$/.test(item)) { const d = DESCONTOS_RETORNO_FIXOS[item === 'Desconto IFI' ? 0 : 1]; return d.giga; }
+  const l = valoresContratoEm(dataISO).find(v => v.label === item);
+  return l ? Number(l[campo]) : 0;
+}
+function valorTarifaDoCiclo(item, campo, dataISO) {
+  if (/^Desconto (IFI|IRR)$/.test(item)) return descontoGigaEm(item === 'Desconto IFI' ? 'ifi' : 'irr', dataISO);
+  const l = valoresVigentesEm(dataISO).find(v => v.label === item);
+  return l ? Number(l[campo]) : 0;
+}
+const TARIFA_ROTULO = { giga: 'GIGA paga', normal: 'técnico normal', d26: 'técnico 26 dias' };
+async function salvarTarifaCiclo(periodo, item, campo, valor, ehPadrao) {
+  if (folhaFechada(periodo)) return { mudou: false, fechada: true };
+  const j = datasDoPeriodoFolha(periodo); if (!j.inicio) return { mudou: false };
+  const base = valorTarifaContrato(item, campo, j.fim), atual = valorTarifaDoCiclo(item, campo, j.fim);
+  const novo = ehPadrao ? base : Math.max(0, Number(valor) || 0);
+  if (Math.abs(atual - novo) < 0.005) return { mudou: false };
+  const tipo = `tarifa|${item}|${campo}`;
+  const reg = { chave: `${periodo}|${tipo}|${Date.now()}`, periodo, tipo, valor: novo, anterior: atual, padrao: !!ehPadrao || Math.abs(novo - base) < 0.005,
+    alterado_por: currentUser ? (currentUser.nome || currentUser.login) : null, alterado_em: new Date().toISOString() };
+  DB.valoresSpHistorico.push(reg);
+  DB_INDEX.valoresSpHistorico.set(reg.chave, DB.valoresSpHistorico.length - 1);
+  const sync = await syncBatchToSupabase('valoresSpHistorico', [reg]);
+  await registrarHistoricoFolha([{ periodo, tecnico: '—', campo: 'tarifa_' + item + '_' + campo, rotulo: `Tarifa ${item} (${TARIFA_ROTULO[campo] || campo})`,
+    de: formatCurrency(atual), para: formatCurrency(novo) + (reg.padrao ? ' (contrato)' : '') }]);
   const r = await reaplicarOrdensNaFolha(periodo);
   return { mudou: true, sync, alteradas: r.alteradas };
 }
@@ -25350,6 +25495,11 @@ function quebraPorTipoDaLinha(linha, apto, ordensDoTecnico) {
     const l = tabela.find(v => t.re.test(normalizeHeader(v.label)));
     out['v_' + t.chave] = l ? qtd * (apto ? l.d26 : l.normal) : 0;
   });
+  // valor em R$ digitado por tipo (ajustes.v_<tipo>) vale por cima de quantidade × tarifa
+  TIPOS_FOLHA.forEach(t => {
+    const v = ajusteFolha(linha, 'v_' + t.chave);
+    if (v !== null) out['v_' + t.chave] = Math.max(0, Number(v) || 0);
+  });
   return out;
 }
 // Guardada por tarefa (memoDaTarefa, auditoria de 06/10/2026): a Folha pedia a mesma quebra
@@ -25487,6 +25637,7 @@ function holeriteTecnicoHTML(linha) {
   // era de antes da regra de faixa. Edição à mão continua vencendo.
   const campoManual = c => {
     if (manual[c] !== undefined) return manual[c];
+    if ((c === 'desc_ifi' || c === 'desc_irr') && ajusteFolha(linha, c) !== null) return n(ajusteFolha(linha, c));   // desconto digitado na folha
     if (c === 'desc_ifi' || c === 'desc_irr') {
       const tipo = c === 'desc_ifi' ? 'ifi' : 'irr';
       const qtd = manual['qtd_' + tipo] !== undefined ? manual['qtd_' + tipo] : n(linha['qtd_' + tipo]);
@@ -25497,7 +25648,11 @@ function holeriteTecnicoHTML(linha) {
   const diasTrab = manual.dias_trab !== undefined ? manual.dias_trab : n(linha.dias_trab);
   const diasAluguel = manual.dias_aluguel !== undefined ? manual.dias_aluguel : n(linha.dias_aluguel);
   const totalQtd = SERVICOS.reduce((a, [, k]) => a + contagem[k], 0);
-  const totalValor = SERVICOS.reduce((a, [, k]) => a + valores[k], 0) + campoManual('valor_aluguel') + campoManual('emprestimo');
+  // valores digitados na Folha (19/10/2026): "Valor Ordens" no lugar da soma dos tipos; o holerite só os respeita enquanto ninguém
+  // mexeu no próprio holerite (HOLERITE_MANUAL), que continua sendo um acerto pontual de papel
+  const semAcertoNoPapel = !Object.keys(manual).length;
+  const valorOrdensAj = semAcertoNoPapel ? ajusteFolha(linha, 'valor_ordens') : null;
+  const totalValor = (valorOrdensAj !== null ? n(valorOrdensAj) : SERVICOS.reduce((a, [, k]) => a + valores[k], 0)) + campoManual('valor_aluguel') + campoManual('emprestimo');
   // desconto: rótulo, campo do valor, campo da parcela, e a quantidade quando
   // o desconto vem de contagem (IFI/IRR) em vez de ser lançado à mão
   const qtdIfiHol = manual.qtd_ifi !== undefined ? manual.qtd_ifi : n(linha.qtd_ifi);
@@ -25515,9 +25670,11 @@ function holeriteTecnicoHTML(linha) {
     ['Tag Pedágio', 'desc_pedagio', null, null],
     ['Desc. Cartão Combustível', 'desc_combustivel', 'parcela_combustivel', null],
   ];
-  const totalDesc = DESCONTOS.reduce((a, [, campo]) => a + campoManual(campo), 0);
+  const totalDescAj = semAcertoNoPapel ? ajusteFolha(linha, 'total_descontos') : null;
+  const totalDesc = totalDescAj !== null ? n(totalDescAj) : DESCONTOS.reduce((a, [, campo]) => a + campoManual(campo), 0);
   const qtdDesc = qtdIfiHol + qtdIrrHol;
-  const aReceber = totalValor - totalDesc;
+  const totalReceberAj = semAcertoNoPapel ? ajusteFolha(linha, 'total_receber') : null;
+  const aReceber = totalReceberAj !== null ? n(totalReceberAj) : totalValor - totalDesc;
   // "Desconto aplicado para cada" mostra o preço da FAIXA daquele técnico —
   // é o mesmo número que a folha desconta (precoRetornoDoTecnico). Só mostra
   // o preço quando teve retorno DAQUELE tipo no ciclo (senão fica "-", igual
@@ -25699,12 +25856,12 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     ? `<span style="white-space:nowrap"><input type="number" class="folha-edit${ajusteFolha(r, chave) !== null ? ' folha-manual' : ''}" step="1" min="0"
         data-campo="aj_${chave}" data-ajuste="${chave}" ${attrsChave(r)} value="${valor || 0}" style="width:60px" title="Digite pra ajustar à mão; ↺ volta ao automático">${botaoAjuste(r, chave)}</span>`
     : String(valor || 0);
-  const inputMoedaAj = (r, chave, valor) => {
-    if (!podePagamento(r)) return money(valor);
+  const inputMoedaAj = (r, chave, valor, estilo) => {
+    if (!podePagamento(r)) return estilo ? `<span style="${estilo}">${money(valor)}</span>` : money(valor);
     const c = Math.round((Number(valor) || 0) * 100);
     return `<span style="white-space:nowrap"><input type="text" inputmode="decimal" class="folha-edit folha-edit-aj-moeda${ajusteFolha(r, chave) !== null ? ' folha-manual' : ''}"
-      data-campo="aj_${chave}" data-ajuste="${chave}" ${attrsChave(r)} data-centavos="${c}" value="${formatCurrency(c / 100)}" style="width:110px;text-align:right"
-      title="Digite pra ajustar à mão; ↺ volta ao automático">${botaoAjuste(r, chave)}</span>`;
+      data-campo="aj_${chave}" data-ajuste="${chave}" ${attrsChave(r)} data-centavos="${c}" value="${formatCurrency(c / 100)}" style="width:110px;text-align:right${estilo ? ';' + estilo : ''}"
+      title="Digite o valor em R$ pra ajustar à mão; ↺ volta ao automático">${botaoAjuste(r, chave)}</span>`;
   };
   const botaoAuto = (r, campo) => `<button type="button" class="folha-auto" data-campo="${campo}" ${attrsChave(r)}
     title="Voltar ao automático"${valorManualFolha(r[campo]) === null ? ' hidden' : ''}>↺</button>`;
@@ -25741,9 +25898,10 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
       // data-tipo é o gancho que o troca-de-bônus usa pra recalcular só essa
       // célula (ver o listener de select[data-campo="bonus"] mais abaixo) —
       // por isso o span existe mesmo quando o valor é zero/"-".
+      if (podePagamento(r)) return inputMoedaAj(r, 'v_' + t.chave, v);   // 19/10/2026: o valor em R$ também é editável
       return `<span class="folha-valor-tipo" data-tipo="${t.chave}">${v ? money(v) : '-'}</span>`;
     }]),
-    ['Valor Ordens', r=>`<span class="folha-valor-ordens">${money(r.valor_total_ordens)}</span>`],
+    ['Valor Ordens', r => podePagamento(r) ? inputMoedaAj(r, 'valor_ordens', r.valor_total_ordens) : `<span class="folha-valor-ordens">${money(r.valor_total_ordens)}</span>`],
     // Cruza o "Dias Trab." da planilha com o mesmo cálculo que a tela
     // Acompanhamento Técnico usa em "Bônus dos técnicos — situação de agora"
     // (dias DISTINTOS com ao menos 1 ordem concluída baixada, na Produção) —
@@ -25825,8 +25983,10 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     ['Parcela Vale', r => podeMaterial(r) ? inputParcela(r, 'parcela_vale', r.parcela_vale) : (r.parcela_vale || '-')],
     ['Parcela Fiscalização', r => podeMaterial(r) ? inputParcela(r, 'parcela_fiscalizacao', r.parcela_fiscalizacao) : (r.parcela_fiscalizacao || '-')],
     ['Parcela Combustível', r => podeMaterial(r) ? inputParcela(r, 'parcela_combustivel', r.parcela_combustivel) : (r.parcela_combustivel || '-')],
-    ['TOTAL DESCONTOS', r=>`<span class="folha-total-descontos" style="color:var(--danger);font-weight:700">${money(r.total_descontos)}</span>`],
-    ['TOTAL A RECEBER', r=>`<span class="folha-total-receber" style="color:var(--success);font-weight:700">${money(r.total_receber)}</span>`]
+    ['TOTAL DESCONTOS', r => podePagamento(r) ? inputMoedaAj(r, 'total_descontos', r.total_descontos, 'color:var(--danger);font-weight:700')
+      : `<span class="folha-total-descontos" style="color:var(--danger);font-weight:700">${money(r.total_descontos)}</span>`],
+    ['TOTAL A RECEBER', r => podePagamento(r) ? inputMoedaAj(r, 'total_receber', r.total_receber, 'color:var(--success);font-weight:700')
+      : `<span class="folha-total-receber" style="color:var(--success);font-weight:700">${money(r.total_receber)}</span>`]
   ];
   // A qual BLOCO cada coluna pertence — as cores saem do arquivo do cliente
   // (ver o CSS de .col-g-*). O grupo é deduzido do próprio cabeçalho em vez de
