@@ -29547,19 +29547,43 @@ async function u2kSalvarNoBanco() {
     return { ok: true, n: linhas.length, hist: h.n };
   } catch (e) { return { ok: false, motivo: String((e && e.message) || e) }; }
 }
+// ---- CARREGAR O U2000 DO BANCO MAIS RÁPIDO (20/10/2026, pedido do cliente: "por que está demorando tanto pra carregar os dados") ----
+// Medido no site real: abrir a aba U2000 baixava 52.710 ONUs (53 páginas), 82.923 linhas de histórico (83 páginas) e 8.000 alarmes, UMA PÁGINA POR VEZ
+// (~400 ms cada) = uns 25–30 s. Agora (1) as páginas vão em paralelo (`comLimite`, até 8 juntas, depois de contar as linhas) e (2) as ONUs e os dias antigos
+// do histórico ficam numa cópia no navegador (IndexedDB), conferida com o servidor por contagem + maior `importado_em`. Importação nova = cópia refeita sozinha.
+// A ordenação das páginas é por chave ÚNICA (senão páginas pedidas juntas repetem/pulam linha).
+async function u2kLerPaginado(tabela, colunas, ordens, filtro) {
+  const tam = 1000, base = () => { let q = supa.from(tabela).select(colunas); if (filtro) q = filtro(q); ordens.forEach(o => { q = q.order(o); }); return q; };
+  let total = null;
+  try { let q = supa.from(tabela).select('*', { count: 'exact', head: true }); if (filtro) q = filtro(q); const { count, error } = await comLimite(() => q); if (!error && typeof count === 'number') total = count; } catch (e) { /* sem contagem: vai uma por vez */ }
+  if (total === null) {
+    const todas = [];
+    for (let ini = 0; ini < 200000; ini += tam) { const { data, error } = await base().range(ini, ini + tam - 1); if (error) throw error; todas.push(...(data || [])); if (!data || data.length < tam) break; }
+    return todas;
+  }
+  if (!total) return [];
+  const pags = Math.ceil(total / tam), res = await Promise.all(Array.from({ length: pags }, (_, i) => comLimite(() => base().range(i * tam, i * tam + tam - 1))));
+  const erro = res.find(r => r.error); if (erro) throw erro.error;
+  return res.flatMap(r => r.data || []);
+}
+async function u2kLerOnusDoBanco() {
+  let n = null, max = '';
+  try {
+    const h = await comLimite(() => supa.from('u2000_onus').select('*', { count: 'exact', head: true })); if (!h.error && typeof h.count === 'number') n = h.count;
+    const m = await comLimite(() => supa.from('u2000_onus').select('importado_em').order('importado_em', { ascending: false }).limit(1)); if (!m.error && m.data && m.data[0]) max = m.data[0].importado_em || '';
+  } catch (e) { /* sem conferência: baixa tudo */ }
+  if (n != null && max) { const c = await cacheLer('u2k_onus_v1'); if (c && c.v === 1 && c.n === n && c.max === max && Array.isArray(c.d)) { U2K._origemOnus = 'cópia local'; return c.d; } }
+  const rows = await u2kLerPaginado('u2000_onus', '*', ['chave']);
+  U2K._origemOnus = 'servidor';
+  if (rows.length && max) cacheGravar('u2k_onus_v1', { v: 1, n: rows.length, max, d: rows, t: Date.now() }).catch(() => {});
+  return rows;
+}
 async function u2kCarregarDoBanco() {
   if (!supa || U2K._doBanco) return U2K._doBanco ? { ok: true } : { ok: false };
   try {
-    const onus = [], alm = [];
-    for (let ini = 0; ini < 150000; ini += 1000) {
-      const { data, error } = await supa.from('u2000_onus').select('*').order('chave').range(ini, ini + 999);
-      if (error) return { ok: false, motivo: /does not exist|schema cache|PGRST205|42P01/i.test(String(error.message || '')) ? 'tabela' : error.message };
-      onus.push(...(data || [])); if (!data || data.length < 1000) break;
-    }
-    for (let ini = 0; ini < 10000; ini += 1000) {
-      const { data, error } = await supa.from('u2000_alarmes').select('*').order('id').range(ini, ini + 999);
-      if (error) break; alm.push(...(data || [])); if (!data || data.length < 1000) break;
-    }
+    let onus = [], alm = [];
+    try { [onus, alm] = await Promise.all([u2kLerOnusDoBanco(), u2kLerPaginado('u2000_alarmes', '*', ['id']).catch(() => [])]); }
+    catch (e) { return { ok: false, motivo: /does not exist|schema cache|PGRST205|42P01/i.test(String((e && e.message) || '')) ? 'tabela' : String((e && e.message) || e) }; }
     if (!onus.length && !alm.length) return { ok: true, vazio: true };
     U2K.onus = onus.map(r => ({ _k: r.chave, olt: r.olt, frame: r.frame, slot: r.slot, porta: r.porta, onuId: r.onu_id, alias: r.alias, sn: r.sn, status: r.status, rx: r.rx == null ? null : Number(r.rx), tx: r.tx == null ? null : Number(r.tx), tipo: r.tipo, motivo: r.motivo || '', perfilLinha: r.perfil_linha || '', perfilServico: r.perfil_servico || '', perfilVas: r.perfil_vas || '', configStatus: r.config_status || '', operStatus: r.oper_status || '', wan: r.wan || [], _importado: r.importado_em }));
     U2K.alarmes = alm.map(r => ({ severidade: r.severidade, id: r.alarme_id, nome: r.nome, fonte: r.fonte, local: r.local, frame: r.frame, slot: r.slot, porta: r.porta, onuId: r.onu_id, vezes: r.vezes, primeiro: r.primeiro || '', ultimo: r.ultimo || '', limpo: r.limpo || '', alias: r.alias || '', categoria: r.categoria || u2kCategoria(r.nome), equip: r.equip || '', oltIp: r.olt_ip || '', razao: r.razao || '' }));
@@ -29792,11 +29816,26 @@ async function u2kSalvarHist() {
 async function u2kCarregarHist() {
   if (!supa || U2K._histCarregado) return;
   try {
-    const desde = isoLocalDe(new Date(Date.now() - 60 * 86400000)), todas = [];
-    for (let ini = 0; ini < 150000; ini += 1000) {
-      const { data, error } = await supa.from('u2000_dia').select('dia,olt,frame,slot,porta,onu_id,alias,sn,los,energia,sinal,enlace,outros').gte('dia', desde).order('dia').range(ini, ini + 999);
-      if (error) return; todas.push(...(data || [])); if (!data || data.length < 1000) break;
+    // 20/10/2026: os dias ANTIGOS (mais de 3 dias atrás) quase não mudam — ficam numa cópia local conferida pela contagem do servidor; só os últimos dias vêm sempre do banco.
+    const dia = d => isoLocalDe(new Date(Date.now() - d * 86400000)), desde = dia(60), corte = dia(3), HORAS24 = 24 * 3600 * 1000;
+    const cols = 'dia,olt,frame,slot,porta,onu_id,alias,sn,los,energia,sinal,enlace,outros', ordens = ['dia', 'olt', 'frame', 'slot', 'porta', 'onu_id'];
+    const c = await cacheLer('u2k_hist_v1');
+    let antigas = null, nServidor = null;
+    if (c && c.v === 1 && Array.isArray(c.d) && Date.now() - c.t < HORAS24 && c.desde <= desde) {
+      try { const h = await comLimite(() => supa.from('u2000_dia').select('*', { count: 'exact', head: true }).gte('dia', c.desde).lt('dia', c.corte)); if (!h.error && typeof h.count === 'number') nServidor = h.count; } catch (e) { /* sem conferência */ }
+      if (nServidor === c.n) antigas = c.d.filter(r => r.dia >= desde);
     }
+    let todas;
+    if (antigas) {
+      const recentes = await u2kLerPaginado('u2000_dia', cols, ordens, q => q.gte('dia', c.corte));
+      todas = c.d.filter(r => r.dia >= desde).concat(recentes);
+      U2K._origemHist = 'cópia local + últimos dias';
+    } else {
+      todas = await u2kLerPaginado('u2000_dia', cols, ordens, q => q.gte('dia', desde));
+      U2K._origemHist = 'servidor';
+    }
+    // regrava a cópia (dias < corte) quando ela não existia, não bateu ou o corte andou 2+ dias
+    if (!antigas || (c && c.corte < dia(5))) { const velhos = todas.filter(r => r.dia < corte); if (velhos.length) cacheGravar('u2k_hist_v1', { v: 1, desde, corte, n: velhos.length, d: velhos, t: Date.now() }).catch(() => {}); }
     U2K.hist = u2kMesclaHist(U2K.hist, todas, false); U2K._histCarregado = true;
   } catch (e) { /* sem tabela: o acompanhamento vale só com o que está carregado agora */ }
 }
@@ -30528,7 +30567,7 @@ function u2kCacheSalvarAutLoc() {
 }
 function u2kCacheDescartar() {
   U2K._autLoc = null; U2K._autLocT = null; U2K._cliAtivos = null; U2K._cacheLido = null; clearTimeout(U2K._cacheTimer);
-  cacheGravar('u2k_autloc', null).catch(() => {}); cacheGravar('u2k_cliativos', null).catch(() => {});
+  cacheGravar('u2k_autloc', null).catch(() => {}); cacheGravar('u2k_cliativos', null).catch(() => {}); cacheGravar('u2k_onus_v1', null).catch(() => {}); cacheGravar('u2k_hist_v1', null).catch(() => {});
 }
 async function u2kAutPorSn(sns, progresso, limite) {
   await u2kCacheLer();
