@@ -655,6 +655,7 @@
   #u2-corpo .u2c-chip.on { outline: 2px solid var(--c); }
   .u2-busca-navy { background: linear-gradient(160deg, #0f2552, #14336e) !important; border: none !important; color: #e2e8f0; box-shadow: 0 8px 24px rgba(10, 35, 80, .28); }
   .u2-busca-navy h3, .u2-busca-navy h3 * { color: #fff !important; }
+  .u2-busca-navy h3 button, .u2-busca-navy h3 button * { color: #0d1526 !important; }   /* ocultar / Ampliar / Gerar imagem: fundo branco, texto escuro (estavam branco sobre branco) */
   .u2-busca-navy label, .u2-busca-navy .field label { color: #cbd5e1 !important; }
   .u2-busca-navy .toolbar { background: transparent !important; border: none !important; padding: 0 !important; box-shadow: none !important; }
   .u2-busca-navy input[type=text], .u2-busca-navy select { background: #fff !important; color: #0d1526 !important; border-color: transparent !important; }
@@ -666,6 +667,22 @@
   .u2-busca-navy #u2-live { border-top-color: rgba(255, 255, 255, .22) !important; }
   .u2-busca-navy #u2l-conn a { color: #93c5fd; }
   .u2-busca-navy [style*="--text-secondary"], .u2-busca-navy [style*="--text-muted"] { color: #cbd5e1 !important; }
+  /* cartões internos (ONU no U2000 / Cliente / Último atendimento / Alarmes / Histórico) e a tabela de resultados ficam em fundo claro: texto escuro, título e botões visíveis */
+  .u2-busca-navy .panel { color: var(--text-primary); }
+  .u2-busca-navy .panel h3, .u2-busca-navy .panel h3 * { color: var(--text-primary) !important; }
+  .u2-busca-navy .panel label, .u2-busca-navy .panel .field label { color: var(--text-secondary) !important; }
+  .u2-busca-navy .panel [style*="--text-secondary"], .u2-busca-navy .panel [style*="--text-muted"] { color: var(--text-muted) !important; }
+  .u2-busca-navy .panel .empty { color: var(--text-muted); }
+  .u2-busca-navy .panel .btn-export-xls { background: var(--card-bg-2, #eef2f9); color: var(--text-primary); border-color: var(--border); }
+  /* a regra global "uma caixa só" (.panel .table-wrap transparente) vencia o fundo branco da tabela de resultados: texto escuro sobre azul-marinho */
+  #u2-busca.u2-busca-navy .table-wrap { background: #fff !important; border-radius: 12px; }
+  #u2-busca.u2-busca-navy .panel .table-wrap { background: transparent !important; }
+  .u2-busca-navy .panel .table-wrap td, .u2-busca-navy .panel .table-wrap td * { color: var(--tab-num, #000); }
+  .u2-busca-navy .panel a { color: var(--accent); }
+  .u2-busca-navy .table-wrap tbody tr:hover td { background: #eaf1ff !important; }
+  .u2-busca-navy details > summary { color: #cbd5e1; }
+  #u2l-det a, #u2l-lista a { color: #93c5fd; }
+  #u2-busca .table-wrap a { color: #1d4ed8 !important; }   /* links do AutoISP ao vivo direto sobre o azul-marinho */
   /* RECEITAS E DESPESAS (20/10/2026) — copia do modelo que o cliente mandou: faixa azul-marinho no topo com o filtro de período, cartões por grupo
      (cada um com a sua cor) à esquerda e "Resumo do Período" à direita. Cor por token do grupo (--g); fundo/borda em color-mix pra valer nos 2 temas. */
   .rd-topo { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 18px 22px; border-radius: 16px; color: #fff;
@@ -31428,17 +31445,17 @@ function u2kLigarAutoispVivo() {
   async function buscar(base) {
     if (!LIVE.conectado) { await verificarConexao(true); if (!LIVE.conectado) return; }
     const f = base || {}; if (!base) campos.forEach(k => { f[k] = (g(k).value || '').trim(); });
-    if (!Object.values(f).some(Boolean)) { msg('Digite pelo menos um campo (nome, contrato, SN, OLT, PPPoE, endereço ou Int6).'); return; }
+    if (!Object.values(f).some(Boolean)) { msg('Digite o que procurar (nome, contrato, SN, OLT/porta, PPPoE, endereço ou Int6).'); return; }
     g('go').disabled = true; msg('Buscando no AutoISP…'); g('lista').innerHTML = ''; g('det').innerHTML = '';
     const r = await consultarExtensao('buscar', f); g('go').disabled = false;
     if (!g('lista')) return;
     if (!r.ok) { msg(`<span style="color:var(--danger)">⚠ ${esc(r.erro)}</span>`); if (/Entre no AutoISP/.test(r.erro)) verificarConexao(true); return; }
     LIVE.itens = (r.dados || []).map(b => ({ base: b, det: null, erro: '', atualizado: false }));
     if (!LIVE.itens.length) { msg('Nenhum assinante encontrado nas OLTs da JH com esses dados.'); return; }
-    g('lista').innerHTML = `<div class="table-wrap" style="margin-top:10px;max-height:520px;overflow:auto"><table class="data-table" id="u2l-tab"><thead><tr>
-      <th>Assinante</th><th>Contrato</th><th>OLT</th><th>PON</th><th>ONU SN</th><th>Sinal</th><th>Situação</th><th>Último contato do equipamento</th><th>Lido em</th><th>Endereço</th><th>PPPoE</th><th>Int6</th><th></th></tr></thead><tbody>
+    g('lista').innerHTML = `<div style="margin-top:14px;font-weight:700;color:#fff">🔌 AutoISP ao vivo <span style="font-weight:500;opacity:.8">· sinal atualizado</span></div><div class="table-wrap" style="margin-top:6px;max-height:520px;overflow:auto"><table class="data-table" id="u2l-tab"><thead><tr>
+      <th>Assinante</th><th>Contrato</th><th>OLT</th><th>PON</th><th>ONU SN</th><th>No U2000 (porta · ONU · status)</th><th>Sinal</th><th>Situação</th><th>Último contato do equipamento</th><th>Lido em</th><th>Endereço</th><th>PPPoE</th><th>Int6</th><th></th></tr></thead><tbody>
       ${LIVE.itens.map((it, i) => { const b = it.base; return `<tr data-i="${i}"><td class="cat-cell">${esc(b.nome || '-')}</td><td>${esc(b.contrato || '-')}</td><td style="white-space:nowrap">${esc(b.olt || '-')}</td><td>${esc(b.ponlink || '-')}</td>
-        <td style="font-size:12px;white-space:nowrap">${esc(b.serial || '-')}</td><td class="c-sinal">${b.int6 ? '…' : '-'}</td><td class="c-sit"></td><td class="c-contato" style="white-space:nowrap"></td><td class="c-lido" style="white-space:nowrap"></td>
+        <td style="font-size:12px;white-space:nowrap">${esc(b.serial || '-')}</td><td style="font-size:12px;white-space:nowrap">${(() => { const u = noU2000(b.serial); return u ? esc(`${u.frame || '0'}/${u.slot}/${u.porta} · ONU ${u.onuId}${u.status ? ' · ' + u.status + (u.motivo ? ' (' + u.motivo + ')' : '') : ''}`) : '<span style="color:var(--text-muted)">não está nas listas importadas</span>'; })()}</td><td class="c-sinal">${b.int6 ? '…' : '-'}</td><td class="c-sit"></td><td class="c-contato" style="white-space:nowrap"></td><td class="c-lido" style="white-space:nowrap"></td>
         <td style="white-space:normal;min-width:170px;font-size:12.5px">${esc(b.endereco || '-')}</td><td style="font-size:12px">${esc(b.pppoe || '-')}</td><td>${esc(b.int6 || '-')}</td>
         <td style="white-space:nowrap">${b.int6 ? `<a href="#" class="u2l-det" data-i="${i}">detalhe</a> · <a href="#" class="u2l-atu" data-i="${i}" title="Manda a OLT ler o sinal desta ONU agora (igual ao botão Atualizar do AutoISP)">⚡ atualizar sinal</a>` : ''}</td></tr>`; }).join('')}</tbody></table></div>
       <p style="margin:8px 0 0"><button type="button" class="btn-export-xls" id="u2l-atu-todos">⚡ Atualizar o sinal de todos (até 30)</button></p>`;
@@ -31467,9 +31484,20 @@ function u2kLigarAutoispVivo() {
     if (!r.ok) { it.erro = r.erro; desenharLinha(i); toast(r.erro, 'erro', 6000); return r; }
     it.det = r.dados.depois; it.erro = ''; it.atualizado = true; it.antes = r.dados.antes; desenharLinha(i); return r;
   }
-  g('go').addEventListener('click', () => buscar());
-  g('form').addEventListener('keydown', ev => { if (ev.key === 'Enter' && ev.target.tagName === 'INPUT') { ev.preventDefault(); buscar(); } });
-  g('limpar').addEventListener('click', () => { campos.forEach(k => { g(k).value = ''; }); g('lista').innerHTML = ''; g('det').innerHTML = ''; msg(''); LIVE.itens = []; });
+  // chamada pela busca de cima: preenche nome / contrato / SN / OLT / PON a partir do texto digitado (mesma leitura da busca do U2000) e busca no AutoISP
+  U2K._buscarVivo = async q => {
+    const loc = u2kBuscaLocal(q), c = loc.criterios || {};
+    g('nome').value = (c.nomes || []).join(' ').replace(/_/g, ' '); g('contrato').value = c.contrato || ''; g('serial').value = (c.sns || [])[0] || '';
+    g('olt').value = (c.olts || []).length ? c.olts[0].join('-') : ''; g('pon').value = c.porta ? `${c.porta.frame || '0'}/${c.porta.slot}/${c.porta.porta}` : '';
+    const extras = ['pppoe', 'endereco', 'int6'].some(k => (g(k).value || '').trim());
+    if (!Object.values(c).some(v => Array.isArray(v) ? v.length : v) && !extras) { g('lista').innerHTML = ''; g('det').innerHTML = ''; msg(''); return; }
+    // sem a extensão (ou sem login no AutoISP) não insiste a cada busca: o aviso de conexão já está na tela
+    if (!LIVE.conectado && EXT_JH.presente === false && Date.now() - (LIVE.checadoEm || 0) < 20000) return;
+    LIVE.checadoEm = Date.now();
+    await buscar();
+  };
+  g('form').addEventListener('keydown', ev => { if (ev.key === 'Enter' && ev.target.tagName === 'INPUT') { ev.preventDefault(); const b = document.getElementById('u2-bgo'); if (b) b.click(); } });
+  g('limpar').addEventListener('click', () => { campos.forEach(k => { g(k).value = ''; }); const q = document.getElementById('u2-bq'); if (q) q.value = ''; const r = document.getElementById('u2-bres'); if (r) r.innerHTML = ''; g('lista').innerHTML = ''; g('det').innerHTML = ''; msg(''); LIVE.itens = []; });
   g('lista').addEventListener('click', async ev => {
     const olt = ev.target.closest('a.u2l-olt-ver'); if (olt) { ev.preventDefault(); campos.forEach(k => { g(k).value = ''; }); g('olt').value = olt.dataset.h; buscar(); return; }
     const a = ev.target.closest('a.u2l-det, a.u2l-atu'); if (a) {
@@ -31525,6 +31553,8 @@ function u2kLigarBusca() {
   };
   const buscar = async () => {
     const q = inp.value; const loc = u2kBuscaLocal(q);
+    // UMA busca só: o AutoISP ao vivo roda junto (sem esperar), com o que foi digitado aqui
+    if (U2K._buscarVivo) U2K._buscarVivo(q).catch(() => {});
     if (!U2K.onus.length) { box.innerHTML = '<div class="empty">Importe o inventário (All GPON ONU) ou uma lista GPON primeiro.</div>'; return; }
     if (loc.vazio) { box.innerHTML = `<div class="empty">${esc(loc.dica || 'Digite o SN, o nome do cliente ou a porta (0/1/15 · SAN-04 1/15 · 0/1/15/20).')}</div>`; return; }
     box.innerHTML = '<div class="empty">Buscando…</div>';
@@ -31560,24 +31590,24 @@ function renderU2000() {
         <span id="u2-msg" style="font-size:12.5px;color:var(--text-muted);align-self:center"></span></div>
     </div>
     <div class="panel u2-busca-navy" id="u2-busca" style="margin-bottom:1rem">
-      <h3 title="Pelo SN, pelo nome (alias) ou pela porta">🔎 Buscar assinante</h3>
-      <div class="toolbar" style="margin:0;box-shadow:none"><div class="field" style="flex:1;min-width:280px"><label>Buscar</label><input type="text" id="u2-bq" autocomplete="off" placeholder="SN (HWTCA519EAAE) · nome do cliente · porta (0/1/15 · SAN-04 1/15 · 0/1/15/20) · contrato"></div><button class="btn" type="button" id="u2-bgo">Buscar</button></div>
+      <h3 title="Uma busca só: procura no U2000 (importado) e, com a extensão do Chrome conectada, no AutoISP ao vivo, com o sinal atualizado. Pelo SN, nome, contrato, OLT ou porta.">🔎 Buscar assinante <span style="font-size:12px;font-weight:500;opacity:.8">· U2000 + AutoISP ao vivo</span></h3>
+      <div class="toolbar" style="margin:0;box-shadow:none"><div class="field" style="flex:1;min-width:280px"><label>Buscar</label><input type="text" id="u2-bq" autocomplete="off" placeholder="SN (HWTCA519EAAE) · nome do cliente · contrato · OLT e porta (SAN-04 1/15 · 0/1/15/20)"></div><button class="btn" type="button" id="u2-bgo">Buscar</button></div>
       <div id="u2-bres" style="margin-top:10px"></div>
-      <div id="u2-live" style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
-        <h3 style="margin:0 0 6px" title="Busca em tempo real, com o sinal atualizado — por nome, contrato, SN, OLT ou PON">🔌 AutoISP ao vivo</h3>
-        <div id="u2l-conn" style="font-size:13px;margin:0 0 10px"></div>
-        <div class="toolbar" id="u2l-form" style="margin:0;box-shadow:none">
-          <div class="field"><label>Nome</label><input type="text" id="u2l-nome" autocomplete="off" placeholder="nome do assinante"></div>
-          <div class="field"><label>Contrato</label><input type="text" id="u2l-contrato" autocomplete="off" placeholder="nº do contrato"></div>
-          <div class="field"><label>SN da ONU</label><input type="text" id="u2l-serial" autocomplete="off" placeholder="HWTCA519EAAE"></div>
-          <div class="field"><label>OLT</label><input type="text" id="u2l-olt" list="u2l-olts" autocomplete="off" placeholder="ex.: SAN-04"><datalist id="u2l-olts"></datalist></div>
-          <div class="field"><label>PON</label><input type="text" id="u2l-pon" autocomplete="off" placeholder="ex.: 0/3/3" style="min-width:90px"></div>
-          <div class="field"><label>PPPoE</label><input type="text" id="u2l-pppoe" autocomplete="off" placeholder="usuário PPPoE"></div>
-          <div class="field"><label>Endereço</label><input type="text" id="u2l-endereco" autocomplete="off" placeholder="rua, bairro…"></div>
-          <div class="field"><label>Int6</label><input type="text" id="u2l-int6" autocomplete="off" placeholder="ID do AutoISP" style="min-width:110px"></div>
-          <button class="btn" type="button" id="u2l-go">Buscar no AutoISP</button><button class="btn-export-xls" type="button" id="u2l-limpar">Limpar</button>
-        </div>
-        <label style="font-size:12.5px;color:var(--text-secondary);display:inline-flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="u2l-ler" checked> Ler o sinal de cada resultado (até 30)</label>
+      <div id="u2-live" style="margin-top:10px">
+        <div id="u2l-conn" style="font-size:13px;margin:0 0 6px"></div>
+        <details id="u2l-mais" style="margin:2px 0 8px">
+          <summary style="cursor:pointer;font-size:12.5px" title="O nome, contrato, SN, OLT e porta digitados em cima já vão sozinhos pro AutoISP; estes são extras">Mais filtros do AutoISP (PPPoE, endereço, Int6)</summary>
+          <div class="toolbar" id="u2l-form" style="margin:8px 0 0;box-shadow:none">
+            <input type="hidden" id="u2l-nome"><input type="hidden" id="u2l-contrato"><input type="hidden" id="u2l-serial"><input type="hidden" id="u2l-olt"><input type="hidden" id="u2l-pon">
+            <datalist id="u2l-olts"></datalist>
+            <div class="field"><label>PPPoE</label><input type="text" id="u2l-pppoe" autocomplete="off" placeholder="usuário PPPoE"></div>
+            <div class="field"><label>Endereço</label><input type="text" id="u2l-endereco" autocomplete="off" placeholder="rua, bairro…"></div>
+            <div class="field"><label>Int6</label><input type="text" id="u2l-int6" autocomplete="off" placeholder="ID do AutoISP" style="min-width:110px"></div>
+            <button class="btn-export-xls" type="button" id="u2l-limpar">Limpar tudo</button>
+          </div>
+        </details>
+        <button type="button" id="u2l-go" hidden></button>
+        <label style="font-size:12.5px;color:var(--text-secondary);display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="u2l-ler" checked> Ler o sinal de cada resultado do AutoISP (até 30)</label>
         <div id="u2l-msg" style="font-size:13px;margin-top:8px"></div>
         <div id="u2l-lista"></div><div id="u2l-det"></div>
       </div>
