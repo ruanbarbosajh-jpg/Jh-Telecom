@@ -13750,6 +13750,8 @@ function importarCsvPCR(texto) {
   // pelo mapa de O.S em aberto do Parcial do Dia (extrairBairro tira o bairro
   // daqui, igual já faz com a planilha de produção).
   const iEndereco = col('endereco');
+  // contato do assinante (20/10/2026, aba Contatos): o CSV de atividades traz Telefone / Telefone Celular / E-mail — agora cada linha da PCR guarda isso
+  const iTel = col('telefone'), iCel = col('telefone celular'), iMail = col('e mail'), iNumCli = col('numero do cliente');
   contatosGuardarDoCsv(linhas, 'CSV de atividades');   // telefone / celular / e-mail do assinante (aba Contatos); nunca atrapalha a importação
   if (iData < 0 || iAbert < 0 || iOS < 0) return { erro: 'Não encontrei as colunas "Data", "Data Abertura Chamado" e "Ordem de Serviço" nesse CSV.' };
 
@@ -13798,6 +13800,8 @@ function importarCsvPCR(texto) {
       cliente: (l[iNome] || '').trim(), tipo_atividade: (l[iTipo] || '').trim(),
       motivo: iMotivo >= 0 ? (l[iMotivo] || '').trim() : '',
       endereco: iEndereco >= 0 ? (l[iEndereco] || '').trim() : '',
+      telefone: iTel >= 0 ? contatoTelValido(l[iTel]) : '', celular: iCel >= 0 ? contatoTelValido(l[iCel]) : '',
+      email: iMail >= 0 ? (l[iMail] || '').trim() : '', numero_cliente: iNumCli >= 0 ? contatoSoDigitos(l[iNumCli]) : '',
     });
   }
   // CHAVE de cada linha: dia + O.S + nº da ocorrência daquela O.S no dia.
@@ -13819,7 +13823,7 @@ function importarCsvPCR(texto) {
   const anteriores = new Map(DB.pcr.map(r => [r.chave, r]));
   const tm = d => d ? +new Date(d) : 0;
   const assinatura = r => [r.status, r.recurso, r.cidade, r.tipo_atividade, r.motivo, r.cliente, r.contrato, r.endereco,
-    r.periodo, r.periodo_sistema, r.horas_prazo, r.faixa, r.aging, tm(r.abertura), tm(r.limite), tm(r.encerramento), tm(r.inicio)].join('¦');
+    r.periodo, r.periodo_sistema, r.horas_prazo, r.faixa, r.aging, tm(r.abertura), tm(r.limite), tm(r.encerramento), tm(r.inicio), r.telefone, r.celular, r.email].join('¦');
   const diaJaMarcado = new Set();
   out.forEach(r => {
     const base = `${r.data}|${r.os || 'sem-os'}`;
@@ -15866,9 +15870,55 @@ async function contatosGravarNoBanco(mapa, aoProgresso) {
   if (erro) { if (/relation|does not exist|42P01|schema cache|PGRST205/i.test(String(erro.message || erro.code || ''))) CONTATOS_ESTADO.semTabela = true; return { ok: false, erro }; }
   return { ok: true };
 }
-// busca no banco só os contratos pedidos que ainda não conheço (100 por consulta, até 4 ao mesmo tempo)
-async function contatosCarregar(contratos) {
+// Telefone que o CSV de atividades já trouxe em QUALQUER dia carregado (DB.pcr): por contrato e por nº do cliente, o dia mais novo vale
+let _CT_IDX = null, _CT_IDX_N = -1;
+function contatosIndiceCsv() {
+  if (_CT_IDX && _CT_IDX_N === DB.pcr.length) return _CT_IDX;
+  const porCtt = new Map(), porCli = new Map();
+  DB.pcr.forEach(r => {
+    if (!r.telefone && !r.celular) return;
+    const c = { telefone: r.telefone || '', celular: r.celular || '', email: r.email || '', nome: r.cliente || '', endereco: r.endereco || '', data: r.data || '' };
+    const k = contatoSoDigitos(r.contrato), n = contatoSoDigitos(r.numero_cliente);
+    if (k && (!porCtt.has(k) || c.data > porCtt.get(k).data)) porCtt.set(k, c);
+    if (n && (!porCli.has(n) || c.data > porCli.get(n).data)) porCli.set(n, c);
+  });
+  _CT_IDX = { porCtt, porCli }; _CT_IDX_N = DB.pcr.length; return _CT_IDX;
+}
+let _CT_CLI = null, _CT_CLI_N = -1;   // planilhas/GIGA guardadas, também por nº do cliente
+function contatosIndiceCliente() {
+  if (_CT_CLI && _CT_CLI_N === CONTATOS.size) return _CT_CLI;
+  const m = new Map(); CONTATOS.forEach(c => { if (c.numero_cliente && (c.telefone || c.celular) && (!m.has(c.numero_cliente) || (c.data || '') > (m.get(c.numero_cliente).data || ''))) m.set(c.numero_cliente, c); });
+  _CT_CLI = m; _CT_CLI_N = CONTATOS.size; return m;
+}
+// O contato de UMA ordem. Ordem de preferência (pedido do cliente: "considerar o CSV importado, e se não tiver telefone procurar na planilha de produção"):
+//   1) o telefone da própria linha do CSV desta ordem; 2) o do mesmo contrato em outro dia do CSV; 3) o da planilha / GIGA guardados (mesmo contrato);
+//   4) o mesmo nº do cliente (CSV de outro dia ou planilha) — o cliente pode ter outro contrato. Devolve também DE ONDE veio (`origem`).
+function contatoDaOrdem(l) {
+  const base = CONTATOS.get(l.contrato) || null, idx = contatosIndiceCsv();
+  const tem = c => c && (c.telefone || c.celular);
+  const fecha = (c, origem) => ({ telefone: c.telefone || '', celular: c.celular || '', email: c.email || (base && base.email) || '', nome: c.nome || (base && base.nome) || '', endereco: c.endereco || (base && base.endereco) || '', origem });
+  if (tem(l.csv)) return fecha({ ...l.csv, nome: l.cliente, endereco: l.endereco }, 'CSV do dia');
+  const outro = idx.porCtt.get(l.contrato); if (tem(outro)) return fecha(outro, `CSV de ${formatDate(outro.data)}`);
+  if (tem(base)) return fecha(base, 'planilha');
+  const n = contatoSoDigitos(l.numcli);
+  if (n) { const oc = idx.porCli.get(n); if (tem(oc)) return fecha(oc, `CSV de ${formatDate(oc.data)} (nº do cliente)`); const pl = contatosIndiceCliente().get(n); if (tem(pl)) return fecha(pl, 'planilha (nº do cliente)'); }
+  return base ? fecha({}, '') : null;
+}
+// busca no banco só os contratos pedidos que ainda não conheço (100 por consulta, até 4 ao mesmo tempo); `numerosCliente` = plano B pra quem não tem telefone pelo contrato
+async function contatosCarregar(contratos, numerosCliente) {
   if (!supa || CONTATOS_ESTADO.semTabela) return;
+  // 2ª rodada: quem continua sem telefone depois do contrato é procurado pelo nº do cliente
+  const numeros = [...new Set((numerosCliente || []).map(contatoSoDigitos).filter(n => n.length >= 4 && !CONTATOS_TENTADOS.has('cli:' + n)))];
+  if (numeros.length) {
+    const ps = []; for (let i = 0; i < numeros.length; i += 100) ps.push(numeros.slice(i, i + 100));
+    await Promise.all(ps.map(parte => comLimite(async () => {
+      try {
+        const { data, error } = await supa.from('contatos_assinantes').select('*').in('numero_cliente', parte);
+        if (error) return; parte.forEach(n => CONTATOS_TENTADOS.add('cli:' + n));
+        (data || []).forEach(r => { if (!CONTATOS.has(r.contrato)) CONTATOS.set(r.contrato, { contrato: r.contrato, nome: r.nome || '', telefone: r.telefone || '', celular: r.celular || '', email: r.email || '', endereco: r.endereco || '', cidade: r.cidade || '', cep: r.cep || '', numero_cliente: r.numero_cliente || '', data: '', fonte: r.fonte || '' }); });
+      } catch (e) { /* tenta de novo na próxima abertura */ }
+    })));
+  }
   const faltam = [...new Set(contratos.map(contatoSoDigitos).filter(c => c.length >= 5 && !CONTATOS_TENTADOS.has(c)))];
   if (!faltam.length) return;
   const partes = []; for (let i = 0; i < faltam.length; i += 100) partes.push(faltam.slice(i, i + 100));
@@ -15911,6 +15961,14 @@ async function contatosLerArquivo(arq, aoMsg) {
 function renderContatos() {
   const dias = [...new Set(DB.pcr.map(r => r.data).filter(Boolean))].sort().reverse();
   document.getElementById('content').innerHTML = `
+    <div class="panel" style="margin-bottom:1rem">
+      <h3 title="O sistema lê as colunas Telefone / Telefone Celular / E-mail do CSV de atividades (já é feito sozinho quando você importa na PCR), do CSV de chamados da GIGA e das planilhas Excel">📥 Importar contatos (CSV ou planilha)</h3>
+      <div class="toolbar" style="margin:0;box-shadow:none">${campoArquivo('ct-file', 'CSV de atividades, CSV da GIGA ou planilha Excel (BASE GERAL CONCLUÍDO, BASE PRODUÇÃO, BASE DE DADOS…)', '.csv,.xlsx,.xls,text/csv', ' multiple')}
+        <span id="ct-msg" style="font-size:12.5px;color:var(--text-muted);align-self:center"></span></div>
+    </div>
+    <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span>Assinantes e técnicos</span>
+      <button type="button" class="btn-sinalizar" id="ct-sinalizar" title="Copia a lista pra colar no WhatsApp: por técnico, CLIENTE - telefone - endereço - serviço - prazo">📲 SINALIZAR</button>
+      <button type="button" class="btn-export-xls" id="ct-excel">⤓ Excel (só o filtrado)</button></div>
     <div class="toolbar">
       <div class="field"><label>Data (CSV de atividades)</label><select id="ct-dia">${dias.length ? dias.map(d => `<option value="${d}">${formatDate(d)}</option>`).join('') : '<option value="">sem CSV importado</option>'}</select></div>
       <div class="field"><label>Técnico</label><select id="ct-tec"><option value="">Todos os técnicos</option></select></div>
@@ -15924,11 +15982,6 @@ function renderContatos() {
       <div class="field" style="justify-content:flex-end"><label style="display:flex;gap:6px;align-items:center;font-size:12.5px" title="Chamados abertos na GIGA (aba Chamados em Aberto) cujo contrato ainda não está em campo no dia escolhido"><input type="checkbox" id="ct-giga"> Incluir chamados GIGA sem técnico</label></div>
       <button class="btn" id="ct-aplicar">Filtrar</button>
     </div>
-    <div class="panel" style="margin-bottom:1rem">
-      <h3 title="O sistema lê as colunas Telefone / Telefone Celular / E-mail do CSV de atividades (já é feito sozinho quando você importa na PCR), do CSV de chamados da GIGA e das planilhas Excel">📥 Importar contatos (CSV ou planilha)</h3>
-      <div class="toolbar" style="margin:0;box-shadow:none">${campoArquivo('ct-file', 'CSV de atividades, CSV da GIGA ou planilha Excel (BASE GERAL CONCLUÍDO, BASE PRODUÇÃO, BASE DE DADOS…)', '.csv,.xlsx,.xls,text/csv', ' multiple')}
-        <span id="ct-msg" style="font-size:12.5px;color:var(--text-muted);align-self:center"></span></div>
-    </div>
     <div id="ct-body"></div>`;
   let seq = 0;   // descarta resposta atrasada quando o filtro muda no meio da busca no banco
   const g = id => document.getElementById(id);
@@ -15941,24 +15994,26 @@ function renderContatos() {
       const gr = classifyStatusGranular(r.status), aberta = ['pendente', 'em_rota', 'iniciado'].includes(gr), lim = r.limite ? +new Date(r.limite) : null;
       const prazo = !lim ? 'semprazo' : gr === 'concluido' ? 'concluida' : !aberta ? 'outro' : lim < agora ? 'vencida' : lim - agora < 2 * 36e5 ? 'vence2h' : 'noprazo';
       return { os: r.os, contrato: contatoSoDigitos(r.contrato), cliente: r.cliente || '', endereco: r.endereco || '', cidade: rotuloCidadeGeral(r.cidade), tipo: rotuloTipoServico(r.tipo_atividade), status: r.status || '',
-        tecnico: ehRecursoTecnico(r.recurso) ? r.recurso : '', gr, aberta, limite: lim, prazo, ret: ret.get(String(r.os)) || '' };
+        tecnico: ehRecursoTecnico(r.recurso) ? r.recurso : '', gr, aberta, limite: lim, prazo, ret: ret.get(String(r.os)) || '',
+        csv: { telefone: r.telefone || '', celular: r.celular || '', email: r.email || '' }, numcli: r.numero_cliente || '' };
     });
     if (incluirGiga) {
       const emCampo = new Set(doDia.filter(r => !/nao conclu/.test(normalizeHeader(r.status))).map(r => contatoSoDigitos(r.contrato)));
       DB.chamadosGiga.filter(r => chamadoGigaEmAberto(r.status) && !emCampo.has(contatoSoDigitos(r.contrato))).forEach(r => {
         linhas.push({ os: '', contrato: contatoSoDigitos(r.contrato), cliente: r.cliente || '', endereco: [r.logradouro, r.bairro].filter(Boolean).join(' - '), cidade: r.unidade || 'GIGA', tipo: r.fila || 'GIGA', status: 'Chamado GIGA (sem técnico)',
-          tecnico: '', gr: 'pendente', aberta: true, limite: null, prazo: 'semprazo', ret: '', giga: true });
+          tecnico: '', gr: 'pendente', aberta: true, limite: null, prazo: 'semprazo', ret: '', giga: true, csv: null, numcli: '' });
       });
     }
     return linhas;
   }
-  const contatoDe = l => CONTATOS.get(l.contrato) || null;
+  const contatoDe = l => contatoDaOrdem(l);
   const fmtLimite = l => l.limite ? new Date(l.limite).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
   const ROT_PRAZO = { vencida: ['Vencido', 'var(--danger)'], vence2h: ['Vence em até 2h', '#f59e0b'], noprazo: ['No prazo', 'var(--success)'], concluida: ['Concluído', 'var(--text-secondary)'], semprazo: ['Sem prazo', 'var(--text-muted)'], outro: ['—', 'var(--text-muted)'] };
   function celTel(c) {
     if (!c || (!c.telefone && !c.celular)) return '<span style="color:var(--text-muted)">sem telefone</span>';
     const un = (num, rot) => { const d = contatoTelValido(num); return d ? `<div style="white-space:nowrap">${rot ? `<span style="font-size:11px;color:var(--text-muted)">${rot} </span>` : ''}<a href="tel:+55${d}" class="ct-tel">${esc(contatoFmtTel(d))}</a> <a href="https://wa.me/55${d}" target="_blank" rel="noopener" class="ct-wa" title="Abrir conversa no WhatsApp">💬</a></div>` : ''; };
-    return un(c.celular, c.telefone ? 'cel' : '') + un(c.telefone, c.celular ? 'fixo' : '');
+    const origem = c.origem && c.origem !== 'CSV do dia' ? `<div style="font-size:10.5px;color:var(--text-muted)" title="O CSV deste dia não trazia telefone dessa ordem: o número veio de outra fonte">↳ ${esc(c.origem)}</div>` : '';
+    return un(c.celular, c.telefone ? 'cel' : '') + un(c.telefone, c.celular ? 'fixo' : '') + origem;
   }
   // ---- aplica os filtros ----
   function filtrar(todas) {
@@ -15989,9 +16044,6 @@ function renderContatos() {
         ${metricCard('Sem telefone', (lista.length - comTel).toLocaleString('pt-BR'), lista.length - comTel > 0)}
         ${metricCard('Técnicos', tecs.toLocaleString('pt-BR'))}
       </div>
-      <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span>Assinantes e técnicos</span>
-        <button type="button" class="btn-sinalizar" id="ct-sinalizar" title="Copia a lista pra colar no WhatsApp: por técnico, CLIENTE - telefone - endereço - serviço - prazo">📲 SINALIZAR</button>
-        <button type="button" class="btn-export-xls" id="ct-excel">⤓ Excel (só o filtrado)</button></div>
       ${!lista.length ? '<div class="panel"><div class="empty">Nenhuma ordem nesse filtro. Importe o CSV de atividades na PCR (o telefone vem junto) ou ajuste os filtros.</div></div>' : `
       <div class="table-wrap caixa-tabela-fixa rolagem-inteira-na-imagem" style="margin-bottom:1.5rem"><table class="data-table" id="tab-contatos"><thead><tr>
         <th>Técnico</th><th>Cliente</th><th>Telefone</th><th>E-mail</th><th>Contrato</th><th>O.S</th><th>Endereço</th><th>Cidade</th><th>Tipo de serviço</th><th>Status</th><th>Prazo</th><th>IFI/IRR</th></tr></thead><tbody>
@@ -16002,14 +16054,15 @@ function renderContatos() {
           <td style="white-space:nowrap">${l.limite ? `<b>${esc(fmtLimite(l))}</b><br>` : ''}<span style="color:${pz[1]};font-weight:700;font-size:12px">${pz[0]}</span></td>
           <td>${l.ret ? `<b style="color:${l.ret === 'IFI' ? 'var(--danger)' : '#f59e0b'}">${l.ret}</b>` : '-'}</td></tr>`; }).join('')}
       </tbody></table></div>`}`;
-    const bx = g('ct-excel'); if (bx) bx.addEventListener('click', () => { const r = exportarTabelaVisivel(g('tab-contatos'), 'contatos-' + (g('ct-dia').value || hoje())); if (r) avisoBotao(bx, `⤓ ${r.linhas} linha(s)`, '⤓ Excel (só o filtrado)'); });
-    const bs = g('ct-sinalizar'); if (bs) bs.addEventListener('click', () => {
+  }
+  // Excel e SINALIZAR ficam no título da seção (fixos): leem a tabela que está na tela agora
+  { const bx = g('ct-excel'); bx.addEventListener('click', () => { const t = g('tab-contatos'); if (!t) { toast('Não há tabela pra exportar (confira o filtro).', 'aviso'); return; } const r = exportarTabelaVisivel(t, 'contatos-' + (g('ct-dia').value || hoje())); if (r) avisoBotao(bx, `⤓ ${r.linhas} linha(s)`, '⤓ Excel (só o filtrado)'); });
+    const bs = g('ct-sinalizar'); bs.addEventListener('click', () => {
       // só o que está VISÍVEL na tabela (respeita o funil das colunas, igual ao SINALIZAR dos prazos)
       const vis = [...document.querySelectorAll('#tab-contatos tbody tr')].filter(tr => tr.style.display !== 'none' && !tr.hidden).map(tr => atuais[Number(tr.dataset.ri)]).filter(Boolean);
       if (!vis.length) { toast('Nada visível na tabela (confira o filtro).', 'aviso'); return; }
       copiarParaWhatsApp(textoSinalizarContatos(vis, contatoDe, fmtLimite), bs, '📲 SINALIZAR', `${vis.length} assinante(s)`);
-    });
-  }
+    }); }
   async function carregar() {
     const meu = ++seq, dia = g('ct-dia').value, giga = g('ct-giga').checked;
     if (!dia && !giga) { g('ct-body').innerHTML = '<div class="panel"><div class="empty">Importe o CSV de atividades na PCR (ele traz o telefone do assinante) ou importe aqui em cima.</div></div>'; return; }
@@ -16020,6 +16073,8 @@ function renderContatos() {
     preenche('ct-cid', [...new Set(todas.map(l => l.cidade).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR')), 'Todas as cidades');
     desenhar(todas);                                       // já mostra o que está em memória…
     await contatosCarregar(todas.map(l => l.contrato));    // …e completa com o banco (só os contratos desta tela)
+    const semTel = todas.filter(l => { const c = contatoDaOrdem(l); return !(c && (c.telefone || c.celular)) && l.numcli; });
+    if (semTel.length) await contatosCarregar([], semTel.map(l => l.numcli));   // plano B: o mesmo nº do cliente em outro contrato
     if (meu === seq && g('ct-body')) { const aberto = document.activeElement && document.activeElement.id === 'ct-q'; desenhar(todas); if (aberto) g('ct-q').focus(); }
     g('ct-dia')._todas = todas;
   }
@@ -28129,6 +28184,7 @@ const SAUDE_CHECAGENS_SQL = [
   { passo: 'PASSO-58', rotulo: 'Histórico de alterações de Receitas e Despesas', tabela: 'financeiro_historico' },
   { passo: 'PASSO-59', rotulo: 'Folha do Escritório: parcelas do vale', tabela: 'folha_escritorio', coluna: 'parcela_vale' },
   { passo: 'PASSO-60', rotulo: 'Contatos dos assinantes (aba Contatos)', tabela: 'contatos_assinantes' },
+  { passo: 'PASSO-61', rotulo: 'PCR: telefone do assinante vindo do CSV', tabela: 'pcr', coluna: 'telefone,celular,email,numero_cliente' },
   { passo: 'PASSO-33', rotulo: 'Trava da importação da PCR', rpc: 'pcr_trava_status', args: { p_token: 'saude' } },
   { passo: 'PASSO-34', rotulo: 'Fechamento do ciclo da Folha', tabela: 'folha_fechamentos' },
   { passo: 'PASSO-39', rotulo: 'Clientes da JH com o sinal real (Monitoramento OLT)', tabela: 'monitor_olt_clientes' },
