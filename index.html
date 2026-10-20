@@ -15961,8 +15961,9 @@ async function contatosLerArquivo(arq, aoMsg) {
 function renderContatos() {
   const dias = [...new Set(DB.pcr.map(r => r.data).filter(Boolean))].sort().reverse();
   document.getElementById('content').innerHTML = `
+    <div id="ct-cards"></div>
     <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span>Assinantes e técnicos</span>
-      <button type="button" class="btn-sinalizar" id="ct-sinalizar" title="Copia a lista pra colar no WhatsApp: por técnico, CLIENTE - telefone - endereço - serviço">📲 SINALIZAR</button>
+      <button type="button" class="btn-sinalizar" id="ct-sinalizar" title="Copia a lista pra colar no WhatsApp: por técnico, CLIENTE - número">📲 SINALIZAR</button>
       <button type="button" class="btn-export-xls" id="ct-excel">⤓ Excel (só o filtrado)</button></div>
     <div class="toolbar">
       <div class="field"><label>Data (CSV de atividades)</label><select id="ct-dia">${dias.length ? dias.map(d => `<option value="${d}">${formatDate(d)}</option>`).join('') : '<option value="">sem CSV importado</option>'}</select></div>
@@ -15973,8 +15974,6 @@ function renderContatos() {
       <div class="field"><label>Situação da ordem</label><select id="ct-sit"><option value="aberta">Em aberto (pendente / em rota / iniciado)</option><option value="">Todas as ordens</option><option value="concluida">Concluídas</option></select></div>
       <div class="field"><label>Contato</label><select id="ct-tem"><option value="">Todos</option><option value="com">Só com telefone</option><option value="sem">Sem telefone</option></select></div>
       <div class="field"><label>Buscar</label><input type="text" id="ct-q" placeholder="cliente, contrato, O.S, endereço…" autocomplete="off"></div>
-      <div class="field" style="justify-content:flex-end"><label style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input type="checkbox" id="ct-sep" checked> Separar por técnico</label></div>
-      <div class="field" style="justify-content:flex-end"><label style="display:flex;gap:6px;align-items:center;font-size:12.5px" title="Chamados abertos na GIGA (aba Chamados em Aberto) cujo contrato ainda não está em campo no dia escolhido"><input type="checkbox" id="ct-giga" checked> Incluir chamados GIGA sem técnico</label></div>
       <button class="btn" id="ct-aplicar">Filtrar</button>
     </div>
     <div id="ct-body"></div>`;
@@ -16028,18 +16027,18 @@ function renderContatos() {
   let atuais = [];
   function desenhar(todas) {
     const corpo = g('ct-body');
-    const lista = filtrar(todas), sep = g('ct-sep').checked;
+    const lista = filtrar(todas), sep = true;   // sempre separado por técnico (sem caixinha, pedido do cliente 20/10/2026)
     lista.sort((a, b) => (sep ? (a.tecnico || 'zzzzzz').localeCompare(b.tecnico || 'zzzzzz', 'pt-BR') : 0) || (a.limite || Infinity) - (b.limite || Infinity) || String(a.cliente).localeCompare(String(b.cliente), 'pt-BR'));
     atuais = lista;
     const comTel = lista.filter(l => { const c = contatoDe(l); return c && (c.telefone || c.celular); }).length, tecs = new Set(lista.map(l => l.tecnico).filter(Boolean)).size;
     const aviso = CONTATOS_ESTADO.semTabela ? '<div style="padding:10px 12px;border:1px solid #f59e0b;border-radius:10px;margin-bottom:12px;font-size:13px;background:color-mix(in srgb, #f59e0b 10%, transparent)">⚠ A tabela de contatos ainda não existe no banco (rode o <b>sql/PASSO-60-contatos-assinantes.sql</b> no Supabase). Por enquanto valem só os contatos importados <b>nesta sessão</b> — use o botão <b>Importar CSV de atividades</b> da barra lateral.</div>' : '';
-    corpo.innerHTML = `${aviso}<div class="cards-grid">
+    g('ct-cards').innerHTML = `${aviso}<div class="cards-grid">
         ${metricCard('Ordens listadas', lista.length.toLocaleString('pt-BR'))}
         ${metricCard('Com telefone', comTel.toLocaleString('pt-BR'), false, { positive: comTel > 0 && comTel === lista.length })}
         ${metricCard('Sem telefone', (lista.length - comTel).toLocaleString('pt-BR'), lista.length - comTel > 0)}
         ${metricCard('Técnicos', tecs.toLocaleString('pt-BR'))}
-      </div>
-      ${!lista.length ? '<div class="panel"><div class="empty">Nenhuma ordem nesse filtro. Importe o CSV de atividades pelo botão da barra lateral (o telefone vem junto) ou ajuste os filtros.</div></div>' : `
+      </div>`;
+    corpo.innerHTML = `${!lista.length ? '<div class="panel"><div class="empty">Nenhuma ordem nesse filtro. Importe o CSV de atividades pelo botão da barra lateral (o telefone vem junto) ou ajuste os filtros.</div></div>' : `
       <div class="table-wrap caixa-tabela-fixa rolagem-inteira-na-imagem" style="margin-bottom:1.5rem"><table class="data-table" id="tab-contatos"><thead><tr>
         <th>Técnico</th><th>Cliente</th><th>Telefone</th><th>E-mail</th><th>Contrato</th><th>O.S</th><th>Endereço</th><th>Cidade</th><th>Tipo de serviço</th><th>Status</th><th>Prazo</th><th>IFI/IRR</th></tr></thead><tbody>
         ${lista.map((l, i) => { const c = contatoDe(l), inicio = sep && (i === 0 || lista[i - 1].tecnico !== l.tecnico), pz = ROT_PRAZO[l.prazo] || ROT_PRAZO.outro;
@@ -16059,8 +16058,8 @@ function renderContatos() {
       copiarParaWhatsApp(textoSinalizarContatos(vis, contatoDe, fmtLimite), bs, '📲 SINALIZAR', `${vis.length} assinante(s)`);
     }); }
   async function carregar() {
-    const meu = ++seq, dia = g('ct-dia').value, giga = g('ct-giga').checked;
-    if (!dia && !giga) { g('ct-body').innerHTML = '<div class="panel"><div class="empty">Importe o CSV de atividades pelo botão <b>Importar CSV de atividades</b> da barra lateral (ele traz o telefone do assinante).</div></div>'; return; }
+    const meu = ++seq, dia = g('ct-dia').value, giga = true;   // sempre inclui os chamados da GIGA sem técnico (sem caixinha)
+    if (!dia && !giga) { g('ct-cards').innerHTML = ''; g('ct-body').innerHTML = '<div class="panel"><div class="empty">Importe o CSV de atividades pelo botão <b>Importar CSV de atividades</b> da barra lateral (ele traz o telefone do assinante).</div></div>'; return; }
     const todas = dia ? montarLinhas(dia, giga) : montarLinhas('__nenhum__', giga);
     // opções de técnico / cidade desse dia (preservando a escolha atual quando ainda existe)
     const preenche = (id, valores, todosTxt, extra) => { const el = g(id), atual = el.value; el.innerHTML = `<option value="">${todosTxt}</option>${extra || ''}${valores.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('')}`; if ([...el.options].some(o => o.value === atual)) el.value = atual; };
@@ -16074,20 +16073,19 @@ function renderContatos() {
     g('ct-dia')._todas = todas;
   }
   g('ct-aplicar').addEventListener('click', carregar);
-  g('ct-dia').addEventListener('change', carregar); g('ct-giga').addEventListener('change', carregar);
-  ['ct-tec', 'ct-cid', 'ct-prazo', 'ct-ret', 'ct-sit', 'ct-tem', 'ct-sep'].forEach(id => g(id).addEventListener('change', () => desenhar(g('ct-dia')._todas || [])));
+  g('ct-dia').addEventListener('change', carregar);
+  ['ct-tec', 'ct-cid', 'ct-prazo', 'ct-ret', 'ct-sit', 'ct-tem'].forEach(id => g(id).addEventListener('change', () => desenhar(g('ct-dia')._todas || [])));
   g('ct-q').addEventListener('input', () => desenhar(g('ct-dia')._todas || []));
   carregar();
 }
-// SINALIZAR dos contatos: por técnico, uma linha por assinante — CLIENTE - telefone - endereço - serviço [- IFI|IRR]; linha em branco entre técnicos
+// SINALIZAR dos contatos: por técnico, uma linha por assinante — CLIENTE - número; linha em branco entre técnicos
 function textoSinalizarContatos(lista, contatoDe, fmtLimite) {
   const por = new Map();
   lista.forEach(l => { const k = l.tecnico ? l.tecnico.trim() : 'SEM TÉCNICO'; if (!por.has(k)) por.set(k, []); por.get(k).push(l); });
   return [...por.entries()].sort((a, b) => (a[0] === 'SEM TÉCNICO') - (b[0] === 'SEM TÉCNICO') || a[0].localeCompare(b[0], 'pt-BR')).map(([tec, ls]) => tec.toUpperCase() + '\n' + ls.map(l => {
     const c = contatoDe(l), tel = c ? contatoFmtTel(c.celular || c.telefone) : '';
-    const partes = [String(l.cliente || (c && c.nome) || '').trim().toUpperCase(), tel || 'sem telefone', String(l.endereco || (c && c.endereco) || '').trim(), l.tipo];
-    if (l.ret) partes.push(l.ret);   // sem prazo nem horário (pedido do cliente, 20/10/2026); só o IFI/IRR quando for retorno
-    return partes.filter(Boolean).join(' - ');
+    // só nome do cliente e número (pedido do cliente, 20/10/2026): sem endereço, serviço, prazo nem IFI/IRR
+    return [String(l.cliente || (c && c.nome) || '').trim().toUpperCase(), tel || 'sem telefone'].filter(Boolean).join(' - ');
   }).join('\n')).join('\n\n');
 }
 
