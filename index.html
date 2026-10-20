@@ -30888,7 +30888,7 @@ const u2kDur = ms => { if (!(ms > 0)) return ''; const m = Math.round(ms / 60000
 // Usado pelo Analítico e pela aba "Cliente e monitorar"; `calcular()` pode ser chamado de novo (o contrato chega do AutoISP em segundo plano).
 const u2kTipoMassiva = t => String(t).startsWith('Porta PON') ? 'PON sem sinal' : String(t).startsWith('Sem energia') ? 'Sem energia' : 'LOS / fibra';
 // fim da massiva: o último encerramento dos alarmes; "Em aberto" enquanto a porta ainda tem alarme (mesma regra das abas de massiva)
-const u2kFimMassiva = e => (e.abertas > 0 && (String(e.tipo).startsWith('Porta PON') || e.abertas >= 5 || e.abertas * 2 >= e.onus)) ? 'Em aberto' : u2kFmtData(e.resolvidoEm || e.fim);
+const u2kFimMassiva = e => (e.abertas > 0 && (String(e.tipo).startsWith('Porta PON') || e.abertas >= 5 || e.abertas * 2 >= e.onus)) ? 'Em aberto' : (e.resolvidoEm ? u2kFmtData(e.resolvidoEm) : 'Sem baixa no U2000');   // 20/10/2026: o U2000 deixa muito alarme sem encerrar; o `fim` do evento é só o último alarme da janela de ~10 min do início, então "terminou" saía igual a "começou"
 const u2kFmtChamado = (t, comHora) => t ? new Date(t).toLocaleString('pt-BR', comHora ? { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' } : { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
 function u2kColsChamadosMassiva(cidDe) {
   return [{ t: 'IFI / IRR', h: r => r.marcaPot ? `<span class="badge ${r.marca ? (r.marcaPot === 'IFI' ? 'warn' : 'amber') : 'neutral'}" title="${r.marca ? 'o chamado foi concluído: virou retorno' : 'só vira IFI / IRR se o chamado for concluído'}" style="white-space:normal">${esc(r.rotulo)}</span>` : '<span style="color:var(--text-muted)">não</span>', x: r => r.rotulo, s: 'white-space:normal;min-width:130px' },
@@ -30945,7 +30945,7 @@ function renderRelU2000() {
     <div class="toolbar">
       <div class="field"><label>Período</label><select id="ru-per">${[3, 7, 10, 15, 25, 30, 45, 60].map(n => `<option value="${n}"${n === 30 ? ' selected' : ''}>Últimos ${n} dias</option>`).join('')}</select></div>
       <div class="field"><label>Cidade (OLT)</label><select id="ru-cid"><option value="">Todas</option></select></div>
-      <div class="field"><label>Chamado até (depois da massiva)</label><select id="ru-jan"><option value="24">24 horas</option><option value="72" selected>3 dias</option><option value="168">7 dias</option></select></div>
+      <div class="field"><label>Chamado até (depois da massiva)</label><input type="text" value="3 dias (fixo)" disabled style="width:120px" title="Só conta chamado aberto até 3 dias depois da massiva"><input type="hidden" id="ru-jan" value="72"></div>
       <button class="btn" id="f-apply">Filtrar</button>
     </div>
     <p style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">Feito com o que foi importado na aba <b>U2000</b> (alarmes, listas GPON e inventário) e com o histórico guardado no banco. Quanto mais dias de alarmes importados, mais completo fica.</p>
@@ -31023,7 +31023,7 @@ function renderRelU2000() {
       <div class="panel" id="ru-t-vlan"></div>
       ${sec('Todas as massivas do período')}
       <div class="panel" id="ru-t-todas"></div>
-      ${sec('Chamados e IFI / IRR durante ou depois das massivas', 'clientes das portas que tiveram massiva e abriram reparo do início da massiva até o prazo escolhido em cima — pra ver se o retorno foi por causa da massiva')}
+      ${sec('Chamados e IFI / IRR durante ou depois das massivas', 'clientes das portas que tiveram massiva e abriram reparo do início da massiva até 3 dias depois (limite fixo) — pra ver se o retorno foi por causa da massiva')}
       <div id="ru-ret"></div>
       <div class="panel" id="ru-mapas"></div>`;
     const lbl = d => formatDate(d);   // dd/mm/aaaa (pedido do cliente)
@@ -31048,7 +31048,7 @@ function renderRelU2000() {
     // ---- IFI / IRR durante ou depois das massivas (14/10/2026, pedido do cliente) ----
     // Cliente da porta com massiva: o contrato vem do AutoISP guardado (pelo SN) ou, sem ele, o nome do alias. Chamado = reparo da Produção/PCR aberto entre
     // 1 h antes do início da massiva e o prazo escolhido. IFI/IRR: a coluna oficial da Produção; sem ela, o último serviço concluído antes do reparo (mesma régua do sistema).
-    const cm = u2kChamadosMassivas(onus, lista, desde, (Number(document.getElementById('ru-jan').value) || 72) * 3600000), { onusMassiva, evPorPorta } = cm;
+    const cm = u2kChamadosMassivas(onus, lista, desde, 72 * 3600000), { onusMassiva, evPorPorta } = cm;
     function pintarRet() {
       const box = document.getElementById('ru-ret'); if (!box) return;
       const res = cm.calcular();
@@ -31692,7 +31692,7 @@ function renderU2000() {
     function abaDiag(grupo, tit, sub) {
       el.innerHTML = `<div id="u2-dg" style="display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px">${U2K_DIAG_GRUPOS.map(([k, rot]) => `<button type="button" class="u2-dg" data-g="${k}" style="border:1px solid var(--border);border-radius:999px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;background:${k === grupo ? 'var(--accent)' : 'var(--card-bg)'};color:${k === grupo ? '#fff' : 'var(--text-primary)'}">${esc(rot)} <span style="opacity:.85">(${nAba[k].toLocaleString('pt-BR')})</span></button>`).join('')}</div>` + titulo(tit, sub) + '' + `<p id="u2-dcli" style="font-size:12.5px;color:var(--text-secondary);margin:-4px 0 10px;line-height:1.5"></p><div id="u2-d"></div>`
         // 15/10/2026 (pedido do cliente): abaixo da tabela de "Cliente e monitorar", os clientes que abriram chamado por causa da massiva, com a coluna IFI / IRR
-        + (grupo === 'cliente' ? titulo('Clientes que abriram chamado por causa da massiva', 'reparo aberto de 1 h antes do início da massiva até a janela escolhida, por clientes das portas com massiva; a coluna IFI / IRR diz se o chamado virou retorno') + '<div id="u2-cham"></div>' : '');
+        + (grupo === 'cliente' ? titulo('Clientes que abriram chamado por causa da massiva', 'reparo aberto de 1 h antes do início da massiva até 3 dias depois (limite fixo), por clientes das portas com massiva; a coluna IFI / IRR diz se o chamado virou retorno') + '<div id="u2-cham"></div>' : '');
       document.getElementById('u2-dg').addEventListener('click', ev => { const b = ev.target.closest('.u2-dg'); if (!b) return; U2K._diagGrupo = b.dataset.g; pintar(); });
       if (grupo === 'cliente') document.getElementById('u2-dcli').insertAdjacentHTML('afterend', `<div id="u2-aisp-bar" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px">
         <b style="font-size:13px">🔌 AutoISP ao vivo</b><span style="font-size:12.5px;color:var(--text-secondary)">sinal atualizado das linhas filtradas (até 60)</span>
@@ -31735,12 +31735,12 @@ function renderU2000() {
         const box = document.getElementById('u2-cham'); if (!box) return;
         const tipoCurto = t => String(t).startsWith('Porta PON') ? 'PON sem sinal' : String(t).startsWith('Sem energia') ? 'Sem energia' : 'LOS / fibra', cidDe = r => (r.cidade && (u2kRotCidade(moChaveCid(r.cidade)) || r.cidade)) || 'sem cidade';
         u2kVisao(box, { id: 'u2cham', excel: 'u2000-chamados-por-massiva', busca: r => [r.cliente, r.contrato, r.o.olt, r.o.sn, r.x.os, r.bairro].join(' '),
-          controles: [{ id: 'per', rot: 'Massivas dos últimos', opcoes: [['3', '3 dias'], ['7', '7 dias'], ['15', '15 dias'], ['30', '30 dias']], padrao: '7' }, { id: 'tipo', rot: 'Tipo de massiva', opcoes: [['los', 'LOS / fibra (padrão)'], ['todas', 'Todas (inclui sem energia)']], padrao: 'los' }, { id: 'jan', rot: 'Chamado até', opcoes: [['24', '24 horas depois'], ['72', '3 dias depois'], ['168', '7 dias depois']], padrao: '72' }],
+          controles: [{ id: 'per', rot: 'Massivas dos últimos', opcoes: [['3', '3 dias'], ['7', '7 dias'], ['15', '15 dias'], ['30', '30 dias']], padrao: '7' }, { id: 'tipo', rot: 'Tipo de massiva', opcoes: [['los', 'LOS / fibra (padrão)'], ['todas', 'Todas (inclui sem energia)']], padrao: 'los' }],
           linhas: est => {
-            const chave = `${est.per}|${est.tipo}|${est.jan}|${U2K._autLoc ? U2K._autLoc.size : 0}`; if (cacheCham && cacheCham.chave === chave) return cacheCham.res;
+            const chave = `${est.per}|${est.tipo}|${U2K._autLoc ? U2K._autLoc.size : 0}`; if (cacheCham && cacheCham.chave === chave) return cacheCham.res;
             const desde = isoLocalDe(new Date(Date.now() - (Number(est.per) - 1) * 86400000)), evs = evPorta.filter(e => String(e.ini).slice(0, 10) >= desde && String(e.ini).slice(0, 10) <= hoje
               && (e.onus >= 5 || (String(e.tipo).startsWith('Porta PON') && e.total >= 5)) && (est.tipo === 'todas' || u2kTipoMassiva(e.tipo) !== 'Sem energia'));
-            const res = u2kChamadosMassivas(onus, evs, desde, Number(est.jan) * 3600000).calcular().sort((a, b) => (b.marca ? 1 : 0) - (a.marca ? 1 : 0) || b.x.t - a.x.t);
+            const res = u2kChamadosMassivas(onus, evs, desde, 72 * 3600000).calcular().sort((a, b) => (b.marca ? 1 : 0) - (a.marca ? 1 : 0) || b.x.t - a.x.t);
             cacheCham = { chave, res }; return res; },
           filtros: [{ id: 'ifi', rot: 'IFI / IRR', valor: r => r.marcaPot ? r.rotulo : 'Não', opcoes: ['IFI concluído', 'IRR concluído', 'IFI cancelado', 'IFI não concluído', 'IFI em aberto', 'IRR cancelado', 'IRR não concluído', 'IRR em aberto', 'Não'].map(v => [v, v === 'Não' ? 'Não é IFI / IRR' : v]) }, { id: 'sitch', rot: 'Situação do chamado', valor: r => r.sitTxt }, { id: 'olt', rot: 'OLT', valor: r => r.o.olt }, { id: 'cid', rot: 'Cidade', valor: cidDe }], chips: { filtro: 'ifi' },
           cols: u2kColsChamadosMassiva(cidDe) });
