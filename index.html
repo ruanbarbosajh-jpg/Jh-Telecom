@@ -15958,6 +15958,10 @@ async function contatosLerArquivo(arq, aoMsg) {
   return total;
 }
 
+// siglas que a equipe usa (e que podem vir na coluna Unidade da GIGA) → nome da cidade por extenso
+const CIDADE_POR_SIGLA_CONTATOS = { gja: 'Guarujá', sts: 'Santos', sve: 'São Vicente', pge: 'Praia Grande', cao: 'Cubatão', bert: 'Bertioga', bertin: 'Bertioga' };
+function cidadeDaSiglaContatos(c) { const t = String(c || '').trim(); return CIDADE_POR_SIGLA_CONTATOS[normalizeHeader(t)] || t; }
+
 function renderContatos() {
   const dias = [...new Set(DB.pcr.map(r => r.data).filter(Boolean))].sort().reverse();
   document.getElementById('content').innerHTML = `
@@ -15994,7 +15998,7 @@ function renderContatos() {
     if (incluirGiga) {
       const emCampo = new Set(doDia.filter(r => !/nao conclu/.test(normalizeHeader(r.status))).map(r => contatoSoDigitos(r.contrato)));
       DB.chamadosGiga.filter(r => chamadoGigaEmAberto(r.status) && !emCampo.has(contatoSoDigitos(r.contrato))).forEach(r => {
-        linhas.push({ os: '', contrato: contatoSoDigitos(r.contrato), cliente: r.cliente || '', endereco: [r.logradouro, r.bairro].filter(Boolean).join(' - '), cidade: r.unidade || 'GIGA', tipo: r.fila || 'GIGA', status: 'Chamado GIGA (sem técnico)',
+        linhas.push({ os: '', contrato: contatoSoDigitos(r.contrato), cliente: r.cliente || '', endereco: [r.logradouro, r.bairro].filter(Boolean).join(' - '), cidade: cidadeDaSiglaContatos(r.unidade) || 'GIGA', tipo: r.fila || 'GIGA', status: 'Chamado GIGA (sem técnico)',
           tecnico: '', gr: 'pendente', aberta: true, limite: null, prazo: 'semprazo', ret: '', giga: true, csv: null, numcli: '' });
       });
     }
@@ -16082,9 +16086,8 @@ function renderContatos() {
 function textoSinalizarContatos(lista, contatoDe, fmtLimite) {
   // por CIDADE, depois por técnico (pedido do cliente, 20/10/2026): Cidade / Técnico / Cliente - telefone; linha em branco entre técnicos e entre cidades
   const porCidade = new Map();
-  // cidade pela SIGLA que a equipe usa no WhatsApp (pedido do cliente, 20/10/2026); cidade fora da lista sai por extenso
-  const SIGLAS = { guaruja: 'GJA', santos: 'STS', 'sao vicente': 'SVE', 'praia grande': 'PGE', cubatao: 'CAO', bertioga: 'BERT' };
-  lista.forEach(l => { const nomeCid = String(l.cidade || 'SEM CIDADE').trim(), cid = SIGLAS[normalizeHeader(nomeCid)] || nomeCid, tec = l.tecnico ? l.tecnico.trim() : 'SEM TÉCNICO';
+  // cidade sempre pelo NOME por extenso (pedido do cliente, 20/10/2026): sigla vira nome (`cidadeDaSiglaContatos`)
+  lista.forEach(l => { const cid = cidadeDaSiglaContatos(l.cidade || 'SEM CIDADE'), tec = l.tecnico ? l.tecnico.trim() : 'SEM TÉCNICO';
     if (!porCidade.has(cid)) porCidade.set(cid, new Map());
     const m = porCidade.get(cid); if (!m.has(tec)) m.set(tec, []); m.get(tec).push(l); });
   const cmp = (a, b) => a.localeCompare(b, 'pt-BR');
