@@ -4351,8 +4351,25 @@ function getFirstAllowedRoute(role) {
   if (podeAcessar(role, 'dashboard')) return 'dashboard';
   return Object.keys(PAGES).find(r => podeAcessar(role, r)) || 'dashboard';
 }
+// Rótulo da rota por perfil (20/10/2026, pedido do cliente): só o Escritório vê "Prazo — Reparo (24h)" como "Visão Geral de prazos"
+// (ele tem a aba "Prazos" da PCR; esta é a visão geral do mês). Os outros perfis seguem com o nome de sempre.
+const ROTULO_POR_PERFIL = { escritorio: { prazo: 'Visão Geral de prazos' } };
+function tituloDaRota(rota, role) {
+  const r = role || (currentUser && currentUser.role);
+  const o = r && ROTULO_POR_PERFIL[perfilValido(r)];
+  return (o && o[rota]) || (PAGES[rota] ? PAGES[rota].title : '');
+}
+function aplicarRotulosDoPerfil() {
+  const o = (currentUser && ROTULO_POR_PERFIL[perfilValido(currentUser.role)]) || {};
+  document.querySelectorAll('#sidebar-nav a[data-route]').forEach(a => {
+    const t = a.querySelector('.nav-txt'); if (!t) return;
+    if (a.dataset.rotuloOrig === undefined) a.dataset.rotuloOrig = t.textContent;
+    t.textContent = o[a.dataset.route] || a.dataset.rotuloOrig;
+  });
+}
 function applySidebarPermissions() {
   monitorOltAvisarPronto();
+  aplicarRotulosDoPerfil();
   montarMenuNovo();   // coletor do AutoISP esperando (aberto com ?monitor-olt=1)
   document.querySelectorAll('.sidebar-nav a[data-route]').forEach(a => {
     a.style.display = podeAcessar(currentUser.role, a.dataset.route) ? '' : 'none';
@@ -8655,7 +8672,7 @@ function navigate(route) {
   if (!PAGES[route] || (currentUser && !podeAcessar(currentUser.role, route))) route = getFirstAllowedRoute(currentUser ? currentUser.role : 'admin');
   document.querySelectorAll('.sidebar-nav a').forEach(a => a.classList.toggle('active', a.dataset.route === route));
   abrirSecaoDaRota(route);
-  document.getElementById('page-title').textContent = PAGES[route].title;
+  document.getElementById('page-title').textContent = tituloDaRota(route);
   document.getElementById('content').innerHTML = '';
   window.scrollTo(0,0);
   closeSidebar();
@@ -9273,7 +9290,7 @@ function skeletonTela(alvo, cards = 4, linhas = 6) {
     // respeita EXATAMENTE as permissões do perfil logado
     return Object.keys(PAGES)
       .filter(r => !currentUser || podeAcessar(currentUser.role, r))
-      .map(r => ({ rota: r, titulo: PAGES[r].title }));
+      .map(r => ({ rota: r, titulo: tituloDaRota(r) }));
   }
   // itens da lista: { grupo, titulo, sub, acao }. Perfil comum: só telas (como sempre). Analista (modo novo): telas, assuntos, O.S, contratos, clientes e técnicos.
   function itens(termoBruto) {
@@ -9288,7 +9305,7 @@ function skeletonTela(alvo, cards = 4, linhas = 6) {
     LUPA_ASSUNTOS.forEach(a => {
       if (!a.termos.some(t => termo.includes(t) || t.includes(termo))) return;
       if (!podeAcessar(currentUser.role, a.rota)) return;
-      assuntos.push({ grupo: 'Assuntos', titulo: `${PAGES[a.rota].title} › ${a.secao}`, sub: a.sub || '', acao: () => { navigate(a.rota); irParaSecao(a.secao); } });
+      assuntos.push({ grupo: 'Assuntos', titulo: `${tituloDaRota(a.rota)} › ${a.secao}`, sub: a.sub || '', acao: () => { navigate(a.rota); irParaSecao(a.secao); } });
     });
     out.unshift(...assuntos);   // assuntos primeiro (ex.: "prazos" leva direto à seção)
     // dados: O.S / contrato / cliente (Produção + PCR + Prazo) e técnicos
