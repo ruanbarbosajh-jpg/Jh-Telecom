@@ -15960,6 +15960,8 @@ async function contatosLerArquivo(arq, aoMsg) {
 
 // siglas que a equipe usa (e que podem vir na coluna Unidade da GIGA) → nome da cidade por extenso
 const CIDADE_POR_SIGLA_CONTATOS = { gja: 'Guarujá', sts: 'Santos', sve: 'São Vicente', pge: 'Praia Grande', cao: 'Cubatão', bert: 'Bertioga', bertin: 'Bertioga' };
+// situações do filtro "Situação da ordem" (caixas de seleção, várias ao mesmo tempo) → bucket de `classifyStatusGranular`
+const SITUACOES_CONTATOS = { 'Concluído': 'concluido', 'Em rota': 'em_rota', 'Pendente': 'pendente', 'Iniciado': 'iniciado', 'Não concluído': 'nao_concluido', 'Cancelado': 'cancelado' };
 function cidadeDaSiglaContatos(c) { const t = String(c || '').trim(); return CIDADE_POR_SIGLA_CONTATOS[normalizeHeader(t)] || t; }
 
 function renderContatos() {
@@ -15975,7 +15977,7 @@ function renderContatos() {
       <div class="field"><label>Cidade</label><select id="ct-cid"><option value="">Todas as cidades</option></select></div>
       <div class="field"><label>Prazo</label><select id="ct-prazo"><option value="">Todos os prazos</option><option value="vencida">Já vencidos</option><option value="vence2h">Vencem em até 2h</option><option value="noprazo">No prazo (em aberto)</option><option value="concluida">Concluídos</option><option value="semprazo">Sem prazo</option></select></div>
       <div class="field"><label>Retornos</label><select id="ct-ret"><option value="">Todos</option><option value="retorno">Só retornos (IFI + IRR)</option><option value="IFI">Só IFI</option><option value="IRR">Só IRR</option><option value="nao">Sem retorno</option></select></div>
-      <div class="field"><label>Situação da ordem</label><select id="ct-sit"><option value="aberta">Em aberto (pendente / em rota / iniciado)</option><option value="">Todas as ordens</option><option value="concluida">Concluídas</option></select></div>
+      ${multiSelectField('ct-sit', 'Situação da ordem', Object.keys(SITUACOES_CONTATOS), { preset: ['Em rota', 'Pendente', 'Iniciado'], allLabel: 'Todas as situações', noneLabel: 'Nenhuma' })}
       <div class="field"><label>Contato</label><select id="ct-tem"><option value="">Todos</option><option value="com">Só com telefone</option><option value="sem">Sem telefone</option></select></div>
       <div class="field"><label>Buscar</label><input type="text" id="ct-q" placeholder="cliente, contrato, O.S, endereço…" autocomplete="off"></div>
       <button class="btn" id="ct-aplicar">Filtrar</button>
@@ -16015,13 +16017,13 @@ function renderContatos() {
   }
   // ---- aplica os filtros ----
   function filtrar(todas) {
-    const tec = g('ct-tec').value, cid = g('ct-cid').value, pz = g('ct-prazo').value, rt = g('ct-ret').value, sit = g('ct-sit').value, tem = g('ct-tem').value, q = normalizeHeader(g('ct-q').value);
+    const tec = g('ct-tec').value, cid = g('ct-cid').value, pz = g('ct-prazo').value, rt = g('ct-ret').value, sits = new Set(getMultiSelectValues('ct-sit').map(v => SITUACOES_CONTATOS[v])), tem = g('ct-tem').value, q = normalizeHeader(g('ct-q').value);
     return todas.filter(l => {
       if (tec && (tec === '__sem' ? l.tecnico : l.tecnico !== tec)) return false;
       if (cid && l.cidade !== cid) return false;
       if (pz && l.prazo !== pz) return false;
       if (rt === 'retorno' ? !l.ret : rt === 'nao' ? !!l.ret : (rt && l.ret !== rt)) return false;
-      if (sit === 'aberta' ? !l.aberta : (sit === 'concluida' && l.gr !== 'concluido')) return false;
+      if (!sits.has(l.gr)) return false;
       const c = contatoDe(l), temTel = !!(c && (c.telefone || c.celular));
       if (tem === 'com' ? !temTel : (tem === 'sem' && temTel)) return false;
       if (q && !normalizeHeader([l.cliente, l.contrato, l.os, l.endereco, l.tecnico, c && c.nome].join(' ')).includes(q)) return false;
@@ -16078,7 +16080,8 @@ function renderContatos() {
   }
   g('ct-aplicar').addEventListener('click', carregar);
   g('ct-dia').addEventListener('change', carregar);
-  ['ct-tec', 'ct-cid', 'ct-prazo', 'ct-ret', 'ct-sit', 'ct-tem'].forEach(id => g(id).addEventListener('change', () => desenhar(g('ct-dia')._todas || [])));
+  wireMultiSelectField('ct-sit', { noun: 'situação(ões)', allLabel: 'Todas as situações' }, () => desenhar(g('ct-dia')._todas || []));
+  ['ct-tec', 'ct-cid', 'ct-prazo', 'ct-ret', 'ct-tem'].forEach(id => g(id).addEventListener('change', () => desenhar(g('ct-dia')._todas || [])));
   g('ct-q').addEventListener('input', () => desenhar(g('ct-dia')._todas || []));
   carregar();
 }
