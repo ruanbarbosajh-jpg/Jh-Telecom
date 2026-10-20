@@ -581,6 +581,17 @@
     background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius);
     font-size: 13px; color: var(--text-primary);
   }
+  /* HOLERITES LADO A LADO NA TELA, de 2 em 2 (20/10/2026, pedido do cliente: "coloque um holerite do lado do outro, de 2 em 2, ao invés de um embaixo do outro").
+     Vale pra Folha dos técnicos e pra Folha do Escritório (as duas desenham dentro de #hol-area). Em tela estreita (< 1250px) volta a 1 por linha, que
+     senão a tabela de 3 colunas não cabe. A impressão tem a grade própria (@media print mais abaixo) e continua como está. */
+  @media screen {
+    #hol-area { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+    #hol-area .holerite { max-width: none; margin: 0; padding: 22px 24px 20px; min-width: 0; }
+    #hol-area > :not(.holerite) { grid-column: 1 / -1; }
+  }
+  @media screen and (max-width: 1250px) {
+    #hol-area { grid-template-columns: minmax(0, 1fr); }
+  }
   /* Cabeçalho: nome à esquerda, "EXTRATO DE SERVIÇOS" à direita, alinhados
      na mesma linha de base — layout de carta corporativa (timbre), não
      mais centralizado/empilhado. Sem logo/ícone (pedido do cliente
@@ -29403,7 +29414,7 @@ function u2kJuntar(linhas, nomeArquivo) {
   });
   // a lista de alarmes é uma FOTO do momento: o arquivo novo substitui a anterior
   if (alarmesNovos.length) {
-    U2K.alarmes = alarmesNovos; U2K._alarmesNovos = true;
+    U2K.alarmes = alarmesNovos; U2K._alarmesNovos = true; U2K.alarmesEm = new Date().toISOString();
     u2kInferirPortas();   // lista simples (MA5800) importada antes dos alarmes: a porta sai agora, pra o total da porta já valer nos eventos
     const snDe = u2kSnPorLoc();
     U2K.hist = u2kMesclaHist(U2K.hist, u2kAgregaDia(alarmesNovos, a => snDe(a.fonte, a.frame, a.slot, a.porta, a.onuId)), true);
@@ -29554,6 +29565,7 @@ async function u2kCarregarDoBanco() {
     U2K.alarmes = alm.map(r => ({ severidade: r.severidade, id: r.alarme_id, nome: r.nome, fonte: r.fonte, local: r.local, frame: r.frame, slot: r.slot, porta: r.porta, onuId: r.onu_id, vezes: r.vezes, primeiro: r.primeiro || '', ultimo: r.ultimo || '', limpo: r.limpo || '', alias: r.alias || '', categoria: r.categoria || u2kCategoria(r.nome), equip: r.equip || '', oltIp: r.olt_ip || '', razao: r.razao || '' }));
     u2kConsolidar(); U2K._doBanco = true;
     U2K.importadoEm = onus.reduce((m, r) => r.importado_em && r.importado_em > m ? r.importado_em : m, '');
+    U2K.alarmesEm = alm.reduce((m, r) => r.importado_em && r.importado_em > m ? r.importado_em : m, '');   // quando o arquivo de alarmes foi importado (idade do dado)
     return { ok: true, n: onus.length };
   } catch (e) { return { ok: false, motivo: String((e && e.message) || e) }; }
 }
@@ -29654,7 +29666,7 @@ function u2kEventosMassa(alm) {
 }
 // evento "plano" (o que vai pro banco e pras tabelas): ONU de referência da porta mais afetada + SN dela
 function u2kEvFlat(e, snDe) {
-  return { olt: e.olt, tipo: e.tipo, ini: e.ini, fim: e.fim, escopo: e.escopo, onus: e.onus.size, portas: e.portas.size, abertas: e.abertas.size, onde: e.onde, leitura: e.leitura,
+  return { olt: e.olt, tipo: e.tipo, ini: e.ini, fim: e.fim, escopo: e.escopo, onus: e.onus.size, portas: e.portas.size, abertas: e.abertas.size, abertosChaves: [...e.abertas], onde: e.onde, leitura: e.leitura,
     frame: e.ref.frame, slot: e.ref.slot, porta: e.ref.porta, onuId: e.ref.onuId, sn: snDe ? snDe(e.olt, e.ref.frame, e.ref.slot, e.ref.porta, e.ref.onuId) : '' };
 }
 async function u2kSalvarEventos() {
@@ -29939,7 +29951,7 @@ function u2kInventarioOlts(portas, alm) {
 // Com a lista GPON da OLT mostra quantas ONUs a porta tem e o % afetado (porta inteira × parte da porta).
 function u2kTotaisPorta(onus) {
   const nk = normalizeHeader, m = new Map();
-  onus.forEach(o => { if (o.slot === '' || o.slot == null) return; const k = `${nk(o.olt)}|${o.frame}/${o.slot}/${o.porta}`; let e = m.get(k); if (!e) { e = { total: 0, online: 0, offline: 0, sn: '', onuId: '' }; m.set(k, e); } e.total++; if (o.status === 'Online') e.online++; else if (o.status === 'Offline') { e.offline++; if (!e.sn) { e.sn = o.sn; e.onuId = o.onuId; } } if (!e.sn) { e.sn = o.sn; e.onuId = o.onuId; } });
+  onus.forEach(o => { if (o.slot === '' || o.slot == null) return; const k = `${nk(o.olt)}|${o.frame}/${o.slot}/${o.porta}`; let e = m.get(k); if (!e) { e = { total: 0, online: 0, offline: 0, sn: '', onuId: '', imp: '' }; m.set(k, e); } if (o._importado && o._importado > e.imp) e.imp = o._importado; e.total++; if (o.status === 'Online') e.online++; else if (o.status === 'Offline') { e.offline++; if (!e.sn) { e.sn = o.sn; e.onuId = o.onuId; } } if (!e.sn) { e.sn = o.sn; e.onuId = o.onuId; } });
   return m;
 }
 const u2kPortaCompleta = r => `${r.frame === '' || r.frame == null ? '0' : r.frame}/${r.slot}/${r.porta}`;
@@ -29948,6 +29960,25 @@ function u2kLeituraPorta(e) {
   const tipoEnergia = String(e.tipo).startsWith('Sem energia');
   if (e.total) return e.pct >= 80 ? (tipoEnergia ? 'Porta inteira sem energia' : 'Porta INTEIRA em LOS / sem sinal') : e.pct >= 40 ? (tipoEnergia ? 'Maior parte da porta sem energia' : 'Maior parte da porta em LOS') : `Parte da porta (as outras ${e.total - e.onus} ONUs seguem online)`;
   return `${e.onus} ONUs da porta afetadas (importe a lista GPON da OLT pra ver o % da porta)`;
+}
+// "AINDA EM MASSIVA?" (20/10/2026, pedido do cliente: "o monitoramento está acusando massiva em portas que não estão mais em massiva").
+// O U2000 deixa muito alarme de LOS/sem energia SEM ENCERRAR mesmo depois que a ONU voltou — contar só "alarme sem Cleared" mantinha a porta em
+// massiva pra sempre. Agora confere com a lista GPON (status da ONU): ONU que está ONLINE na lista, importada DEPOIS da última ocorrência do alarme,
+// não conta como ainda caída; e porta PON com 80% ou mais das ONUs online (lista posterior ao alarme) não está mais sem sinal.
+// Sem lista GPON da OLT, vale a regra antiga (alarme aberto). Devolve { aberta, abReal, rec }: rec = ONUs com alarme aberto que já estão online.
+function u2kMassivaAberta(e, lstLoc, totPorta) {
+  const nk = normalizeHeader, fimMs = Date.parse(String(e.fim || '').replace(' ', 'T')) || 0, confiavel = imp => !imp || (Date.parse(imp) || 0) >= fimMs;
+  const pon = String(e.tipo).startsWith('Porta PON');
+  let ab = e.abertas || 0, rec = 0;
+  if (pon) {
+    const t = totPorta && (totPorta.get(`${nk(e.olt)}|${e.frame}/${e.slot}/${e.porta}`) || totPorta.get(`${nk(e.olt)}|0/${e.slot}/${e.porta}`));
+    if (ab > 0 && t && t.total >= 5 && t.online / t.total >= 0.8 && confiavel(t.imp)) { rec = ab; ab = 0; }
+  } else if (lstLoc && ab > 0) {
+    const chaves = e.abertosChaves || (e.abertosIds || []).map(id => `${nk(e.olt)}|${e.frame}/${e.slot}/${e.porta}|${id}`);
+    chaves.forEach(k => { const l = lstLoc.get(k) || lstLoc.get(k.replace(/\|[^|\/]*\//, '|0/')); if (l && l.status === 'Online' && confiavel(l._importado)) rec++; });
+    ab = Math.max(0, ab - rec);
+  }
+  return { aberta: ab > 0 && (pon || ab >= 5 || ab * 2 >= (e.onus || 0)), abReal: ab, rec };
 }
 function u2kEventosPorta(alm, tot) {
   const nk = normalizeHeader, jan = [];
@@ -29968,7 +29999,7 @@ function u2kEventosPorta(alm, tot) {
   return evs.filter(e => e.tipo.startsWith('Porta PON') || e.ids.size >= 5).map(e => {
     const t = tot && tot.get(`${nk(e.olt)}|${e.frame}/${e.slot}/${e.porta}`), ids = [...e.ids].filter(x => x !== '(porta)').map(Number).sort((x, y) => x - y), n = e.tipo.startsWith('Porta PON') ? (t ? t.total : 0) : e.ids.size;
     const r = { olt: e.olt, frame: e.frame, slot: e.slot, porta: e.porta, tipo: e.tipo, ini: e.ini, fim: e.fim, onus: n, total: t ? t.total : 0, pct: t && t.total ? Math.min(100, n / t.total * 100) : null, abertas: e.abertas.size, resolvidoEm: e.limpo,
-      idsAbertos: [...e.abertas].filter(x => x !== '(porta)').map(Number).sort((x, y) => x - y).slice(0, 30).join(', '),
+      idsAbertos: [...e.abertas].filter(x => x !== '(porta)').map(Number).sort((x, y) => x - y).slice(0, 30).join(', '), abertosIds: [...e.abertas].filter(x => x !== '(porta)').map(Number),
       ids: ids.slice(0, 30).join(', ') + (ids.length > 30 ? ` … (+${ids.length - 30})` : ''), onuId: ids[0] != null ? String(ids[0]) : (t ? t.onuId : ''), sn: t && t.sn && !ids.length ? t.sn : '' };
     r.leitura = u2kLeituraPorta(r); return r;
   }).sort((x, y) => String(y.ini).localeCompare(String(x.ini)) || y.onus - x.onus);
@@ -30329,7 +30360,8 @@ function renderRelU2000() {
     // eventos de massiva por porta: os calculados dos alarmes importados + os guardados no banco (mesma regra da aba U2000)
     const totPorta = u2kTotaisPorta(onus), calc = u2kEventosPorta(alm, totPorta), evs = [...calc];
     U2K.eventosPorta.forEach(e => { if (!calc.some(c => c.olt === e.olt && String(c.slot) === String(e.slot) && String(c.porta) === String(e.porta) && c.tipo === e.tipo && tms(c.ini) <= tms(e.fim) + 900000 && tms(c.fim) >= tms(e.ini) - 900000)) evs.push(e); });
-    const calcSet = new Set(calc), aindaAberta = e => e.abertas > 0 && (String(e.tipo).startsWith('Porta PON') || e.abertas >= 5 || e.abertas * 2 >= e.onus);
+    const lstLocR = new Map(onus.filter(o => o.slot !== '' && o.slot != null).map(o => [`${nk(o.olt)}|${o.frame}/${o.slot}/${o.porta}|${o.onuId}`, o]));
+    const calcSet = new Set(calc), aindaAberta = e => u2kMassivaAberta(e, lstLocR, totPorta).aberta;
     const lista = evs.filter(e => okCid(e.olt) && String(e.ini).slice(0, 10) >= desde && String(e.ini).slice(0, 10) <= hoje).map(e => {
       const sit = aindaAberta(e) ? (calcSet.has(e) ? 'aberta' : 'semconf') : 'resolvida', fimR = e.resolvidoEm || e.fim;
       return { ...e, sit, dur: sit === 'resolvida' ? Math.max(0, tms(fimR) - tms(e.ini)) : sit === 'aberta' ? Math.max(0, Date.now() - tms(e.ini)) : null, dia: String(e.ini).slice(0, 10), hora: Number(String(e.ini).slice(11, 13)) };
@@ -30664,6 +30696,134 @@ function u2kDadosAssinante(o, aut) {
   return { o, a, at, por, contrato: contrato || (at[0] && at[0].contrato) || '', nome: (a && a.nome) || (u2kAliasVazio(o.alias) ? '' : o.alias) || (at[0] && at[0].nome) || '' };
 }
 function u2kBairroDoEndereco(e) { try { return extrairBairro(e) || ''; } catch (err) { return ''; } }
+// ---- AUTOISP AO VIVO na busca de assinante (20/10/2026) ----
+// Pedido do cliente: "o AutoISP voltou, porém só é possível buscar o assinante e não mais a OLT — na busca de assinante faça com que seja possível
+// conectar no AutoISP para eu buscar os assinantes com sinal atualizado". A busca de cima lê o que o AutoISP deixou guardado no banco (dado velho);
+// esta lê o AutoISP NA HORA, pela extensão do Chrome (com o login que já está neste Chrome — nenhuma senha passa pelo sistema). Só GET na Busca de
+// Assinantes e nos detalhes; o botão "⚡ Atualizar sinal" faz o mesmo que o "Atualizar" do AutoISP (manda a OLT ler a ONU), um assinante por clique.
+// Busca por OLT (parte do nome) e por PON lista os assinantes dela (o AutoISP devolve no máximo 100 por consulta).
+function u2kLigarAutoispVivo() {
+  const g = id => document.getElementById('u2l-' + id); if (!g('go')) return;
+  const LIVE = { itens: [], olts: [], conectado: false };
+  const dh = t => { if (!t) return ''; const d = new Date(t); return isNaN(d) ? String(t).replace('T', ' ').slice(0, 16) : d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); };
+  const msg = h => { const e = g('msg'); if (e) e.innerHTML = h; };
+  const conn = h => { const e = g('conn'); if (e) e.innerHTML = h; };
+  const campos = ['nome', 'contrato', 'serial', 'olt', 'pon', 'pppoe', 'endereco', 'int6'];
+  const snKey = sn => u2kSnNorm(u2kSnCurto(sn || ''));
+  let indiceSn = null;
+  const noU2000 = serial => { if (!serial || !U2K.onus.length) return null; if (!indiceSn) { indiceSn = new Map(); U2K.onus.forEach(o => { if (o.sn) indiceSn.set(snKey(o.sn), o); }); } return indiceSn.get(snKey(serial)) || null; };
+  const sitHtml = d => d && d.status_onu ? `<span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap"><span style="width:10px;height:10px;border-radius:50%;background:${moCorSit(d.status_onu)}"></span>${esc(moStatusTxt(d.status_onu))}</span>` : '';
+  async function verificarConexao(forcar) {
+    LIVE.conectado = false;
+    conn('<span style="color:var(--text-muted)">Verificando a conexão com o AutoISP…</span>');
+    window.postMessage({ tipo: 'jh-ext-ping' }, location.origin);
+    if (!EXT_JH.presente) await new Promise(r => setTimeout(r, forcar ? 1200 : 700));
+    if (!EXT_JH.presente) {
+      conn(`<div style="padding:10px 12px;border:1px solid var(--danger);border-radius:10px;background:color-mix(in srgb, var(--danger) 8%, transparent)">🔴 <b>Extensão do Chrome não encontrada.</b> Ela faz a ponte com o AutoISP usando o login deste Chrome. <a href="/extensao-jh-monitor-olt.zip" download>Baixar a extensão</a> → extraia a pasta → no Chrome abra <b>chrome://extensions</b>, ligue o <i>Modo do desenvolvedor</i> → <i>Carregar sem compactação</i> → escolha a pasta → volte aqui, dê F5 e <button type="button" class="btn-export-xls" id="u2l-recheck">verificar de novo</button></div>`);
+      const b = g('recheck'); if (b) b.addEventListener('click', () => verificarConexao(true)); return;
+    }
+    if (!extensaoAtende('1.3.0')) {
+      conn(`<div style="padding:10px 12px;border:1px solid var(--danger);border-radius:10px;background:color-mix(in srgb, var(--danger) 8%, transparent)">🟠 Sua extensão é a versão <b>${esc(EXT_JH.versao || '?')}</b> e esta busca precisa da <b>1.3.0</b>. <a href="/extensao-jh-monitor-olt.zip" download>Baixe o zip de novo</a>, substitua os arquivos da pasta e clique em ⟳ (recarregar) na extensão, em chrome://extensions. Depois dê F5 aqui.</div>`); return;
+    }
+    const r = await consultarExtensao('status', {});
+    if (!g('conn')) return;
+    if (!r.ok) {
+      conn(`<div style="padding:10px 12px;border:1px solid var(--danger);border-radius:10px;background:color-mix(in srgb, var(--danger) 8%, transparent)">🔴 <b>Não conectado ao AutoISP.</b> ${esc(r.erro)} <a href="https://auto.alloha.com" target="_blank" rel="noopener" class="btn-export-xls" style="text-decoration:none;margin-left:6px">Abrir o AutoISP e entrar ↗</a> <button type="button" class="btn-export-xls" id="u2l-recheck">Já entrei — verificar de novo</button></div>`);
+      const b = g('recheck'); if (b) b.addEventListener('click', () => verificarConexao(true)); return;
+    }
+    LIVE.conectado = true;
+    conn(`🟢 <b>Conectado ao AutoISP</b>${r.dados && r.dados.olts != null ? ` · ${r.dados.olts} OLT(s) da JH` : ''} <span style="color:var(--text-muted)">(com o seu login deste Chrome; só leitura)</span> <button type="button" class="btn-export-xls" id="u2l-oltsbtn" style="margin-left:6px">Ver as OLTs</button>`);
+    const ob = g('oltsbtn'); if (ob) ob.addEventListener('click', mostrarOlts);
+    const ro = await consultarExtensao('olts', {});
+    if (ro.ok && Array.isArray(ro.dados)) { LIVE.olts = ro.dados; const dl = g('olts'); if (dl) dl.innerHTML = ro.dados.map(o => `<option value="${esc(o.hostname)}"></option>`).join(''); }
+  }
+  function mostrarOlts() {
+    if (!LIVE.olts.length) { msg('Lista de OLTs ainda não carregada.'); return; }
+    g('lista').innerHTML = `<div class="table-wrap" style="margin-top:10px;max-height:420px;overflow:auto"><table class="data-table"><thead><tr><th>OLT</th><th>Modelo</th><th>Modo</th><th>Conexão</th><th>Clientes</th><th></th></tr></thead><tbody>
+      ${LIVE.olts.map(o => `<tr><td class="cat-cell">${esc(o.hostname)}</td><td>${esc(o.modelo)}</td><td>${esc(o.modo)}</td><td>${esc(o.conexao)}</td><td>${o.clientes || 0}</td><td><a href="#" class="u2l-olt-ver" data-h="${esc(o.hostname)}">listar assinantes</a></td></tr>`).join('')}</tbody></table></div>`;
+    g('det').innerHTML = ''; msg(`${LIVE.olts.length} OLT(s) da JH no AutoISP. Clique em <b>listar assinantes</b> para ver os clientes de uma OLT (no máximo 100 por consulta — acrescente a PON para filtrar).`);
+  }
+  function celulaSinal(it) { const d = it.det; return d ? (d.sinal_rx == null ? '-' : `<b>${esc(moSinal(d.sinal_rx))}</b>`) : (it.erro ? `<span title="${esc(it.erro)}" style="color:var(--danger)">erro</span>` : '…'); }
+  function desenharLinha(i) {
+    const tr = document.querySelector(`#u2l-tab tr[data-i="${i}"]`); if (!tr) return;
+    const it = LIVE.itens[i], d = it.det;
+    tr.querySelector('.c-sinal').innerHTML = celulaSinal(it);
+    tr.querySelector('.c-sit').innerHTML = d ? sitHtml(d) : '';
+    tr.querySelector('.c-contato').innerHTML = d && d.acs_ultimo_contato ? `${esc(dh(d.acs_ultimo_contato))}<br><span style="font-size:11px;color:var(--text-muted)">${esc(haQuantoTempo(d.acs_ultimo_contato))}</span>` : '';
+    tr.querySelector('.c-lido').innerHTML = d ? `${esc(dh(d.consultado_em))}${it.atualizado ? ' <span title="a OLT foi mandada ler o sinal agora" style="color:var(--accent)">⚡</span>' : ''}` : '';
+  }
+  async function lerDetalhes(indices) {
+    let feitos = 0, i = 0; const total = indices.length;
+    const trabalhador = async () => { while (i < total) { const k = indices[i++], it = LIVE.itens[k]; if (!it.base.int6) { feitos++; continue; }
+      const r = await consultarExtensao('detalhe', { int6: it.base.int6 }); if (!g('lista')) return; if (r.ok) { it.det = r.dados; it.erro = ''; } else it.erro = r.erro; desenharLinha(k); feitos++;
+      msg(`Lendo o sinal… ${feitos} de ${total}`); } };
+    await Promise.all([trabalhador(), trabalhador(), trabalhador()]);
+    if (g('msg')) msg(`✔ ${LIVE.itens.length} assinante(s) · sinal lido de ${LIVE.itens.filter(x => x.det).length} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}${LIVE.itens.length >= 100 ? ' — <b>o AutoISP mostra no máximo 100</b>: refine (PON, nome, contrato ou SN)' : ''}. O sinal é o último que a OLT tem — use <b>⚡ Atualizar sinal</b> para ler agora.`);
+  }
+  async function buscar(base) {
+    if (!LIVE.conectado) { await verificarConexao(true); if (!LIVE.conectado) return; }
+    const f = base || {}; if (!base) campos.forEach(k => { f[k] = (g(k).value || '').trim(); });
+    if (!Object.values(f).some(Boolean)) { msg('Digite pelo menos um campo (nome, contrato, SN, OLT, PPPoE, endereço ou Int6).'); return; }
+    g('go').disabled = true; msg('Buscando no AutoISP…'); g('lista').innerHTML = ''; g('det').innerHTML = '';
+    const r = await consultarExtensao('buscar', f); g('go').disabled = false;
+    if (!g('lista')) return;
+    if (!r.ok) { msg(`<span style="color:var(--danger)">⚠ ${esc(r.erro)}</span>`); if (/Entre no AutoISP/.test(r.erro)) verificarConexao(true); return; }
+    LIVE.itens = (r.dados || []).map(b => ({ base: b, det: null, erro: '', atualizado: false }));
+    if (!LIVE.itens.length) { msg('Nenhum assinante encontrado nas OLTs da JH com esses dados.'); return; }
+    g('lista').innerHTML = `<div class="table-wrap" style="margin-top:10px;max-height:520px;overflow:auto"><table class="data-table" id="u2l-tab"><thead><tr>
+      <th>Assinante</th><th>Contrato</th><th>OLT</th><th>PON</th><th>ONU SN</th><th>Sinal</th><th>Situação</th><th>Último contato do equipamento</th><th>Lido em</th><th>Endereço</th><th>PPPoE</th><th>Int6</th><th></th></tr></thead><tbody>
+      ${LIVE.itens.map((it, i) => { const b = it.base; return `<tr data-i="${i}"><td class="cat-cell">${esc(b.nome || '-')}</td><td>${esc(b.contrato || '-')}</td><td style="white-space:nowrap">${esc(b.olt || '-')}</td><td>${esc(b.ponlink || '-')}</td>
+        <td style="font-size:12px;white-space:nowrap">${esc(b.serial || '-')}</td><td class="c-sinal">${b.int6 ? '…' : '-'}</td><td class="c-sit"></td><td class="c-contato" style="white-space:nowrap"></td><td class="c-lido" style="white-space:nowrap"></td>
+        <td style="white-space:normal;min-width:170px;font-size:12.5px">${esc(b.endereco || '-')}</td><td style="font-size:12px">${esc(b.pppoe || '-')}</td><td>${esc(b.int6 || '-')}</td>
+        <td style="white-space:nowrap">${b.int6 ? `<a href="#" class="u2l-det" data-i="${i}">detalhe</a> · <a href="#" class="u2l-atu" data-i="${i}" title="Manda a OLT ler o sinal desta ONU agora (igual ao botão Atualizar do AutoISP)">⚡ atualizar sinal</a>` : ''}</td></tr>`; }).join('')}</tbody></table></div>
+      <p style="margin:8px 0 0"><button type="button" class="btn-export-xls" id="u2l-atu-todos">⚡ Atualizar o sinal de todos (até 30)</button></p>`;
+    const idx = LIVE.itens.map((x, i) => i).filter(i => LIVE.itens[i].base.int6);
+    if (g('ler').checked) lerDetalhes(idx.slice(0, 30)); else msg(`${LIVE.itens.length} assinante(s) encontrado(s). Clique em <b>detalhe</b> para ver o sinal.`);
+    if (LIVE.itens.length === 1 && LIVE.itens[0].base.int6) abrirDet(0);
+  }
+  function abrirDet(i) {
+    const it = LIVE.itens[i], b = it.base, d = it.det; const alvo = g('det'); if (!alvo) return;
+    const linha = (r, v) => v === '' || v == null ? '' : `<div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--border);font-size:13px"><span style="min-width:160px;color:var(--text-muted)">${esc(r)}</span><span style="font-weight:600;word-break:break-word">${esc(String(v))}</span></div>`;
+    const u = noU2000(b.serial || (d && d.serial));
+    alvo.innerHTML = `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)"><div style="font-size:15px;font-weight:700">${esc((d && d.nome) || b.nome || 'Assinante')} <span style="font-weight:400;color:var(--text-muted)">· Int6 ${esc(b.int6)}</span>
+      <a href="https://auto.alloha.com/gpon_clients/${encodeURIComponent(b.int6)}" target="_blank" rel="noopener" style="font-size:12px;margin-left:8px">Abrir no AutoISP ↗</a></div>
+      <div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:8px"><div style="flex:1;min-width:300px">
+        ${linha('Sinal (Rx)', d && d.sinal_rx != null ? moSinal(d.sinal_rx) : '')}${linha('Situação da ONU', d ? moStatusTxt(d.status_onu) : '')}${linha('Último contato do equipamento', d ? dh(d.acs_ultimo_contato) : '')}${linha('Consultado em', d ? dh(d.consultado_em) : '')}
+        ${linha('Contrato', (d && d.contrato) || b.contrato)}${linha('Plano', d && d.plano)}${linha('OLT / PON', [b.olt, d ? d.ponlink : b.ponlink].filter(Boolean).join(' · '))}${linha('ONU SN', (d && d.serial) || b.serial)}${linha('MAC', d && d.mac)}${linha('PPPoE', (d && d.pppoe) || b.pppoe)}
+        ${linha('Endereço', b.endereco)}${linha('Bairro / cidade', d ? [d.bairro, d.cidade].filter(Boolean).join(' / ') : '')}</div>
+        <div style="flex:1;min-width:300px"><div style="font-weight:700;margin-bottom:4px">No U2000 (importado)</div>${u ? linha('OLT', u.olt) + linha('Local (F/S/P · ONU)', `${u.frame || '0'}/${u.slot}/${u.porta} · ONU ${u.onuId}`) + linha('Status', u.status ? u.status + (u.motivo ? ' · ' + u.motivo : '') : '') + linha('VLAN (perfil)', u.vlanPerfil || (u.semVlan ? 'sem VLAN' : '')) + linha('Modelo', u.tipo) : '<span style="font-size:13px;color:var(--text-muted)">Esta ONU não está nas exportações do U2000 importadas.</span>'}</div></div></div>`;
+    alvo.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  async function atualizar(i) {
+    const it = LIVE.itens[i]; if (!it || !it.base.int6) return null;
+    const tr = document.querySelector(`#u2l-tab tr[data-i="${i}"] .c-sinal`); if (tr) tr.innerHTML = '⚡ lendo…';
+    const r = await consultarExtensao('atualizar', { int6: it.base.int6 });
+    if (!g('lista')) return null;
+    if (!r.ok) { it.erro = r.erro; desenharLinha(i); toast(r.erro, 'erro', 6000); return r; }
+    it.det = r.dados.depois; it.erro = ''; it.atualizado = true; it.antes = r.dados.antes; desenharLinha(i); return r;
+  }
+  g('go').addEventListener('click', () => buscar());
+  g('form').addEventListener('keydown', ev => { if (ev.key === 'Enter' && ev.target.tagName === 'INPUT') { ev.preventDefault(); buscar(); } });
+  g('limpar').addEventListener('click', () => { campos.forEach(k => { g(k).value = ''; }); g('lista').innerHTML = ''; g('det').innerHTML = ''; msg(''); LIVE.itens = []; });
+  g('lista').addEventListener('click', async ev => {
+    const olt = ev.target.closest('a.u2l-olt-ver'); if (olt) { ev.preventDefault(); campos.forEach(k => { g(k).value = ''; }); g('olt').value = olt.dataset.h; buscar(); return; }
+    const a = ev.target.closest('a.u2l-det, a.u2l-atu'); if (a) {
+      ev.preventDefault(); const i = parseInt(a.dataset.i, 10);
+      if (a.classList.contains('u2l-det')) { if (!LIVE.itens[i].det) { const r = await consultarExtensao('detalhe', { int6: LIVE.itens[i].base.int6 }); if (r.ok) { LIVE.itens[i].det = r.dados; desenharLinha(i); } } abrirDet(i); }
+      else { const r = await atualizar(i); if (r && r.ok) { const x = r.dados; msg(`⚡ ${esc(LIVE.itens[i].base.nome || 'Assinante')}: sinal ${esc(moSinal(x.antes.sinal_rx))} → <b>${esc(moSinal(x.depois.sinal_rx))}</b> · situação ${esc(moStatusTxt(x.antes.status_onu))} → <b>${esc(moStatusTxt(x.depois.status_onu))}</b>`); if (g('det').innerHTML) abrirDet(i); } }
+      return; }
+    if (ev.target.id === 'u2l-atu-todos') {
+      const idx = LIVE.itens.map((x, i) => i).filter(i => LIVE.itens[i].base.int6).slice(0, 30);
+      if (!idx.length || !confirm(`Isto manda a OLT ler o sinal de ${idx.length} assinante(s) agora (o mesmo que clicar em "Atualizar" no AutoISP, um por um). Continuar?`)) return;
+      ev.target.disabled = true; let ok = 0, k = 0;
+      const trab = async () => { while (k < idx.length) { const i = idx[k++]; const r = await atualizar(i); if (r && r.ok) ok++; msg(`⚡ Atualizando o sinal… ${k} de ${idx.length}`); } };
+      await Promise.all([trab(), trab()]);
+      if (g('msg')) msg(`✔ Sinal atualizado de ${ok} de ${idx.length} assinante(s) às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`);
+      ev.target.disabled = false;
+    }
+  });
+  verificarConexao(false);
+}
 function u2kLigarBusca() {
   const box = document.getElementById('u2-bres'), inp = document.getElementById('u2-bq'); if (!box || !inp) return;
   let atual = [];
@@ -30733,6 +30893,24 @@ function renderU2000() {
       <h3>🔎 Buscar assinante <span style="font-size:12px;font-weight:500;color:var(--text-muted)">pelo SN, pelo nome (alias) ou pela porta</span></h3>
       <div class="toolbar" style="margin:0;box-shadow:none"><div class="field" style="flex:1;min-width:280px"><label>Buscar</label><input type="text" id="u2-bq" autocomplete="off" placeholder="SN (HWTCA519EAAE) · nome do cliente · porta (0/1/15 · SAN-04 1/15 · 0/1/15/20) · contrato"></div><button class="btn" type="button" id="u2-bgo">Buscar</button></div>
       <div id="u2-bres" style="margin-top:10px"></div>
+      <div id="u2-live" style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
+        <h3 style="margin:0 0 6px">🔌 AutoISP ao vivo <span style="font-size:12px;font-weight:500;color:var(--text-muted)">busca em tempo real, com o sinal atualizado — por nome, contrato, SN, OLT ou PON</span></h3>
+        <div id="u2l-conn" style="font-size:13px;margin:0 0 10px"></div>
+        <div class="toolbar" id="u2l-form" style="margin:0;box-shadow:none">
+          <div class="field"><label>Nome</label><input type="text" id="u2l-nome" autocomplete="off" placeholder="nome do assinante"></div>
+          <div class="field"><label>Contrato</label><input type="text" id="u2l-contrato" autocomplete="off" placeholder="nº do contrato"></div>
+          <div class="field"><label>SN da ONU</label><input type="text" id="u2l-serial" autocomplete="off" placeholder="HWTCA519EAAE"></div>
+          <div class="field"><label>OLT</label><input type="text" id="u2l-olt" list="u2l-olts" autocomplete="off" placeholder="ex.: SAN-04"><datalist id="u2l-olts"></datalist></div>
+          <div class="field"><label>PON</label><input type="text" id="u2l-pon" autocomplete="off" placeholder="ex.: 0/3/3" style="min-width:90px"></div>
+          <div class="field"><label>PPPoE</label><input type="text" id="u2l-pppoe" autocomplete="off" placeholder="usuário PPPoE"></div>
+          <div class="field"><label>Endereço</label><input type="text" id="u2l-endereco" autocomplete="off" placeholder="rua, bairro…"></div>
+          <div class="field"><label>Int6</label><input type="text" id="u2l-int6" autocomplete="off" placeholder="ID do AutoISP" style="min-width:110px"></div>
+          <button class="btn" type="button" id="u2l-go">Buscar no AutoISP</button><button class="btn-export-xls" type="button" id="u2l-limpar">Limpar</button>
+        </div>
+        <label style="font-size:12.5px;color:var(--text-secondary);display:inline-flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="u2l-ler" checked> Ler o sinal de cada resultado (até 30)</label>
+        <div id="u2l-msg" style="font-size:13px;margin-top:8px"></div>
+        <div id="u2l-lista"></div><div id="u2l-det"></div>
+      </div>
     </div>
     <div class="panel" style="margin-bottom:1rem">
       <h3>🛰 Monitoramento OLTs e ONUs (Huawei)</h3>
@@ -30742,6 +30920,7 @@ function renderU2000() {
     </div>
     <div id="u2-corpo"></div>`;
   u2kLigarBusca();
+  u2kLigarAutoispVivo();
   document.getElementById('u2-file').addEventListener('change', async ev => {
     const msg = document.getElementById('u2-msg'); const arqs = [...ev.target.files]; if (!arqs.length) return;
     msg.textContent = 'Lendo…'; let tot = 0;
@@ -30892,10 +31071,10 @@ function renderU2000() {
       const dur = ms => { if (!(ms > 0)) return ''; const m = Math.round(ms / 60000), d = Math.floor(m / 1440), h = Math.floor(m % 1440 / 60), mi = m % 60; return d ? `${d}d ${h}h` : h ? `${h}h ${String(mi).padStart(2, '0')}min` : `${mi}min`; };
       const calcP = new Set(evPCalc), calcO = new Set(evCalc), diaMs = Date.parse(diaRef + 'T00:00:00');
       // ainda em massiva = alarme da própria PON aberto, ou pelo menos 5 ONUs (ou metade das afetadas) ainda com alarme aberto; sobrando 1-2 ONUs a massiva já acabou (elas seguem como ONU individual)
-      const aindaAberta = e => e.abertas > 0 && (String(e.tipo).startsWith('Porta PON') || e.abertas >= 5 || e.abertas * 2 >= e.onus);
-      const decora = e => { const estado = aindaAberta(e) ? (calcP.has(e) ? 'aberta' : 'semconf') : 'resolvida', fimTxt = estado === 'aberta' ? refMax : (e.resolvidoEm || e.fim), t = totPorta.get(`${nk(e.olt)}|${e.frame}/${e.slot}/${e.porta}`);
+      const verMassiva = e => u2kMassivaAberta(e, lstLoc, totPorta), aindaAberta = e => verMassiva(e).aberta;
+      const decora = e => { const ver = verMassiva(e), estado = ver.aberta ? (calcP.has(e) ? 'aberta' : 'semconf') : 'resolvida', fimTxt = estado === 'aberta' ? refMax : (e.resolvidoEm || e.fim), t = totPorta.get(`${nk(e.olt)}|${e.frame}/${e.slot}/${e.porta}`);
         const reinc = evPorta.filter(x => x.olt === e.olt && String(x.slot) === String(e.slot) && String(x.porta) === String(e.porta) && Math.abs(tms(x.ini) - tms(e.ini)) <= 7 * 86400000).length;
-        return { ...e, estado, fimTxt, durMs: Math.max(0, tms(fimTxt) - tms(e.ini)), offAgora: t && (t.online || t.offline) ? t.offline : null, reinc, idade: Math.round((diaMs - Date.parse(String(e.ini).slice(0, 10) + 'T00:00:00')) / 86400000) }; };
+        return { ...e, abertas: ver.abReal, recuperadas: ver.rec, leitura: e.leitura + (ver.rec ? ` · ${ver.rec} ONU(s) com alarme aberto já estão ONLINE na lista GPON (alarme não encerrado no U2000)` : ''), estado, fimTxt, durMs: Math.max(0, tms(fimTxt) - tms(e.ini)), offAgora: t && (t.online || t.offline) ? t.offline : null, reinc, idade: Math.round((diaMs - Date.parse(String(e.ini).slice(0, 10) + 'T00:00:00')) / 86400000) }; };
       const todasP = evPorta.map(decora);
       // a mesma porta com o mesmo alarme aberto desde dias atrás vira UMA linha (início = o mais antigo)
       const gAb = new Map(); todasP.filter(e => e.estado === 'aberta').forEach(e => { const k = [e.olt, e.frame, e.slot, e.porta, e.tipo].join('|'), a = gAb.get(k); if (!a) { gAb.set(k, { ...e }); return; } const ini = e.ini < a.ini ? e.ini : a.ini; if (e.onus > a.onus || (e.onus === a.onus && e.abertas > a.abertas)) Object.assign(a, e); a.ini = ini; });
@@ -30906,10 +31085,12 @@ function renderU2000() {
       const refTxt = e => { const sn = e.sn || (lstLoc.get(`${nk(e.olt)}|${e.frame || 0}/${e.slot}/${e.porta}|${e.onuId}`) || {}).sn || ''; const al = aliasDe(e.olt, e.frame, e.slot, e.porta, e.onuId); return `${e.frame || 0}/${e.slot}/${e.porta}${e.onuId !== '' && e.onuId != null ? ' ONU ' + e.onuId : ''}${sn ? ' · SN ' + u2kSnCurto(sn) : ''}${al ? ' · ' + al : ''}`; };
       abertasP.forEach(e => { const o = getO(e.olt); o.ab++; o.onusAb += e.abertas; if (!o.desde || e.ini < o.desde) o.desde = e.ini; o.portas.push(u2kPortaCompleta(e)); if (o.refs.length < 3) o.refs.push(refTxt(e)); });
       todasP.forEach(e => { const o = getO(e.olt); if (e.estado === 'resolvida') { o.res++; if (String(e.fimTxt).slice(0, 10) === diaRef) { o.resHoje++; if (e.fimTxt > o.ultRes) o.ultRes = e.fimTxt; } } });
-      eventos.forEach(e => { const o = getO(e.olt), aberto = e.abertas > 0 && (e.abertas >= 5 || e.abertas * 2 >= e.onus); if (calcO.has(e) && aberto) { if (!o.ab && o.refs.length < 3) o.refs.push(`${e.onde || ''}${e.slot !== '' && e.slot != null ? ' — ref. ' + refTxt(e) : ''}`); if (!o.desde || e.ini < o.desde) o.desde = e.ini; }
+      eventos.forEach(e => { const o = getO(e.olt), aberto = u2kMassivaAberta(e, lstLoc, totPorta).aberta; if (calcO.has(e) && aberto) { if (!o.ab && o.refs.length < 3) o.refs.push(`${e.onde || ''}${e.slot !== '' && e.slot != null ? ' — ref. ' + refTxt(e) : ''}`); if (!o.desde || e.ini < o.desde) o.desde = e.ini; }
         if (calcO.has(e) && aberto) o.oltAb++; else if (!aberto && String(e.fim).slice(0, 10) === diaRef) o.oltRes++; });
       const linhasOlt = [...porOlt.values()].map(o => ({ ...o, situacao: (o.ab || o.oltAb) ? 'EM MASSIVA' : (o.resHoje || o.oltRes) ? 'Resolvida' : 'Normal', durMs: o.desde ? Math.max(0, tms(refMax) - tms(o.desde)) : 0 }))
         .filter(o => o.situacao !== 'Normal').sort((x, y) => (x.situacao === 'EM MASSIVA' ? 0 : 1) - (y.situacao === 'EM MASSIVA' ? 0 : 1) || y.onusAb - x.onusAb || String(y.ultRes).localeCompare(String(x.ultRes)));
+      const impMs = U2K.alarmesEm ? Date.parse(U2K.alarmesEm) : 0, idadeImp = impMs ? Date.now() - impMs : 0;
+      const avisoIdade = idadeImp > 2 * 3600000 ? `<div style="margin:0 0 12px;padding:10px 14px;border-radius:10px;border:1px solid var(--danger);background:color-mix(in srgb, var(--danger) 10%, transparent);font-size:13px"><b>Atenção:</b> o arquivo de alarmes foi importado há <b>${dur(idadeImp)}</b>. O que está "em aberto" abaixo vale para aquele momento — a porta pode já ter normalizado. Exporte e importe o Browse Current Alarm de novo para confirmar.</div>` : '';
       const nEmMassiva = linhasOlt.filter(o => o.situacao === 'EM MASSIVA').length, nResOlt = linhasOlt.length - nEmMassiva, nResHoje = resolvP.filter(e => e.estado === 'resolvida' && String(e.fimTxt).slice(0, 10) === diaRef).length;
       const badgeSit = t => `<span class="badge ${t === 'EM MASSIVA' ? 'warn' : 'ok'}">${esc(t)}</span>`;
       const colsRef = () => [{ t: 'ONU ID (referência)', f: e => e.onuId }, { t: 'SN (referência)', f: e => e.sn, s: 'font-size:11.5px' }];
@@ -30919,7 +31100,7 @@ function renderU2000() {
       const colsRes = () => [colPorta, { t: 'OLT', f: e => e.olt }, { t: 'Tipo', f: e => e.tipo }, { t: 'Situação', h: e => e.estado === 'resolvida' ? '<span class="badge ok">Resolvida</span>' : '<span class="badge neutral" title="estava aberta quando foi importada e não aparece no último arquivo de alarmes">Sem confirmação</span>', x: e => e.estado === 'resolvida' ? 'Resolvida' : 'Sem confirmação' },
         { t: 'Início', f: e => u2kFmtData(e.ini) }, { t: 'Resolvida em', f: e => e.estado === 'resolvida' ? u2kFmtData(e.fimTxt) : '' }, { t: 'Duração', f: e => dur(e.durMs) },
         { t: 'ONUs afetadas', h: e => e.onus ? `<b>${e.onus}</b>` : '-', x: e => e.onus || '' }, { t: 'ONUs na porta (lista GPON)', f: e => e.total || '' }, colPct, { t: 'ONUs que seguem com alarme', f: e => e.abertas || '' }, colReinc, { t: 'ONU IDs afetadas', f: e => e.ids, s: 'font-size:12px;white-space:normal' }, ...colsRef()];
-      el.innerHTML = `<div class="stat-cards" style="margin-bottom:12px">${statCard(nEmMassiva ? 'red' : 'green', nEmMassiva ? icAviso : icOk, 'OLTs em massiva agora', String(nEmMassiva), nEmMassiva ? linhasOlt.filter(o => o.situacao === 'EM MASSIVA').slice(0, 3).map(o => o.olt.replace(/^NIU-/, '')).join(' · ') : 'nenhuma')}${statCard(abertasP.length ? 'red' : 'green', icAviso, 'Portas em massiva (em aberto)', String(abertasP.length), `${abertasP.reduce((t, e) => t + e.abertas, 0).toLocaleString('pt-BR')} ONUs com alarme aberto`)}${statCard('green', icOk, 'Portas resolvidas hoje', String(nResHoje), `${nResOlt} OLT(s) já normalizada(s)`)}${statCard('blue', icRelogio, 'Dados até', refMax ? u2kFmtData(refMax).slice(0, 16) : '-', 'alarme mais novo do arquivo')}</div>`
+      el.innerHTML = avisoIdade + `<div class="stat-cards" style="margin-bottom:12px">${statCard(nEmMassiva ? 'red' : 'green', nEmMassiva ? icAviso : icOk, 'OLTs em massiva agora', String(nEmMassiva), nEmMassiva ? linhasOlt.filter(o => o.situacao === 'EM MASSIVA').slice(0, 3).map(o => o.olt.replace(/^NIU-/, '')).join(' · ') : 'nenhuma')}${statCard(abertasP.length ? 'red' : 'green', icAviso, 'Portas em massiva (em aberto)', String(abertasP.length), `${abertasP.reduce((t, e) => t + e.abertas, 0).toLocaleString('pt-BR')} ONUs com alarme aberto`)}${statCard('green', icOk, 'Portas resolvidas hoje', String(nResHoje), `${nResOlt} OLT(s) já normalizada(s)`)}${statCard(idadeImp > 2 * 3600000 ? 'red' : 'blue', icRelogio, 'Dados até', refMax ? u2kFmtData(refMax).slice(0, 16) : '-', impMs ? `alarme mais novo · arquivo importado há ${dur(idadeImp) || '0min'}` : 'alarme mais novo do arquivo')}</div>`
         + titulo('Massivas — todas (em aberto e resolvidas)', 'uma linha por porta completa e evento (e por queda da OLT inteira). Situação da OLT: EM MASSIVA = a OLT tem porta com queda em massa ainda aberta; Resolvida = teve massiva no dia e todos os alarmes já foram encerrados. "Resolvida em" = o último encerramento dos alarmes; sem confirmação = estava aberta numa importação antiga e não aparece no último arquivo') + '<div id="u2-m2"></div>'
         + titulo('Portas com a maioria das ONUs offline agora', 'pelo status da lista GPON (50% ou mais, mínimo 5 ONUs)') + '<div id="u2-h3"></div>';
       // unificada (14/10/2026, pedido do cliente): as em aberto (agrupadas por porta) + as resolvidas, com todas as colunas
@@ -30928,7 +31109,7 @@ function renderU2000() {
       const sitDaOlt = new Map(linhasOlt.map(o => [o.olt, o.situacao]));
       const soOlt = linhasOlt.filter(o => !o.ab && !o.resHoje).map(o => o.olt);
       const linhasOltInteira = eventos.filter(e => soOlt.includes(e.olt)).map(e => {
-        const aberto = e.abertas > 0 && (e.abertas >= 5 || e.abertas * 2 >= e.onus);
+        const aberto = u2kMassivaAberta(e, lstLoc, totPorta).aberta;
         if (!(calcO.has(e) && aberto) && !(!aberto && String(e.fim).slice(0, 10) === diaRef)) return null;
         const estado = aberto ? 'aberta' : 'resolvida', fimTxt = aberto ? refMax : e.fim;
         return { ...e, oltInteira: true, estado, fimTxt, durMs: Math.max(0, tms(fimTxt) - tms(e.ini)), pct: null, total: '', reinc: 0, offAgora: null, ids: e.ids || '', idade: Math.round((diaMs - Date.parse(String(e.ini).slice(0, 10) + 'T00:00:00')) / 86400000) };
