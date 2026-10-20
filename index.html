@@ -15963,7 +15963,7 @@ function renderContatos() {
   document.getElementById('content').innerHTML = `
     <div id="ct-cards"></div>
     <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span>Assinantes e técnicos</span>
-      <button type="button" class="btn-sinalizar" id="ct-sinalizar" title="Copia a lista pra colar no WhatsApp: por técnico, CLIENTE - número">📲 SINALIZAR</button>
+      <button type="button" class="btn-sinalizar" id="ct-sinalizar" title="Copia a lista pra colar no WhatsApp: por cidade e técnico, CLIENTE - telefone">📲 SINALIZAR</button>
       <button type="button" class="btn-export-xls" id="ct-excel">⤓ Excel (só o filtrado)</button></div>
     <div class="toolbar">
       <div class="field"><label>Data (CSV de atividades)</label><select id="ct-dia">${dias.length ? dias.map(d => `<option value="${d}">${formatDate(d)}</option>`).join('') : '<option value="">sem CSV importado</option>'}</select></div>
@@ -16078,15 +16078,19 @@ function renderContatos() {
   g('ct-q').addEventListener('input', () => desenhar(g('ct-dia')._todas || []));
   carregar();
 }
-// SINALIZAR dos contatos: por técnico, uma linha por assinante — CLIENTE - número; linha em branco entre técnicos
+// SINALIZAR dos contatos: por cidade e, dentro dela, por técnico — uma linha por assinante: CLIENTE - telefone
 function textoSinalizarContatos(lista, contatoDe, fmtLimite) {
-  const por = new Map();
-  lista.forEach(l => { const k = l.tecnico ? l.tecnico.trim() : 'SEM TÉCNICO'; if (!por.has(k)) por.set(k, []); por.get(k).push(l); });
-  return [...por.entries()].sort((a, b) => (a[0] === 'SEM TÉCNICO') - (b[0] === 'SEM TÉCNICO') || a[0].localeCompare(b[0], 'pt-BR')).map(([tec, ls]) => tec.toUpperCase() + '\n' + ls.map(l => {
-    const c = contatoDe(l), tel = c ? contatoFmtTel(c.celular || c.telefone) : '';
-    // só nome do cliente e número (pedido do cliente, 20/10/2026): sem endereço, serviço, prazo nem IFI/IRR
-    return [String(l.cliente || (c && c.nome) || '').trim().toUpperCase(), tel || 'sem telefone'].filter(Boolean).join(' - ');
-  }).join('\n')).join('\n\n');
+  // por CIDADE, depois por técnico (pedido do cliente, 20/10/2026): Cidade / Técnico / Cliente - telefone; linha em branco entre técnicos e entre cidades
+  const porCidade = new Map();
+  lista.forEach(l => { const cid = String(l.cidade || 'SEM CIDADE').trim(), tec = l.tecnico ? l.tecnico.trim() : 'SEM TÉCNICO';
+    if (!porCidade.has(cid)) porCidade.set(cid, new Map());
+    const m = porCidade.get(cid); if (!m.has(tec)) m.set(tec, []); m.get(tec).push(l); });
+  const cmp = (a, b) => a.localeCompare(b, 'pt-BR');
+  return [...porCidade.entries()].sort((a, b) => (a[0] === 'SEM CIDADE') - (b[0] === 'SEM CIDADE') || cmp(a[0], b[0])).map(([cid, tecs]) =>
+    cid + '\n' + [...tecs.entries()].sort((a, b) => (a[0] === 'SEM TÉCNICO') - (b[0] === 'SEM TÉCNICO') || cmp(a[0], b[0])).map(([tec, ls]) => tec + '\n' + ls.map(l => {
+      const c = contatoDe(l), tel = c ? contatoFmtTel(c.celular || c.telefone) : '';
+      return [String(l.cliente || (c && c.nome) || '').trim().toUpperCase(), tel || 'sem telefone'].filter(Boolean).join(' - ');
+    }).join('\n')).join('\n\n')).join('\n\n');
 }
 
 function renderChamadosGiga() {
