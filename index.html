@@ -15759,6 +15759,7 @@ function renderChamadosGiga() {
   // ver CLAUDE.md §11.11: tabela de ordem-por-linha sem limite pode travar a
   // aba com um export grande da GIGA, achado em auditoria 14/09/2026).
   let limiteGiga = 100;
+  let soNaoAntecipadas = false;   // botão "Ordens Não Antecipadas": filtra a tabela pelos chamados que ainda não estão em campo
   document.getElementById('content').innerHTML = `
     <div class="toolbar">
       <div class="field">${campoArquivo('giga-file', 'CSV de chamados (GIGA)', '.csv,text/csv')}</div>
@@ -15966,48 +15967,79 @@ function renderChamadosGiga() {
       return linhas.length ? linhas.join('<br>') : '<span style="color:var(--text-muted)">—</span>';
     };
 
+    const ordenados = [...abertos].sort((a,b) => (a.data_abertura||'').localeCompare(b.data_abertura||''));
+    const naoAntecipadas = ordenados.filter(r => !contratosEmCampo.has(soDigitos(r.contrato)));
+    // uma linha de células por chamado, montada SÓ quando alguém pede (cartão ou tabela) e guardada — nada é refeito a cada clique
+    const celulasCache = new Map();
+    const celulasDe = r => {
+      let c = celulasCache.get(r);
+      if (c) return c;
+      const emCampo = contratosEmCampo.has(soDigitos(r.contrato));
+      const visitadaHoje = visitadaHojeImprodutiva(r.contrato);
+      c = [formatDate(r.data_abertura), esc(r.fila), celulaIfiIrr(r), celulaPrazoContratado(r), celulaSituacaoPrazo(r), esc(r.unidade), esc(r.contrato), esc(r.cliente), esc(r.bairro),
+        `<span style="color:${emCampo ? 'var(--success)' : 'var(--danger)'};font-weight:700">${emCampo ? 'EM CAMPO' : 'NÃO ESTÁ EM CAMPO'}</span>`,
+        visitadaHoje
+          ? `<span style="color:var(--danger);font-weight:700">Sim</span>${visitadaHoje.motivo ? `<br><span style="font-size:11px;color:var(--text-secondary)">${esc(visitadaHoje.motivo)}</span>` : ''}`
+          : '<span style="color:var(--text-secondary)">Não</span>',
+        celulaDetalhe(r)];
+      celulasCache.set(r, c);
+      return c;
+    };
+    const COLS_GIGA = ['Abertura', 'Fila', 'IFI / IRR', 'Prazo', 'Situação do prazo', 'Unidade', 'Contrato', 'Cliente', 'Bairro', 'Status', 'Já visitada hoje?', 'Detalhe do retorno e do prazo'];
+    // cartões clicáveis (20/10/2026, pedido do cliente: "os cards de chamados em aberto GIGA não estão clicáveis"): a janela mostra os chamados do cartão,
+    // com filtro por coluna e Excel. As linhas só são montadas NO CLIQUE (getter) — nada pesado ao abrir a tela. Teto de 3.000 linhas na janela.
+    const listaGiga = (chave, titulo, arr) => {
+      if (!arr.length) return '';
+      cartaoListaCustom(chave, titulo, arr.length > 3000 ? `mostrando os 3.000 mais antigos de ${arr.length.toLocaleString('pt-BR')}` : '', COLS_GIGA, [{ tipo: '', celulas: [] }]);
+      Object.defineProperty(CARTOES_LISTA[chave].custom, 'linhas', { configurable: true, get: () => arr.slice(0, 3000).map(r => ({ tipo: '', celulas: celulasDe(r) })) });
+      return chave;
+    };
+    const emCampoLista = ordenados.filter(r => contratosEmCampo.has(soDigitos(r.contrato)));
     body.innerHTML = `
       <div class="cards-grid">
-        ${metricCard('Sem O.S. em campo', semOS.length, semOS.length > 0)}
-        ${metricCard('Já em campo (PCR)', comOS)}
-        ${metricCard('Possíveis retornos (IFI/IRR)', qtdRetornos, qtdRetornos > 0)}
-        ${metricCard('Prazo vencido', qtdVencidos, qtdVencidos > 0)}
-        ${metricCard('Prazo em risco', qtdRisco, qtdRisco > 0)}
+        ${metricCard('Sem O.S. em campo', semOS.length, semOS.length > 0, { lista: listaGiga('giga|semos', 'Chamados sem O.S. em campo', naoAntecipadas) })}
+        ${metricCard('Já em campo (PCR)', comOS, false, { lista: listaGiga('giga|campo', 'Chamados já em campo (PCR)', emCampoLista) })}
+        ${metricCard('Possíveis retornos (IFI/IRR)', qtdRetornos, qtdRetornos > 0, { lista: listaGiga('giga|ret', 'Possíveis retornos (IFI/IRR)', ordenados.filter(r => infoChamado.get(r).ret)) })}
+        ${metricCard('Prazo vencido', qtdVencidos, qtdVencidos > 0, { lista: listaGiga('giga|venc', 'Prazo vencido', ordenados.filter(r => infoChamado.get(r).sit === 'vencido')) })}
+        ${metricCard('Prazo em risco', qtdRisco, qtdRisco > 0, { lista: listaGiga('giga|risco', 'Prazo em risco', ordenados.filter(r => infoChamado.get(r).sit === 'risco')) })}
       </div>
       <div class="section-heading">Chamados em aberto na GIGA</div>
       <p style="font-size:13px;color:var(--text-secondary);margin:0 0 10px">Cruza o CONTRATO de cada chamado aberto contra o PCR (${esc(String(DB.pcr.length))} linhas carregadas — o CSV de atividades diário). Status = EM CAMPO quando o contrato já tem alguma linha ativa (não Não Concluída) no PCR. "Já visitada hoje" = teve tentativa Não Concluída HOJE pra esse contrato (com o motivo, quando tem).
         <b>IFI / IRR</b> = reparo de um contrato que já teve serviço concluído dentro da janela (IRR: reparo anterior em até ${JANELA_IRR} dias; IFI: ativação ou mudança de endereço anterior em até ${JANELA_IFI} dias), pelo histórico da Produção + PCR — pode faltar retorno se o serviço anterior é mais antigo que a Produção importada.
         <b>Prazo</b> = reparo 24h, ativação e mudança de endereço ${PRAZO_ATIVACAO_HORAS}h (mudança de cômodo e upgrade não têm prazo); <b>Situação do prazo</b> diz se está no prazo ou vencido. É exato quando o contrato já tem a ordem no PCR; sem isso é estimado, porque a GIGA manda só a data da abertura, sem hora.</p>
-      ${!abertos.length ? '<div class="panel"><div class="empty">Nenhum chamado em aberto no export importado.</div></div>' : (() => {
-        const ordenados = [...abertos].sort((a,b) => (a.data_abertura||'').localeCompare(b.data_abertura||''));
-        return `
+      ${!abertos.length ? '<div class="panel"><div class="empty">Nenhum chamado em aberto no export importado.</div></div>' : `
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
-        <span style="font-size:12px;color:var(--text-muted)">${ordenados.length} chamado(s) no filtro${ordenados.length > limiteGiga ? ` — mostrando os ${limiteGiga} mais antigos na tabela` : ''}</span>
+        <span style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <button type="button" class="btn${soNaoAntecipadas ? '' : ' btn-secundario'}" id="giga-nao-ant" aria-pressed="${soNaoAntecipadas}" title="Mostra só os chamados que ainda não estão em campo (sem O.S. ativa no PCR). Clique de novo pra ver todos.">Ordens Não Antecipadas (${naoAntecipadas.length})</button>
+          <span id="giga-contagem" style="font-size:12px;color:var(--text-muted)"></span>
+        </span>
         <select class="topn-select" id="giga-limite">
           ${[100, 300, 1000, 99999].map(n => `<option value="${n}"${limiteGiga === n ? ' selected' : ''}>${n >= 99999 ? 'Mostrar todos' : 'Mostrar ' + n}</option>`).join('')}
         </select>
       </div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>
-        <th>Abertura</th><th>Fila</th><th>IFI / IRR</th><th>Prazo</th><th>Situação do prazo</th><th>Unidade</th><th>Contrato</th><th>Cliente</th><th>Bairro</th><th>Status</th><th>Já visitada hoje?</th><th>Detalhe do retorno e do prazo</th>
-      </tr></thead><tbody>
-        ${ordenados.slice(0, limiteGiga).map(r => {
-          const emCampo = contratosEmCampo.has(soDigitos(r.contrato));
-          const visitadaHoje = visitadaHojeImprodutiva(r.contrato);
-          return `<tr>
-          <td>${formatDate(r.data_abertura)}</td><td>${esc(r.fila)}</td>
-          <td>${celulaIfiIrr(r)}</td><td>${celulaPrazoContratado(r)}</td><td>${celulaSituacaoPrazo(r)}</td>
-          <td>${esc(r.unidade)}</td><td>${esc(r.contrato)}</td><td>${esc(r.cliente)}</td><td>${esc(r.bairro)}</td>
-          <td style="color:${emCampo ? 'var(--success)' : 'var(--danger)'};font-weight:700">${emCampo ? 'EM CAMPO' : 'NÃO ESTÁ EM CAMPO'}</td>
-          <td>${visitadaHoje
-            ? `<span style="color:var(--danger);font-weight:700">Sim</span>${visitadaHoje.motivo ? `<br><span style="font-size:11px;color:var(--text-secondary)">${esc(visitadaHoje.motivo)}</span>` : ''}`
-            : '<span style="color:var(--text-secondary)">Não</span>'}</td>
-          <td style="white-space:normal;min-width:240px;font-size:12px;line-height:1.5">${celulaDetalhe(r)}</td>
-        </tr>`;
-        }).join('')}
-      </tbody></table></div>`;
-      })()}`;
+      <div id="giga-tabela"></div>`}`;
+    // só a TABELA é redesenhada ao filtrar / mudar o limite (os cálculos acima ficam como estão) — é isso que evita travar
+    function desenharTabelaGiga() {
+      const alvo = document.getElementById('giga-tabela');
+      if (!alvo) return;
+      const fonte = soNaoAntecipadas ? naoAntecipadas : ordenados;
+      const mostrar = fonte.slice(0, limiteGiga);
+      const cont = document.getElementById('giga-contagem');
+      if (cont) cont.textContent = `${fonte.length} chamado(s) no filtro${soNaoAntecipadas ? ' (só não antecipadas)' : ''}${fonte.length > limiteGiga ? ` — mostrando os ${limiteGiga} mais antigos na tabela` : ''}`;
+      const btn = document.getElementById('giga-nao-ant');
+      if (btn) { btn.classList.toggle('btn-secundario', !soNaoAntecipadas); btn.setAttribute('aria-pressed', String(soNaoAntecipadas)); }
+      const estDet = 'white-space:normal;min-width:240px;font-size:12px;line-height:1.5';
+      alvo.innerHTML = !mostrar.length
+        ? '<div class="panel"><div class="empty">Nenhum chamado nesse filtro.</div></div>'
+        : `<div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table"><thead><tr>${COLS_GIGA.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>${
+          mostrar.map(r => { const c = celulasDe(r); return `<tr>${c.map((x, i) => `<td${i === c.length - 1 ? ` style="${estDet}"` : ''}>${x}</td>`).join('')}</tr>`; }).join('')
+        }</tbody></table></div>`;
+    }
+    desenharTabelaGiga();
+    const btnNaoAnt = document.getElementById('giga-nao-ant');
+    if (btnNaoAnt) btnNaoAnt.addEventListener('click', () => { soNaoAntecipadas = !soNaoAntecipadas; desenharTabelaGiga(); });
     const selLimite = document.getElementById('giga-limite');
-    if (selLimite) selLimite.addEventListener('change', () => { limiteGiga = parseInt(selLimite.value, 10); load(); });
+    if (selLimite) selLimite.addEventListener('change', () => { limiteGiga = parseInt(selLimite.value, 10); desenharTabelaGiga(); });
   }
 }
 
@@ -26876,6 +26908,9 @@ function renderFolhaEscritorio() {
     const inpNum = (l, campo, largura) => pode
       ? `<input type="number" class="folha-edit" step="0.5" min="0" data-pessoa="${esc(l.pessoa)}" data-campo="${campo}" value="${Number(l[campo]) || 0}" style="width:${largura}px">`
       : (Number(l[campo]) || 0);
+    const inpTexto = (l, campo, largura) => pode
+      ? `<input type="text" class="folha-edit fe-texto" maxlength="12" placeholder="1/2" data-pessoa="${esc(l.pessoa)}" data-campo="${campo}" value="${esc(l[campo] || '')}" style="width:${largura}px;text-align:center">`
+      : esc(l[campo] || '-');
     const inpDin = (l, campo) => {
       if (!pode) return money(l[campo]);
       const cent = Math.round((Number(l[campo]) || 0) * 100);
@@ -26891,7 +26926,10 @@ function renderFolhaEscritorio() {
       ['Dias trab.',  l => inpNum(l, 'dias_trab', 66), 'prod'],
       ['Líquido',     l => `<span class="fe-liquido">${money(l.liquido)}</span>`, 'valor'],
       ...FOLHA_ESC_PROVENTOS.map(c => [c.rot, l => inpDin(l, c.campo), 'valor']),
-      ...FOLHA_ESC_DESCONTOS.map(c => [c.rot, l => inpDin(l, c.campo), 'desc']),
+      // "Parcelas do vale" = texto livre (ex.: 1/2) logo depois de "Desconto vale"; não entra em nenhuma conta
+      ...FOLHA_ESC_DESCONTOS.flatMap(c => c.campo === 'desconto_vale'
+        ? [[c.rot, l => inpDin(l, c.campo), 'desc'], ['Parcelas do vale', l => inpTexto(l, 'parcela_vale', 64), 'desc']]
+        : [[c.rot, l => inpDin(l, c.campo), 'desc']]),
       ['PROVENTOS',   l => `<span class="fe-proventos" style="color:var(--accent);font-weight:700">${money(l.proventos)}</span>`, 'valor'],
       ['DESCONTOS',   l => `<span class="fe-descontos" style="color:var(--danger);font-weight:700">${money(l.descontos)}</span>`, 'desc'],
       ['A RECEBER',   l => `<span class="fe-receber" style="color:var(--success);font-weight:700">${money(l.total_receber)}</span>`, 'receb'],
@@ -26982,6 +27020,13 @@ function renderFolhaEscritorio() {
         refazLinha(l);
       });
     });
+    document.querySelectorAll('#fe-body input.fe-texto').forEach(el => {
+      el.addEventListener('input', () => {
+        const l = acha(el.dataset.pessoa); if (!l) return;
+        l[el.dataset.campo] = el.value.trim();
+        refazLinha(l);
+      });
+    });
     // Descartar: as edições vivem só nas linhas da tela (o banco/DB só muda no Salvar), então refazer a tela volta tudo ao último salvo
     const btnDesc = document.getElementById('fe-descartar');
     if (btnDesc) btnDesc.addEventListener('click', () => {
@@ -27045,7 +27090,7 @@ function holeriteEscritorioHTML(l) {
   // 3 colunas (Informações/Quant./Valores), igual ao holerite do técnico — só
   // "Dias trabalhados" usa a coluna de quantidade; o resto fica em branco ali.
   const linhaProv = c => `<tr><td>${c.rot}</td><td class="q"></td><td class="v">${cel(n(l[c.campo]))}</td></tr>`;
-  const linhaDesc = c => `<tr><td>${c.rot}</td><td class="v">${cel(n(l[c.campo]))}</td></tr>`;
+  const linhaDesc = c => `<tr><td>${c.rot}${c.campo === 'desconto_vale' && l.parcela_vale ? ` (parcela ${esc(l.parcela_vale)})` : ''}</td><td class="v">${cel(n(l[c.campo]))}</td></tr>`;
   return `<div class="holerite holerite-esc">
     <div class="hol-topo">
       <div class="hol-logo-linha"><div class="hol-marca">JH TELECOM<span>SOLUÇÕES EM FIBRA ÓPTICA</span></div></div>
@@ -27778,6 +27823,7 @@ const SAUDE_CHECAGENS_SQL = [
   { passo: 'PASSO-32', rotulo: 'Ajuste de Frota/Aluguel na Folha', tabela: 'folha_pagamento', coluna: 'frota_manual,dias_aluguel_manual,valor_aluguel_manual' },
   { passo: 'PASSO-32', rotulo: 'Histórico de alterações da Folha', tabela: 'folha_historico' },
   { passo: 'PASSO-58', rotulo: 'Histórico de alterações de Receitas e Despesas', tabela: 'financeiro_historico' },
+  { passo: 'PASSO-59', rotulo: 'Folha do Escritório: parcelas do vale', tabela: 'folha_escritorio', coluna: 'parcela_vale' },
   { passo: 'PASSO-33', rotulo: 'Trava da importação da PCR', rpc: 'pcr_trava_status', args: { p_token: 'saude' } },
   { passo: 'PASSO-34', rotulo: 'Fechamento do ciclo da Folha', tabela: 'folha_fechamentos' },
   { passo: 'PASSO-39', rotulo: 'Clientes da JH com o sinal real (Monitoramento OLT)', tabela: 'monitor_olt_clientes' },
