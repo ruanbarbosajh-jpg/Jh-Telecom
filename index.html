@@ -30600,7 +30600,7 @@ function u2kDadosCliente(sn, alias) {
 // Só GET; com `atualizar` a OLT é mandada ler cada ONU (igual ao botão Atualizar do AutoISP) — só quando a pessoa pede e confirma.
 const U2K_AISP = { cache: new Map(), portas: new Map() };    // cache: SN → leitura · portas: "olt|f/s/p|tipo" → veredito da porta
 const aispChave = sn => u2kSnNorm(u2kSnCurto(sn || ''));
-const aispPronto = () => !!(EXT_JH.presente && extensaoAtende('1.4.0'));
+const aispPronto = () => !!(EXT_JH.presente && extensaoAtende('1.4.1'));
 const aispCaido = d => !!d && d.achou !== false && /loss_signal|power_fail|down|offline/i.test(String(d.status_onu || ''));
 const aispGet = sn => U2K_AISP.cache.get(aispChave(sn));
 function aispRot(sn) { const d = aispGet(sn); if (!d) return 'Não consultado'; if (d.achou === false) return d.erro ? 'Erro na consulta' : 'Não achado no AutoISP'; return moStatusTxt(d.status_onu); }
@@ -30608,7 +30608,7 @@ const aispQuando = t => t ? new Date(t).toLocaleString('pt-BR', { day: '2-digit'
 function aispSinalHtml(d) {
   if (!d) return '<span style="color:var(--text-muted)">-</span>';
   if (d.achou === false) return `<span style="color:var(--text-muted)" title="${esc(d.erro || 'esse SN não apareceu na busca do AutoISP')}">${d.erro ? 'erro' : 'não achado'}</span>`;
-  return `<b style="color:${moCorSit(d.status_onu)}">${esc(d.sinal_rx == null ? '-' : moSinal(d.sinal_rx))}</b>${d.atualizado ? ' <span title="a OLT foi mandada ler a ONU agora">⚡</span>' : ''}`;
+  return `<b style="color:${moCorSit(d.status_onu)}">${esc(d.sinal_rx == null ? '-' : moSinal(d.sinal_rx))}</b>${d.atualizado ? ' <span title="a OLT foi mandada ler a ONU agora">⚡</span>' : ''}${d.via === 'contrato' ? ' <span title="o SN não apareceu no AutoISP — achado pelo CONTRATO" style="font-size:11px;color:var(--text-muted)">(contrato)</span>' : ''}`;
 }
 const aispSitHtml = d => !d || d.achou === false ? '' : `<span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap"><span style="width:10px;height:10px;border-radius:50%;background:${moCorSit(d.status_onu)}"></span>${esc(moStatusTxt(d.status_onu))}</span>`;
 // colunas "AutoISP ao vivo" (Cliente e monitorar)
@@ -30618,13 +30618,17 @@ const u2kColsAisp = () => [
   { t: 'Último contato do equipamento', f: r => { const d = aispGet(r.sn); return d && d.achou !== false ? aispQuando(d.acs_ultimo_contato) : ''; }, w: 110, s: 'font-size:12px;white-space:nowrap' },
   { t: 'Lido em', f: r => { const d = aispGet(r.sn); return d ? aispQuando(d.consultado_em || d.em) : ''; }, w: 90, s: 'font-size:12px;white-space:nowrap' }];
 // consulta uma lista de SNs (em blocos) e guarda no cache; aoAndar(feitos, total)
-async function u2kAispConsultar(serials, opts) {
-  const o = opts || {}, alvo = [...new Map(serials.filter(Boolean).map(sn => [aispChave(sn), u2kSnCurto(sn)])).values()].filter(Boolean), tam = o.atualizar ? 6 : 10;
+// 20/10/2026 (pedido do cliente: "busque sempre pelo SN e, se não achar pelo SN, pelo contrato"): cada item pode ser o SN (texto) ou { sn, contrato };
+// a extensão busca pelo SN e só tenta o contrato (erp_id) quando o SN não aparece. O cache é sempre pelo SN (ou pelo contrato, quando a ONU não tem SN).
+const aispItemChave = it => aispChave(it.sn) || ('c' + String(it.contrato || ''));
+async function u2kAispConsultar(entradas, opts) {
+  const o = opts || {}, itens = entradas.map(x => typeof x === 'string' ? { sn: x } : { sn: x && x.sn, contrato: x && x.contrato }).filter(x => x.sn || x.contrato);
+  const alvo = [...new Map(itens.map(x => [aispItemChave(x), { sn: u2kSnCurto(x.sn || ''), contrato: String(x.contrato || '').replace(/\D/g, '') }])).values()], tam = o.atualizar ? 6 : 10;
   let feitos = 0;
   for (let i = 0; i < alvo.length; i += tam) {
-    const bloco = alvo.slice(i, i + tam), r = await consultarExtensao('sinais', { serials: bloco, atualizar: !!o.atualizar });
+    const bloco = alvo.slice(i, i + tam), r = await consultarExtensao('sinais', { itens: bloco, atualizar: !!o.atualizar });
     if (!r.ok) return { ok: false, erro: r.erro, feitos };
-    (r.dados || []).forEach(x => U2K_AISP.cache.set(aispChave(x.serial), { ...x, em: Date.now() }));
+    (r.dados || []).forEach(x => U2K_AISP.cache.set(aispItemChave({ sn: x.serial, contrato: x.contrato }), { ...x, em: Date.now() }));
     feitos += bloco.length; if (o.aoAndar) o.aoAndar(feitos, alvo.length);
   }
   return { ok: true, feitos };
@@ -30642,13 +30646,13 @@ const aispPortaHtml = e => { const v = U2K_AISP.portas.get(aispChavePorta(e)); i
 // confere UMA porta: pelos SNs das ONUs afetadas (lista GPON) ou, sem lista, pela OLT + PON no AutoISP
 async function u2kAispVerificarPorta(e, lstLoc, atualizar) {
   const nk = normalizeHeader, ids = (e.abertosIds && e.abertosIds.length ? e.abertosIds : String(e.ids || '').split(/[,\s]+/).map(Number).filter(Boolean));
-  const sns = ids.map(id => { const l = lstLoc.get(`${nk(e.olt)}|${e.frame || 0}/${e.slot}/${e.porta}|${id}`) || lstLoc.get(`${nk(e.olt)}|0/${e.slot}/${e.porta}|${id}`); return l && l.sn ? u2kSnCurto(l.sn) : ''; }).filter(Boolean);
+  const sns = ids.map(id => { const l = lstLoc.get(`${nk(e.olt)}|${e.frame || 0}/${e.slot}/${e.porta}|${id}`) || lstLoc.get(`${nk(e.olt)}|0/${e.slot}/${e.porta}|${id}`); if (!l || !l.sn) return null; let contrato = ''; try { contrato = (u2kDadosCliente(l.sn, l.alias) || {}).contrato || ''; } catch (x) { /* sem contrato */ } return { sn: u2kSnCurto(l.sn), contrato }; }).filter(Boolean);
   let itens = [], amostra = false;
   if (sns.length >= 3) {
     const passo = sns.length / Math.min(12, sns.length), pick = []; for (let k = 0; k < Math.min(12, sns.length); k++) pick.push(sns[Math.floor(k * passo)]);
     amostra = sns.length > pick.length;
     const r = await u2kAispConsultar(pick, { atualizar }); if (!r.ok) return { ok: false, erro: r.erro };
-    itens = pick.map(sn => aispGet(sn) || { achou: false, serial: sn });
+    itens = pick.map(x => aispGet(x.sn) || { achou: false, serial: x.sn });
   } else {
     const r = await consultarExtensao('porta', { olt: e.olt, frame: e.frame || 0, slot: e.slot, porta: e.porta, limite: 12, atualizar: !!atualizar });
     if (!r.ok) return { ok: false, erro: r.erro };
@@ -30826,8 +30830,8 @@ function u2kLigarAutoispVivo() {
       conn(`<div style="padding:10px 12px;border:1px solid var(--danger);border-radius:10px;background:color-mix(in srgb, var(--danger) 8%, transparent)">🔴 <b>Extensão do Chrome não encontrada.</b> Ela faz a ponte com o AutoISP usando o login deste Chrome. <a href="/extensao-jh-monitor-olt.zip" download>Baixar a extensão</a> → extraia a pasta → no Chrome abra <b>chrome://extensions</b>, ligue o <i>Modo do desenvolvedor</i> → <i>Carregar sem compactação</i> → escolha a pasta → volte aqui, dê F5 e <button type="button" class="btn-export-xls" id="u2l-recheck">verificar de novo</button></div>`);
       const b = g('recheck'); if (b) b.addEventListener('click', () => verificarConexao(true)); return;
     }
-    if (!extensaoAtende('1.4.0')) {
-      conn(`<div style="padding:10px 12px;border:1px solid var(--danger);border-radius:10px;background:color-mix(in srgb, var(--danger) 8%, transparent)">🟠 Sua extensão é a versão <b>${esc(EXT_JH.versao || '?')}</b> e esta busca precisa da <b>1.4.0</b>. <a href="/extensao-jh-monitor-olt.zip" download>Baixe o zip de novo</a>, substitua os arquivos da pasta e clique em ⟳ (recarregar) na extensão, em chrome://extensions. Depois dê F5 aqui.</div>`); return;
+    if (!extensaoAtende('1.4.1')) {
+      conn(`<div style="padding:10px 12px;border:1px solid var(--danger);border-radius:10px;background:color-mix(in srgb, var(--danger) 8%, transparent)">🟠 Sua extensão é a versão <b>${esc(EXT_JH.versao || '?')}</b> e esta busca precisa da <b>1.4.1</b>. <a href="/extensao-jh-monitor-olt.zip" download>Baixe o zip de novo</a>, substitua os arquivos da pasta e clique em ⟳ (recarregar) na extensão, em chrome://extensions. Depois dê F5 aqui.</div>`); return;
     }
     const r = await consultarExtensao('status', {});
     if (!g('conn')) return;
@@ -31126,12 +31130,12 @@ function renderU2000() {
         const resumoA = () => { const ls = todas.map(r => aispGet(r.sn)).filter(Boolean); if (!ls.length) return ''; const ach = ls.filter(d => d.achou !== false); return `✔ ${ls.length} consultada(s): ${ach.filter(aispCaido).length} sem sinal/energia/offline · ${ach.filter(d => !aispCaido(d) && /warning|critical/i.test(String(d.status_onu || ''))).length} com sinal ruim · ${ach.filter(d => /^ok$/i.test(String(d.status_onu || ''))).length} OK · ${ls.length - ach.length} não achada(s)`; };
         msgA(resumoA());
         const bGo = document.getElementById('u2-aisp-go'); if (bGo) bGo.addEventListener('click', async () => {
-          if (!aispPronto()) { msgA(`<span style="color:var(--danger)">Precisa da extensão do Chrome v1.4.0 (e do login no AutoISP). Veja o bloco "AutoISP ao vivo" no topo da aba U2000.</span>`); return; }
+          if (!aispPronto()) { msgA(`<span style="color:var(--danger)">Precisa da extensão do Chrome v1.4.1 (e do login no AutoISP). Veja o bloco "AutoISP ao vivo" no topo da aba U2000.</span>`); return; }
           const atu = document.getElementById('u2-aisp-atu').checked, alvo = filtradasAisp.filter(r => r.sn).slice(0, 60);
           if (!alvo.length) { msgA('Nenhuma ONU com SN nesse filtro.'); return; }
           if (atu && !confirm(`Isto manda a OLT ler o sinal de ${alvo.length} ONU(s) agora (o mesmo que clicar em "Atualizar" no AutoISP, uma por uma). Continuar?`)) return;
           bGo.disabled = true; msgA('Consultando o AutoISP…');
-          const r = await u2kAispConsultar(alvo.map(x => x.sn), { atualizar: atu, aoAndar: (f, t) => msgA(`Lendo o sinal… ${f} de ${t}`) });
+          const r = await u2kAispConsultar(alvo.map(x => ({ sn: x.sn, contrato: x.cli && x.cli.contrato })), { atualizar: atu, aoAndar: (f, t) => msgA(`Lendo o sinal… ${f} de ${t}`) });
           bGo.disabled = false; if (!document.getElementById('u2-aisp-msg')) return;
           if (!r.ok) { msgA(`<span style="color:var(--danger)">⚠ ${esc(r.erro)}</span>`); }
           desenhar(); msgA((r.ok ? '' : `<span style="color:var(--danger)">⚠ ${esc(r.erro)}</span> · `) + resumoA());
@@ -31276,7 +31280,7 @@ function renderU2000() {
         const m2 = document.getElementById('u2-aispm-msg'); if (m2) m2.innerHTML = (erroM ? `<span style="color:var(--danger)">⚠ ${esc(erroM)}</span> ` : '') + resumoM();
       };
       const bM = document.getElementById('u2-aispm-go'); if (bM) bM.onclick = async () => {
-        if (!aispPronto()) { msgM(`<span style="color:var(--danger)">Precisa da extensão do Chrome v1.4.0 (e do login no AutoISP). Veja o bloco "AutoISP ao vivo" no topo da aba U2000.</span>`); return; }
+        if (!aispPronto()) { msgM(`<span style="color:var(--danger)">Precisa da extensão do Chrome v1.4.1 (e do login no AutoISP). Veja o bloco "AutoISP ao vivo" no topo da aba U2000.</span>`); return; }
         const atu = document.getElementById('u2-aispm-atu').checked, lista = abertasP.slice(0, 20);
         if (!lista.length) { msgM('Não há massiva em aberto.'); return; }
         if (atu && !confirm(`Isto manda a OLT ler o sinal de até 12 ONUs em cada uma das ${lista.length} portas em aberto (o mesmo que clicar em "Atualizar" no AutoISP, uma por uma). Continuar?`)) return;
@@ -31284,7 +31288,7 @@ function renderU2000() {
       };
       if (boxM && !boxM.dataset.aisp) { boxM.dataset.aisp = '1'; boxM.addEventListener('click', async ev => {
         const a = ev.target.closest('a.u2-aisp-porta'); if (!a) return; ev.preventDefault();
-        if (!aispPronto()) { msgM(`<span style="color:var(--danger)">Precisa da extensão do Chrome v1.4.0 (e do login no AutoISP). Veja o bloco "AutoISP ao vivo" no topo da aba U2000.</span>`); return; }
+        if (!aispPronto()) { msgM(`<span style="color:var(--danger)">Precisa da extensão do Chrome v1.4.1 (e do login no AutoISP). Veja o bloco "AutoISP ao vivo" no topo da aba U2000.</span>`); return; }
         const e = todasU.find(x => aispChavePorta(x) === a.dataset.k && !x.oltInteira); if (!e) return;
         a.textContent = '🔌 conferindo…'; await rodarPortas([e], false);
       }); }
