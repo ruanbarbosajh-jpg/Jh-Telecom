@@ -2609,7 +2609,7 @@
   :root[data-estilo="novo"] .graf-classificar { display: flex; justify-content: flex-end; margin: -4px 0 8px; font-size: 12px; color: var(--text-muted); }
   :root[data-estilo="novo"] .graf-classificar select { margin-left: 6px; }
   .sidebar-subgrupo { padding: 10px 14px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; color: var(--text-muted); text-transform: uppercase; opacity: .8; }
-  .btn-importar-lateral { margin: 0 12px 10px; width: calc(100% - 24px); padding: 11px 12px; border-radius: 10px; border: 1.5px dashed color-mix(in srgb, var(--nav-inactive) 60%, transparent); background: transparent; color: var(--nav-inactive); font-weight: 700; font-size: 13px; cursor: pointer; text-align: center; }
+  .btn-importar-lateral { margin: 0 12px 12px; width: calc(100% - 24px); padding: 11px 12px; border-radius: 10px; border: 1.5px dashed color-mix(in srgb, var(--nav-inactive) 60%, transparent); background: transparent; color: var(--nav-inactive); font-weight: 700; font-size: 13px; cursor: pointer; text-align: center; }
   .btn-importar-lateral:hover { background: var(--nav-hover-bg); color: var(--text-primary); border-style: solid; }
   .btn-importar-lateral[hidden] { display: none; }
   .btn-instalar-lateral { margin: 0 12px 10px; justify-content: center; display: flex; gap: 8px; align-items: center; }
@@ -2947,6 +2947,7 @@
   <div class="sidebar-backdrop" id="sidebar-backdrop" aria-hidden="true"></div>
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand"><h1>JH <span class="brand-gradient-text">TELECOM</span></h1><p>OPERATIONS</p></div>
+    <button type="button" class="btn-importar-lateral" id="btn-importar-csv" hidden title="Escolha o CSV de atividades: ele já é importado (PCR, retornos e prazos)">📥 Importar CSV de atividades</button><input type="file" id="menu-csv-pcr" accept=".csv,text/csv" hidden>
     <nav class="sidebar-nav" id="sidebar-nav">
       <!-- Fica no TOPO e destacado de propósito (pedido do cliente): é a tela
            que abre a reunião técnica, então precisa ser a primeira coisa que a
@@ -3011,7 +3012,6 @@
       <a data-route="saude"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2.4" y="2.8" width="13.2" height="5" rx="1.2"/><rect x="2.4" y="10.2" width="13.2" height="5" rx="1.2"/><circle cx="5.2" cy="5.3" r=".7"/><circle cx="5.2" cy="12.7" r=".7"/></svg></i><span class="nav-txt">Saúde do Sistema</span></a>
     </nav>
     <nav class="sidebar-nav" id="sidebar-nav-novo" style="display:none"></nav>
-    <button type="button" class="btn-importar-lateral" id="btn-importar-csv" hidden title="Escolha o CSV de atividades: ele já é importado (PCR, retornos e prazos)">📥 Importar CSV de atividades</button><input type="file" id="menu-csv-pcr" accept=".csv,text/csv" hidden>
     <button class="logout-btn" id="logout-btn">Sair</button>
   </aside>
   <main class="main">
@@ -15335,7 +15335,7 @@ function renderPCR(modoArg) {
     if (btnSinPrazo) btnSinPrazo.addEventListener('click', () => {
       const vis = osVisiveis(tabPrazos()), lista = prazoUnificado.filter(r => aberta(r) && r.limite && vis.has(String(r.os)));
       if (!lista.length) { toast('Nenhuma ordem em aberto na tabela (confira o filtro).', 'aviso'); return; }
-      copiarParaWhatsApp(textoSinalizarPrazos(lista), btnSinPrazo, '📲 SINALIZAR', `${lista.length} ordem(ns)`);
+      copiarParaWhatsApp(textoSinalizarPrazos(lista, { faixa: r => { const f = faixaEfetiva(r); return !f ? '' : /24/.test(f) ? 'até 24h' : /48/.test(f) ? (/mais|maior|acima|>/.test(f) ? '+48h' : 'até 48h') : f === 'outlier' ? 'outlier' : ''; }, retorno: r => { const x = (retornos || []).find(y => String(y.os) === String(r.os)); return x && x.ifi_irr ? x.ifi_irr : ''; } }), btnSinPrazo, '📲 SINALIZAR', `${lista.length} ordem(ns)`);
     });
     const btnSinRet = document.getElementById('ret-sinalizar');
     if (btnSinRet) btnSinRet.addEventListener('click', () => {
@@ -33373,15 +33373,22 @@ const FAIXA_LABEL = { ate24: 'Até 24h', ate48: 'Até 48h', maior48: 'Maior que 
 // Prazos:   GUARUJÁ / IVAN FERREIRA DOS SANTOS - 16:48 - Adilson / ... (CLIENTE - HORA DO LIMITE - TÉCNICO, confirmado pelo cliente em 20/10/2026; linha em branco entre as cidades) — só ordem em aberto
 // Retornos: RETORNOS / CLIENTE @Técnico [Retorno do @Ofensor quando o retorno caiu pra OUTRO técnico]
 const primeiroNomeTec = n => { const w = String(n || '').trim().split(/\s+/)[0] || ''; return w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ''; };
-function textoSinalizarPrazos(lista) {
+function textoSinalizarPrazos(lista, ext) {
+  // CLIENTE - HORA - TÉCNICO (nome completo) - faixa (até 24h / até 48h...) [- IFI|IRR]; do mais cedo pro mais tarde dentro de cada cidade
   const hm = d => { const x = new Date(d); return `${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}`; };
   const por = new Map();
   [...lista].sort((a, b) => +new Date(a.limite) - +new Date(b.limite)).forEach(r => { const c = String(rotuloCidadeGeral(r.cidade) || 'Não informado').toUpperCase(); if (!por.has(c)) por.set(c, []); por.get(c).push(r); });
-  return [...por.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt-BR')).map(([c, rs]) => `${c}\n` + rs.map(r => `${String(r.cliente || '').trim().toUpperCase()} - ${hm(r.limite)} - ${ehRecursoTecnico(r.recurso) ? primeiroNomeTec(r.recurso) : 'sem técnico'}`).join('\n')).join('\n\n');
+  return [...por.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt-BR')).map(([c, rs]) => c + '\n' + rs.map(r => {
+    const partes = [String(r.cliente || '').trim().toUpperCase(), hm(r.limite), ehRecursoTecnico(r.recurso) ? String(r.recurso).trim() : 'sem técnico'];
+    const f = ext && ext.faixa ? ext.faixa(r) : '', ret = ext && ext.retorno ? ext.retorno(r) : '';
+    if (f) partes.push(f);
+    if (ret) partes.push(ret);
+    return partes.join(' - ');
+  }).join('\n')).join('\n\n');
 }
 function textoSinalizarRetornos(lista) {
   return 'RETORNOS\n\n' + lista.map(r => {
-    const atual = ehRecursoTecnico(r.tecnico_atual) ? primeiroNomeTec(r.tecnico_atual) : '', ofensor = ehRecursoTecnico(r.ofensor) ? primeiroNomeTec(r.ofensor) : '';
+    const atual = ehRecursoTecnico(r.tecnico_atual) ? String(r.tecnico_atual).trim() : '', ofensor = ehRecursoTecnico(r.ofensor) ? String(r.ofensor).trim() : '';
     const outro = atual && ofensor && normalizeHeader(r.tecnico_atual) !== normalizeHeader(r.ofensor);
     return `${String(r.cliente || '').trim().toUpperCase()}${atual ? ' @' + atual : ''}${outro ? ' Retorno do @' + ofensor : ''}`;
   }).join('\n');
