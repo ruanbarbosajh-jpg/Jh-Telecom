@@ -681,6 +681,8 @@
   .u2-busca-navy .panel a { color: var(--accent); }
   .u2-busca-navy .table-wrap tbody tr:hover td { background: #eaf1ff !important; }
   .u2-busca-navy details > summary { color: #cbd5e1; }
+  tr.u2-clic { cursor: pointer; }
+  tr.u2-clic:hover td { background: var(--accent-bg, #e7efff) !important; }
   #u2l-det a, #u2l-lista a { color: #93c5fd; }
   #u2-busca .table-wrap a { color: #1d4ed8 !important; }   /* links do AutoISP ao vivo direto sobre o azul-marinho */
   /* RECEITAS E DESPESAS (20/10/2026) — copia do modelo que o cliente mandou: faixa azul-marinho no topo com o filtro de período, cartões por grupo
@@ -30586,7 +30588,7 @@ function u2kEventosPorta(alm, tot) {
     const t = tot && tot.get(`${nk(e.olt)}|${e.frame}/${e.slot}/${e.porta}`), ids = [...e.ids].filter(x => x !== '(porta)').map(Number).sort((x, y) => x - y), n = e.tipo.startsWith('Porta PON') ? (t ? t.total : 0) : e.ids.size;
     const r = { olt: e.olt, frame: e.frame, slot: e.slot, porta: e.porta, tipo: e.tipo, ini: e.ini, fim: e.fim, onus: n, total: t ? t.total : 0, pct: t && t.total ? Math.min(100, n / t.total * 100) : null, abertas: e.abertas.size, resolvidoEm: e.limpo,
       idsAbertos: [...e.abertas].filter(x => x !== '(porta)').map(Number).sort((x, y) => x - y).slice(0, 30).join(', '), abertosIds: [...e.abertas].filter(x => x !== '(porta)').map(Number),
-      ids: ids.slice(0, 30).join(', ') + (ids.length > 30 ? ` … (+${ids.length - 30})` : ''), onuId: ids[0] != null ? String(ids[0]) : (t ? t.onuId : ''), sn: t && t.sn && !ids.length ? t.sn : '' };
+      idsLista: ids, ids: ids.slice(0, 30).join(', ') + (ids.length > 30 ? ` … (+${ids.length - 30})` : ''), onuId: ids[0] != null ? String(ids[0]) : (t ? t.onuId : ''), sn: t && t.sn && !ids.length ? t.sn : '' };
     r.leitura = u2kLeituraPorta(r); return r;
   }).sort((x, y) => String(y.ini).localeCompare(String(x.ini)) || y.onus - x.onus);
 }
@@ -30658,10 +30660,10 @@ function u2kQuedasPorStatus(snaps) {
 // ---------- tela ----------
 const u2kV = v => (v === '' || v == null) ? '-' : v;
 // tabela genérica: cols = [{ t: título, f: valor, h: html opcional, x: valor pro Excel, s: estilo }]
-function u2kTab(id, cols, linhas, corte) {
+function u2kTab(id, cols, linhas, corte, clicavel) {
   const l = linhas.slice(0, corte || Infinity);
   return `<div class="table-wrap" style="margin-bottom:1.5rem;max-height:max(620px,86vh);overflow:auto"><table class="data-table" id="${id}"><thead><tr>${cols.map(c => `<th${c.w ? ` style="min-width:${c.w}px"` : ''}${/\(F\/S\/P\)/.test(c.t) ? ' title="Frame / Slot / Porta"' : ''}>${esc(c.t)}</th>`).join('')}</tr></thead><tbody>
-    ${l.map(r => `<tr>${cols.map(c => `<td${c.s ? ` style="${c.s}"` : ''}>${c.h ? c.h(r) : esc(u2kV(c.f(r)))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>${linhas.length > l.length ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${l.length.toLocaleString('pt-BR')} de ${linhas.length.toLocaleString('pt-BR')} — o Excel leva todas.</p>` : ''}`;
+    ${l.map((r, i) => `<tr data-ri="${i}"${clicavel ? ' class="u2-clic" title="Clique para ver os clientes afetados"' : ''}>${cols.map(c => `<td${c.s ? ` style="${c.s}"` : ''}>${c.h ? c.h(r) : esc(u2kV(c.f(r)))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>${linhas.length > l.length ? `<p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 1rem">Mostrando ${l.length.toLocaleString('pt-BR')} de ${linhas.length.toLocaleString('pt-BR')} — o Excel leva todas.</p>` : ''}`;
 }
 // colunas de localização: SEMPRE OLT, Porta (F/S/P = frame/slot/porta numa coluna só, ex. 0/4/5), ONU ID e SN (de referência quando a linha é de porta/OLT).
 // `w` = largura mínima do título (px); sem ela o texto comprido do alias empurrava as colunas pequenas e o título quebrava no meio.
@@ -30707,7 +30709,8 @@ function u2kVisao(el, cfg) {
     g('cont').textContent = `${l.length.toLocaleString('pt-BR')} linha(s)`;
     if (cfg.chips) { const f = filtros.find(x => x.id === cfg.chips.filtro), cont = {}; filtrar(f.id).forEach(r => { const k = String(f.valor(r)); cont[k] = (cont[k] || 0) + 1; });
       g('chips').innerHTML = f.opcoes.filter(([v]) => cont[v]).map(([v, t]) => { const cor = u2kCorChip(t); return `<button type="button" class="u2c-chip${est['f-' + f.id] === String(v) ? ' on' : ''}" data-v="${esc(v)}" style="--c:${cor[0]}"><span class="u2c-dot">${cor[1]}</span>${esc(t)} <b>${cont[v].toLocaleString('pt-BR')}</b></button>`; }).join(''); }
-    g('tab').innerHTML = !l.length ? '<div class="panel"><div class="empty">Nada nesse filtro.</div></div>' : u2kTab(`${pre}-t`, cols, l, Number(est.lim) || Infinity);
+    g('tab').innerHTML = !l.length ? '<div class="panel"><div class="empty">Nada nesse filtro.</div></div>' : u2kTab(`${pre}-t`, cols, l, Number(est.lim) || Infinity, !!cfg.aoClicarLinha);
+    if (cfg.aoClicarLinha) g('tab').onclick = ev => { if (ev.target.closest('a, button, input, select')) return; const tr = ev.target.closest('tr[data-ri]'); if (!tr) return; const r = l[Number(tr.dataset.ri)]; if (r) cfg.aoClicarLinha(r, base); };
     ativarFiltrosDeColuna(g('tab'));
     g('xls').onclick = () => exportarQuadroPresenca((cfg.excel || pre) + '-' + hojeISOLocal(), cols.map(c => c.t), l.map(r => cols.map(c => c.x ? c.x(r) : c.f ? c.f(r) : '')), 'U2000');
   };
@@ -30890,6 +30893,35 @@ const u2kTipoMassiva = t => String(t).startsWith('Porta PON') ? 'PON sem sinal' 
 // fim da massiva: o último encerramento dos alarmes; "Em aberto" enquanto a porta ainda tem alarme (mesma regra das abas de massiva)
 const u2kFimMassiva = e => (e.abertas > 0 && (String(e.tipo).startsWith('Porta PON') || e.abertas >= 5 || e.abertas * 2 >= e.onus)) ? 'Em aberto' : (e.resolvidoEm ? u2kFmtData(e.resolvidoEm) : 'Sem baixa no U2000');   // 20/10/2026: o U2000 deixa muito alarme sem encerrar; o `fim` do evento é só o último alarme da janela de ~10 min do início, então "terminou" saía igual a "começou"
 const u2kFmtChamado = (t, comHora) => t ? new Date(t).toLocaleString('pt-BR', comHora ? { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' } : { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
+// ---- clique na linha de "chamado durante ou depois da massiva": mostra os clientes AFETADOS pela massiva daquela linha (20/10/2026, pedido do cliente) ----
+// Afetados = as ONUs da porta que caíram juntas (ONU IDs do evento); porta inteira sem sinal (alarme da PON) = todas as ONUs da porta. Cliente: AutoISP guardado (pelo SN) ou alias do U2000.
+function u2kClientesDaMassiva(ev, res) {
+  const nk = normalizeHeader, idsTxt = String(ev.ids || '').replace(/\(\+\d+\)/g, '');
+  const ids = (Array.isArray(ev.idsLista) ? ev.idsLista.map(String) : (idsTxt.match(/\d+/g) || [])), porta = String(ev.tipo).startsWith('Porta PON') || !ids.length;
+  const naPorta = U2K.onus.filter(o => nk(o.olt) === nk(ev.olt) && String(o.slot) === String(ev.slot) && String(o.porta) === String(ev.porta));
+  const alarmes = U2K.alarmes.filter(a => nk(a.fonte) === nk(ev.olt) && String(a.slot) === String(ev.slot) && String(a.porta) === String(ev.porta));
+  const chamados = (res || []).filter(r => r.ev === ev), porOnu = new Map(); chamados.forEach(r => { const k = String(r.o.onuId); if (!porOnu.has(k)) porOnu.set(k, []); porOnu.get(k).push(r); });
+  const onusIds = porta ? naPorta.map(o => String(o.onuId)) : ids;
+  return [...new Set(onusIds)].sort((a, b) => Number(a) - Number(b)).map(id => {
+    const o = naPorta.find(x => String(x.onuId) === id) || null, al = alarmes.find(a => String(a.onuId) === id) || null, aut = o && U2K._autLoc ? (U2K._autLoc.get(u2kSnNorm(u2kSnCurto(o.sn))) || null) : null;
+    const nomeAlias = o && !u2kAliasVazio(o.alias) ? o.alias : (al && al.alias && !u2kAliasVazio(al.alias) ? al.alias : '');
+    return { id, o, aut, nome: (aut && aut.nome) || nomeAlias || '', contrato: (aut && aut.contrato) || '', cham: porOnu.get(id) || [] };
+  });
+}
+function u2kAbrirClientesMassiva(r, res) {
+  const ev = r.ev, lista = u2kClientesDaMassiva(ev, res);
+  const cid = x => (x.aut && x.aut.cidade) || (x.o && u2kRotCidade(x.o.cidade)) || '';
+  const celChamado = x => x.cham.length ? x.cham.map(c => `<b>${esc(c.x.os)}</b> · ${esc(c.sitTxt)}${c.marcaPot ? ` · <span class="badge ${c.marca ? (c.marcaPot === 'IFI' ? 'warn' : 'amber') : 'neutral'}">${esc(c.rotulo)}</span>` : ''}`).join('<br>') : '<span style="color:var(--text-muted)">não abriu</span>';
+  const linhas = lista.map(x => ({ tipo: '', celulas: [esc(x.nome) || '<span style="color:var(--text-muted)">sem nome (alias vazio)</span>', esc(x.contrato) || '-', esc(x.id), x.o ? esc(u2kSnCurto(x.o.sn)) : '-', x.o ? u2kBadgeStatus(x.o) : '-', celChamado(x), esc(cid(x)) || '-', esc((x.aut && x.aut.bairro) || '') || '-'] }));
+  const comCham = lista.filter(x => x.cham.length).length;
+  abrirModalLista(`Clientes afetados — ${ev.olt} · porta ${u2kPortaCompleta(ev)}`, `${u2kTipoMassiva(ev.tipo)} · começou ${u2kFmtData(ev.ini)} · ${lista.length} ONU(s) afetada(s) · ${comCham} abriram chamado de reparo`,
+    ['Cliente', 'Contrato', 'ONU ID', 'SN', 'Status agora', 'Chamado de reparo (até 3 dias depois)', 'Cidade', 'Bairro'], linhas, { nome: 'clientes-afetados-massiva' });
+}
+// liga o clique nas linhas de uma tabela feita por u2kTab(..., clicavel): `obter()` devolve as linhas na MESMA ordem em que foram desenhadas
+function u2kLigarCliqueMassiva(raiz, obter, res) {
+  if (!raiz) return;
+  raiz.onclick = ev => { if (ev.target.closest('a, button, input, select')) return; const tr = ev.target.closest('tr[data-ri]'); if (!tr) return; const r = obter()[Number(tr.dataset.ri)]; if (r && r.ev) u2kAbrirClientesMassiva(r, typeof res === 'function' ? res() : res); };
+}
 function u2kColsChamadosMassiva(cidDe) {
   return [{ t: 'IFI / IRR', h: r => r.marcaPot ? `<span class="badge ${r.marca ? (r.marcaPot === 'IFI' ? 'warn' : 'amber') : 'neutral'}" title="${r.marca ? 'o chamado foi concluído: virou retorno' : 'só vira IFI / IRR se o chamado for concluído'}" style="white-space:normal">${esc(r.rotulo)}</span>` : '<span style="color:var(--text-muted)">não</span>', x: r => r.rotulo, s: 'white-space:normal;min-width:130px' },
     { t: 'Cliente', f: r => r.cliente, s: 'font-weight:600' }, { t: 'Contrato', f: r => r.contrato }, { t: 'Cidade', f: cidDe }, { t: 'Bairro', f: r => r.bairro },
@@ -31072,15 +31104,15 @@ function renderRelU2000() {
           <div class="panel"><h3>Por bairro</h3><div id="ru-ret-bai"></div></div>
           <div class="panel"><h3>Técnico que atendeu o chamado</h3><div id="ru-ret-tec"></div></div>
         </div>
-        <div class="panel"><h3>Clientes — chamado e IFI / IRR durante ou depois da massiva</h3><div id="ru-ret-cli"></div></div>
+        <div class="panel"><h3>Clientes — chamado e IFI / IRR durante ou depois da massiva <span style="font-size:12px;font-weight:500;color:var(--text-muted)">· clique na linha para ver os clientes afetados pela massiva</span></h3><div id="ru-ret-cli"></div></div>
         <div class="panel"><h3>Mapa — bairros que mais abriram chamado durante ou depois de massiva</h3><div id="ru-ret-mapa" class="mapa-cidades" style="height:480px;border-radius:10px"></div><p id="ru-ret-mapa-nota" style="font-size:12px;color:var(--text-muted);margin:6px 0 0"></p></div>`;
       const colsQ = [{ t: 'Chamados', f: a => a.chamados }, { t: 'IFI', h: a => a.ifi ? `<b style="color:var(--danger)">${a.ifi}</b>` : '-', x: a => a.ifi }, { t: 'IRR', h: a => a.irr ? `<b style="color:#f59e0b">${a.irr}</b>` : '-', x: a => a.irr }];
       tab('ru-ret-cid', [{ t: 'Cidade', f: a => a.nome, s: 'font-weight:600' }, ...colsQ], porCid);
       tab('ru-ret-bai', [{ t: 'Bairro - Cidade', f: a => a.nome, s: 'font-weight:600' }, ...colsQ], porBairro);
       tab('ru-ret-of', [{ t: 'Ofensor (fez o serviço anterior)', f: a => a.nome, s: 'font-weight:600' }, { t: 'IFI', f: a => a.ifi || '' }, { t: 'IRR', f: a => a.irr || '' }, { t: 'Total', f: a => a.ifi + a.irr }], porOf);
       tab('ru-ret-tec', [{ t: 'Técnico do chamado', f: a => a.nome, s: 'font-weight:600' }, ...colsQ], porTecRep);
-      tab('ru-ret-cli', u2kColsChamadosMassiva(r => r.cidade),
-        res.slice().sort((a, b) => (b.marca ? 1 : 0) - (a.marca ? 1 : 0) || b.x.t - a.x.t));
+      const linhasCli = res.slice().sort((a, b) => (b.marca ? 1 : 0) - (a.marca ? 1 : 0) || b.x.t - a.x.t);
+      { const elc = document.getElementById('ru-ret-cli'); if (elc) { elc.innerHTML = linhasCli.length ? u2kTab('ru-ret-cli-t', u2kColsChamadosMassiva(r => r.cidade), linhasCli, 3000, true) : '<div class="empty">Nada no período.</div>'; u2kLigarCliqueMassiva(elc, () => linhasCli, res); } }
       // mapa: bolha por bairro (coordenada do bairro; sem ela, o centro da cidade, tracejado)
       const el = document.getElementById('ru-ret-mapa');
       if (el && typeof L !== 'undefined') {
@@ -31692,7 +31724,7 @@ function renderU2000() {
     function abaDiag(grupo, tit, sub) {
       el.innerHTML = `<div id="u2-dg" style="display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px">${U2K_DIAG_GRUPOS.map(([k, rot]) => `<button type="button" class="u2-dg" data-g="${k}" style="border:1px solid var(--border);border-radius:999px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;background:${k === grupo ? 'var(--accent)' : 'var(--card-bg)'};color:${k === grupo ? '#fff' : 'var(--text-primary)'}">${esc(rot)} <span style="opacity:.85">(${nAba[k].toLocaleString('pt-BR')})</span></button>`).join('')}</div>` + titulo(tit, sub) + '' + `<p id="u2-dcli" style="font-size:12.5px;color:var(--text-secondary);margin:-4px 0 10px;line-height:1.5"></p><div id="u2-d"></div>`
         // 15/10/2026 (pedido do cliente): abaixo da tabela de "Cliente e monitorar", os clientes que abriram chamado por causa da massiva, com a coluna IFI / IRR
-        + (grupo === 'cliente' ? titulo('Clientes que abriram chamado por causa da massiva', 'reparo aberto de 1 h antes do início da massiva até 3 dias depois (limite fixo), por clientes das portas com massiva; a coluna IFI / IRR diz se o chamado virou retorno') + '<div id="u2-cham"></div>' : '');
+        + (grupo === 'cliente' ? titulo('Clientes que abriram chamado por causa da massiva', 'reparo aberto de 1 h antes do início da massiva até 3 dias depois (limite fixo), por clientes das portas com massiva; a coluna IFI / IRR diz se o chamado virou retorno. Clique numa linha para ver os clientes afetados pela massiva') + '<div id="u2-cham"></div>' : '');
       document.getElementById('u2-dg').addEventListener('click', ev => { const b = ev.target.closest('.u2-dg'); if (!b) return; U2K._diagGrupo = b.dataset.g; pintar(); });
       if (grupo === 'cliente') document.getElementById('u2-dcli').insertAdjacentHTML('afterend', `<div id="u2-aisp-bar" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px">
         <b style="font-size:13px">🔌 AutoISP ao vivo</b><span style="font-size:12.5px;color:var(--text-secondary)">sinal atualizado das linhas filtradas (até 60)</span>
@@ -31743,7 +31775,7 @@ function renderU2000() {
             const res = u2kChamadosMassivas(onus, evs, desde, 72 * 3600000).calcular().sort((a, b) => (b.marca ? 1 : 0) - (a.marca ? 1 : 0) || b.x.t - a.x.t);
             cacheCham = { chave, res }; return res; },
           filtros: [{ id: 'ifi', rot: 'IFI / IRR', valor: r => r.marcaPot ? r.rotulo : 'Não', opcoes: ['IFI concluído', 'IRR concluído', 'IFI cancelado', 'IFI não concluído', 'IFI em aberto', 'IRR cancelado', 'IRR não concluído', 'IRR em aberto', 'Não'].map(v => [v, v === 'Não' ? 'Não é IFI / IRR' : v]) }, { id: 'sitch', rot: 'Situação do chamado', valor: r => r.sitTxt }, { id: 'olt', rot: 'OLT', valor: r => r.o.olt }, { id: 'cid', rot: 'Cidade', valor: cidDe }], chips: { filtro: 'ifi' },
-          cols: u2kColsChamadosMassiva(cidDe) });
+          aoClicarLinha: (r, base) => u2kAbrirClientesMassiva(r, base), cols: u2kColsChamadosMassiva(cidDe) });
       };
       pintarCham();
       if (sns.length) u2kAutPorSn(sns).then(qtd => { if (!qtd || U2K._aba !== aba0 || !document.getElementById('u2-d')) return; todas = montar(); nota(); desenhar(); pintarCham(); });
