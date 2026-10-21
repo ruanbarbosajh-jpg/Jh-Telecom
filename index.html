@@ -2503,7 +2503,7 @@
   .ampliar-caixa { background: var(--bg-page); border: 1px solid var(--border); border-radius: 14px; width: auto; min-width: min(640px, 97vw); max-width: 97vw; max-height: 96vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0, 0, 0, .45); }
   .ampliar-caixa.ampliar-larga { width: min(1600px, 97vw); }
   .ampliar-justa .ampliar-corpo > .ampliado { zoom: 1.3; }
-  .ampliar-larga.ampliar-zoom .ampliar-corpo > .ampliado { zoom: 1.15; width: calc(100% / 1.15) !important; }
+  .ampliar-larga.ampliar-zoom .ampliar-corpo > .ampliado { zoom: 1.15; }   /* 21/10/2026: sem width:calc(100%/1.15) — com o zoom padronizado do Chrome sobrava ~13% de espaço à direita */
   .ampliado table.data-table { width: 100% !important; margin: 0; }   /* 16/10/2026: preenche a janela inteira (a janela já tem o tamanho do conteúdo) */
   .ampliado table.data-table td, .ampliado table.data-table th { padding-left: 14px !important; padding-right: 14px !important; }
   .ampliar-topo { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 15px; color: var(--text-primary); }
@@ -15499,6 +15499,40 @@ const PRAZO_ATIVACAO_META = 85;
 // Prazo de REPARO do dia, direto do CSV de atividades — é a tabela que antes
 // ficava na PCR ("Prazo Geral do Dia — por Faixa"). Aqui ela fica junto do
 // acompanhamento mensal de reparo, que é o mesmo assunto.
+// VISÃO GERAL DE PRAZOS — só do Escritório (21/10/2026, pedido do cliente: "em visão geral dos prazos pode tirar o do dia e mostre quantos prazos estão em rota,
+// pendente, iniciados, improdutivas, totais concluídos até 24h etc"). No lugar do cartão "Prazo do DIA" entra a SITUAÇÃO dos reparos do dia escolhido (CSV de atividades,
+// uma linha por O.S): pendente, em rota, iniciado, improdutiva (não concluído), cancelado, concluídos e, entre os concluídos, as faixas de prazo (até 24h / até 48h /
+// maior que 48h / outlier — `r.faixa`, mesma régua do resto da tela). Cada cartão abre a lista das ordens. O bloco do MÊS (planilha) continua logo abaixo.
+function htmlSituacaoReparosDoDia(dia, cidades) {
+  if (!dia) return '';
+  const cab = faixaDeSecao('Situação dos reparos — dia', `${formatDate(dia)} · vem do CSV de atividades (PCR) · só Reparo · ${(cidades || []).join(', ')}`, 'dia');
+  const rows = linhasDoCsvPorDia(dia).filter(r => ehServicoReparo(r.tipo_atividade) && (cidades || []).includes(r.cidade));
+  if (!rows.length) return cab + `<div class="panel" style="margin-bottom:1.5rem"><div class="empty">Nenhum reparo no CSV desse dia/cidades.</div></div>`;
+  const por = ordensPorStatusCartao(rows), sub = formatDate(dia);
+  const conc = por.concluido, fx = k => conc.filter(r => r.faixa === k);
+  const noPrazo = fx('ate24').length, pct = conc.length ? (noPrazo / conc.length) * 100 : 0;
+  const k = n => 'vg|' + n;
+  return cab + `
+    <div class="stat-cards stat-cards--6">
+      ${statCard('orange', icRelogio, 'Pendentes', por.pendente.length, '', cartaoLista(k('pend'), 'Reparos pendentes', por.pendente, sub))}
+      ${statCard('orange', icRota, 'Em rota', por.em_rota.length, '', cartaoLista(k('rota'), 'Reparos em rota', por.em_rota, sub))}
+      ${statCard('blue', icPlay, 'Iniciados', por.iniciado.length, '', cartaoLista(k('inic'), 'Reparos iniciados', por.iniciado, sub))}
+      ${statCard('red', icAviso, 'Improdutivas', por.nao_concluido.length, '', cartaoLista(k('improd'), 'Reparos improdutivos', por.nao_concluido, sub))}
+      ${statCard('neutral', icX, 'Canceladas', por.cancelado.length, '', cartaoLista(k('canc'), 'Reparos cancelados', por.cancelado, sub))}
+      ${statCard('green', icOk, 'Concluídas', conc.length, '', cartaoLista(k('conc'), 'Reparos concluídos', conc, sub))}
+    </div>
+    <div class="stat-cards stat-cards--6">
+      ${statCard('green', icOk, 'Concluídas até 24h', noPrazo, '', cartaoLista(k('f24'), 'Concluídas até 24h', fx('ate24'), sub))}
+      ${statCard('blue', icRelogio, 'Concluídas até 48h', fx('ate48').length, '', cartaoLista(k('f48'), 'Concluídas até 48h', fx('ate48'), sub))}
+      ${statCard('orange', icAviso, 'Maior que 48h', fx('maior48').length, '', cartaoLista(k('fm48'), 'Concluídas com mais de 48h', fx('maior48'), sub))}
+      ${statCard('red', icAviso, 'Outliers', fx('outlier').length, '', cartaoLista(k('fout'), 'Concluídas como outlier', fx('outlier'), sub))}
+      ${statCard(conc.length && pct < PRAZO_META ? 'red' : 'green', icOk, '% no prazo (24h)', conc.length ? formatPct(pct, 1) : '-', '', '')}
+      ${statCard('neutral', icPasta, 'Total de reparos no dia', rows.length, '', cartaoLista(k('tot'), 'Todos os reparos do dia', rows, sub))}
+    </div>`;
+}
+function blocoDiaDaVisaoGeralPrazos(dia, cidades) {
+  return currentUser && perfilValido(currentUser.role) === 'escritorio' ? htmlSituacaoReparosDoDia(dia, cidades) : montarPrazoReparoDoDia(dia, cidades);
+}
 function montarPrazoReparoDoDia(dia, cidades) {
   if (!dia) return '';
   const doDia = linhasDoCsvPorDia(dia).filter(r => ehServicoReparo(r.tipo_atividade) && cidades.includes(r.cidade));
@@ -18182,7 +18216,7 @@ function renderPrazo() {
         : `Há ${DB.prazo.length} linha(s) de prazo salvas, mas nenhuma cai nesse período/cidades (só entram ordens CONCLUÍDAS de Reparo com faixa de prazo preenchida).`;
       // O bloco do DIA vem do CSV de atividades e não depende da planilha do mês:
       // sem ele aqui, quem ainda não importou o Excel do mês perdia o prazo do dia.
-      body.innerHTML = montarPrazoReparoDoDia(selDiaPz ? selDiaPz.value : '', cidadesSelecionadas)
+      body.innerHTML = blocoDiaDaVisaoGeralPrazos(selDiaPz ? selDiaPz.value : '', cidadesSelecionadas)
         + faixaDeSecao('Prazo do MÊS — Reparo (24h)', 'planilha PRAZOS_ESCRITÓRIO (BASE DE DADOS)', 'mes')
         + `<div class="panel"><div class="empty">Sem dados de prazo no período/cidades selecionadas.<br><span style="font-size:12px">${dica}</span></div></div>`;
       wireGerarImagemCartaoPrazo();
@@ -18268,7 +18302,7 @@ function renderPrazo() {
     const rotuloMes = (mesesDisponiveis.find(x => x.value === s.slice(0,7)) || {}).label || `${formatDate(s)} a ${formatDate(e)}`;
     body.innerHTML = `
       ${avisoTipoAtividade(rows)}
-      ${montarPrazoReparoDoDia(selDiaPz ? selDiaPz.value : '', cidadesSelecionadas)}
+      ${blocoDiaDaVisaoGeralPrazos(selDiaPz ? selDiaPz.value : '', cidadesSelecionadas)}
       ${faixaDeSecao('Prazo do MÊS — Reparo (24h)',
         `${rotuloMes} · vem da planilha PRAZOS_ESCRITÓRIO (BASE DE DADOS) · só ordens CONCLUÍDAS de Reparo · ${cidadesSelecionadas.join(', ')}`, 'mes')}
       <div class="panels-grid" id="pz-mes-resumo">
