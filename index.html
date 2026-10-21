@@ -2713,6 +2713,10 @@
     :root[data-estilo="novo"] .panel > h3 .ph-acoes { flex-wrap: nowrap; flex-shrink: 0; }
   }
   :root[data-estilo="novo"] .panel > h3 .ph-acoes .secao-toggle, :root[data-estilo="novo"] .panel > h3 .ph-acoes .btn-export-xls, :root[data-estilo="novo"] .panel > h3 .ph-acoes .btn-export-img { padding: 6px 11px; font-size: 12.5px; white-space: nowrap; }
+  /* detalhe da ONU (Buscar assinante): o painel é estreito, então título e botões podem quebrar linha em vez de vazar do card (21/10/2026) */
+  :root[data-estilo="novo"] #u2-bres .panel > h3 { flex-wrap: wrap !important; }
+  :root[data-estilo="novo"] #u2-bres .panel > h3 .ph-acoes { flex-wrap: wrap !important; flex-shrink: 1 !important; margin-left: 0 !important; }
+  #u2-bres .panel { overflow: hidden; }
   /* lupa (busca global) */
   .cmdk-grupo-tit { padding: 8px 12px 4px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
   .cmdk-item .cmdk-sub { display: block; font-size: 11.5px; color: var(--text-muted); font-weight: 400; margin-top: 2px; }
@@ -31056,7 +31060,7 @@ function u2kVisao(el, cfg) {
 }
 const U2K_ABAS = [
   ['resumo', 'Resumo'], ['diag', 'Diagnóstico das ONUs'], ['acomp', 'Acompanhamento OLTs'],
-  ['hoje', 'Massivas e histórico'], ['portas', 'Portas e ONUs'], ['vlan', 'VLAN e perfis'], ['alarmes', 'Alarmes'], ['mapas', 'Mapa VLAN e Problemas'],
+  ['hoje', 'Massivas e histórico'], ['vlan', 'VLAN e perfis'], ['mapas', 'Mapa VLAN e Problemas'],   // 21/10/2026 (pedido do cliente): saíram "Portas e ONUs" e "Alarmes"
 ];
 // 20/10/2026 (pedido do cliente: "verifique a possibilidade de unificar alguma tabela"): as 3 abas de diagnóstico (Preventiva via sistema / operacional /
 // Cliente e monitorar) eram a MESMA tabela cortada por grupo → viraram a aba "Diagnóstico das ONUs" com 3 botões; a aba "Histórico de falhas" se
@@ -31903,23 +31907,35 @@ function u2kLigarBusca() {
   const detalhe = d => {
     const o = d.o, a = d.a, alm = U2K.alarmes.filter(x => String(x.fonte) === String(o.olt) && String(x.slot) === String(o.slot) && String(x.porta) === String(o.porta) && (String(x.onuId) === String(o.onuId))).sort((x, y) => String(y.ultimo).localeCompare(String(x.ultimo))).slice(0, 15);
     const hist = U2K.hist.filter(h => String(h.olt) === String(o.olt) && String(h.slot) === String(o.slot) && String(h.porta) === String(o.porta) && String(h.onu_id) === String(o.onuId)).sort((x, y) => String(y.dia).localeCompare(String(x.dia))).slice(0, 10);
-    const linha = (r, v) => v === '' || v == null ? '' : `<div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--border);font-size:13px"><span style="min-width:150px;color:var(--text-muted)">${esc(r)}</span><span style="font-weight:600;word-break:break-word">${esc(String(v))}</span></div>`;
+    const linha = (r, v) => v === '' || v == null ? '' : `<div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span style="min-width:118px;max-width:118px;color:var(--text-muted)">${esc(r)}</span><span style="font-weight:600;word-break:break-word;min-width:0">${esc(String(v))}</span></div>`;
     const wan = (o.wan || []).filter(w => w.ip || w.vlan).map(w => `${w.servico || 'WAN'}: ${w.ip || '-'}${w.vlan ? ' · VLAN ' + w.vlan : ''}`).join(' | ');
-    const bloco = (tit, corpo) => `<div class="panel" style="flex:1 1 320px;min-width:0;max-width:100%"><h3 style="margin-top:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap">${tit}</h3>${corpo || '<div class="empty">Sem dados.</div>'}</div>`;
-    const tabMini = (cab, linhas) => linhas.length ? `<div class="table-wrap" style="max-height:260px;overflow:auto"><table class="data-table"><thead><tr>${cab.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${linhas.map(l => `<tr>${l.map(c => `<td>${esc(String(c == null ? '' : c))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '';
-    const link = a && a.gpon_id ? `<p style="margin:8px 0 0;font-size:12px"><a href="https://auto.alloha.com/gpon_clients/${encodeURIComponent(a.gpon_id)}" target="_blank" rel="noopener">Abrir no AutoISP ↗</a> (quando voltar a funcionar)</p>` : '';
+    const bloco = (tit, corpo) => `<div class="panel" style="flex:1 1 320px;min-width:0;max-width:100%;margin:0"><h3 style="margin-top:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap">${tit}</h3>${corpo || '<div class="empty">Sem dados.</div>'}</div>`;
+    const tabMini = (cab, linhas) => linhas.length ? `<div class="table-wrap" style="max-height:230px;overflow:auto"><table class="data-table"><thead><tr>${cab.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${linhas.map(l => `<tr>${l.map(c => `<td>${esc(String(c == null ? '' : c))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '';
+    const link = a && a.gpon_id ? `<a href="https://auto.alloha.com/gpon_clients/${encodeURIComponent(a.gpon_id)}" target="_blank" rel="noopener" style="font-size:12px">Abrir no AutoISP ↗</a>` : '';
     // SINAL EM DESTAQUE (pedido do cliente, 21/10/2026): número grande, colorido pela situação, antes de todo o resto
     const corSinal = (st, v) => (st && !/^ok$/i.test(st)) ? (MONITOR_OLT_COR[st] || '#dc2626') : v == null ? 'var(--text-muted)' : v <= -27 ? '#dc2626' : v <= -25 ? '#f59e0b' : '#16a34a';
     const cartaoSinal = (rot, v, st, sub) => `<div style="flex:1 1 220px;min-width:0;border-left:6px solid ${corSinal(st, v)};border-radius:12px;padding:12px 16px;background:color-mix(in srgb, ${corSinal(st, v)} 12%, #ffffff)"><div style="font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#334155">${rot}</div><div style="font-size:34px;line-height:1.15;font-weight:800;color:${corSinal(st, v)}">${v == null ? '-' : esc(Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))}<span style="font-size:16px;font-weight:700"> dBm</span></div><div style="font-size:13px;font-weight:700;color:${corSinal(st, v)}">${esc(st ? (MO_ROTULO_STATUS[st] || st) : '')}</div>${sub ? `<div style="font-size:11.5px;color:#475569">${sub}</div>` : ''}</div>`;
     const destSinal = `<div style="display:flex;flex-wrap:wrap;gap:12px;margin:12px 0">${a && a.sinal != null ? cartaoSinal('Sinal (AutoISP)', a.sinal, a.status, a.refresh || a.checado ? 'lido em ' + esc(dh(a.refresh || a.checado)) : '') : ''}${o.rx != null ? cartaoSinal('Sinal Rx (U2000)', o.rx, '', '') : ''}${(a && a.sinal != null) || o.rx != null ? '' : '<div class="empty" style="flex:1">Sem leitura de sinal desta ONU (o U2000 importado não traz Rx e o AutoISP não tem este SN guardado).</div>'}</div>`;
-    return destSinal + `<div style="display:flex;flex-wrap:wrap;gap:12px;margin:12px 0">
-      ${bloco('ONU no U2000', linha('OLT', o.olt) + linha('Local (Frame/Slot/Porta · ONU ID)', `${o.frame || '0'}/${o.slot}/${o.porta} · ONU ${o.onuId}`) + linha('SN', o.sn) + linha('Nome na OLT (alias)', o.alias) + linha('Modelo', o.tipo) + linha('Status agora', rotStatus(d)) + linha('Config / operação', [o.configStatus, o.operStatus].filter(Boolean).join(' / ')) + linha('Perfil de linha', o.perfilLinha) + linha('Perfil de serviço', o.perfilServico) + linha('VLAN (perfil)', o.vlanPerfil || (o.semVlan ? 'sem VLAN' : '')) + linha('Bairros dessa VLAN (lista)', (o.bairrosVlan || []).slice(0, 12).join(', ')) + linha('WAN', wan) + linha('Sinal Rx (U2000)', o.rx == null ? '' : o.rx.toLocaleString('pt-BR') + ' dBm'))}
-      ${bloco('Cliente (AutoISP guardado no banco)', a ? linha('Nome', a.nome) + linha('Contrato', a.contrato) + linha('Situação do cadastro', a.estado) + linha('Cidade / bairro', [a.cidade, a.bairro].filter(Boolean).join(' / ')) + linha('OLT / PON (AutoISP)', [a.olt, a.ponlink].filter(Boolean).join(' · ')) + linha('Sinal', a.sinal == null ? '' : `${a.sinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} dBm · ${MO_ROTULO_STATUS[a.status] || a.status || ''}`) + linha('Último contato do equipamento', dh(a.acs)) + linha('Lido em', dh(a.refresh || a.checado)) + linha('Coordenada', a.lat != null && a.lng != null ? `${a.lat}, ${a.lng}` : '') + link : `<div class="empty">Este SN não está nos dados que o AutoISP deixou no banco.</div>`)}
+    // 1) ONU (U2000) + cliente (AutoISP guardado) num bloco só, em 2 colunas; o que se repete aparece uma vez (o sinal já está no destaque)
+    const campos = [
+      ['Cliente', (a && a.nome) || o.alias], ['Contrato', a && a.contrato], ['Cadastro', a && a.estado],
+      ['Cidade / bairro', a && [a.cidade, a.bairro].filter(Boolean).join(' / ')], ['Nome na OLT (alias)', a && a.nome && o.alias !== a.nome ? o.alias : ''],
+      ['OLT', o.olt], ['Local (F/S/P · ONU)', `${o.frame || '0'}/${o.slot}/${o.porta} · ONU ${o.onuId}`], ['PON (AutoISP)', a && [a.olt, a.ponlink].filter(Boolean).join(' · ')],
+      ['SN', o.sn], ['Modelo', o.tipo], ['Status agora', rotStatus(d)], ['Config / operação', [o.configStatus, o.operStatus].filter(Boolean).join(' / ')],
+      ['Perfil de linha', o.perfilLinha], ['Perfil de serviço', o.perfilServico], ['VLAN (perfil)', o.vlanPerfil || (o.semVlan ? 'sem VLAN' : '')], ['Bairros da VLAN', (o.bairrosVlan || []).slice(0, 8).join(', ')],
+      ['WAN', wan], ['Contato do equipamento', a && a.acs ? dh(a.acs) : ''], ['Lido em', a ? dh(a.refresh || a.checado) : ''], ['Coordenada', a && a.lat != null && a.lng != null ? `${a.lat}, ${a.lng}` : '']];
+    const corpoOnu = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));column-gap:22px">${campos.map(([r, v]) => linha(r, v)).join('')}</div>${a ? '' : '<div style="font-size:12px;color:var(--text-muted);margin-top:6px">AutoISP: este SN não está nos dados guardados no banco.</div>'}${link ? `<div style="margin-top:6px">${link}</div>` : ''}`;
+    // 2) alarmes + histórico por dia numa tabela só, do mais recente pro mais antigo
+    const nomeTipos = h => [['LOS', h.los], ['Sem energia', h.energia], ['Sinal', h.sinal], ['Enlace', h.enlace], ['Outros', h.outros]].filter(([, n]) => Number(n)).map(([t, n]) => `${t} ${n}`).join(' · ');
+    const eventos = [
+      ...alm.map(x => ({ q: String(x.ultimo || ''), c: [u2kFmtData(x.ultimo), 'Alarme · ' + (x.severidade || ''), x.categoria || x.nome, x.vezes, x.limpo ? 'limpo em ' + u2kFmtData(x.limpo) : 'aberto'] })),
+      ...hist.map(h => ({ q: String(h.dia || '') + ' 99', c: [u2kFmtData(h.dia + ' 00:00').slice(0, 10), 'Resumo do dia', nomeTipos(h) || 'sem alarme', ['los', 'energia', 'sinal', 'enlace', 'outros'].reduce((t, k) => t + (Number(h[k]) || 0), 0) || '', ''] }))].sort((x, y) => y.q.localeCompare(x.q));
+    return destSinal + `<div style="display:grid;grid-template-columns:minmax(0,1fr);gap:12px;margin:12px 0">
+      ${bloco('ONU e cliente', corpoOnu)}
+      <div style="display:flex;flex-wrap:wrap;gap:12px">
       ${bloco('Último atendimento (Produção / PCR)' + (d.por ? ` <span style="font-size:11.5px;font-weight:500;color:var(--text-muted)">por ${esc(d.por)}</span>` : ''), tabMini(['Data', 'Serviço', 'Técnico', 'Status', 'Endereço'], d.at.slice(0, 8).map(r => [formatDate(r.dia), r.tipo, r.tecnico, r.status, limparEnderecoNull(r.endereco)])))}
-    </div>
-    <div style="display:flex;flex-wrap:wrap;gap:12px">
-      ${bloco('Alarmes desta ONU', tabMini(['Gravidade', 'Alarme', 'Primeiro', 'Último', 'Vezes', 'Limpo em'], alm.map(x => [x.severidade, x.categoria || x.nome, u2kFmtData(x.primeiro), u2kFmtData(x.ultimo), x.vezes, x.limpo ? u2kFmtData(x.limpo) : 'aberto'])))}
-      ${bloco('Histórico por dia (U2000)', tabMini(['Dia', 'LOS', 'Sem energia', 'Sinal', 'Enlace', 'Outros'], hist.map(h => [h.dia, h.los, h.energia, h.sinal, h.enlace, h.outros])))}
+      ${bloco('Alarmes e histórico desta ONU', tabMini(['Quando', 'Tipo', 'Detalhe', 'Vezes', 'Situação'], eventos.map(e => e.c)))}
+      </div>
     </div>`;
   };
   const buscar = async () => {
@@ -32022,6 +32038,7 @@ function renderU2000() {
     if (!U2K._aba) U2K._aba = 'resumo';
     if (['sistema', 'operacional', 'cliente'].includes(U2K._aba)) { U2K._diagGrupo = U2K._aba; U2K._aba = 'diag'; }   // ids antigos das 3 abas de diagnóstico
     if (U2K._aba === 'hist') U2K._aba = 'hoje';
+    if (U2K._aba === 'portas' || U2K._aba === 'alarmes') U2K._aba = 'resumo';   // abas que saíram
     box.innerHTML = `<div id="u2-abas" style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px">${U2K_ABAS.map(([id, rot]) => `<button type="button" class="u2-aba" data-aba="${id}" style="border:1px solid var(--border);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;background:${U2K._aba === id ? 'var(--accent)' : 'var(--card-bg)'};color:${U2K._aba === id ? '#fff' : 'var(--text-primary)'}">${esc(rot)}${nAba[id] != null ? ` <span style="opacity:.85">(${nAba[id].toLocaleString('pt-BR')})</span>` : ''}</button>`).join('')}</div><div id="u2-aba-corpo"></div>`;
     document.getElementById('u2-abas').addEventListener('click', ev => { const b = ev.target.closest('.u2-aba'); if (!b) return; U2K._aba = b.dataset.aba; pintar(); });
     const el = document.getElementById('u2-aba-corpo'), titulo = (t, sub) => `<div class="section-heading"${sub ? ` title="${esc(sub)}"` : ''}>${esc(t)}</div>`;
