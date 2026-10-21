@@ -10370,7 +10370,7 @@ function renderDashboard() {
       .sort((a, b) => (b.total_geral || 0) - (a.total_geral || 0));
     const semProducao = fech.length - ativos.length;
     // uma linha da tabela de fechamento (serve para as três tabelas de frota)
-    const linhaTec = f => {
+    const linhaTec = (f, semAlu) => {
       const propria = ehFrotaPropria(f);
       const alu = propria ? (f.aluguel_carro || 0) : (ehFrotaJH(f) ? ALUGUEL_JH : 0);
       const fp = descPorTecnico[normalizeHeader(f.tecnico)];
@@ -10387,11 +10387,12 @@ function renderDashboard() {
         <td class="num">${formatCurrency(f.valor_ordens||0)}</td>
         ${temFolha ? `<td class="num" style="color:var(--danger)">${fp && fp.total_descontos ? formatCurrency(fp.total_descontos) : '—'}</td>
           <td class="num"><b>${fp ? formatCurrency(fp.total_receber||0) : '—'}</b></td>` : ''}
-        <td class="num">${alu ? formatCurrency(alu) : '—'}</td>
+        ${semAlu ? '' : `<td class="num">${alu ? formatCurrency(alu) : '—'}</td>`}
         <td class="num">${formatCurrency(f.gasolina||0)}</td></tr>`;
     };
     // tabela de um grupo de frota, com os TOTAIS no TOPO (pedido do cliente)
-    const tabelaFrota = (lista, titulo, nota) => {
+    // semAlu: sem a coluna Aluguel (carros da JH — 21/10/2026, pedido do cliente: o aluguel é da empresa com a locadora, não do técnico)
+    const tabelaFrota = (lista, titulo, nota, semAlu) => {
       if (!lista.length) return '';
       const S = k => lista.reduce((a, f) => a + (f[k] || 0), 0);
       const alu = lista.reduce((a, f) => a + (ehFrotaPropria(f) ? (f.aluguel_carro||0) : (ehFrotaJH(f) ? ALUGUEL_JH : 0)), 0);
@@ -10400,7 +10401,7 @@ function renderDashboard() {
         return a + (x ? (x[campo] || 0) : 0);
       }, 0);
       // total no FIM da tabela pro Analista (14/10/2026, pedido do cliente: "deixe os totais no final e não no topo")
-      const linhaTotal = tabelaFrotaLinhaTotal(lista, S, alu, somaFolha);
+      const linhaTotal = tabelaFrotaLinhaTotal(lista, S, alu, somaFolha, semAlu);
       return `<div class="section-heading sem-toggle">${esc(titulo)}<span class="sec-nota">${esc(nota)}</span></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table dash-tab">
         <thead>
@@ -10409,20 +10410,20 @@ function renderDashboard() {
             <th class="num" title="O que a GIGA paga à JH pelas ordens desse técnico (coluna VALOR PAGO GIGA)">GIGA → JH</th>
             <th class="num" title="O que as ordens do técnico renderam para ele, antes de qualquer desconto (coluna VALOR ORDENS) — é o mesmo número do ranking. Os descontos vêm na coluna ao lado.">JH → técnico</th>
             ${temFolha ? '<th class="num">Descontos</th><th class="num">A receber</th>' : ''}
-            <th class="num">Aluguel</th><th class="num">Gasolina</th></tr>
+            ${semAlu ? '' : '<th class="num">Aluguel</th>'}<th class="num">Gasolina</th></tr>
           ${modoNovo() ? '' : linhaTotal}
         </thead>
-        <tbody>${lista.map(linhaTec).join('')}${modoNovo() ? linhaTotal : ''}</tbody>
+        <tbody>${lista.map(f => linhaTec(f, semAlu)).join('')}${modoNovo() ? linhaTotal : ''}</tbody>
       </table></div>`;
     };
-    const tabelaFrotaLinhaTotal = (lista, S, alu, somaFolha) => `<tr class="total-row">
+    const tabelaFrotaLinhaTotal = (lista, S, alu, somaFolha, semAlu) => `<tr class="total-row">
             <td>${modoNovo() ? 'Total — ' : ''}${lista.length} técnicos</td><td class="num">—</td>
             <td class="num">${S('ativacao').toLocaleString('pt-BR')}</td><td class="num">${S('mc').toLocaleString('pt-BR')}</td>
             <td class="num">${S('me').toLocaleString('pt-BR')}</td><td class="num">${S('reparos').toLocaleString('pt-BR')}</td>
             <td class="num">${S('upgrade').toLocaleString('pt-BR')}</td><td class="num">${S('total_geral').toLocaleString('pt-BR')}</td>
             <td class="num">${formatCurrency(S('valor_pago_giga'))}</td><td class="num">${formatCurrency(S('valor_ordens'))}</td>
             ${temFolha ? `<td class="num">${formatCurrency(somaFolha('total_descontos'))}</td><td class="num">${formatCurrency(somaFolha('total_receber'))}</td>` : ''}
-            <td class="num">${formatCurrency(alu)}</td><td class="num">${formatCurrency(S('gasolina'))}</td></tr>`;
+            ${semAlu ? '' : `<td class="num">${formatCurrency(alu)}</td>`}<td class="num">${formatCurrency(S('gasolina'))}</td></tr>`;
     const tecProprios = ativos.filter(ehFrotaPropria);
     const tecJH = ativos.filter(ehFrotaJH);
     const tecSemFrota = ativos.filter(f => !f.frota);
@@ -10505,7 +10506,7 @@ function renderDashboard() {
           <td class="num">${formatCurrency(totalValorGiga)}</td></tr></tfoot>
       </table></div>
       ${tabelaFrota(tecProprios, 'Fechamento — carros próprios', 'aluguel é provento do técnico')}
-      ${tabelaFrota(tecJH, 'Fechamento — carros da JH', 'aluguel é despesa da JH, pago à locadora')}
+      ${tabelaFrota(tecJH, 'Fechamento — carros da JH', 'carro alugado pela JH — o aluguel é despesa da empresa e não entra por técnico', true)}
       ${ehAnalista() ? tabelaFrota(tecSemFrota, 'Fechamento — sem frota informada', '') : ''}
       <p style="font-size:var(--fs-sm);color:var(--text-muted);margin:-8px 0 22px">
         <b>Carro próprio:</b> o técnico roda com o veículo dele e o aluguel entra como provento, somando no que ele recebe.
@@ -10543,6 +10544,7 @@ function renderDashboard() {
         É o índice do ciclo inteiro, não a média das porcentagens de cada técnico —
         essa média dá o mesmo peso a quem fez 200 ordens e a quem fez 10.
       </p>
+      ${htmlOfensoresEMotivosRetornos(retornosConcluidosDaProducao().filter(p => todosOsCiclos || faixas.some(c => inRange(p.data, c.start, c.end))))}
       <div class="section-heading sem-toggle">Ranking de técnicos</div>
       <div class="panel" style="margin-bottom:1.5rem">
         <h3>Top técnicos — valor das ordens (JH → técnico)</h3>
@@ -10638,9 +10640,39 @@ function rankingListaHtml(itens, opts = {}) {
       ${it.sub !== undefined ? `<span class="rk2-sub">${it.sub}</span>` : ''}
     </div>`).join('')}</div>`;
 }
+// OFENSORES E MOTIVOS DA BAIXA DOS RETORNOS — duas tabelas lado a lado, sem gráfico (21/10/2026, pedido do cliente: "o ranking de técnicos ofensores do lado esquerdo e do
+// lado direito em outra tabela os motivos das baixas ... não quero gráficos"). `linhas` = retornos concluídos da Produção (retornosConcluidosDaProducao) do recorte da tela:
+// o IFI/IRR é do OFENSOR (quem fez o serviço anterior), o motivo é o da visita de retorno. Mesma fonte da contagem de retornos do ciclo (contarRetornosPorOfensor).
+function htmlOfensoresEMotivosRetornos(linhas) {
+  if (!linhas.length) return '';
+  const ofs = new Map(), mots = new Map();
+  linhas.forEach(p => {
+    const t = (p.ifi_irr || '').trim().toUpperCase() === 'IFI' ? 'ifi' : 'irr';
+    [[ofs, (p.ofensor || '').trim() || 'Não informado'], [mots, (p.motivo || '').trim() || 'Não informado']].forEach(([m, nome]) => {
+      const k = normalizeHeader(nome);
+      if (!m.has(k)) m.set(k, { nome, ifi: 0, irr: 0 });
+      m.get(k)[t]++;
+    });
+  });
+  const ordenar = m => [...m.values()].map(o => ({ ...o, total: o.ifi + o.irr })).sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome, 'pt-BR'));
+  const total = linhas.length, nIfi = linhas.filter(p => (p.ifi_irr || '').trim().toUpperCase() === 'IFI').length, nIrr = total - nIfi;
+  const tabela = (itens, rotulo) => `<div class="table-wrap" style="max-height:440px;overflow:auto"><table class="data-table"><thead><tr>
+      <th>#</th><th>${rotulo}</th><th class="num">IFI</th><th class="num">IRR</th><th class="num">Total</th><th class="num">% dos retornos</th></tr></thead><tbody>
+      ${itens.map((o, i) => `<tr><td style="color:var(--text-muted)">${i + 1}</td><td class="cat-cell" style="white-space:normal">${esc(o.nome)}</td>
+        <td class="num">${o.ifi}</td><td class="num">${o.irr}</td><td class="num"><b>${o.total}</b></td><td class="num">${formatPct(o.total / total * 100, 1)}</td></tr>`).join('')}
+      <tr class="total-row"><td>-</td><td class="cat-cell">Total</td><td class="num">${nIfi}</td><td class="num">${nIrr}</td><td class="num">${total}</td><td class="num">100%</td></tr>
+    </tbody></table></div>`;
+  return `<div class="panels-grid" style="margin-bottom:1.5rem">
+    <div class="panel"><h3>Técnicos ofensores — quem leva os retornos</h3>${tabela(ordenar(ofs), 'Técnico ofensor')}</div>
+    <div class="panel"><h3>Motivos da baixa dos retornos</h3>${tabela(ordenar(mots), 'Motivo da baixa')}</div>
+  </div>
+  <p style="font-size:var(--fs-sm);color:var(--text-muted);margin:-6px 0 18px">O retorno vai pro <b>ofensor</b> (quem fez o serviço anterior), não pra quem refez a visita. O motivo é o da baixa da visita de retorno. Só retornos concluídos do período.</p>`;
+}
 function renderRelatorioGeralCompleto(fech) {
   if (!fech.length) return '<div class="empty">Sem dados. Importe a aba RELATORIO de RELATORIO_GERAL.xlsx.</div>';
   const toPct = v => Math.abs(v||0) <= 5 ? (v||0)*100 : (v||0); // fração até 500% — cobre eficiência acima de 100%
+  // carro da frota da JH (qualquer frota informada que não seja PRÓPRIO): não mostra valor de aluguel (21/10/2026, pedido do cliente)
+  const ehFrotaDaJH = r => !!r.frota && !/propri/i.test(normalizeHeader(r.frota));
   // APTO verde, FORA (ou qualquer outro que não seja apto) vermelho
   const statusCell = r => `<span style="color:${/apto/i.test(r.status)&&!/inapto/i.test(r.status)?'var(--success)':'var(--danger)'};font-weight:700">${esc(r.status)||'-'}</span>`;
   // Lucro: quem está ABAIXO DA MÉDIA da equipe no ciclo fica vermelho, quem
@@ -10669,7 +10701,7 @@ function renderRelatorioGeralCompleto(fech) {
     ['Total Geral', r=>r.total_geral], ['Valor Ordens', r=>formatCurrency(r.valor_ordens)], ['Dias Trab.', r=>r.dias_trabalhados],
     ['Qtd IRR', r=>r.qtd_irr], ['Ind. IRR', r=>formatPct(toPct(r.ind_irr), 2)], ['Desc. IRR', r=>formatCurrency(r.desc_irr)],
     ['Qtd IFI', r=>r.qtd_ifi], ['Ind. IFI', r=>formatPct(toPct(r.ind_ifi), 2)], ['Desc. IFI', r=>formatCurrency(r.desc_ifi)],
-    ['Status', statusCell], ['Gasolina', r=>formatCurrency(r.gasolina)], ['Aluguel Carro', r=>formatCurrency(r.aluguel_carro)],
+    ['Status', statusCell], ['Gasolina', r=>formatCurrency(r.gasolina)], ['Aluguel Carro', r=>ehFrotaDaJH(r) ? '<span title="Carro da frota da JH: o aluguel é da empresa com a locadora, não do técnico" style="color:var(--text-muted)">—</span>' : formatCurrency(r.aluguel_carro)],
     ['Total Líquido', r=>formatCurrency(r.total_liquido)], ['Despesas', r=>formatCurrency(r.despesas)],
     ['Lucros', lucroCell], ['Eficiência', eficienciaCell],
   ];
@@ -10686,7 +10718,9 @@ function renderRelatorioGeralCompleto(fech) {
   </tbody></table></div>
   ${confere}
   <p style="font-size:var(--fs-sm);color:var(--text-muted);margin:10px 0 0">
-    <b>Eficiência</b> = coluna EFICIÊNCIA da própria planilha RELATORIO (vem pronta, o sistema não recalcula) —
+    <b>Eficiência</b> = Lucros ÷ Despesas — coluna EFICIÊNCIA da planilha RELATORIO quando o ciclo tem fechamento importado; no ciclo sem
+    fechamento (o atual) o sistema faz a mesma conta com os números da Produção (Total Líquido = Valor Ordens − descontos de IFI/IRR; Despesas = Total Líquido +
+    indicadores GIGA de R$ 107 por retorno + aluguel do carro próprio + gasolina; Lucros = Valor pago pela GIGA − Despesas) —
     mede o rendimento do técnico contra o que era esperado dele no ciclo, não lucro. Pra saber se o técnico
     "se paga" de fato (o que ele gera cobre o que ele custa), compare <b>Valor Ordens</b> com <b>Total Líquido +
     Despesas</b>, ou olhe direto a coluna <b>Lucros</b> — abaixo da média da equipe fica vermelho.
@@ -23349,6 +23383,7 @@ function gasolinaImportadaDo(tecnico, inicio) {
 }
 function fechamentoSintetico(inicio, fim) {
   const vigentes = valoresVigentesEm(fim);
+  const dGigaIfi = descontoGigaEm('ifi', fim), dGigaIrr = descontoGigaEm('irr', fim);
   const campoDe = { 'Ativação': 'ativacao', 'Reparo': 'reparos', 'Mudança de Endereço': 'me', 'Mudança de Cômodo': 'mc', 'Upgrade/Downgrade': 'upgrade' };
   const porTec = new Map();
   producaoConcluidaDeTecnico().forEach(p => {
@@ -23379,13 +23414,29 @@ function fechamentoSintetico(inicio, fim) {
     let giga = 0, valor = 0;
     vigentes.forEach(v => { const q = o[campoDe[v.label]] || 0; giga += q * v.giga; valor += q * (apto ? v.d26 : v.normal); });
     const frota = frotaDoTecnico(tecnico, inicio, fim);
+    // Contas da aba RELATORIO (conferidas célula a célula na planilha, 21/10/2026 — antes o sintético saía com Total Líquido, Despesas, Lucros e
+    // Eficiência zerados no ciclo sem fechamento e a tabela "Relatório Geral completo" mostrava R$ 0,00 / 0,0%):
+    //   TOTAL LIQUIDO = VALOR ORDENS − DESC. TOTAL (desconto de IFI/IRR do técnico);   INDICADORES GIGA = Qtd IFI × R$ 107 + Qtd IRR × R$ 107;
+    //   DESPESAS = TOTAL LIQUIDO + INDICADORES GIGA + ALUGUEL CARRO + GASOLINA (aluguel só do carro PRÓPRIO; o da locadora é somado à parte pelo Dashboard);
+    //   LUCROS = VALOR PAGO GIGA − DESPESAS;   EFICIÊNCIA = LUCROS ÷ DESPESAS (fração).
+    const descIfi = rl ? rl.valorIfi : 0, descIrr = rl ? rl.valorIrr : 0;
+    const aluguel = /propri/i.test(norm(frota)) ? valorAluguelPorRegra(frota, o.dias.size) : 0;
+    const gasolina = gasolinaImportadaDo(tecnico, inicio) || 0;
+    const totalLiquido = valor - descIfi - descIrr;
+    const indGiga = qtdIfi * dGigaIfi + qtdIrr * dGigaIrr;
+    const despesas = totalLiquido + indGiga + aluguel + gasolina;
+    const lucros = giga - despesas;
     return {
       tecnico, inicio, ate_o_dia: fim, _sintetico: true,
+      status: apto ? 'APTO' : 'FORA',
+      ind_ifi: baseIfi ? qtdIfi / baseIfi : 0, ind_irr: o.reparos ? qtdIrr / o.reparos : 0,
+      total_liquido: totalLiquido, ind_giga: indGiga, ind_giga_jh: indGiga - (descIfi + descIrr),
+      eficiencia: despesas > 0 ? lucros / despesas : 0,
       ativacao: o.ativacao, mc: o.mc, me: o.me, reparos: o.reparos, upgrade: o.upgrade,
       total_geral: o.ativacao + o.mc + o.me + o.reparos + o.upgrade, dias_trabalhados: o.dias.size,
-      valor_pago_giga: giga, valor_ordens: valor, despesas: 0, lucros: 0, gasolina: gasolinaImportadaDo(tecnico, inicio) || 0,
-      qtd_ifi: qtdIfi, qtd_irr: qtdIrr, desc_ifi: rl ? rl.valorIfi : 0, desc_irr: rl ? rl.valorIrr : 0,
-      frota, aluguel_carro: /propri/i.test(norm(frota)) ? valorAluguelPorRegra(frota, o.dias.size) : 0,
+      valor_pago_giga: giga, valor_ordens: valor, despesas, lucros, gasolina,
+      qtd_ifi: qtdIfi, qtd_irr: qtdIrr, desc_ifi: descIfi, desc_irr: descIrr,
+      frota, aluguel_carro: aluguel,
     };
   });
 }
@@ -28027,20 +28078,40 @@ function renderPainelBI(alvoId = 'content') {
     // Antes, quando nenhum ciclo cruzava o período, caía pra "últimos 6" — o
     // gráfico mostrava ciclo de fora do filtro, o que confunde mais do que
     // ajuda. Sem ciclo no período, o painel diz isso na cara.
-    const ciclosEvo = ciclosDoFechamento().lista
+    // Ciclos da evolução = os que têm fechamento importado + os MAIS NOVOS que o último fechamento e já têm ordens concluídas na Produção (o ciclo atual, em andamento):
+    // 21/10/2026, pedido do cliente: "verifique por que não tem o fechamento atual" — a lista vinha só de DB.fechamento, então o ciclo corrente nunca aparecia.
+    // Esses ciclos usam o fechamento sintético (mesmas contas da planilha, a partir da Produção) e saem marcados "da Produção".
+    const ciclosEvoBase = (() => {
+      const base = ciclosDoFechamento().lista.map(c => ({ ...c }));
+      const vistos = new Set(base.map(c => c.start + '|' + c.end));
+      const ultimoFim = base.reduce((m, c) => String(c.end) > m ? String(c.end) : m, '');
+      const atual = defaultPeriod();
+      const extras = new Map();
+      producaoConcluidaDeTecnico().forEach(p => {
+        if (!p.data || p.data <= ultimoFim) return;
+        const c = cicloCalendarioDe(p.data);
+        const k = c.start + '|' + c.end;
+        if (vistos.has(k) || extras.has(k)) return;
+        if (!ultimoFim && k !== atual.start + '|' + atual.end) return; // sem nenhum fechamento: só o ciclo atual
+        extras.set(k, { start: c.start, end: c.end, sintetico: true });
+      });
+      return [...base, ...extras.values()];
+    })();
+    const ciclosEvo = ciclosEvoBase.slice()
       .filter(c => overlaps(c.start, c.end, s, e))
       .sort((a, b) => String(a.end).localeCompare(String(b.end)));
     // As 3 séries (GIGA, Despesas e Lucro) vêm da MESMA fonte: a aba RELATORIO
     // do Relatório Geral (DB.fechamento), somando os técnicos de cada ciclo.
     // Só o Lucro tem fallback: se a coluna LUCROS vier vazia na planilha,
     // calcula GIGA − Despesas (é a conta que a própria coluna faz).
-    const listaCiclosEvo = ciclosDoFechamento().lista.slice().sort((a, b) => String(a.end).localeCompare(String(b.end)));
+    const listaCiclosEvo = ciclosEvoBase.slice().sort((a, b) => String(a.end).localeCompare(String(b.end)));
     const montaEvoCiclo = c => {
-      const fs = DB.fechamento.filter(f => f.inicio === c.start && f.ate_o_dia === c.end);
+      const fs = c.sintetico ? fechamentoSintetico(c.start, c.end) : DB.fechamento.filter(f => f.inicio === c.start && f.ate_o_dia === c.end);
       const soma = k => fs.reduce((a, f) => a + (f[k] || 0), 0);
       const giga = soma('valor_pago_giga'), despesas = soma('despesas');
       return {
-        label: formatDate(c.end), inicio: c.start, fim: c.end, tecnicos: fs.length,
+        label: formatDate(c.end), inicio: c.start, fim: c.end, tecnicos: fs.length, parcial: !!c.sintetico,
+        // ciclo sem fechamento: a Despesa do técnico ainda não tem o aluguel da locadora (é somado à parte no Dashboard) — a tabela avisa
         giga, despesas, lucro: soma('lucros') || (giga - despesas),
       };
     };
@@ -28075,10 +28146,10 @@ function renderPainelBI(alvoId = 'content') {
       <div class="panel" style="margin-bottom:1.5rem">
         <h3>Faturamento GIGA × Despesas × Lucro por ciclo</h3>
         <div class="toolbar fora-da-imagem" style="margin:0 0 10px;padding:10px 12px">
-          <div class="field"><label>Do fechamento</label><select id="bi-evo-de">${listaCiclosEvo.map((c, k) => `<option value="${k}"${k === evoIni ? ' selected' : ''}>${formatDate(c.start)} a ${formatDate(c.end)}</option>`).join('')}</select></div>
-          <div class="field"><label>Até o fechamento</label><select id="bi-evo-ate">${listaCiclosEvo.map((c, k) => `<option value="${k}"${k === evoFim ? ' selected' : ''}>${formatDate(c.start)} a ${formatDate(c.end)}</option>`).join('')}</select></div>
+          <div class="field"><label>Do fechamento</label><select id="bi-evo-de">${listaCiclosEvo.map((c, k) => `<option value="${k}"${k === evoIni ? ' selected' : ''}>${formatDate(c.start)} a ${formatDate(c.end)}${c.sintetico ? ' (da Produção)' : ''}</option>`).join('')}</select></div>
+          <div class="field"><label>Até o fechamento</label><select id="bi-evo-ate">${listaCiclosEvo.map((c, k) => `<option value="${k}"${k === evoFim ? ' selected' : ''}>${formatDate(c.start)} a ${formatDate(c.end)}${c.sintetico ? ' (da Produção)' : ''}</option>`).join('')}</select></div>
         </div>
-        <p style="font-size:12px;color:var(--text-muted);margin:-2px 0 12px">Os três valores vêm da aba RELATORIO (Relatório Geral), somando todos os técnicos de cada ciclo. Escolha acima de qual fechamento até qual fechamento mostrar.</p>
+        <p style="font-size:12px;color:var(--text-muted);margin:-2px 0 12px">Os três valores vêm da aba RELATORIO (Relatório Geral), somando todos os técnicos de cada ciclo. O ciclo atual (ainda sem fechamento importado) entra marcado <b>"da Produção"</b>: as ordens concluídas até agora × valor da GIGA, com as mesmas contas da planilha (parcial, sem Upgrade/M.Cômodo que só vêm na planilha). Escolha acima de qual fechamento até qual fechamento mostrar.</p>
         <div id="bi-evo-corpo"></div>
       </div>
 
@@ -28143,7 +28214,7 @@ function renderPainelBI(alvoId = 'content') {
           <th>Ciclo</th><th>Técnicos</th><th>Pago pela GIGA</th><th>Despesas</th><th>Lucro</th><th>Margem</th>
         </tr></thead><tbody>
           ${evoPorCiclo.map(c => `<tr>
-            <td class="cat-cell">${formatDate(c.inicio)} a ${formatDate(c.fim)}</td>
+            <td class="cat-cell">${formatDate(c.inicio)} a ${formatDate(c.fim)}${c.parcial ? ' <span class="badge warn" title="Ciclo sem fechamento importado: calculado da Produção (parcial)">da Produção</span>' : ''}</td>
             <td>${c.tecnicos}</td>
             <td style="color:var(--accent);font-weight:600">${formatCurrency(c.giga)}</td>
             <td style="color:var(--danger);font-weight:600">${formatCurrency(c.despesas)}</td>
