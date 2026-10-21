@@ -19437,6 +19437,46 @@ function htmlTabelaTecnicosGeral(tecs, tot, idTab, inicio, fim) {
     </tbody></table></div>`;
 }
 
+// RESULTADO POR TÉCNICO — "o técnico se paga?" (21/10/2026, pedido do cliente: "aquela tabela igual o Relatório Geral que mostra a efetividade, pra saber se o técnico
+// está se pagando ou não, e quantas vezes teve revisão ou manutenção"). Base = `fechamentoSintetico` (Produção × tabela de valores, sem depender do RELATORIO):
+//   Receita GIGA = o que a GIGA paga pelas ordens do técnico − desconto da GIGA por IFI/IRR dele (R$ 107 cada, tarifa do ciclo);
+//   Custo = o que a JH paga ao técnico (valor das ordens na faixa APTO/INAPTO − o desconto de IFI/IRR dele) + aluguel de carro + gasolina;
+//   Resultado = receita líquida − custo; Eficiência = receita líquida ÷ custo (≥ 100% = se paga). NÃO é a coluna EFICIÊNCIA da planilha RELATORIO (essa vem pronta de lá).
+// Revisões/manutenções: linhas da Frota do técnico (pelo condutor, ou pela placa do vínculo atual quando o condutor está em branco) com data dentro do período.
+function htmlTabelaRentabilidadeTecnicos(inicio, fim, tecOk, idTab) {
+  const rows = fechamentoSintetico(inicio, fim).filter(r => tecOk(r.tecnico));
+  if (!rows.length) return '<div class="empty">Sem produção de técnico nesse período.</div>';
+  const dIfi = descontoGigaEm('ifi', fim), dIrr = descontoGigaEm('irr', fim), cic = cicloCalendarioDe(inicio);
+  const linhas = rows.map(r => {
+    const link = linkDaFrotaDoTecnico(r.tecnico), pl = link ? String(link.placa || '') : '';
+    const doTec = x => mesmaPessoa(x.condutor, r.tecnico) || (!String(x.condutor || '').trim() && pl && String(x.placa || '') === pl);
+    const rev = (DB.frotaRevisao || []).filter(x => doTec(x) && inRange(x.data_revisao, inicio, fim)).length;
+    const man = (DB.frotaManutencao || []).filter(x => doTec(x) && inRange(x.data, inicio, fim)).length;
+    const f = (DB.fechamento || []).find(x => mesmaPessoa(x.tecnico, r.tecnico) && overlaps(x.inicio, x.ate_o_dia, inicio, fim));
+    const gas = f && f.gasolina != null ? (Number(f.gasolina) || 0) : (gasolinaImportadaDo(r.tecnico, cic.start) || 0);
+    const receita = r.valor_pago_giga || 0, descGiga = (r.qtd_ifi || 0) * dIfi + (r.qtd_irr || 0) * dIrr, recLiq = receita - descGiga;
+    const pago = r.valor_ordens || 0, descTec = (r.desc_ifi || 0) + (r.desc_irr || 0), aluguel = r.aluguel_carro || 0;
+    const custo = pago - descTec + aluguel + gas, resultado = recLiq - custo, efic = custo > 0 ? recLiq / custo * 100 : null;
+    return { nome: r.tecnico, frota: r.frota, servicos: r.total_geral, dias: r.dias_trabalhados, receita, descGiga, recLiq, pago, descTec, aluguel, gas, custo, resultado, efic, rev, man };
+  }).sort((a, b) => (a.efic == null ? 1e9 : a.efic) - (b.efic == null ? 1e9 : b.efic));
+  const tot = linhas.reduce((t, l) => { ['servicos', 'receita', 'descGiga', 'recLiq', 'pago', 'descTec', 'aluguel', 'gas', 'custo', 'resultado', 'rev', 'man'].forEach(k => { t[k] = (t[k] || 0) + (l[k] || 0); }); return t; }, {});
+  const eficTot = tot.custo > 0 ? tot.recLiq / tot.custo * 100 : null, moeda = v => formatCurrency(v);
+  const corVal = v => v < 0 ? 'var(--danger)' : 'var(--success)';
+  const tdEfic = v => v == null ? '<td>-</td>' : `<td style="font-weight:700;color:${v >= 100 ? 'var(--success)' : 'var(--danger)'}">${formatPct(v, 1)}</td>`;
+  const nSePaga = linhas.filter(l => l.resultado >= 0).length, nNao = linhas.length - nSePaga;
+  const cartoes = `<div class="cards-grid" style="margin-bottom:12px">${metricCard('Técnicos que se pagam', String(nSePaga), false, { positive: nSePaga > 0, sub: `de ${linhas.length} técnico(s)` })}${metricCard('Técnicos que NÃO se pagam', String(nNao), nNao > 0, { sub: 'receita líquida menor que o custo' })}${metricCard('Resultado do período', moeda(tot.resultado), tot.resultado < 0, { positive: tot.resultado >= 0, sub: eficTot == null ? '' : `eficiência ${formatPct(eficTot, 1)}` })}${metricCard('Revisões / manutenções', `${tot.rev} / ${tot.man}`, false, { sub: 'dos carros dos técnicos no período' })}</div>`;
+  const corpo = linhas.map(l => `<tr><td class="cat-cell">${esc(l.nome)}</td><td>${esc(l.frota || '-')}</td><td>${fmtN(l.servicos)}</td><td>${l.dias || '-'}</td>
+      <td>${moeda(l.receita)}</td><td>${l.descGiga ? '-' + moeda(l.descGiga) : '-'}</td><td style="font-weight:600">${moeda(l.recLiq)}</td>
+      <td>${moeda(l.pago)}</td><td>${l.descTec ? '-' + moeda(l.descTec) : '-'}</td><td>${l.aluguel ? moeda(l.aluguel) : '-'}</td><td>${l.gas ? moeda(l.gas) : '-'}</td><td style="font-weight:600">${moeda(l.custo)}</td>
+      <td style="font-weight:700;color:${corVal(l.resultado)}">${moeda(l.resultado)}</td>${tdEfic(l.efic)}
+      <td><span class="badge ${l.resultado >= 0 ? 'ok' : 'warn'}">${l.resultado >= 0 ? 'Se paga' : 'Não se paga'}</span></td><td>${l.rev || '-'}</td><td>${l.man || '-'}</td></tr>`).join('');
+  return `${cartoes}<div class="table-wrap"><table class="data-table" id="${idTab}"><thead><tr>
+    <th>Técnico</th><th>Frota / próprio</th><th>Serviços</th><th>Dias trab.</th><th>Receita GIGA</th><th>Desc. GIGA (IFI/IRR)</th><th>Receita líquida</th><th>Pago ao técnico</th><th>Desc. do técnico</th><th>Aluguel carro</th><th>Gasolina</th><th>Custo total</th>
+    <th>Resultado</th><th>Eficiência</th><th>Situação</th><th>Revisões</th><th>Manutenções</th></tr></thead><tbody>${corpo}
+    <tr class="total-row"><td class="cat-cell">Total</td><td>-</td><td>${fmtN(tot.servicos)}</td><td>-</td><td>${moeda(tot.receita)}</td><td>${tot.descGiga ? '-' + moeda(tot.descGiga) : '-'}</td><td>${moeda(tot.recLiq)}</td><td>${moeda(tot.pago)}</td><td>${tot.descTec ? '-' + moeda(tot.descTec) : '-'}</td><td>${moeda(tot.aluguel)}</td><td>${moeda(tot.gas)}</td><td>${moeda(tot.custo)}</td>
+      <td style="color:${corVal(tot.resultado)}">${moeda(tot.resultado)}</td>${tdEfic(eficTot)}<td>-</td><td>${tot.rev || '-'}</td><td>${tot.man || '-'}</td></tr></tbody></table></div>`;
+}
+
 function htmlTabelaCidadesGeral(cids, tot, idTab) {
   if (!cids.length) return '<div class="empty">Sem dados de cidade nesse período.</div>';
   const linha = (c, ehTotal) => {
@@ -19884,6 +19924,11 @@ function renderRelatorioGeral() {
       ${xls('rg-xls-tec')}
       ${htmlTabelaTecnicosGeral(g.tecnicos, t, 'rg-tab-tecnicos', s, e)}
 
+      <div class="section-heading">Resultado por técnico — o técnico se paga?</div>
+      ${nota('Receita GIGA = o que a GIGA paga pelas ordens do técnico, menos o desconto da GIGA pelos IFI/IRR dele. Custo = o que a JH paga ao técnico (valor das ordens na faixa APTO/INAPTO, menos o desconto dele de IFI/IRR) + aluguel de carro + gasolina. <b>Resultado</b> = receita líquida − custo; <b>Eficiência</b> = receita líquida ÷ custo (100% ou mais = se paga). Não é a coluna EFICIÊNCIA da planilha RELATORIO. A gasolina vem do fechamento ou da planilha de gasolina do ciclo (período parcial pode ficar sem). Revisões e manutenções são as da Frota do técnico no período. Respeita o filtro de técnico e o período; cidades e tipos de serviço não se aplicam (o custo é do técnico inteiro). Quem não se paga fica no topo.')}
+      ${xls('rg-xls-rent')}
+      ${htmlTabelaRentabilidadeTecnicos(s, e, tecOk, 'rg-tab-rent')}
+
       <div class="section-heading">Produção geral por cidade</div>
       ${nota('IRR/IFI por cidade usam a base da própria cidade. "O.S no período", cancelados e improdutivas são contados por O.S única (Produção + CSV da PCR).')}
       ${xls('rg-xls-cid')}
@@ -20103,7 +20148,7 @@ function renderRelatorioGeral() {
     };
     ativarTogglesDeSecao(body);
     ativarBotoesImagem(body);
-    [['rg-xls-tec', 'rg-tab-tecnicos', 'relatorio-geral-tecnicos'], ['rg-xls-cid', 'rg-tab-cidades', 'relatorio-geral-cidades'], ['rg-xls-max', 'rg-tab-max', 'max-reparos-por-cliente'],
+    [['rg-xls-tec', 'rg-tab-tecnicos', 'relatorio-geral-tecnicos'], ['rg-xls-rent', 'rg-tab-rent', 'resultado-por-tecnico'], ['rg-xls-cid', 'rg-tab-cidades', 'relatorio-geral-cidades'], ['rg-xls-max', 'rg-tab-max', 'max-reparos-por-cliente'],
      ['rg-xls-pzdia', 'rg-tab-pzdia', 'prazo-por-dia'], ['rg-xls-pzof', 'rg-tab-pzof', 'ofensores-de-prazo'], ['rg-xls-pzmot', 'rg-tab-pzmot', 'motivos-da-baixa-fora-do-prazo'],
      ['rg-xls-imp', 'rg-tab-imp', 'improdutivas-por-tecnico'], ['rg-xls-a18', 'rg-tab-a18', 'concluidas-apos-18h'], ['rg-xls-canc', 'rg-tab-canc', 'canceladas-por-cidade-e-tipo'], ['rg-xls-ord', 'rg-tab-ordens', 'ordens-do-periodo']].forEach(([btnId, tabId, nome]) => {
       const b = document.getElementById(btnId);
