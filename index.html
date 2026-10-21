@@ -30775,7 +30775,7 @@ function u2kDiagnostico(onus, alm) {
   });
   ents.forEach(e => { if (e.alias && !/^-+$/.test(e.alias)) { const k = chaveA(e.olt, e.alias); if (!porAlias.has(k)) porAlias.set(k, e); } });
   const linhas = [], ref = Date.parse(String(alm.reduce((m, a) => a.ultimo > m ? a.ultimo : m, '')).replace(' ', 'T')) || 0;
-  const eventos = u2kEventosMassa(alm), evPorOnu = new Map(); eventos.forEach(ev => ev.chaves.forEach(k => { if (!evPorOnu.has(k)) evPorOnu.set(k, ev); }));
+  const eventos = u2kEventosMassa(alm).filter(e => !String(e.tipo || '').startsWith('Sem energia')), evPorOnu = new Map(); eventos.forEach(ev => ev.chaves.forEach(k => { if (!evPorOnu.has(k)) evPorOnu.set(k, ev); }));
   const marcaEvento = (r, chave) => { const ev = (r.diag === 'energia' || r.diag === 'los') && evPorOnu.get(chave); if (ev) r.extra = `Parte de uma queda em massa: ${ev.onus.size} ONUs da ${ev.olt} às ${u2kFmtData(ev.ini).slice(0, 16)}`; };
   const classifica = r => {
     const ab = r.catsAb, has = c => !!ab[c], offline = r.status ? r.status === 'Offline' : true;
@@ -31034,15 +31034,16 @@ function u2kVisao(el, cfg) {
     <div class="u2f-grade">
     ${(cfg.controles || []).map(c => sel('c-' + c.id, c.rot, c.opcoes, est[c.id])).join('')}
     ${filtros.map(f => sel('f-' + f.id, f.rot, f.opcoes, est['f-' + f.id] || '', f.todos || 'Todos')).join('')}
+    ${cfg.dia ? `<div class="field"><label>De (data)</label><input type="date" id="${pre}-de" value="${esc(est.de || '')}"></div><div class="field"><label>Até (data)</label><input type="date" id="${pre}-ate" value="${esc(est.ate || '')}"></div>` : ''}
     <div class="field"><label>Buscar</label><div class="u2f-q"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="text" id="${pre}-q" placeholder="cliente, SN ou OLT…" autocomplete="off" value="${esc(est.q || '')}"></div></div>
     ${sel('lim', 'Mostrar', [['1000', '1.000'], ['3000', '3.000'], ['10000', '10.000'], ['0', 'Todas']], est.lim || (base0.length > 3000 ? '3000' : '10000'))}
     <button type="button" class="btn-export-xls" id="${pre}-xls">⤓ Exportar Excel</button></div></div>
     ${cfg.chips ? `<div id="${pre}-chips" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px"></div>` : ''}<div id="${pre}-tab"></div>`;
   const g = id => document.getElementById(`${pre}-${id}`);
   const desenhar = () => {
-    (cfg.controles || []).forEach(c => { est[c.id] = g('c-' + c.id).value; }); filtros.forEach(f => { est['f-' + f.id] = g('f-' + f.id).value; }); est.q = g('q').value; est.lim = g('lim').value;
+    (cfg.controles || []).forEach(c => { est[c.id] = g('c-' + c.id).value; }); filtros.forEach(f => { est['f-' + f.id] = g('f-' + f.id).value; }); est.q = g('q').value; est.lim = g('lim').value; if (cfg.dia) { est.de = g('de').value; est.ate = g('ate').value; }
     const base = cfg.linhas(est), cols = typeof cfg.cols === 'function' ? cfg.cols(est) : cfg.cols, q = normalizeHeader(est.q || '');
-    const filtrar = (ignora) => base.filter(r => filtros.every(f => f.id === ignora || !est['f-' + f.id] || (f.pred ? f.pred(r, est['f-' + f.id]) : String(f.valor(r)) === est['f-' + f.id])) && (!q || normalizeHeader(cfg.busca ? cfg.busca(r) : [r.alias, r.sn, r.olt].join(' ')).includes(q)));
+    const filtrar = (ignora) => base.filter(r => filtros.every(f => f.id === ignora || !est['f-' + f.id] || (f.pred ? f.pred(r, est['f-' + f.id]) : String(f.valor(r)) === est['f-' + f.id])) && (!q || normalizeHeader(cfg.busca ? cfg.busca(r) : [r.alias, r.sn, r.olt].join(' ')).includes(q)) && (!cfg.dia || !(est.de || est.ate) || (() => { const d = String(cfg.dia(r) || '').slice(0, 10); return !!d && (!est.de || d >= est.de) && (!est.ate || d <= est.ate); })()));
     const l = filtrar();
     if (cfg.aoFiltrar) cfg.aoFiltrar(l);
     g('cont').textContent = `${l.length.toLocaleString('pt-BR')} linha(s)`;
@@ -31053,8 +31054,8 @@ function u2kVisao(el, cfg) {
     ativarFiltrosDeColuna(g('tab'));
     g('xls').onclick = () => exportarQuadroPresenca((cfg.excel || pre) + '-' + hojeISOLocal(), cols.map(c => c.t), l.map(r => cols.map(c => c.x ? c.x(r) : c.f ? c.f(r) : '')), 'U2000');
   };
-  [...(cfg.controles || []).map(c => 'c-' + c.id), ...filtros.map(f => 'f-' + f.id), 'lim'].forEach(id => g(id).addEventListener('change', desenhar)); g('q').addEventListener('input', desenhar);
-  g('limpar').addEventListener('click', () => { filtros.forEach(f => { g('f-' + f.id).value = ''; }); g('q').value = ''; desenhar(); });
+  [...(cfg.controles || []).map(c => 'c-' + c.id), ...filtros.map(f => 'f-' + f.id), 'lim', ...(cfg.dia ? ['de', 'ate'] : [])].forEach(id => g(id).addEventListener('change', desenhar)); g('q').addEventListener('input', desenhar);
+  g('limpar').addEventListener('click', () => { filtros.forEach(f => { g('f-' + f.id).value = ''; }); g('q').value = ''; if (cfg.dia) { g('de').value = ''; g('ate').value = ''; } desenhar(); });
   if (cfg.chips) g('chips').addEventListener('click', ev => { const b = ev.target.closest('.u2c-chip'); if (!b) return; const s = g('f-' + cfg.chips.filtro); s.value = s.value === b.dataset.v ? '' : b.dataset.v; desenhar(); });
   desenhar();
 }
@@ -31314,7 +31315,9 @@ function u2kChamadosMassivas(onus, eventos, desde, janelaMs) {
 function renderRelU2000() {
   document.getElementById('content').innerHTML = `
     <div class="toolbar">
-      <div class="field"><label>Período</label><select id="ru-per">${[3, 7, 10, 15, 25, 30, 45, 60].map(n => `<option value="${n}"${n === 30 ? ' selected' : ''}>Últimos ${n} dias</option>`).join('')}</select></div>
+      <div class="field"><label>Período</label><select id="ru-per">${[3, 7, 10, 15, 25, 30, 45, 60, 90, 180, 365].map(n => `<option value="${n}"${n === 30 ? ' selected' : ''}>Últimos ${n} dias</option>`).join('')}<option value="custom">Escolher datas</option></select></div>
+      <div class="field"><label>De (data)</label><input type="date" id="ru-de" value="${isoLocalDe(new Date(Date.now() - 29 * 86400000))}"></div>
+      <div class="field"><label>Até (data)</label><input type="date" id="ru-ate" value="${hojeISOLocal()}"></div>
       <div class="field"><label>Cidade (OLT)</label><select id="ru-cid"><option value="">Todas</option></select></div>
       <div class="field"><label>Chamado até (depois da massiva)</label><input type="text" value="3 dias (fixo)" disabled style="width:120px" title="Só conta chamado aberto até 3 dias depois da massiva"><input type="hidden" id="ru-jan" value="72"></div>
       <button class="btn" id="f-apply">Filtrar</button>
@@ -31324,7 +31327,7 @@ function renderRelU2000() {
   U2K.eventos = U2K.eventos || [];
   try { if (!U2K.onus.length && !U2K.alarmes.length) { const sv = JSON.parse(localStorage.getItem('jh_u2000_v1') || 'null'); if (sv) { U2K.onus = sv.onus || []; U2K.alarmes = sv.alarmes || []; U2K.arquivos = sv.arquivos || []; U2K.meta = sv.meta || null; u2kConsolidar(); } } } catch (e) { /* sem cache */ }
   document.getElementById('f-apply').addEventListener('click', load);
-  ['ru-per', 'ru-cid', 'ru-jan'].forEach(id => document.getElementById(id).addEventListener('change', load));
+  ['ru-per', 'ru-cid', 'ru-jan', 'ru-de', 'ru-ate'].forEach(id => document.getElementById(id).addEventListener('change', ev => { if (id === 'ru-de' || id === 'ru-ate') document.getElementById('ru-per').value = 'custom'; load(); }));
   Promise.all([u2kCarregarDoBanco, u2kCarregarHist, u2kCarregarEventos, u2kCarregarEventosPorta, u2kCarregarSnapshots].map(f => Promise.resolve().then(() => f()).catch(() => null))).then(() => {
     const sel = document.getElementById('ru-cid'); if (!sel) return;
     const cids = [...new Set([...U2K.onus.map(o => o.cidade), ...U2K.eventosPorta.map(e => u2kCidadeDaOlt(e.olt)), ...U2K.alarmes.map(a => u2kCidadeDaOlt(a.fonte))].filter(Boolean))].sort();
@@ -31333,8 +31336,11 @@ function renderRelU2000() {
   });
   function load() {
     const body = document.getElementById('ru-body'); if (!body) return;
-    const nDias = Number(document.getElementById('ru-per').value) || 30, cid = document.getElementById('ru-cid').value;
-    const hoje = hojeISOLocal(), desde = isoLocalDe(new Date(Date.now() - (nDias - 1) * 86400000));
+    // período: "Últimos N dias" calcula as datas; "Escolher datas" usa o De / Até digitado (dia, mês e ano) — vale pra TODOS os gráficos e tabelas da tela
+    const perSel = document.getElementById('ru-per').value, cid = document.getElementById('ru-cid').value;
+    let desde, hoje;
+    if (perSel === 'custom') { desde = document.getElementById('ru-de').value || isoLocalDe(new Date(Date.now() - 29 * 86400000)); hoje = document.getElementById('ru-ate').value || hojeISOLocal(); if (desde > hoje) { const x = desde; desde = hoje; hoje = x; } }
+    else { const nDias = Number(perSel) || 30; hoje = hojeISOLocal(); desde = isoLocalDe(new Date(Date.now() - (nDias - 1) * 86400000)); document.getElementById('ru-de').value = desde; document.getElementById('ru-ate').value = hoje; }
     const nk = normalizeHeader, tms = x => Date.parse(String(x || '').replace(' ', 'T')) || 0, onus = U2K.onus, alm = U2K.alarmes;
     if (!onus.length && !alm.length && !U2K.eventosPorta.length && !U2K.hist.length) { body.innerHTML = '<div class="panel"><div class="empty">Nada importado do U2000 ainda. Importe os alarmes e o inventário na aba U2000.</div></div>'; return; }
     const okCid = olt => !cid || u2kCidadeDaOlt(olt) === cid;
@@ -31343,7 +31349,9 @@ function renderRelU2000() {
     U2K.eventosPorta.forEach(e => { if (!calc.some(c => c.olt === e.olt && String(c.slot) === String(e.slot) && String(c.porta) === String(e.porta) && c.tipo === e.tipo && tms(c.ini) <= tms(e.fim) + 900000 && tms(c.fim) >= tms(e.ini) - 900000)) evs.push(e); });
     const lstLocR = new Map(onus.filter(o => o.slot !== '' && o.slot != null).map(o => [`${nk(o.olt)}|${o.frame}/${o.slot}/${o.porta}|${o.onuId}`, o]));
     const calcSet = new Set(calc), aindaAberta = e => u2kMassivaAberta(e, lstLocR, totPorta).aberta;
-    const lista = evs.filter(e => okCid(e.olt) && String(e.ini).slice(0, 10) >= desde && String(e.ini).slice(0, 10) <= hoje).map(e => {
+    const ehEnergiaR = e => String(e.tipo || '').startsWith('Sem energia');
+    const nEnergia = evs.filter(e => ehEnergiaR(e) && okCid(e.olt) && String(e.ini).slice(0, 10) >= desde && String(e.ini).slice(0, 10) <= hoje).length;
+    const lista = evs.filter(e => !ehEnergiaR(e) && okCid(e.olt) && String(e.ini).slice(0, 10) >= desde && String(e.ini).slice(0, 10) <= hoje).map(e => {
       const sit = aindaAberta(e) ? (calcSet.has(e) ? 'aberta' : 'semconf') : 'resolvida', fimR = e.resolvidoEm || e.fim;
       return { ...e, sit, dur: sit === 'resolvida' ? Math.max(0, tms(fimR) - tms(e.ini)) : sit === 'aberta' ? Math.max(0, Date.now() - tms(e.ini)) : null, dia: String(e.ini).slice(0, 10), hora: Number(String(e.ini).slice(11, 13)) };
     }).sort((a, b) => String(b.ini).localeCompare(String(a.ini)));
@@ -31372,7 +31380,8 @@ function renderRelU2000() {
       <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">${formatDate(desde)} a ${formatDate(hoje)}${cid ? ' · ' + esc(u2kRotCidade(cid)) : ' · todas as cidades'} · ${lista.length} massiva(s) por porta</div>
       ${sec('Resumo do período')}
       <div class="stat-cards">
-        ${statCard(lista.length ? 'red' : 'green', icAviso, 'Massivas no período', lista.length.toLocaleString('pt-BR'), `${lista.filter(e => tipoCurto(e.tipo) === 'LOS / fibra').length} LOS · ${lista.filter(e => tipoCurto(e.tipo) === 'Sem energia').length} sem energia · ${lista.filter(e => tipoCurto(e.tipo) === 'PON sem sinal').length} PON`)}
+        ${statCard(lista.length ? 'red' : 'green', icAviso, 'Massivas no período (LOS)', lista.length.toLocaleString('pt-BR'), `${lista.filter(e => tipoCurto(e.tipo) === 'LOS / fibra').length} LOS · ${lista.filter(e => tipoCurto(e.tipo) === 'PON sem sinal').length} PON sem sinal`)}
+        ${statCard(nEnergia ? 'orange' : 'neutral', icAviso, 'Quedas de energia (verificar)', nEnergia.toLocaleString('pt-BR'), 'não contam como massiva')}
         ${statCard('purple', icPessoas, 'ONUs afetadas (soma)', lista.reduce((t, e) => t + (e.onus || 0), 0).toLocaleString('pt-BR'), `${nOlts} OLT(s) com massiva`)}
         ${statCard(lista.some(e => e.sit === 'aberta') ? 'red' : 'green', icRelogio, 'Em aberto agora', String(lista.filter(e => e.sit === 'aberta').length), 'pelo último arquivo de alarmes')}
         ${statCard('blue', icRelogio, 'Tempo médio até resolver', u2kDur(media) || '-', durs.length ? `mediana ${u2kDur(mediana)} · ${durs.length} resolvida(s)` : 'sem massiva resolvida')}
@@ -31395,17 +31404,20 @@ function renderRelU2000() {
       ${sec('Todas as massivas do período')}
       <div class="panel" id="ru-t-todas"></div>
       ${sec('Chamados e IFI / IRR durante ou depois das massivas', 'clientes das portas que tiveram massiva e abriram reparo do início da massiva até 3 dias depois (limite fixo) — pra ver se o retorno foi por causa da massiva')}
+      <div class="toolbar" style="margin:0 0 12px"><div class="field"><label>Massivas de (data)</label><input type="date" id="ru-ret-de" value="${desde}"></div><div class="field"><label>até (data)</label><input type="date" id="ru-ret-ate" value="${hoje}"></div><span style="font-size:12px;color:var(--text-muted);align-self:center">filtra só esta seção; começa igual ao período de cima</span></div>
       <div id="ru-ret"></div>
+      ${sec('Técnicos — clientes que deixaram com sinal crítico', 'contratos que o técnico atendeu por último no período (de cima), com o sinal real de cada um no AutoISP — clique no técnico para ver os clientes')}
+      <div class="panel" id="ru-tec-crit"><div class="empty">Carregando o sinal dos clientes…</div></div>
       <div class="panel" id="ru-mapas"></div>`;
     const lbl = d => formatDate(d);   // dd/mm/aaaa (pedido do cliente)
-    trendChart('ru-g-dia', ['LOS / fibra', 'Sem energia', 'PON sem sinal'].map((t, i) => ({ name: t, color: ['#7c3aed', '#64748b', '#be185d'][i], points: dias.map(d => ({ label: lbl(d), value: lista.filter(e => e.dia === d && tipoCurto(e.tipo) === t).length })) })), { expandir: true });
+    trendChart('ru-g-dia', ['LOS / fibra', 'PON sem sinal'].map((t, i) => ({ name: t, color: ['#7c3aed', '#be185d'][i], points: dias.map(d => ({ label: lbl(d), value: lista.filter(e => e.dia === d && tipoCurto(e.tipo) === t).length })) })), { expandir: true });
     trendChart('ru-g-onus', [{ name: 'ONUs afetadas (massivas)', color: '#dc2626', points: dias.map(d => ({ label: lbl(d), value: lista.filter(e => e.dia === d).reduce((t, e) => t + (e.onus || 0), 0) })) },
       ...[['los', 'Com LOS / fibra', '#7c3aed'], ['energia', 'Sem energia', '#64748b'], ['sinal', 'Sinal ruim (SD/SF)', '#f59e0b']].map(([k, n, c]) => ({ name: n, color: c, points: dias.map(d => ({ label: lbl(d), value: histDia(d)[k] })) }))], { expandir: true });
     barsChart('ru-g-hora', Array.from({ length: 24 }, (_, h) => ({ label: String(h).padStart(2, '0') + 'h', value: lista.filter(e => e.hora === h).length, display: String(lista.filter(e => e.hora === h).length) })).filter(x => x.value), { semClassificar: true });
     barsChart('ru-g-olt', oltLista.slice(0, 15).map(o => ({ label: o.olt.replace(/^NIU-/, ''), value: o.n, display: `${o.n} · ${o.onus.toLocaleString('pt-BR')} ONUs` })));
-    donutChart('ru-g-tipo', ['LOS / fibra', 'Sem energia', 'PON sem sinal'].map((t, i) => ({ label: t, value: lista.filter(e => tipoCurto(e.tipo) === t).length, color: ['#7c3aed', '#64748b', '#be185d'][i] })).filter(x => x.value), { centroLabel: 'Massivas' });
+    donutChart('ru-g-tipo', ['LOS / fibra', 'PON sem sinal'].map((t, i) => ({ label: t, value: lista.filter(e => tipoCurto(e.tipo) === t).length, color: ['#7c3aed', '#be185d'][i] })).filter(x => x.value), { centroLabel: 'Massivas' });
     const tab = (id, cols, linhas) => { const el = document.getElementById(id); if (el) el.innerHTML = linhas.length ? u2kTab(id + '-t', cols, linhas, 3000) : '<div class="empty">Nada no período.</div>'; };
-    tab('ru-t-olt', [{ t: 'OLT', f: o => o.olt, s: 'font-weight:600' }, { t: 'Cidade', f: o => u2kRotCidade(u2kCidadeDaOlt(o.olt)) }, { t: 'Massivas', f: o => o.n }, { t: 'LOS / fibra', f: o => o.los }, { t: 'Sem energia', f: o => o.energia }, { t: 'PON sem sinal', f: o => o.pon },
+    tab('ru-t-olt', [{ t: 'OLT', f: o => o.olt, s: 'font-weight:600' }, { t: 'Cidade', f: o => u2kRotCidade(u2kCidadeDaOlt(o.olt)) }, { t: 'Massivas', f: o => o.n }, { t: 'LOS / fibra', f: o => o.los }, { t: 'PON sem sinal', f: o => o.pon },
       { t: 'ONUs afetadas', f: o => o.onus }, { t: 'Em aberto agora', h: o => o.abertas ? `<b style="color:var(--danger)">${o.abertas}</b>` : '-', x: o => o.abertas }, { t: 'Tempo médio até resolver', f: o => u2kDur(o.media) }, { t: 'Maior tempo', f: o => u2kDur(o.maior) }, { t: 'Portas com massiva', f: o => o.portas.size }, { t: 'Portas reincidentes', f: o => o.reinc || '' }], oltLista);
     const reincL = reinc.map(l => { const e0 = l.slice().sort((a, b) => (b.onus || 0) - (a.onus || 0))[0], v = vlanDe(e0); return { olt: e0.olt, porta: u2kPortaCompleta(e0), n: l.length, tipos: [...new Set(l.map(e => tipoCurto(e.tipo)))].join(', '), primeira: l.map(e => e.ini).sort()[0], ultima: l.map(e => e.ini).sort().pop(), maxOnus: Math.max(...l.map(e => e.onus || 0)), total: e0.total || '', vlan: v, bairros: bairrosDe(e0.olt, v), aberta: l.some(e => e.sit === 'aberta') }; }).sort((a, b) => b.n - a.n || b.maxOnus - a.maxOnus);
     tab('ru-t-reinc', [{ t: 'OLT', f: r => r.olt }, { t: 'Porta completa', h: r => `<b>${esc(r.porta)}</b>`, x: r => r.porta }, { t: 'Massivas', h: r => `<b style="color:var(--danger)">${r.n}×</b>`, x: r => r.n }, { t: 'Tipos', f: r => r.tipos }, { t: 'Primeira', f: r => u2kFmtData(r.primeira) }, { t: 'Última', f: r => u2kFmtData(r.ultima) },
@@ -31419,14 +31431,15 @@ function renderRelU2000() {
     // ---- IFI / IRR durante ou depois das massivas (14/10/2026, pedido do cliente) ----
     // Cliente da porta com massiva: o contrato vem do AutoISP guardado (pelo SN) ou, sem ele, o nome do alias. Chamado = reparo da Produção/PCR aberto entre
     // 1 h antes do início da massiva e o prazo escolhido. IFI/IRR: a coluna oficial da Produção; sem ela, o último serviço concluído antes do reparo (mesma régua do sistema).
-    const cm = u2kChamadosMassivas(onus, lista, desde, 72 * 3600000), { onusMassiva, evPorPorta } = cm;
+    let cm = u2kChamadosMassivas(onus, lista, desde, 72 * 3600000), { onusMassiva, evPorPorta } = cm;
+    const refazRet = () => { const de = document.getElementById('ru-ret-de').value || desde, ate = document.getElementById('ru-ret-ate').value || hoje; cm = u2kChamadosMassivas(onus, lista.filter(e => e.dia >= de && e.dia <= ate), de, 72 * 3600000); ({ onusMassiva, evPorPorta } = cm); pintarRet(); };
+    ['ru-ret-de', 'ru-ret-ate'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('change', refazRet); });
     function pintarRet() {
       const box = document.getElementById('ru-ret'); if (!box) return;
       const res = cm.calcular();
       const comRet = res.filter(r => r.marca), nIfi = comRet.filter(r => r.marca === 'IFI').length, nIrr = comRet.length - nIfi, cli = new Set(res.map(r => r.contrato || r.cliente)), cliRet = new Set(comRet.map(r => r.contrato || r.cliente));
       const somaPor = f => { const m = new Map(); res.forEach(r => { const k = f(r) || 'Não identificado'; const a = m.get(k) || { nome: k, chamados: 0, ifi: 0, irr: 0 }; a.chamados++; if (r.marca === 'IFI') a.ifi++; if (r.marca === 'IRR') a.irr++; m.set(k, a); }); return [...m.values()].sort((a, b) => (b.ifi + b.irr) - (a.ifi + a.irr) || b.chamados - a.chamados); };
-      const porCid = somaPor(r => r.cidade ? (u2kRotCidade(moChaveCid(r.cidade)) || r.cidade) : ''), porBairro = somaPor(r => r.bairro ? `${r.bairro} - ${u2kRotCidade(moChaveCid(r.cidade)) || r.cidade}` : ''), porOf = (() => { const m = new Map(); comRet.forEach(r => { const k = r.ofensor || 'Não identificado'; const a = m.get(k) || { nome: k, ifi: 0, irr: 0 }; if (r.marca === 'IFI') a.ifi++; else a.irr++; m.set(k, a); }); return [...m.values()].sort((a, b) => (b.ifi + b.irr) - (a.ifi + a.irr)); })();
-      const porTecRep = somaPor(r => r.x.tecnico);
+      const porCid = somaPor(r => r.cidade ? (u2kRotCidade(moChaveCid(r.cidade)) || r.cidade) : ''), porBairro = somaPor(r => r.bairro ? `${r.bairro} - ${u2kRotCidade(moChaveCid(r.cidade)) || r.cidade}` : '');
       const semAut = onusMassiva.filter(o => !(U2K._autLoc && U2K._autLoc.has(u2kSnNorm(u2kSnCurto(o.sn))))).length;
       box.innerHTML = `<div class="stat-cards">
           ${statCard('purple', icPessoas, 'Clientes nas portas com massiva', onusMassiva.length.toLocaleString('pt-BR'), `${evPorPorta.size} porta(s) com massiva no período`)}
@@ -31437,19 +31450,13 @@ function renderRelU2000() {
         <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px">Cliente achado pelo contrato do AutoISP (pelo SN) ou, sem ele, pelo nome do alias igual ao da Produção/PCR (aproximado).${semAut ? ` Ainda buscando o contrato de ${semAut.toLocaleString('pt-BR')} ONU(s) no AutoISP guardado — a tabela se atualiza sozinha.` : ''}</p>
         <div class="panels-grid" style="align-items:start">
           <div class="panel"><h3>Por cidade</h3><div id="ru-ret-cid"></div></div>
-          <div class="panel"><h3>De quem é o retorno (ofensor)</h3><div id="ru-ret-of"></div></div>
-        </div>
-        <div class="panels-grid" style="align-items:start">
           <div class="panel"><h3>Por bairro</h3><div id="ru-ret-bai"></div></div>
-          <div class="panel"><h3>Técnico que atendeu o chamado</h3><div id="ru-ret-tec"></div></div>
         </div>
         <div class="panel"><h3>Clientes — chamado e IFI / IRR durante ou depois da massiva <span style="font-size:12px;font-weight:500;color:var(--text-muted)">· clique na linha para ver os clientes afetados pela massiva</span></h3><div id="ru-ret-cli"></div></div>
         <div class="panel"><h3>Mapa — bairros que mais abriram chamado durante ou depois de massiva</h3><div id="ru-ret-mapa" class="mapa-cidades" style="height:480px;border-radius:10px"></div><p id="ru-ret-mapa-nota" style="font-size:12px;color:var(--text-muted);margin:6px 0 0"></p></div>`;
       const colsQ = [{ t: 'Chamados', f: a => a.chamados }, { t: 'IFI', h: a => a.ifi ? `<b style="color:var(--danger)">${a.ifi}</b>` : '-', x: a => a.ifi }, { t: 'IRR', h: a => a.irr ? `<b style="color:#f59e0b">${a.irr}</b>` : '-', x: a => a.irr }];
       tab('ru-ret-cid', [{ t: 'Cidade', f: a => a.nome, s: 'font-weight:600' }, ...colsQ], porCid);
       tab('ru-ret-bai', [{ t: 'Bairro - Cidade', f: a => a.nome, s: 'font-weight:600' }, ...colsQ], porBairro);
-      tab('ru-ret-of', [{ t: 'Ofensor (fez o serviço anterior)', f: a => a.nome, s: 'font-weight:600' }, { t: 'IFI', f: a => a.ifi || '' }, { t: 'IRR', f: a => a.irr || '' }, { t: 'Total', f: a => a.ifi + a.irr }], porOf);
-      tab('ru-ret-tec', [{ t: 'Técnico do chamado', f: a => a.nome, s: 'font-weight:600' }, ...colsQ], porTecRep);
       const linhasCli = res.slice().sort((a, b) => (b.marca ? 1 : 0) - (a.marca ? 1 : 0) || b.x.t - a.x.t);
       { const elc = document.getElementById('ru-ret-cli'); if (elc) { elc.innerHTML = linhasCli.length ? u2kTab('ru-ret-cli-t', u2kColsChamadosMassiva(r => r.cidade), linhasCli, 3000, true) : '<div class="empty">Nada no período.</div>'; u2kLigarCliqueMassiva(elc, () => linhasCli, res); } }
       // mapa: bolha por bairro (coordenada do bairro; sem ela, o centro da cidade, tracejado)
@@ -31471,6 +31478,38 @@ function renderRelU2000() {
       ativarFiltrosDeColuna(box);
     }
     pintarRet();
+    // ---- técnicos × clientes com sinal crítico (21/10/2026, pedido do cliente — igual à janela "Clientes de <técnico>" do Monitoramento) ----
+    // contrato → último atendimento CONCLUÍDO dentro do período → técnico; o sinal real vem do AutoISP guardado (monitor_olt_clientes). Crítico = situação "critical".
+    (async function pintarTecCrit() {
+      const box = document.getElementById('ru-tec-crit'); if (!box) return;
+      let cli = U2K._cliSinal;
+      if (!cli) { try { cli = U2K._cliSinal = await carregarClientesMonitorOlt(); } catch (e) { cli = []; } }
+      if (!document.getElementById('ru-tec-crit')) return;
+      if (!cli || !cli.length) { box.innerHTML = '<div class="empty">Sem sinal de clientes guardado (tabela monitor_olt_clientes vazia ou sem conexão).</div>'; return; }
+      const ind = u2kIndiceAtend(), hojeI = hojeISOLocal(), grupo = s => /^critical$/i.test(s) ? 'critico' : /^warning$/i.test(s) ? 'atencao' : /loss_signal|power_fail|down|massive/i.test(s) ? 'semsinal' : 'ok';
+      const por = new Map();
+      cli.forEach(c => {
+        if (cid && c.olt && !okCid(c.olt)) return;
+        const at = ind.porC.get(String(c.contrato)) || [], ult = at.find(x => isConcluido(x.status) && x.dia >= desde && x.dia <= hoje);
+        if (!ult || !String(ult.tecnico || '').trim()) return;
+        const k = ult.tecnico.trim(), a = por.get(k) || { tec: k, n: 0, critico: 0, atencao: 0, semsinal: 0, ok: 0, cli: [] };
+        const g = grupo(c.status); a.n++; a[g]++; a.cli.push({ c, ult, g }); por.set(k, a);
+      });
+      const linhas = [...por.values()].sort((x, y) => y.critico - x.critico || y.n - x.n);
+      if (!linhas.length) { box.innerHTML = '<div class="empty">Nenhum cliente atendido no período tem sinal guardado.</div>'; return; }
+      box.innerHTML = `<p style="font-size:12px;color:var(--text-muted);margin:0 0 8px">${linhas.reduce((t, l) => t + l.critico, 0).toLocaleString('pt-BR')} cliente(s) com sinal crítico entre ${linhas.reduce((t, l) => t + l.n, 0).toLocaleString('pt-BR')} atendidos por ${linhas.length} técnico(s) · sinal do último contato do equipamento com o AutoISP</p>` + u2kTab('ru-tec-crit-t', [
+        { t: 'Técnico', f: l => l.tec, s: 'font-weight:600' }, { t: 'Clientes atendidos', f: l => l.n }, { t: 'Crítico', h: l => l.critico ? `<b style="color:var(--danger)">${l.critico}</b>` : '-', x: l => l.critico }, { t: '% crítico', f: l => l.n ? formatPct(l.critico / l.n * 100, 0) : '' },
+        { t: 'Atenção', h: l => l.atencao ? `<b style="color:#f59e0b">${l.atencao}</b>` : '-', x: l => l.atencao }, { t: 'Sem sinal / energia', f: l => l.semsinal || '' }, { t: 'OK', f: l => l.ok || '' }], linhas, 3000, true);
+      box.onclick = ev => {
+        if (ev.target.closest('a, button, input, select')) return; const tr = ev.target.closest('tr[data-ri]'); if (!tr) return; const l = linhas[Number(tr.dataset.ri)]; if (!l) return;
+        const peso = g => ({ critico: 0, semsinal: 1, atencao: 2, ok: 3 })[g], badge = g => `<span class="badge ${g === 'critico' ? 'warn' : g === 'atencao' ? 'amber' : g === 'semsinal' ? 'neutral' : 'ok'}">${g === 'critico' ? 'Crítico' : g === 'atencao' ? 'Atenção' : g === 'semsinal' ? 'Sem sinal' : 'OK'}</span>`;
+        const ordem = l.cli.slice().sort((x, y) => peso(x.g) - peso(y.g) || (Number(x.c.sinal) || 0) - (Number(y.c.sinal) || 0));
+        const linhasM = ordem.map(x => { const dias = diasEntre(hojeI, x.ult.dia), marca = classificaRetorno(x.ult.tipo, dias), restam = marca === 'IFI' || marca === 'IRR' ? (marca === 'IFI' ? JANELA_IFI : JANELA_IRR) - dias : null;
+          return { tipo: '', celulas: [badge(x.g), x.c.sinal == null || x.g === 'semsinal' && !Number(x.c.sinal) ? '0,00 dBm' : esc(Number(x.c.sinal).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) + ' dBm', `<b>${esc(x.c.nome || '')}</b>`, esc(x.c.contrato), restam != null ? `<span class="badge ${marca === 'IFI' ? 'warn' : 'amber'}">Risco de ${marca}</span><div style="font-size:11.5px;color:var(--text-muted)">faltam ${restam} dia(s)</div>` : '-', `${esc(formatDate(x.ult.dia))} · ${esc(x.ult.tipo || '')}`, esc(x.c.cidade || ''), esc(x.c.bairro || '')] }; });
+        abrirModalLista('Clientes de ' + l.tec, `Contratos que ele atendeu por último entre ${formatDate(desde)} e ${formatDate(hoje)}, com o sinal real de cada um (pior primeiro)`, ['Situação', 'Rx', 'Cliente', 'Contrato', 'IFI / IRR', 'Último atendimento', 'Cidade', 'Bairro'], linhasM, { nome: 'clientes-' + slugTitulo(l.tec) });
+      };
+      ativarFiltrosDeColuna(box);
+    })();
     // contratos pelo SN no AutoISP guardado (em segundo plano; refaz a seção quando terminar)
     const snsM = onusMassiva.map(o => o.sn).filter(Boolean), geracao = (U2K._relGer = (U2K._relGer || 0) + 1);
     if (snsM.length) u2kAutPorSn(snsM).then(qtd => { if (qtd && U2K._relGer === geracao && document.getElementById('ru-ret')) pintarRet(); });
@@ -32024,11 +32063,15 @@ function renderU2000() {
     if (!onus.length && !alm.length && !U2K.hist.length) { box.innerHTML = '<div class="panel"><div class="empty">Nenhuma exportação do U2000 ainda. Exporte os alarmes e a lista GPON ONU de uma OLT e arraste aqui.</div></div>'; return; }
     // ---- contexto calculado uma vez ----
     const nk = normalizeHeader, snDe = u2kSnPorLoc();
-    const diag = u2kDiagnostico(onus, alm), evCalc = u2kEventosMassa(alm).map(e => u2kEvFlat(e, snDe)), t = s => Date.parse(String(s).replace(' ', 'T')) || 0;
-    const eventos = [...evCalc]; U2K.eventos.forEach(e => { if (!evCalc.some(c => c.olt === e.olt && c.tipo === e.tipo && t(c.ini) <= t(e.fim) + 900000 && t(c.fim) >= t(e.ini) - 900000)) eventos.push(e); });
+    // 21/10/2026 (pedido do cliente): MASSIVA = só LOS (fibra) na mesma data e horário; queda de energia (dying-gasp) em várias ONUs NÃO é massiva, mas precisa ser
+    // verificada — vai pra tabela própria ("Queda de energia — verificar") e fica fora das contagens e do status "EM MASSIVA".
+    const ehEnergiaEv = e => String(e.tipo || '').startsWith('Sem energia');
+    const diag = u2kDiagnostico(onus, alm), evCalc = u2kEventosMassa(alm).filter(e => !ehEnergiaEv(e)).map(e => u2kEvFlat(e, snDe)), t = s => Date.parse(String(s).replace(' ', 'T')) || 0;
+    const eventos = [...evCalc]; U2K.eventos.filter(e => !ehEnergiaEv(e)).forEach(e => { if (!evCalc.some(c => c.olt === e.olt && c.tipo === e.tipo && t(c.ini) <= t(e.fim) + 900000 && t(c.fim) >= t(e.ini) - 900000)) eventos.push(e); });
     eventos.sort((x, y) => String(y.ini).localeCompare(String(x.ini)));
-    const totPorta = u2kTotaisPorta(onus), evPCalc = u2kEventosPorta(alm, totPorta), evPorta = [...evPCalc];
-    U2K.eventosPorta.forEach(e => { if (!evPCalc.some(c => c.olt === e.olt && String(c.slot) === String(e.slot) && String(c.porta) === String(e.porta) && c.tipo === e.tipo && t(c.ini) <= t(e.fim) + 900000 && t(c.fim) >= t(e.ini) - 900000)) evPorta.push(e); });
+    const totPorta = u2kTotaisPorta(onus), evPCalcTodos = u2kEventosPorta(alm, totPorta), evPCalc = evPCalcTodos.filter(e => !ehEnergiaEv(e)), evPorta = [...evPCalc], evPortaEnergia = evPCalcTodos.filter(ehEnergiaEv);
+    U2K.eventosPorta.filter(e => ehEnergiaEv(e) && !evPortaEnergia.some(c => c.olt === e.olt && String(c.slot) === String(e.slot) && String(c.porta) === String(e.porta) && t(c.ini) <= t(e.fim) + 900000 && t(c.fim) >= t(e.ini) - 900000)).forEach(e => evPortaEnergia.push(e));
+    U2K.eventosPorta.filter(e => !ehEnergiaEv(e)).forEach(e => { if (!evPCalc.some(c => c.olt === e.olt && String(c.slot) === String(e.slot) && String(c.porta) === String(e.porta) && c.tipo === e.tipo && t(c.ini) <= t(e.fim) + 900000 && t(c.fim) >= t(e.ini) - 900000)) evPorta.push(e); });
     evPorta.sort((x, y) => String(y.ini).localeCompare(String(x.ini)) || y.onus - x.onus);
     const histTudo = u2kMesclaHist(U2K.hist, u2kAgregaDia(alm, a => snDe(a.fonte, a.frame, a.slot, a.porta, a.onuId)), false);
     const diasTem = [...new Set([...histTudo.map(h => h.dia), ...eventos.map(e => String(e.ini).slice(0, 10)), ...evPorta.map(e => String(e.ini).slice(0, 10))])].sort(), hoje = hojeISOLocal(), diaRef = diasTem.includes(hoje) ? hoje : (diasTem[diasTem.length - 1] || hoje);
@@ -32092,7 +32135,7 @@ function renderU2000() {
       const nota = () => { const n = document.getElementById('u2-dcli'); if (!n) return; n.innerHTML = grupo === 'cliente' ? `<b>${todas.length.toLocaleString('pt-BR')}</b> de ${base.length.toLocaleString('pt-BR')} ONUs com cliente que pode virar IFI/IRR` : ''; };
       nota();
       let filtradasAisp = [];
-      const desenhar = () => u2kVisao(document.getElementById('u2-d'), { id: 'u2d-' + grupo, excel: 'u2000-' + grupo, linhas: () => todas, chips: { filtro: 'diag' }, aoFiltrar: l => { filtradasAisp = l; },
+      const desenhar = () => u2kVisao(document.getElementById('u2-d'), { id: 'u2d-' + grupo, dia: r => String(r.ultimo || r.desde || '').slice(0, 10), excel: 'u2000-' + grupo, linhas: () => todas, chips: { filtro: 'diag' }, aoFiltrar: l => { filtradasAisp = l; },
         filtros: [{ id: 'diag', rot: 'Diagnóstico', valor: r => r.diag, opcoes: Object.entries(U2K_DIAG).filter(([k, d]) => d.aba === grupo && todas.some(r => r.diag === k)).map(([k, d]) => [k, d.rot]) }, { id: 'olt', rot: 'OLT', valor: r => r.olt }, ...(grupo === 'cliente' ? [{ id: 'aisp', rot: 'Sinal (AutoISP)', valor: r => aispRot(r.sn) }] : []), { id: 'cid', rot: 'Cidade', valor: r => u2kRotCidade(r.cidade) || 'sem cidade' }, { id: 'vlan', rot: 'VLAN', valor: r => r.vlan || 'sem VLAN' }, { id: 'bairro', rot: 'Bairro (pela VLAN)', valor: r => '', pred: (r, v) => (r.bairrosVlan || []).includes(v), opcoes: [...new Set(VLAN_LISTA.filter(l => l.bairro !== '*').map(l => l.bairro))].sort().map(b => [b, b]) }, { id: 'st', rot: 'Agora (lista GPON)', valor: r => r.status || 'Não está na lista' }],
         cols: [{ t: 'Diagnóstico', h: r => `<span class="badge ${r.info.cor}" title="${esc(r.info.acao)}" style="cursor:help">${esc(r.info.rot)}</span>`, x: r => r.info.rot, s: 'white-space:normal' }, { t: 'Quem resolve', f: r => r.info.quem, w: 85 }, ...u2kColsLoc(),
           { t: 'Cliente (alias)', f: r => r.alias, w: 220, s: 'font-weight:600;white-space:normal;overflow-wrap:anywhere;max-width:300px;font-size:12.5px' }, ...u2kColsCliente(grupo === 'cliente'), ...(grupo === 'cliente' ? u2kColsAisp() : []), { t: 'Agora', h: u2kBadgeStatus, x: r => (r.status || '') + (r.motivo ? ' · ' + r.motivo : '') }, { t: 'Cidade (OLT)', f: r => u2kRotCidade(r.cidade) }, { t: 'VLAN (perfil)', f: r => r.vlan || (r.semVlan ? 'sem VLAN' : '') }, { t: 'Bairros da VLAN (lista)', f: r => (r.bairrosVlan || []).slice(0, 10).join(', ') + ((r.bairrosVlan || []).length > 10 ? ` … (+${r.bairrosVlan.length - 10})` : ''), s: 'font-size:11.5px;white-space:normal;min-width:180px' }, { t: 'Perfil de linha', f: r => r.perfil, s: 'font-size:11.5px' }, { t: 'Config Status', f: r => r.configStatus },
@@ -32122,7 +32165,7 @@ function renderU2000() {
       const pintarCham = () => {
         const box = document.getElementById('u2-cham'); if (!box) return;
         const tipoCurto = t => String(t).startsWith('Porta PON') ? 'PON sem sinal' : String(t).startsWith('Sem energia') ? 'Sem energia' : 'LOS / fibra', cidDe = r => (r.cidade && (u2kRotCidade(moChaveCid(r.cidade)) || r.cidade)) || 'sem cidade';
-        u2kVisao(box, { id: 'u2cham', excel: 'u2000-chamados-por-massiva', busca: r => [r.cliente, r.contrato, r.o.olt, r.o.sn, r.x.os, r.bairro].join(' '),
+        u2kVisao(box, { id: 'u2cham', dia: r => String((r.ev && r.ev.ini) || '').slice(0, 10), excel: 'u2000-chamados-por-massiva', busca: r => [r.cliente, r.contrato, r.o.olt, r.o.sn, r.x.os, r.bairro].join(' '),
           controles: [{ id: 'per', rot: 'Massivas dos últimos', opcoes: [['3', '3 dias'], ['7', '7 dias'], ['15', '15 dias'], ['30', '30 dias']], padrao: '7' }, { id: 'tipo', rot: 'Tipo de massiva', opcoes: [['los', 'LOS / fibra (padrão)'], ['todas', 'Todas (inclui sem energia)']], padrao: 'los' }],
           linhas: est => {
             const chave = `${est.per}|${est.tipo}|${U2K._autLoc ? U2K._autLoc.size : 0}`; if (cacheCham && cacheCham.chave === chave) return cacheCham.res;
@@ -32217,8 +32260,7 @@ function renderU2000() {
       el.innerHTML = avisoIdade + `<div class="stat-cards" style="margin-bottom:12px">${statCard(nEmMassiva ? 'red' : 'green', nEmMassiva ? icAviso : icOk, 'OLTs em massiva agora', String(nEmMassiva), nEmMassiva ? linhasOlt.filter(o => o.situacao === 'EM MASSIVA' && !oltNormAisp.has(o.olt)).slice(0, 3).map(o => o.olt.replace(/^NIU-/, '')).join(' · ') : 'nenhuma')}${statCard(abertasReaisP.length ? 'red' : 'green', icAviso, 'Portas em massiva (em aberto)', String(abertasReaisP.length), `${abertasReaisP.reduce((t, e) => t + e.abertas, 0).toLocaleString('pt-BR')} ONUs com alarme aberto${abertasP.length > abertasReaisP.length ? ` · ${abertasP.length - abertasReaisP.length} normalizada(s) no AutoISP` : ''}`)}${statCard('green', icOk, 'Portas resolvidas hoje', String(nResHoje), `${nResOlt} OLT(s) já normalizada(s)`)}${statCard(idadeImp > 2 * 3600000 ? 'red' : 'blue', icRelogio, 'Dados até', refMax ? u2kFmtData(refMax).slice(0, 16) : '-', impMs ? `alarme mais novo · arquivo importado há ${dur(idadeImp) || '0min'}` : 'alarme mais novo do arquivo')}</div>`
         + titulo('Massivas — todas (em aberto e resolvidas)', 'uma linha por porta completa e evento (e por queda da OLT inteira). Situação da OLT: EM MASSIVA = a OLT tem porta com queda em massa ainda aberta; Resolvida = teve massiva no dia e todos os alarmes já foram encerrados. "Resolvida em" = o último encerramento dos alarmes; sem confirmação = estava aberta numa importação antiga e não aparece no último arquivo') + '<div id="u2-m2"></div>'
         + titulo('Por OLT', 'o resumo (houve falha?) ou as quedas em massa da OLT — várias portas na mesma janela') + '<div id="u2-m3"></div>'
-        + titulo('Quedas de ONUs por porta entre duas listas GPON', 'a porta perdeu 5 ONUs online ou mais de uma importação da lista para a seguinte (pega queda sem alarme)') + '<div id="u2-i5"></div>'
-        + titulo('Portas com a maioria das ONUs offline agora', 'pelo status da lista GPON (50% ou mais, mínimo 5 ONUs)') + '<div id="u2-h3"></div>';
+        + titulo('Queda de energia em várias ONUs — verificar (não é massiva)', 'sem energia (dying-gasp) em 5 ou mais ONUs da mesma porta no mesmo horário: em geral falta de luz no bairro. Não conta como massiva, mas precisa ser verificada') + '<div id="u2-en"></div>';
       // unificada (14/10/2026, pedido do cliente): as em aberto (agrupadas por porta) + as resolvidas, com todas as colunas
       // 15/10/2026 (pedido do cliente: "unifique situação por OLT com todas, por que são os mesmos dados"): a tabela por OLT saiu; a situação da OLT
       // (EM MASSIVA / Resolvida) e a referência pra buscar no U2000 viraram colunas daqui, e a queda da OLT inteira (sem porta) entra como linha "OLT inteira".
@@ -32232,7 +32274,7 @@ function renderU2000() {
       }).filter(Boolean);
       const todasU = [...abertasP, ...linhasOltInteira.filter(e => e.estado === 'aberta'), ...resolvP, ...linhasOltInteira.filter(e => e.estado !== 'aberta')]
         .map(e => ({ ...e, aispNorm: e.estado === 'aberta' && (e.oltInteira ? oltNormAisp.has(e.olt) : aispNorm(e)), sitTxt: e.estado === 'aberta' ? ((e.oltInteira ? oltNormAisp.has(e.olt) : aispNorm(e)) ? 'Normalizou (AutoISP)' : 'Em aberto') : e.estado === 'resolvida' ? 'Resolvida' : 'Sem confirmação', sitOlt: oltNormAisp.has(e.olt) ? 'Resolvida (AutoISP)' : (sitDaOlt.get(e.olt) || ''), buscar: e.oltInteira ? (e.onde || '') : refTxt(e) }));
-      u2kVisao(document.getElementById('u2-m2'), { id: 'u2m2', excel: 'u2000-massivas-todas', linhas: () => todasU, busca: e => [e.olt, e.sn, u2kPortaCompleta(e), e.ids].join(' '), chips: { filtro: 'sit' },
+      u2kVisao(document.getElementById('u2-m2'), { id: 'u2m2', dia: e => String(e.ini).slice(0, 10), excel: 'u2000-massivas-todas', linhas: () => todasU, busca: e => [e.olt, e.sn, u2kPortaCompleta(e), e.ids].join(' '), chips: { filtro: 'sit' },
         cols: [colPorta, { t: 'OLT', f: e => e.olt }, { t: 'Tipo', f: e => e.tipo }, { t: 'Situação', h: e => `<span class="badge ${e.sitTxt === 'Em aberto' ? 'warn' : e.sitTxt === 'Sem confirmação' ? 'neutral' : 'ok'}"${e.aispNorm ? ' title="o U2000 ainda tem alarme sem baixa, mas os clientes da porta já estão com sinal no AutoISP"' : ''}>${e.sitTxt}</span>`, x: e => e.sitTxt },
           { t: 'Situação da OLT', h: e => e.sitOlt ? badgeSit(e.sitOlt) : '', x: e => e.sitOlt },
           { t: 'Início', f: e => u2kFmtData(e.ini) }, { t: 'Resolvida em', f: e => e.estado === 'resolvida' ? u2kFmtData(e.fimTxt) : e.aispNorm ? 'AutoISP' + (e.oltInteira ? '' : ', lido ' + aispQuando((U2K_AISP.portas.get(aispChavePorta(e)) || {}).quando)) : '' }, { t: 'Duração / há quanto tempo', f: e => dur(e.durMs) },
@@ -32282,13 +32324,13 @@ function renderU2000() {
         linhas: est => est.ver === 'quedas' ? eventosOlt : resAll, cols: est => est.ver === 'quedas' ? colsEv() : colsResumoOlt(),
         filtros: [{ id: 'olt', rot: 'OLT', valor: r => r.olt }, { id: 'sit', rot: 'Situação', valor: r => r.situacao || '', opcoes: [...new Set(resAll.map(r => r.situacao).filter(Boolean))].map(v => [v, v]) },
           { id: 'dia', rot: 'Dia', valor: r => r.dia || '', opcoes: [...new Set(eventosOlt.map(r => r.dia))].sort().reverse().map(v => [v, v]) }, { id: 'esc', rot: 'Escopo', valor: r => r.escopo || '', opcoes: [...new Set(evsAll.map(r => r.escopo).filter(Boolean))].map(v => [v, v]) }] });
-      const quedasSt = u2kQuedasPorStatus(U2K.snaps).map(q => { const t = totPorta.get(`${normalizeHeader(q.olt)}|${q.frame}/${q.slot}/${q.porta}`); return { ...q, onuId: t ? t.onuId : '', sn: t ? t.sn : '' }; });
-      u2kVisao(document.getElementById('u2-i5'), { id: 'u2i5', excel: 'u2000-quedas-por-status', linhas: () => quedasSt, busca: r => [r.olt, r.sn].join(' '), filtros: [{ id: 'olt', rot: 'OLT', valor: r => r.olt }],
-        cols: [...u2kColsLoc(), { t: 'Lista anterior', f: r => u2kFmtData(r.de) }, { t: 'Lista seguinte', f: r => u2kFmtData(r.para) }, { t: 'Online antes → depois', f: r => `${r.antes} → ${r.depois}` }, { t: 'ONUs que caíram', h: r => `<b>${r.caiu}</b>`, x: r => r.caiu },
-          { t: '% da porta', f: r => r.pct == null ? '' : formatPct(r.pct, 0) }, { t: 'a mais sem energia', f: r => r.offEnergia }, { t: 'a mais em fibra', f: r => r.offFibra }] });
-      const ponoff = diag.filter(r => r.diag === 'ponoff');
-      u2kVisao(document.getElementById('u2-h3'), { id: 'u2h3', excel: 'u2000-portas-offline', linhas: () => ponoff, busca: r => [r.olt, r.sn].join(' '),
-        cols: [...u2kColsLoc(), { t: 'Situação', f: r => r.extra, s: 'white-space:normal;font-size:12.5px;min-width:260px' }], filtros: [{ id: 'olt', rot: 'OLT', valor: r => r.olt }] });
+      const energiaL = evPortaEnergia.map(e => { const d = decora(e), ab = aindaAberta(e), estado = ab ? 'aberta' : 'resolvida'; return { ...d, estado, fimTxt: ab ? refMax : (e.resolvidoEm || e.fim), sitTxt: ab ? 'Verificar' : 'Voltou', buscar: refTxt(e) }; }).sort((x, y) => (x.estado === 'aberta' ? 0 : 1) - (y.estado === 'aberta' ? 0 : 1) || String(y.ini).localeCompare(String(x.ini)));
+      u2kVisao(document.getElementById('u2-en'), { id: 'u2en', dia: e => String(e.ini).slice(0, 10), excel: 'u2000-queda-de-energia', linhas: () => energiaL, busca: e => [e.olt, e.sn, u2kPortaCompleta(e), e.ids].join(' '), chips: { filtro: 'sit' },
+        cols: [colPorta, { t: 'OLT', f: e => e.olt }, { t: 'Situação', h: e => `<span class="badge ${e.sitTxt === 'Verificar' ? 'amber' : e.sitTxt === 'Voltou' ? 'ok' : 'neutral'}" title="queda de energia não é massiva: verificar se é falta de luz no bairro ou problema na rede elétrica/alimentador">${e.sitTxt}</span>`, x: e => e.sitTxt },
+          { t: 'Início', f: e => u2kFmtData(e.ini) }, { t: 'Voltou em', f: e => e.estado === 'resolvida' ? u2kFmtData(e.fimTxt) : '' }, { t: 'Duração / há quanto tempo', f: e => dur(e.durMs) },
+          { t: 'ONUs afetadas', h: e => e.onus ? `<b>${e.onus}</b>` : '-', x: e => e.onus || '' }, { t: 'ONUs na porta', f: e => e.total || '' }, colPct, { t: 'ONUs com alarme aberto', f: e => e.abertas || '' },
+          { t: 'ONU IDs', f: e => e.ids, s: 'font-size:12px;white-space:normal' }, ...colsRef(), { t: 'Pra buscar no U2000 (porta · ONU · SN · cliente)', f: e => e.buscar, s: 'font-size:12px;white-space:normal;min-width:260px' }],
+        filtros: [{ id: 'sit', rot: 'Situação', valor: e => e.sitTxt }, { id: 'olt', rot: 'OLT', valor: e => e.olt }] });
     }
     function colsEv() {
       return [{ t: 'Início', f: e => u2kFmtData(e.ini) }, { t: 'Fim', f: e => u2kFmtData(e.fim) }, { t: 'OLT', f: e => e.olt }, { t: 'Tipo', f: e => e.tipo }, { t: 'Escopo', h: e => `<span class="badge ${String(e.escopo).startsWith('OLT') ? 'warn' : 'amber'}">${esc(e.escopo)}</span>`, x: e => e.escopo },
@@ -32366,7 +32408,7 @@ function renderU2000() {
     function falhasPorDia() {
       const porDia = new Map(); histTudo.forEach(h => { if (h.onu_id === '') return; const k = `${h.dia}|${h.olt}`; let e = porDia.get(k); if (!e) { e = { dia: h.dia, olt: h.olt, onus: new Set(), los: new Set(), energia: new Set(), sinal: new Set(), ref: null }; porDia.set(k, e); }
         const id = `${h.slot}/${h.porta}/${h.onu_id}`; e.onus.add(id); if (h.los) e.los.add(id); if (h.energia) e.energia.add(id); if (h.sinal || h.enlace) e.sinal.add(id); if (!e.ref || (h.los && !e.ref.los)) e.ref = h; });
-      u2kVisao(document.getElementById('u2-i3'), { id: 'u2i3', excel: 'u2000-falhas-por-dia', linhas: () => [...porDia.values()].map(e => ({ ...e, frame: e.ref ? e.ref.frame : '', slot: e.ref ? e.ref.slot : '', porta: e.ref ? e.ref.porta : '', onuId: e.ref ? e.ref.onu_id : '', sn: e.ref ? (e.ref.sn || snDe(e.olt, e.ref.frame, e.ref.slot, e.ref.porta, e.ref.onu_id)) : '' })).sort((x, y) => y.dia.localeCompare(x.dia) || y.onus.size - x.onus.size), busca: e => [e.olt, e.sn].join(' '),
+      u2kVisao(document.getElementById('u2-i3'), { id: 'u2i3', dia: e => e.dia, excel: 'u2000-falhas-por-dia', linhas: () => [...porDia.values()].map(e => ({ ...e, frame: e.ref ? e.ref.frame : '', slot: e.ref ? e.ref.slot : '', porta: e.ref ? e.ref.porta : '', onuId: e.ref ? e.ref.onu_id : '', sn: e.ref ? (e.ref.sn || snDe(e.olt, e.ref.frame, e.ref.slot, e.ref.porta, e.ref.onu_id)) : '' })).sort((x, y) => y.dia.localeCompare(x.dia) || y.onus.size - x.onus.size), busca: e => [e.olt, e.sn].join(' '),
         filtros: [{ id: 'dia', rot: 'Dia', valor: e => e.dia }, { id: 'olt', rot: 'OLT', valor: e => e.olt }],
         cols: [{ t: 'Dia', f: e => fmtDia(e.dia) }, { t: 'OLT', f: e => e.olt }, { t: 'Porta ref. (F/S/P)', f: u2kPortaTxt, w: 100, s: 'white-space:nowrap;font-weight:600' }, { t: 'ONU ID (ref.)', f: e => e.onuId, w: 70 }, { t: 'SN (referência)', f: e => e.sn, w: 185, s: 'font-size:11.5px;white-space:nowrap' }, { t: 'ONUs com alarme', f: e => e.onus.size }, { t: 'ONUs com LOS', f: e => e.los.size }, { t: 'ONUs sem energia', f: e => e.energia.size }, { t: 'ONUs com sinal/enlace', f: e => e.sinal.size }] });
     }
