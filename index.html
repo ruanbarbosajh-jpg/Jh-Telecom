@@ -1497,6 +1497,7 @@
   /* célula selecionada pelo teclado nas folhas (ligarNavegacaoPorSetas): moldura azul por dentro, sem mudar o tamanho da célula */
   table.tab-col1-fixa td.celula-ativa, table.tab-col1-fixa td.celula-ativa:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
   table.data-table#folha-tab tbody tr[data-tr-chave] { cursor: pointer; }
+  table.data-table#folha-tab tbody tr.total-row > td { font-weight: 800; border-top: 2px solid var(--accent); white-space: nowrap; }
   .folha-auto { border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; }
   .folha-auto:hover { color: var(--accent); }
   .folha-auto-aj, .folha-tarifa-reset { border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; }
@@ -13344,13 +13345,13 @@ function exportarFolhaXlsxFormatada(tabela, nomeArquivo) {
     const cls = [...th.classList].find(c => c.startsWith('col-g-') && c !== 'col-g-ini' && c !== 'col-g-fim');
     return cls ? cls.replace('col-g-', '') : null;
   });
-  const corpo = [...tabela.querySelectorAll('tbody tr')]
-    .filter(tr => tr.style.display !== 'none' && tr.querySelector('td'))
-    .map(tr => [...tr.querySelectorAll('td')].map(textoCelulaExport));
+  const trsVisiveis = [...tabela.querySelectorAll('tbody tr')].filter(tr => tr.style.display !== 'none' && tr.querySelector('td'));
+  const corpo = trsVisiveis.map(tr => [...tr.querySelectorAll('td')].map(textoCelulaExport));
   if (!corpo.length) return null;
+  const idxTotal = trsVisiveis.findIndex(tr => tr.classList.contains('total-row'));   // a linha de TOTAL (22/10/2026) sai no Excel, em negrito e fora do filtro automático
   const ws = XLSX.utils.aoa_to_sheet([cab, ...corpo]);
   ws['!cols'] = cab.map((c, i) => ({ wch: Math.min(40, Math.max(String(c).length + 2, ...corpo.map(l => String(l[i] || '').length + 2))) }));
-  ws['!autofilter'] = { ref: ws['!ref'] };
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: idxTotal >= 0 ? corpo.length - 1 : corpo.length, c: cab.length - 1 } }) };
   const bordaFina = { style: 'thin', color: { rgb: 'B0B0B0' } };
   const borda = { top: bordaFina, bottom: bordaFina, left: bordaFina, right: bordaFina };
   cab.forEach((titulo, i) => {
@@ -13370,9 +13371,9 @@ function exportarFolhaXlsxFormatada(tabela, nomeArquivo) {
       const cel = ws[XLSX.utils.encode_cell({ r: r + 1, c: i })];
       if (!cel) continue;
       cel.s = {
-        fill: { patternType: 'solid', fgColor: { rgb: corClaro } },
+        fill: { patternType: 'solid', fgColor: { rgb: r === idxTotal ? 'C9D6EA' : corClaro } },
         border: borda, alignment: { vertical: 'center' },
-        ...(destaque ? { font: { bold: true, color: { rgb: destaque } } } : {})
+        ...(destaque ? { font: { bold: true, color: { rgb: destaque } } } : (r === idxTotal ? { font: { bold: true } } : {}))
       };
     }
   });
@@ -25935,6 +25936,7 @@ function renderFolhaPagamento(modo) {
       tr.classList.toggle('linha-marcada', FOLHA_LINHAS_MARCADAS.has(k));
     });
     ligarNavegacaoPorSetas(tabFolhaMarca);
+    ligarTotaisFolha(tabFolhaMarca);
     // ---- Holerite (extrato de serviços) ----
     const selHol = document.getElementById('hol-ms');
     const inpQuantos = document.getElementById('hol-quantos');
@@ -27422,7 +27424,44 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
   // lateral rola na própria tabela (a coluna do nome continua fixa à esquerda).
   return `<div class="table-wrap rolagem-inteira-na-imagem"><table class="data-table tab-col1-fixa" id="folha-tab"><thead><tr>${cols.map((c,i)=>`<th${classeCol(i)}>${c[0]}</th>`).join('')}</tr></thead><tbody>
     ${rows.map(r=>`<tr data-tr-chave="${esc(r.tecnico)}|${esc(r.periodo)}"${FOLHA_LINHAS_MARCADAS.has(r.tecnico + '|' + r.periodo) ? ' class="linha-marcada"' : ''}>${cols.map((c,i)=>`<td${classeCol(i)}>${c[1](r) ?? ''}</td>`).join('')}</tr>`).join('')}
+    ${rows.length ? `<tr class="total-row" data-folha-total="1">${cols.map((c, i) => `<td${classeCol(i)}${tipoSomaColunaFolha(c[0]) ? ` data-soma="${tipoSomaColunaFolha(c[0])}"` : ''}>${i === 0 ? 'TOTAL' : ''}</td>`).join('')}</tr>` : ''}
   </tbody></table></div>`;
+}
+// TOTAL no fim da Folha de Pagamento completa (22/10/2026, pedido do cliente: "coloque uma última linha mostrando os totais, no Excel deve aparecer também").
+// Soma as colunas de quantidade ('n') e de dinheiro ('m') das linhas VISÍVEIS (respeita o funil de filtro) lendo o que está na célula — então acompanha
+// qualquer edição na tela (digitar, ↺, trocar o bônus) sem depender de refazer a conta. Dias, frota, bônus, % e parcelas não somam (não fazem sentido somados).
+function tipoSomaColunaFolha(titulo) {
+  const h = String(titulo).trim();
+  if (/^total ordens$|^qtd i(fi|rr)$/i.test(h) || TIPOS_FOLHA.some(x => x.rot === h)) return 'n';
+  if (/^valor |^empréstimo$|^desc\.|^total descontos$|^total a receber$/i.test(h)) return 'm';
+  return '';
+}
+function ligarTotaisFolha(tab) {
+  if (!tab || tab.dataset.totaisLigados) return;
+  tab.dataset.totaisLigados = '1';
+  const num = td => {
+    const c = td.querySelector('input'), txt = c ? c.value : td.textContent;
+    const x = String(txt || '').replace(/[^\d,.\-]/g, '').replace(/\./g, '').replace(',', '.');
+    const v = parseFloat(x); return isNaN(v) ? 0 : v;
+  };
+  let ocupado = false;
+  const atualizar = () => {
+    const tot = tab.querySelector('tr.total-row[data-folha-total]'); if (!tot) return;
+    const linhas = [...tab.tBodies[0].rows].filter(r => r.dataset.trChave !== undefined && r.style.display !== 'none' && !r.hidden);
+    ocupado = true;
+    [...tot.cells].forEach((td, i) => {
+      const tipo = td.dataset.soma;
+      if (i === 0) td.textContent = `TOTAL · ${linhas.length} técnico(s)`;
+      else if (tipo) { const soma = linhas.reduce((a, r) => a + (r.cells[i] ? num(r.cells[i]) : 0), 0); td.textContent = tipo === 'm' ? formatCurrency(soma) : String(Math.round(soma)); }
+    });
+    ocupado = false;
+  };
+  let agendado = 0;
+  const logo = () => { clearTimeout(agendado); agendado = setTimeout(atualizar, 40); };
+  tab.addEventListener('input', logo); tab.addEventListener('change', logo); tab.addEventListener('filtro-aplicado', logo); tab.addEventListener('click', logo);
+  new MutationObserver(muts => { if (!ocupado && muts.some(m => !(m.target.closest && m.target.closest('tr.total-row')))) logo(); })
+    .observe(tab.tBodies[0], { childList: true, characterData: true, subtree: true });
+  atualizar();
 }
 
 
