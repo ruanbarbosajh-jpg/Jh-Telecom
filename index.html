@@ -1494,6 +1494,8 @@
   /* cor SÓLIDA (mistura com o fundo do cartão): a coluna do nome é fixa ao rolar pro lado e não pode ficar transparente */
   :root { --linha-marcada: color-mix(in srgb, #facc15 34%, var(--card-bg)); }
   table.data-table tbody tr.linha-marcada > td { background-color: var(--linha-marcada) !important; }
+  /* célula selecionada pelo teclado nas folhas (ligarNavegacaoPorSetas): moldura azul por dentro, sem mudar o tamanho da célula */
+  table.tab-col1-fixa td.celula-ativa, table.tab-col1-fixa td.celula-ativa:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
   table.data-table#folha-tab tbody tr[data-tr-chave] { cursor: pointer; }
   .folha-auto { border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; }
   .folha-auto:hover { color: var(--accent); }
@@ -14794,7 +14796,7 @@ function abrirOrdensDoCartao(chave) {
   const it = CARTOES_LISTA[chave]; if (!it) return;
   if (it.custom) { abrirModalLista(it.titulo, it.sub, it.custom.colunas, it.custom.linhas, { nome: slugTitulo(it.titulo), ...it.custom.opts }); return; }
   const tipoCartao = String(chave).split('|')[1] || '';
-  const sinFn = it.sinalizar || (['venc', 'venc2h', 'aberto'].includes(tipoCartao) || (String(chave).startsWith('vg|') && ['pend', 'rota', 'inic'].includes(tipoCartao))
+  const sinFn = it.sinalizar || (['venc', 'venc2h', 'aberto'].includes(tipoCartao) || String(chave).startsWith('vg|')
     ? (rs => textoSinalizarPrazos(rs.filter(r => r.limite), { porPeriodo: true, faixa: faixaSinalizar })) : null);
   const sinOpt = sinFn ? { texto: sinFn, rotulo: 'ordem(ns)', vazio: 'Nenhuma ordem com horário limite na lista (confira o filtro).' } : null;
   const t = x => x ? fmtDT(new Date(x)) : '-';
@@ -25932,6 +25934,7 @@ function renderFolhaPagamento(modo) {
       if (FOLHA_LINHAS_MARCADAS.has(k)) FOLHA_LINHAS_MARCADAS.delete(k); else FOLHA_LINHAS_MARCADAS.add(k);
       tr.classList.toggle('linha-marcada', FOLHA_LINHAS_MARCADAS.has(k));
     });
+    ligarNavegacaoPorSetas(tabFolhaMarca);
     // ---- Holerite (extrato de serviços) ----
     const selHol = document.getElementById('hol-ms');
     const inpQuantos = document.getElementById('hol-quantos');
@@ -27107,6 +27110,60 @@ function ligarProducaoDoTecnicoFolha(ranking, ordensPorTec, pct, IFI_TARGET, IRR
     </tbody></table>`;
   }
 }
+// NAVEGAÇÃO POR SETAS NAS FOLHAS (22/10/2026, pedido do cliente: "quero que funcione igual uma tabela, pra mover de um lado pro outro, com o pad do notebook e as setinhas;
+// se eu clicar no Marco Aurélio e der setinha pro lado, vai seguindo a linha igual o Excel"). Clicar numa célula (ou entrar nela com Tab) a deixa "ativada" (moldura azul); as
+// setas movem de célula em célula, Enter desce (Shift+Enter sobe), e digitar numa célula que tem campo já começa a editar. Dentro de um campo de TEXTO só sai da célula quando
+// o cursor está no começo (←) ou no fim (→); campo numérico e lista (select) sempre saem; ↑/↓ sempre mudam de linha. Entrar por seta seleciona o conteúdo (digitar substitui).
+// Delegado na raiz: vale pra qualquer `table.tab-col1-fixa` dentro dela (Folha dos técnicos e Folha do Escritório).
+function ligarNavegacaoPorSetas(raiz) {
+  if (!raiz || raiz.dataset.navSetas) return;
+  raiz.dataset.navSetas = '1';
+  const FOC = 'input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled])';
+  const TEXTO = ['text', 'search', 'tel', 'url', 'email', 'password'];
+  const tdDe = el => { const td = el && el.closest && el.closest('td'); const tab = td && td.closest('table.tab-col1-fixa'); return tab && raiz.contains(tab) ? td : null; };
+  const marcar = td => { raiz.querySelectorAll('td.celula-ativa').forEach(x => x.classList.remove('celula-ativa')); if (td) td.classList.add('celula-ativa'); };
+  const entrar = td => {
+    marcar(td);
+    const campo = td.querySelector(FOC);
+    if (campo) { campo.focus({ preventScroll: true }); campo.dataset.nav = '1'; if (typeof campo.select === 'function') { try { campo.select(); } catch (e) { /* tipo sem seleção */ } } }
+    else { td.tabIndex = -1; td.focus({ preventScroll: true }); }
+    const wrap = td.closest('.table-wrap'), prim = td.parentElement.cells[0];
+    if (wrap && prim) wrap.style.scrollPaddingLeft = prim.offsetWidth + 'px';   // a 1ª coluna é fixa: não deixa a célula parar escondida atrás dela
+    td.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  };
+  const ir = (td, dl, dc) => {
+    const tr = td.parentElement; let alvo = null;
+    if (dl) { const rs = [...td.closest('table').tBodies[0].rows].filter(r => r.offsetParent !== null), r2 = rs[rs.indexOf(tr) + dl]; alvo = r2 && r2.cells[td.cellIndex]; }
+    else { let c = td.cellIndex + dc; while (tr.cells[c] && tr.cells[c].offsetParent === null) c += dc; alvo = tr.cells[c]; }
+    if (alvo) entrar(alvo);
+  };
+  raiz.addEventListener('keydown', ev => {
+    const td = tdDe(ev.target); if (!td || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    const el = ev.target, k = ev.key, ehCampo = !!(el.matches && el.matches(FOC));
+    if (k.startsWith('Arrow')) {
+      if (ev.shiftKey) return;
+      const dl = k === 'ArrowDown' ? 1 : k === 'ArrowUp' ? -1 : 0, dc = k === 'ArrowRight' ? 1 : k === 'ArrowLeft' ? -1 : 0;
+      if (ehCampo && dc && el.tagName === 'INPUT' && TEXTO.includes(el.type) && el.dataset.nav !== '1') {
+        const ini = el.selectionStart, fim = el.selectionEnd;
+        if (dc < 0 && !(ini === 0 && fim === 0)) return;                              // cursor no meio do texto: a seta anda no texto
+        if (dc > 0 && !(ini === el.value.length && fim === el.value.length)) return;
+      }
+      ev.preventDefault(); ir(td, dl, dc); return;
+    }
+    if (k === 'Enter' && ehCampo && el.tagName !== 'TEXTAREA') { ev.preventDefault(); ir(td, ev.shiftKey ? -1 : 1, 0); return; }
+    if (!ehCampo && k.length === 1) {                                                 // digitou numa célula selecionada: começa a editar o campo dela
+      const campo = td.querySelector(FOC);
+      if (campo) { campo.dataset.nav = ''; campo.focus(); if (typeof campo.select === 'function') { try { campo.select(); } catch (e) { /* ok */ } } }
+    } else if (ehCampo && el.dataset.nav === '1' && (k.length === 1 || k === 'Backspace' || k === 'Delete')) el.dataset.nav = '';
+  });
+  raiz.addEventListener('click', ev => {
+    const td = tdDe(ev.target); if (!td) return;
+    marcar(td);
+    if (ev.target.closest('input, select, textarea')) { if (ev.target.dataset) ev.target.dataset.nav = ''; return; }   // clicou dentro do campo: está editando
+    if (!ev.target.closest('button, a, label')) { td.tabIndex = -1; td.focus({ preventScroll: true }); }
+  });
+  raiz.addEventListener('focusin', ev => { const td = tdDe(ev.target); if (td) marcar(td); });
+}
 // linhas marcadas (tecnico|periodo) — fica de pé enquanto a página estiver aberta, mesmo depois de Filtrar/Salvar
 const FOLHA_LINHAS_MARCADAS = new Set();
 function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
@@ -27690,6 +27747,7 @@ function renderFolhaEscritorio() {
     são calculados: <b>Líquido = salário ÷ 30 × dias</b>. Cada período é salvo separado.
   </p>
   <div id="fe-body"></div>`;
+  ligarNavegacaoPorSetas(document.getElementById('fe-body'));
   document.getElementById('fe-filtrar').addEventListener('click', load);
   document.getElementById('fe-periodo').addEventListener('change', load);
   // sair da tela com alteração não salva descartaria o que a pessoa digitou: avisa antes de abrir o cadastro/edição
