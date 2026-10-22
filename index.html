@@ -16222,7 +16222,42 @@ function renderContatos() {
     } catch (e) { if (!silencioso) diz('Erro: ' + (e.message || e), 'var(--danger)'); }
     finally { bt.disabled = false; }
   }
-  if (g('ct-oracle')) { g('ct-oracle').addEventListener('click', () => sincronizarTelefonesOracle(false)); setTimeout(() => { if (g('ct-oracle')) sincronizarTelefonesOracle(true); }, 1500); }
+  // ---- "Atualizar números com o OFS": varre a tela Gerenciar do Oracle (cada atividade → Detalhes) e leva os telefones pro banco ----
+  // (22/10/2026, pedido do cliente). A extensão (1.6.0+) é quem clica, na aba do Oracle que a pessoa deixou aberta em Gerenciar; aqui só pedimos, acompanhamos e gravamos.
+  let ofsVarrendo = false;
+  async function atualizarComOfs() {
+    const st = g('ct-oracle-st'), bt = g('ct-oracle'); if (!st || !bt) return;
+    const diz = (t, cor) => { st.textContent = t; st.style.color = cor || 'var(--text-muted)'; };
+    if (ofsVarrendo) {   // 2º clique durante a varredura = parar
+      await ofsDaExtensao('jh-ext-ofs-parar'); diz('Parando… (termina a atividade em andamento)'); return;
+    }
+    if (!EXT_JH.presente) { diz('Extensão do Chrome não encontrada nesta página.', 'var(--danger)'); return; }
+    if (!extensaoAtende('1.6.0')) { diz('Atualize a extensão para a versão 1.6.0 (baixe o zip de novo, substitua os arquivos e use ⟳ em chrome://extensions; depois recarregue o Oracle e esta página).', 'var(--danger)'); return; }
+    const est = await ofsDaExtensao('jh-ext-ofs-estado');
+    if (!est.ok) { diz(est.erro, 'var(--danger)'); return; }
+    if (!est.aba || Date.now() - est.aba.em > 20000) { diz('Abra o Oracle Field Service neste Chrome (recarregue a página dele se já estava aberta), deixe na tela Gerenciar com o grupo JH TELECOM e clique de novo.', 'var(--danger)'); return; }
+    if (!est.aba.gerenciar && !confirm('A aba do Oracle não está na tela Gerenciar — a extensão vai abri-la sozinha. Continuar?')) return;
+    if (!confirm('O sistema vai passar por todas as atividades do dia na tela Gerenciar do Oracle, abrindo o "Detalhes" de cada uma pra ler os telefones (cerca de 8 segundos por atividade). Só lê: não altera nada no Oracle. Não mexa na aba do Oracle enquanto roda; clique no botão de novo pra parar. Continuar?')) return;
+    ofsVarrendo = true; bt.textContent = '⏹ Parar a varredura do OFS';
+    const r0 = await ofsDaExtensao('jh-ext-ofs-varrer');
+    if (!r0.ok) { diz(r0.erro, 'var(--danger)'); ofsVarrendo = false; bt.textContent = '🔄 Atualizar números com o OFS'; return; }
+    diz('Iniciando a varredura no Oracle…');
+    let ultimoSync = 0;
+    while (g('ct-oracle')) {
+      await new Promise(r => setTimeout(r, 3000));
+      const e = await ofsDaExtensao('jh-ext-ofs-estado'); if (!e.ok) { diz(e.erro, 'var(--danger)'); break; }
+      const s2 = e.status; if (!s2) continue;
+      diz(`Varrendo o Oracle: ${s2.feitos} de ${s2.total || '?'} atividades · ${s2.lidos} com telefone lido`);
+      if (s2.lidos - ultimoSync >= 15) { ultimoSync = s2.lidos; await sincronizarTelefonesOracle(true); }
+      if (s2.estado !== 'rodando') {
+        await sincronizarTelefonesOracle(true);
+        diz(s2.estado === 'erro' ? `⚠ ${s2.erro}` : `${s2.estado === 'parado' ? 'Parado' : '✔ Concluído'}: ${s2.feitos} atividades vistas, ${s2.lidos} com telefone lido e gravado.`, s2.estado === 'erro' ? 'var(--danger)' : 'var(--success)');
+        break;
+      }
+    }
+    ofsVarrendo = false; const b2 = g('ct-oracle'); if (b2) b2.textContent = '🔄 Atualizar números com o OFS';
+  }
+  if (g('ct-oracle')) { g('ct-oracle').addEventListener('click', atualizarComOfs); setTimeout(() => { if (g('ct-oracle')) sincronizarTelefonesOracle(true); }, 1500); }
   async function carregar() {
     const meu = ++seq, dia = g('ct-dia').value, giga = true;   // sempre inclui os chamados da GIGA sem técnico (sem caixinha)
     if (!dia && !giga) { g('ct-cards').innerHTML = ''; g('ct-body').innerHTML = '<div class="panel"><div class="empty">Importe o CSV de atividades pelo botão <b>Importar CSV de atividades</b> da barra lateral (ele traz o telefone do assinante).</div></div>'; return; }
@@ -28774,6 +28809,20 @@ function telefonesDaExtensao(tipo, extra) {
     const limite = setTimeout(() => fim({ ok: false, erro: 'A extensão não respondeu. Recarregue a página (F5).' }), 15000);
     window.addEventListener('message', ouvir);
     window.postMessage(Object.assign({ tipo, id }, extra || {}), location.origin);
+  });
+}
+// v1.6.0: varredura do Oracle (ponte.js responde "jh-ext-ofs-resp"): estado = aba aberta + andamento; varrer = começa; parar = interrompe
+function ofsDaExtensao(tipo) {
+  return new Promise(resolve => {
+    const id = 'o' + Date.now() + Math.random().toString(36).slice(2, 7);
+    const fim = r => { window.removeEventListener('message', ouvir); clearTimeout(limite); resolve(r); };
+    const ouvir = ev => {
+      if (ev.source !== window || ev.origin !== location.origin || !ev.data || ev.data.id !== id || ev.data.tipo !== 'jh-ext-ofs-resp') return;
+      fim(ev.data.ok ? { ok: true, aba: ev.data.aba || null, status: ev.data.status || null } : { ok: false, erro: String(ev.data.erro || 'erro') });
+    };
+    const limite = setTimeout(() => fim({ ok: false, erro: 'A extensão não respondeu. Recarregue a página (F5).' }), 8000);
+    window.addEventListener('message', ouvir);
+    window.postMessage({ tipo, id }, location.origin);
   });
 }
 // "há 5 min" / "há 3 h" / "há 2 dia(s)"
