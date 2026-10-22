@@ -648,6 +648,8 @@
   #modal-chamar .chm-linha.chm-chamado { background: color-mix(in srgb, #16a34a 9%, transparent); }
   #modal-chamar .chm-linha.chm-reagendou { background: color-mix(in srgb, #f59e0b 13%, transparent); }
   #modal-chamar select.chm-st { width: 100%; padding: 5px 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text-primary); font-size: 13px; font-weight: 600; }
+  #modal-chamar [hidden] { display: none !important; }
+  #modal-chamar .toolbar { overflow: visible; }
   #modal-chamar button.chm-tel { background: #16a34a; color: #fff; border: none; border-radius: 8px; padding: 5px 10px; font-weight: 700; font-size: 13px; cursor: pointer; margin: 2px 6px 2px 0; white-space: nowrap; }
   #modal-chamar button.chm-tel:hover { background: #15803d; }
   #modal-chamar .chm-fixo { font-size: 12.5px; color: var(--text-muted); margin-right: 8px; white-space: nowrap; }
@@ -16286,27 +16288,57 @@ async function waChamarCliente(celular, nome, endereco, dia, chave) {
 // o programa do WhatsApp enquanto há um clique recente (~5 s), e só 3 de 10 abriram — mas o sistema já tinha marcado os 10 como "Chamado". Agora cada clique em "▶ Próxima
 // conversa" abre UMA conversa e só ela é marcada como Chamado. O rascunho com a mensagem fica na conversa (aparece como "Rascunho:" na lista do WhatsApp).
 const WA_LOTE_MAX = 10;
-// janela "Chamar Clientes": os clientes da lista filtrada, agrupados por técnico ("Adilson - 5 ordens"), cada um com a situação (Não chamado / Chamado / Cliente reagendou)
-function abrirChamarClientes(lista, contatoDe, dia, fmtLimite) {
+// quem usa o "Chamar Clientes" (WhatsApp com a mensagem pronta + filtros de escolha múltipla): Analista (22/10/2026) e Escritório (liberado no mesmo dia, pedido do cliente)
+const podeChamarClientes = () => ehAnalista() || (currentUser && perfilValido(currentUser.role) === 'escritorio');
+// ---- filtros de escolha múltipla da aba Contatos (valem na tela e na janela Chamar Clientes) ----
+// conjunto das opções MARCADAS de uma caixa de seleção (null = todas marcadas = sem filtro)
+const marcadosDe = id => { const p = document.getElementById(id + '-panel'); if (!p) return null; const caixas = [...p.querySelectorAll('input[type=checkbox]')], on = caixas.filter(c => c.checked).map(c => c.value); return on.length === caixas.length ? null : new Set(on); };
+const mapaSet = (S, M) => S && new Set([...S].map(v => M[v]));
+const ordUnicos = arr => [...new Set(arr.filter(Boolean))].sort((x, y) => x.localeCompare(y, 'pt-BR'));
+// f = { tecS, cidS, pzS (códigos), tipoS, fxS (códigos), sits (buckets), rt, tem, q } — Set/null; tudo opcional
+function filtrarContatos(todas, f) {
+  return todas.filter(l => {
+    if (f.tecS && !f.tecS.has(l.tecnico || SEM_TEC_CT)) return false;
+    if (f.cidS && !f.cidS.has(l.cidade)) return false;
+    if (f.pzS && !f.pzS.has(l.prazo)) return false;
+    if (f.tipoS && !f.tipoS.has(l.tipo)) return false;
+    if (f.fxS && !f.fxS.has(l.faixa)) return false;
+    if (f.rt === 'retorno' ? !l.ret : f.rt === 'nao' ? !!l.ret : (f.rt && l.ret !== f.rt)) return false;
+    if (f.sits && !f.sits.has(l.gr)) return false;
+    const c = contatoDaOrdem(l), temTel = !!(c && (c.telefone || c.celular || (c.todos && c.todos.length)));
+    if (f.tem === 'com' ? !temTel : (f.tem === 'sem' && temTel)) return false;
+    if (f.q && !normalizeHeader([l.cliente, l.contrato, l.os, l.endereco, l.tecnico, c && c.nome].join(' ')).includes(f.q)) return false;
+    return true;
+  });
+}
+// janela "Chamar Clientes": parte de TODAS as ordens do dia, com os mesmos filtros da tela (começam iguais aos da tela e dá pra mudar aqui dentro:
+// técnico, cidade, tipo de serviço, prazo, faixa do prazo, situação da ordem — inclusive "Não concluído (improdutiva)" — e situação da chamada), agrupadas por
+// técnico ("Adilson - 5 ordens"), cada cliente com a situação Não chamado / Chamado / Cliente reagendou
+function abrirChamarClientes(todas, dia, fmtLimite, fPag) {
   let m = document.getElementById('modal-chamar');
-  if (!m) { m = document.createElement('div'); m.id = 'modal-chamar'; m.className = 'modal-backdrop'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); document.body.appendChild(m); m.addEventListener('click', e => { if (e.target === m) m.classList.remove('active'); }); }
+  if (!m) { m = document.createElement('div'); m.id = 'modal-chamar'; m.className = 'modal-backdrop'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); document.body.appendChild(m); }
+  const contatoDe = l => contatoDaOrdem(l);
   const chaveDe = l => `${dia}|${l.contrato}|${l.os}`;
-  const dados = lista.map(l => { const c = contatoDe(l) || {}, todos = c.todos || []; return { l, c, cel: todos.filter(waCelularValido), fixos: todos.filter(d => !waCelularValido(d)), k: chaveDe(l) }; });
-  const porK = new Map(dados.map(d => [d.k, d])), marcados = new Set();
-  const comCel = dados.filter(d => d.cel.length).length;
-  const exemplo = dados.find(d => d.cel.length) || dados[0];
+  let dados = [], porK = new Map(), fila = null, st = waStatusTodos();
+  const marcados = new Set();
   const nomeDe = d => d.l.cliente || d.c.nome || '', endDe = d => limparEnderecoNull(d.l.endereco || d.c.endereco);
   const destAtual = () => { const d = waDestinoSalvo(); return d ? `Abre em: <b>${esc(WA_DESTINOS[d])}</b> · <a href="#" id="chm-trocar">trocar</a>` : 'Na primeira vez o sistema pergunta onde abrir o WhatsApp.'; };
+  // opções do dia + o que estava marcado na tela da aba
+  const opTec = [...ordUnicos(todas.map(l => l.tecnico)), ...(todas.some(l => !l.tecnico) ? [SEM_TEC_CT] : [])], opCid = ordUnicos(todas.map(l => l.cidade)), opTipo = ordUnicos(todas.map(l => l.tipo));
+  const campo = (id, rot, op, L, all) => multiSelectField(id, rot, op, { preset: L ? op.filter(v => L.has(v)) : op, allLabel: all, noneLabel: 'Nenhuma', emptyMsg: 'Sem opções' });
+  const sitOps = Object.keys(SITUACOES_CONTATOS), sitPre = new Set(fPag.sitL || sitOps);
   m.innerHTML = `<div class="modal-card modal-largo" style="max-width:min(1500px,97vw);width:97vw"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h3 style="margin:0">📞 Chamar Clientes</h3>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button type="button" class="btn-secundario" id="chm-sel10" title="Marca os 10 primeiros que ainda não foram chamados">☑ Marcar os próximos ${WA_LOTE_MAX}</button>
       <button type="button" class="btn-sinalizar" id="chm-lote" title="Marque até ${WA_LOTE_MAX} clientes; cada clique abre UMA conversa no WhatsApp com a mensagem pronta"></button><button type="button" class="btn-secundario" id="chm-parar" hidden title="Cancela a fila">✖ Parar fila</button>
       <button type="button" class="btn-secundario" id="chm-fechar">Fechar</button></div></div>
-    <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin:8px 0 4px">${multiSelectField('chm-fil', 'Mostrar', Object.values(WA_ST), { allLabel: 'Todas as situações', noneLabel: 'Nenhuma' })}
-      <p style="font-size:12.5px;color:var(--text-muted);margin:0;flex:1;min-width:260px"><span id="chm-total"></span> Clique no <b>celular</b> do cliente: o WhatsApp abre com a mensagem pronta. <span id="chm-dest">${destAtual()}</span></p></div>
-    <details style="margin:4px 0 8px;font-size:12.5px"><summary style="cursor:pointer;color:var(--text-secondary)">Ver a mensagem que será enviada</summary><pre style="white-space:pre-wrap;font-family:inherit;margin:6px 0 0;padding:10px;border:1px solid var(--border);border-radius:8px">${esc(exemplo ? mensagemChamarCliente(nomeDe(exemplo), endDe(exemplo), dia) : '')}</pre></details>
-    <div id="chm-lista" style="max-height:68vh;overflow:auto"></div></div>`;
-  const filtroOk = () => { const on = new Set(getMultiSelectValues('chm-fil')); return d => on.has(WA_ST[waStatusDe(d.k, st)]); };
-  let st = waStatusTodos(), fila = null;   // fila = { itens, i } enquanto a pessoa percorre as conversas marcadas
+    <div class="toolbar" style="margin:10px 0 4px">
+      ${campo('chm-tec', 'Técnico', opTec, fPag.tecL, 'Todos os técnicos')}${campo('chm-cid', 'Cidade', opCid, fPag.cidL, 'Todas as cidades')}${campo('chm-tipo', 'Tipo de serviço', opTipo, fPag.tipoL, 'Todos os tipos')}
+      ${campo('chm-prazo', 'Prazo', Object.keys(PRAZOS_CT), fPag.pzL, 'Todos os prazos')}${campo('chm-faixa', 'Faixa do prazo', Object.keys(FAIXAS_CT), fPag.fxL, 'Todas as faixas')}
+      ${multiSelectField('chm-sit', 'Situação da ordem', sitOps, { preset: sitOps.filter(v => sitPre.has(v)), allLabel: 'Todas as situações', noneLabel: 'Nenhuma' })}
+      ${multiSelectField('chm-fil', 'Chamada', Object.values(WA_ST), { allLabel: 'Todas', noneLabel: 'Nenhuma' })}</div>
+    <p style="font-size:12.5px;color:var(--text-muted);margin:4px 0"><span id="chm-total"></span> Clique no <b>celular</b> do cliente: o WhatsApp abre com a mensagem pronta. <span id="chm-dest">${destAtual()}</span></p>
+    <details style="margin:4px 0 8px;font-size:12.5px"><summary style="cursor:pointer;color:var(--text-secondary)">Ver a mensagem que será enviada</summary><pre id="chm-msg" style="white-space:pre-wrap;font-family:inherit;margin:6px 0 0;padding:10px;border:1px solid var(--border);border-radius:8px"></pre></details>
+    <div id="chm-lista" style="max-height:62vh;overflow:auto"></div></div>`;
   const rotuloLote = () => {
     const b = m.querySelector('#chm-lote'), pa = m.querySelector('#chm-parar'); if (!b) return;
     b.innerHTML = fila ? `▶ Próxima conversa (${fila.i + 1} de ${fila.itens.length})` : `📞 Chamar marcados (<span id="chm-n">${marcados.size}</span>)`;
@@ -16319,31 +16351,45 @@ function abrirChamarClientes(lista, contatoDe, dia, fmtLimite) {
       || '<span style="color:var(--text-muted)">sem telefone</span>';
     const pz = l.limite ? `${esc(fmtLimite(l))}${l.faixa ? ' · ' + esc(l.faixa) : ''}` : '';
     return `<div class="chm-linha chm-${s0}" data-k="${esc(k)}"><div><input type="checkbox" class="chm-sel" data-k="${esc(k)}" ${d.cel.length ? '' : 'disabled'} ${marcados.has(k) ? 'checked' : ''} aria-label="Marcar pra chamar em lote"></div><div><b>${esc(String(nomeDe(d) || '-').toUpperCase())}</b></div><div>${tels}</div>
-      <div style="font-size:12.5px">${esc(endDe(d) || '-')}${l.cidade ? ' · ' + esc(l.cidade) : ''}</div><div style="font-size:12.5px">${esc(l.tipo)}${pz ? '<br><span style="color:var(--text-muted)">' + pz + '</span>' : ''}</div>
+      <div style="font-size:12.5px">${esc(endDe(d) || '-')}${l.cidade ? ' · ' + esc(l.cidade) : ''}</div><div style="font-size:12.5px">${esc(l.tipo)}${l.status ? '<br><span style="color:var(--text-muted)">' + esc(l.status) + '</span>' : ''}${pz ? '<br><span style="color:var(--text-muted)">' + pz + '</span>' : ''}</div>
       <div><select class="chm-st" data-k="${esc(k)}" aria-label="Situação do cliente">${Object.keys(WA_ST).map(c => `<option value="${c}" ${c === s0 ? 'selected' : ''}>${WA_ST[c]}</option>`).join('')}</select></div></div>`;
+  };
+  // aplica os filtros da janela (+ busca/retorno/contato que estavam na tela) e redesenha
+  const refiltra = () => {
+    st = waStatusTodos();
+    const f = { rt: fPag.rt, tem: fPag.tem, q: fPag.q, tecS: marcadosDe('chm-tec'), cidS: marcadosDe('chm-cid'), tipoS: marcadosDe('chm-tipo'), pzS: mapaSet(marcadosDe('chm-prazo'), PRAZOS_CT), fxS: mapaSet(marcadosDe('chm-faixa'), FAIXAS_CT), sits: new Set(getMultiSelectValues('chm-sit').map(v => SITUACOES_CONTATOS[v])) };
+    const lista = filtrarContatos(todas, f).sort((a, b) => (a.limite || Infinity) - (b.limite || Infinity) || String(a.cliente).localeCompare(String(b.cliente), 'pt-BR'));
+    dados = lista.map(l => { const c = contatoDe(l) || {}, tels = c.todos || []; return { l, c, cel: tels.filter(waCelularValido), fixos: tels.filter(d => !waCelularValido(d)), k: chaveDe(l) }; });
+    porK = new Map(dados.map(d => [d.k, d]));
+    [...marcados].forEach(k => { if (!porK.has(k)) marcados.delete(k); });
+    pinta();
   };
   const pinta = () => {
     st = waStatusTodos();
-    const ok = filtroOk(), vis = dados.filter(ok), grupos = new Map();
+    const on = new Set(getMultiSelectValues('chm-fil')), vis = dados.filter(d => on.has(WA_ST[waStatusDe(d.k, st)])), grupos = new Map();
     vis.forEach(d => { const tec = d.l.tecnico || ''; if (!grupos.has(tec)) grupos.set(tec, []); grupos.get(tec).push(d); });
     const tecs = [...grupos.keys()].sort((a, b) => (a === '') - (b === '') || a.localeCompare(b, 'pt-BR'));
-    m.querySelector('#chm-lista').innerHTML = tecs.map(tec => { const ls = grupos.get(tec); return `<div class="chm-tec">${esc(tec || 'Sem técnico')} - ${ls.length} ${ls.length === 1 ? 'ordem' : 'ordens'}</div>${ls.map(linha).join('')}`; }).join('') || '<div class="empty" style="padding:16px">Nenhum cliente nessa situação.</div>';
+    m.querySelector('#chm-lista').innerHTML = tecs.map(tec => { const ls = grupos.get(tec); return `<div class="chm-tec">${esc(tec || 'Sem técnico')} - ${ls.length} ${ls.length === 1 ? 'ordem' : 'ordens'}</div>${ls.map(linha).join('')}`; }).join('') || '<div class="empty" style="padding:16px">Nenhum cliente com esses filtros.</div>';
     const cont = { nao: 0, chamado: 0, reagendou: 0 }; dados.forEach(d => { cont[waStatusDe(d.k, st)]++; });
-    m.querySelector('#chm-total').textContent = `${dados.length} ordem(ns) · ${comCel} com celular · ${cont.nao} não chamado(s) · ${cont.chamado} chamado(s) · ${cont.reagendou} reagendou(aram) — segue os filtros da tela.`;
+    m.querySelector('#chm-total').textContent = `${dados.length} ordem(ns) · ${dados.filter(d => d.cel.length).length} com celular · ${cont.nao} não chamado(s) · ${cont.chamado} chamado(s) · ${cont.reagendou} reagendou(aram).`;
+    const ex = dados.find(d => d.cel.length) || dados[0];
+    m.querySelector('#chm-msg').textContent = ex ? mensagemChamarCliente(nomeDe(ex), endDe(ex), dia) : mensagemChamarCliente('', '', dia);
     rotuloLote();
   };
-  wireMultiSelectField('chm-fil', { noun: 'situação(ões)', allLabel: 'Todas as situações' }, pinta);
-  pinta(); m.classList.add('active');
+  [['chm-tec', 'técnico(s)', 'Todos os técnicos'], ['chm-cid', 'cidade(s)', 'Todas as cidades'], ['chm-tipo', 'tipo(s)', 'Todos os tipos'], ['chm-prazo', 'prazo(s)', 'Todos os prazos'], ['chm-faixa', 'faixa(s)', 'Todas as faixas'], ['chm-sit', 'situação(ões)', 'Todas as situações']]
+    .forEach(([id, noun, all]) => wireMultiSelectField(id, { noun, allLabel: all }, refiltra));
+  wireMultiSelectField('chm-fil', { noun: 'situação(ões)', allLabel: 'Todas' }, pinta);
+  refiltra(); m.classList.add('active');
   m.querySelector('#chm-fechar').addEventListener('click', () => m.classList.remove('active'));
   m.onclick = async ev => {
     if (ev.target === m) { m.classList.remove('active'); return; }
-    const tr = ev.target.closest('#chm-trocar'); if (tr) { ev.preventDefault(); try { localStorage.removeItem(WA_DESTINO_CHAVE); } catch (e) { /* idem */ } m.querySelector('#chm-dest').innerHTML = destAtual(); return; }
+    if (ev.target.closest('#chm-trocar')) { ev.preventDefault(); try { localStorage.removeItem(WA_DESTINO_CHAVE); } catch (e) { /* idem */ } m.querySelector('#chm-dest').innerHTML = destAtual(); return; }
     const b = ev.target.closest('button.chm-tel');
     if (b) { const d = porK.get(b.dataset.k); if (!d) return;
       if (await waChamarCliente(b.dataset.num, nomeDe(d), endDe(d), dia, b.dataset.k)) { marcados.delete(b.dataset.k); pinta(); m.querySelector('#chm-dest').innerHTML = destAtual(); } return; }
     if (ev.target.closest('#chm-sel10')) {
-      marcados.clear(); dados.filter(filtroOk()).filter(d => d.cel.length && waStatusDe(d.k, st) === 'nao').slice(0, WA_LOTE_MAX).forEach(d => marcados.add(d.k)); pinta();
-      if (!marcados.size) toast('Não há cliente com celular e ainda não chamado nesse filtro.', 'aviso'); return; }
+      marcados.clear(); dados.filter(d => d.cel.length && waStatusDe(d.k, st) === 'nao').slice(0, WA_LOTE_MAX).forEach(d => marcados.add(d.k)); pinta();
+      if (!marcados.size) toast('Não há cliente com celular e ainda não chamado nesses filtros.', 'aviso'); return; }
     if (ev.target.closest('#chm-parar')) { fila = null; rotuloLote(); toast('Fila cancelada.', 'ok', 2500); return; }
     if (ev.target.closest('#chm-lote')) {
       if (!fila) {
@@ -16367,14 +16413,14 @@ function abrirChamarClientes(lista, contatoDe, dia, fmtLimite) {
 }
 
 function renderContatos() {
-  const ehA = ehAnalista();
+  const ehA = podeChamarClientes();
   const dias = [...new Set(DB.pcr.map(r => r.data).filter(Boolean))].sort().reverse();
   document.getElementById('content').innerHTML = `
     <div id="ct-cards"></div>
     <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span>Assinantes e técnicos</span>
       <button type="button" class="btn-sinalizar" id="ct-sinalizar" title="Copia a lista pra colar no WhatsApp: por cidade e técnico, CLIENTE - telefone">📲 SINALIZAR</button>
       <button type="button" class="btn-export-xls" id="ct-excel">⤓ Excel (só o filtrado)</button>
-      ${ehAnalista() ? '<button type="button" class="btn-sinalizar" id="ct-chamar" title="Lista os clientes do filtro por técnico; clicando no celular o WhatsApp abre com a mensagem de confirmação da visita já escrita">📞 Chamar Clientes</button>' : ''}</div>
+      ${podeChamarClientes() ? '<button type="button" class="btn-sinalizar" id="ct-chamar" title="Lista os clientes do filtro por técnico; clicando no celular o WhatsApp abre com a mensagem de confirmação da visita já escrita">📞 Chamar Clientes</button>' : ''}</div>
     <div class="toolbar">
       <div class="field"><label>Data (CSV de atividades)</label><select id="ct-dia">${dias.length ? dias.map(d => `<option value="${d}">${formatDate(d)}</option>`).join('') : '<option value="">sem CSV importado</option>'}</select></div>
       ${ehA ? multiSelectField('ct-tec', 'Técnico', [], { allLabel: 'Todos os técnicos', emptyMsg: 'Carregando…' }) : '<div class="field"><label>Técnico</label><select id="ct-tec"><option value="">Todos os técnicos</option></select></div>'}
@@ -16417,7 +16463,7 @@ function renderContatos() {
   const ROT_PRAZO = { vencida: ['Vencido', 'var(--danger)'], vence2h: ['Vence em até 2h', '#f59e0b'], noprazo: ['No prazo', 'var(--success)'], concluida: ['Concluído', 'var(--text-secondary)'], semprazo: ['Sem prazo', 'var(--text-muted)'], outro: ['—', 'var(--text-muted)'] };
   function celTel(c) {
     if (!c || (!c.telefone && !c.celular && !(c.todos && c.todos.length))) return '<span style="color:var(--text-muted)">sem telefone</span>';
-    const un = (num, rot) => { const d = contatoTelValido(num); if (d && ehAnalista() && waCelularValido(d)) return `<div style="white-space:nowrap">${rot ? `<span style="font-size:11px;color:var(--text-muted)">${rot} </span>` : ''}<a href="#" class="ct-tel ct-chamar" data-num="${d}" title="Chamar no WhatsApp com a mensagem pronta">${esc(contatoFmtTel(d))} 💬</a></div>`;
+    const un = (num, rot) => { const d = contatoTelValido(num); if (d && podeChamarClientes() && waCelularValido(d)) return `<div style="white-space:nowrap">${rot ? `<span style="font-size:11px;color:var(--text-muted)">${rot} </span>` : ''}<a href="#" class="ct-tel ct-chamar" data-num="${d}" title="Chamar no WhatsApp com a mensagem pronta">${esc(contatoFmtTel(d))} 💬</a></div>`;
       return d ? `<div style="white-space:nowrap">${rot ? `<span style="font-size:11px;color:var(--text-muted)">${rot} </span>` : ''}<a href="tel:+55${d}" class="ct-tel">${esc(contatoFmtTel(d))}</a> <a href="https://wa.me/55${d}" target="_blank" rel="noopener" class="ct-wa" title="Abrir conversa no WhatsApp">💬</a></div>` : ''; };
     const origem = c.origem && c.origem !== 'CSV do dia' ? `<div style="font-size:10.5px;color:var(--text-muted)" title="O CSV deste dia não trazia telefone dessa ordem: o número veio de outra fonte">↳ ${esc(c.origem)}</div>` : '';
     // TODOS os números do cliente, um embaixo do outro (11 dígitos = cel, 10 = fixo); o do Oracle só chega aqui pro Analista (`contatoDaOrdemBase`)
@@ -16426,28 +16472,15 @@ function renderContatos() {
     return lista.map(d => un(d, rot(d))).join('') + origem;
   }
   // ---- aplica os filtros ----
-  // conjunto das opções MARCADAS de um filtro de escolha múltipla (null = todas marcadas = sem filtro)
-  const marcadosDe = id => { const p = g(id + '-panel'); if (!p) return null; const caixas = [...p.querySelectorAll('input[type=checkbox]')], on = caixas.filter(c => c.checked).map(c => c.value); return on.length === caixas.length ? null : new Set(on); };
-  const mapaSet = (S, M) => S && new Set([...S].map(v => M[v]));
-  function filtrar(todas) {
-    const rt = g('ct-ret').value, sits = new Set(getMultiSelectValues('ct-sit').map(v => SITUACOES_CONTATOS[v])), tem = g('ct-tem').value, q = normalizeHeader(g('ct-q').value);
-    let tecS, cidS, pzS, tipoS = null, fxS = null;
-    if (ehA) { tecS = marcadosDe('ct-tec'); cidS = marcadosDe('ct-cid'); tipoS = marcadosDe('ct-tipo'); pzS = mapaSet(marcadosDe('ct-prazo'), PRAZOS_CT); fxS = mapaSet(marcadosDe('ct-faixa'), FAIXAS_CT); }
-    else { const un = v => v ? new Set([v]) : null; tecS = g('ct-tec').value === '__sem' ? new Set([SEM_TEC_CT]) : un(g('ct-tec').value); cidS = un(g('ct-cid').value); pzS = un(g('ct-prazo').value); }
-    return todas.filter(l => {
-      if (tecS && !tecS.has(l.tecnico || SEM_TEC_CT)) return false;
-      if (cidS && !cidS.has(l.cidade)) return false;
-      if (pzS && !pzS.has(l.prazo)) return false;
-      if (tipoS && !tipoS.has(l.tipo)) return false;
-      if (fxS && !fxS.has(l.faixa)) return false;
-      if (rt === 'retorno' ? !l.ret : rt === 'nao' ? !!l.ret : (rt && l.ret !== rt)) return false;
-      if (!sits.has(l.gr)) return false;
-      const c = contatoDe(l), temTel = !!(c && (c.telefone || c.celular || (c.todos && c.todos.length)));
-      if (tem === 'com' ? !temTel : (tem === 'sem' && temTel)) return false;
-      if (q && !normalizeHeader([l.cliente, l.contrato, l.os, l.endereco, l.tecnico, c && c.nome].join(' ')).includes(q)) return false;
-      return true;
-    });
+  // lê os filtros da tela (inclui os rótulos marcados, pra janela Chamar Clientes começar igual)
+  function leFiltros() {
+    const sitL = getMultiSelectValues('ct-sit');
+    const f = { rt: g('ct-ret').value, sits: new Set(sitL.map(v => SITUACOES_CONTATOS[v])), sitL, tem: g('ct-tem').value, q: normalizeHeader(g('ct-q').value) };
+    if (ehA) { f.tecL = f.tecS = marcadosDe('ct-tec'); f.cidL = f.cidS = marcadosDe('ct-cid'); f.tipoL = f.tipoS = marcadosDe('ct-tipo'); f.pzL = marcadosDe('ct-prazo'); f.pzS = mapaSet(f.pzL, PRAZOS_CT); f.fxL = marcadosDe('ct-faixa'); f.fxS = mapaSet(f.fxL, FAIXAS_CT); }
+    else { const un = v => v ? new Set([v]) : null; f.tecS = g('ct-tec').value === '__sem' ? new Set([SEM_TEC_CT]) : un(g('ct-tec').value); f.cidS = un(g('ct-cid').value); f.pzS = un(g('ct-prazo').value); }
+    return f;
   }
+  const filtrar = todas => filtrarContatos(todas, leFiltros());
   let atuais = [];
   function desenhar(todas) {
     const corpo = g('ct-body');
@@ -16464,12 +16497,12 @@ function renderContatos() {
       </div>`;
     corpo.innerHTML = `${!lista.length ? '<div class="panel"><div class="empty">Nenhuma ordem nesse filtro. Importe o CSV de atividades pelo botão da barra lateral (o telefone vem junto) ou ajuste os filtros.</div></div>' : `
       <div class="table-wrap caixa-tabela-fixa rolagem-inteira-na-imagem" style="margin-bottom:1.5rem"><table class="data-table" id="tab-contatos"><thead><tr>
-        <th>Técnico</th><th>Cliente</th><th>Telefone</th><th>E-mail</th><th>Contrato</th><th>O.S</th><th>Endereço</th><th>Cidade</th><th>Tipo de serviço</th><th>Status</th><th>Prazo</th>${ehAnalista() ? '<th>Faixa do prazo</th>' : ''}<th>IFI/IRR</th></tr></thead><tbody>
+        <th>Técnico</th><th>Cliente</th><th>Telefone</th><th>E-mail</th><th>Contrato</th><th>O.S</th><th>Endereço</th><th>Cidade</th><th>Tipo de serviço</th><th>Status</th><th>Prazo</th>${podeChamarClientes() ? '<th>Faixa do prazo</th>' : ''}<th>IFI/IRR</th></tr></thead><tbody>
         ${lista.map((l, i) => { const c = contatoDe(l), inicio = sep && (i === 0 || lista[i - 1].tecnico !== l.tecnico), pz = ROT_PRAZO[l.prazo] || ROT_PRAZO.outro;
           return `<tr data-ri="${i}"${inicio ? ' class="ct-inicio"' : ''}><td class="cat-cell">${l.tecnico ? esc(l.tecnico) : '<span style="color:var(--text-muted)">Sem técnico</span>'}</td>
           <td style="font-weight:600">${esc(l.cliente || (c && c.nome) || '-')}</td><td>${celTel(c)}</td><td style="font-size:12px">${esc((c && c.email) || '') || '-'}</td><td>${esc(l.contrato) || '-'}</td><td>${esc(l.os) || '-'}</td>
           <td style="white-space:normal;min-width:200px;font-size:12.5px">${esc(limparEnderecoNull(l.endereco || (c && c.endereco)) || '-')}</td><td>${esc(l.cidade)}</td><td>${esc(l.tipo)}</td><td>${esc(l.status)}</td>
-          <td style="white-space:nowrap">${l.limite ? `<b>${esc(fmtLimite(l))}</b><br>` : ''}<span style="color:${pz[1]};font-weight:700;font-size:12px">${pz[0]}</span></td>${ehAnalista() ? `<td>${esc(l.faixa) || '-'}</td>` : ''}
+          <td style="white-space:nowrap">${l.limite ? `<b>${esc(fmtLimite(l))}</b><br>` : ''}<span style="color:${pz[1]};font-weight:700;font-size:12px">${pz[0]}</span></td>${podeChamarClientes() ? `<td>${esc(l.faixa) || '-'}</td>` : ''}
           <td>${l.ret ? `<b style="color:${l.ret === 'IFI' ? 'var(--danger)' : '#f59e0b'}">${l.ret}</b>` : '-'}</td></tr>`; }).join('')}
       </tbody></table></div>`}`;
   }
@@ -16583,8 +16616,9 @@ function renderContatos() {
   if (ehA) { wireMultiSelectField('ct-prazo', { noun: 'prazo(s)', allLabel: 'Todos os prazos' }, () => desenhar(g('ct-dia')._todas || [])); wireMultiSelectField('ct-faixa', { noun: 'faixa(s)', allLabel: 'Todas as faixas' }, () => desenhar(g('ct-dia')._todas || [])); }
   // Analista: botão "Chamar Clientes" e clique no celular da tabela (WhatsApp com a mensagem pronta)
   if (g('ct-chamar')) g('ct-chamar').addEventListener('click', () => {
-    if (!atuais.length) { toast('Nenhuma ordem nesse filtro.', 'aviso'); return; }
-    abrirChamarClientes(atuais, contatoDe, g('ct-dia').value, fmtLimite);
+    const todas = g('ct-dia')._todas || [];
+    if (!todas.length) { toast('Nenhuma ordem nesse dia.', 'aviso'); return; }
+    abrirChamarClientes(todas, g('ct-dia').value, fmtLimite, leFiltros());
   });
   g('ct-body').addEventListener('click', async ev => {
     const a = ev.target.closest('a.ct-chamar'); if (!a) return; ev.preventDefault();
