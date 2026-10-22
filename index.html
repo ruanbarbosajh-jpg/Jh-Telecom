@@ -4594,7 +4594,14 @@ async function importarCsvAtividadesPeloMenu(f) {
   if (r.erro) { toast(String(r.erro).replace(/<[^>]*>/g, ''), 'erro', 7000); return; }
   const comp = complementarProducaoDoCsv(texto, f.name);
   toast(`${r.total} atividades importadas de ${f.name}${comp ? ' · Produção/Prazo atualizados' : ''}${supa ? ' — salvando…' : ''}`, 'ok', 5000);
-  if (ROTAS_COM_PCR.has(ROTA_ATUAL.nome)) navigate(ROTA_ATUAL.nome);
+  if (ROTAS_COM_PCR.has(ROTA_ATUAL.nome)) {
+    // 22/10/2026 (pedido do cliente: "o mapa deve atualizar a cada importação do CSV"): a tela é refeita com o CSV novo, mas o filtro de dia lembrado
+    // (PCR, Contatos, Relatório do Dia…) segurava o dia antigo e o mapa seguia mostrando o dia de antes — passa pro dia que acabou de entrar
+    // (o `navigate` guarda os filtros da tela ANTES de refazê-la, então o dia novo é posto no próprio campo, não só na memória)
+    const novo = (r.dias || []).slice(-1)[0];
+    if (novo) document.querySelectorAll('#content select[id$="-dia"]').forEach(sel => { if (![...sel.options].some(o => o.value === novo)) sel.add(new Option(novo, novo)); sel.value = novo; });
+    navigate(ROTA_ATUAL.nome);
+  }
   if (r.syncPromise) r.syncPromise.then(res => toast(res && res.ok ? 'CSV salvo no servidor (todo mundo vê).' : 'Não consegui salvar no servidor — vale só nesta sessão.', res && res.ok ? 'ok' : 'erro', 5000));
 }
 function ligarImportarCsvLateral() {
@@ -14829,6 +14836,9 @@ function renderPCR(modoArg) {
       // dias já encerrados (anteriores a hoje) também vão pra Produção/Prazo: retornos e prazos do dia anterior ficam certos sem depender da planilha
       const comp = complementarProducaoDoCsv(String(leitor.result), f.name);
       renderPCR(modo);
+      // o mapa (e tudo da tela) passa pro dia que acabou de ser importado, mesmo que não seja o mais recente já salvo
+      { const sel = document.getElementById('pcr-dia'), nv = (r.dias || []).slice(-1)[0];
+        if (sel && nv && sel.value !== nv && [...sel.options].some(o => o.value === nv)) { sel.value = nv; const ap = document.getElementById('pcr-apply'); if (ap) ap.click(); } }
       const compTxt = comp ? ` <span style="color:var(--success)">· Produção/Prazo atualizados com as concluídas de ${comp.dias.map(formatDate).join(', ')} (${comp.producao} ordem(ns), ${comp.retornos.IFI} IFI, ${comp.retornos.IRR} IRR)</span>` : '';
       const msg2 = document.getElementById('pcr-msg');
       msg2.innerHTML = `<span style="color:var(--success)">${r.total} atividades importadas de ${f.name}</span>${compTxt}`
