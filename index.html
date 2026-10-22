@@ -2651,6 +2651,7 @@
   .btn-importar-lateral { margin: 0 12px 12px; width: calc(100% - 24px); padding: 11px 12px; border-radius: 10px; border: 1.5px dashed color-mix(in srgb, var(--nav-inactive) 60%, transparent); background: transparent; color: var(--nav-inactive); font-weight: 700; font-size: 13px; cursor: pointer; text-align: center; }
   .btn-importar-lateral:hover { background: var(--nav-hover-bg); color: var(--text-primary); border-style: solid; }
   .btn-importar-lateral[hidden] { display: none; }
+  .btn-importar-lateral .importar-ultima { display: block; margin-top: 4px; font-size: 11px; font-weight: 600; opacity: .8; }
   .btn-instalar-lateral { margin: 0 12px 10px; justify-content: center; display: flex; gap: 8px; align-items: center; }
   .btn-instalar-lateral[hidden] { display: none; }
   .topico-filtros { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin: -6px 0 16px; padding: 10px 12px; border-radius: 10px; background: var(--card-bg-2, var(--card-bg)); border: 1px dashed var(--border); }
@@ -4606,6 +4607,7 @@ async function importarCsvAtividadesPeloMenu(f) {
     if (novo) document.querySelectorAll('#content select[id$="-dia"]').forEach(sel => { if (![...sel.options].some(o => o.value === novo)) sel.add(new Option(novo, novo)); sel.value = novo; });
     navigate(ROTA_ATUAL.nome);
   }
+  atualizarRotuloImportacao();
   if (r.syncPromise) r.syncPromise.then(res => toast(res && res.ok ? 'CSV salvo no servidor (todo mundo vê).' : 'Não consegui salvar no servidor — vale só nesta sessão.', res && res.ok ? 'ok' : 'erro', 5000));
 }
 function ligarImportarCsvLateral() {
@@ -14447,7 +14449,26 @@ const ROTAS_SEM_BOTAO_ATUALIZAR = new Set(['import']);
 let DADOS_LIDOS_EM = null;          // quando este navegador leu o banco pela última vez
 let ATUALIZANDO_PELO_BOTAO = false;
 function horaCurtaPtBr(ms) { return new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); }
-function textoDadosLidosEm() { return DADOS_LIDOS_EM ? `Dados de ${horaCurtaPtBr(DADOS_LIDOS_EM)}` : ''; }
+// 22/10/2026 (pedido do cliente): o rótulo do topo deixou de ser "Dados de HH:MM" (hora em que ESTE navegador leu o banco) e passou a mostrar a ÚLTIMA IMPORTAÇÃO do CSV de atividades
+// (o carimbo mais recente do PCR — `ultimaAtualizacaoPCR()`, o mesmo do card "Última importação (geral)"); o mesmo texto aparece dentro do botão pontilhado "Importar CSV" da barra lateral.
+function dataHoraCurtaPtBr(d) {
+  const p = n => String(n).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function textoUltimaImportacao() {
+  let u = null; try { u = ultimaAtualizacaoPCR(); } catch (e) { /* PCR ainda não carregou */ }
+  return u ? dataHoraCurtaPtBr(u.quando) : '';
+}
+function textoDadosLidosEm() { const t = textoUltimaImportacao(); return t ? `Última importação: ${t}` : ''; }
+// atualiza os dois lugares (rótulo do topo e botão pontilhado da barra lateral); chamado ao abrir tela, ao atualizar e depois de importar
+function atualizarRotuloImportacao() {
+  const st = document.getElementById('atualizar-status'); if (st) st.textContent = textoDadosLidosEm();
+  const b = document.getElementById('btn-importar-csv');
+  if (b) {
+    const t = textoUltimaImportacao();
+    b.innerHTML = `📥 Importar CSV de atividades<small class="importar-ultima">${t ? 'Última importação: ' + t : 'Nenhuma importação ainda'}</small>`;
+  }
+}
 function rotuloBotaoAtualizar(btn, ocupado) {
   if (!btn) return;
   btn.disabled = !!ocupado;
@@ -14458,6 +14479,7 @@ function rotuloBotaoAtualizar(btn, ocupado) {
 // (cliente, 01/10/2026: "esta muito bagunçado ... o botao de atualizar no topo").
 // Sai sozinho nas telas que não são essas três.
 function adicionarBotaoAtualizar(route) {
+  atualizarRotuloImportacao();
   const antigo = document.getElementById('topo-atualizar');
   if (antigo) antigo.remove();
   if (ROTAS_SEM_BOTAO_ATUALIZAR.has(route) || !supa || !currentUser) return;
@@ -14530,7 +14552,7 @@ async function atualizarPeloBotao() {
   if (!mudou) {
     toast('Já está atualizado — nenhuma importação nova.', 'ok', 3000);
     rotuloBotaoAtualizar(btn, false);
-    const st = document.getElementById('atualizar-status'); if (st) st.textContent = textoDadosLidosEm();
+    atualizarRotuloImportacao();
     return;
   }
   const y = window.scrollY;
