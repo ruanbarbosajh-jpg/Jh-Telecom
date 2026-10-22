@@ -2991,6 +2991,7 @@
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand"><h1>JH <span class="brand-gradient-text">TELECOM</span></h1><p>OPERATIONS</p></div>
     <button type="button" class="btn-importar-lateral" id="btn-importar-csv" hidden title="Escolha o CSV de atividades: ele já é importado (PCR, retornos e prazos)">📥 Importar CSV de atividades</button><input type="file" id="menu-csv-pcr" accept=".csv,text/csv" hidden>
+    <button type="button" class="btn-importar-lateral" id="btn-pasta-csv" hidden title="Escolha UMA vez a pasta onde você salva os CSVs do OFS (ex.: BASE DE DADOS): o sistema importa sozinho os que ainda não entraram">📂 Pasta de CSVs (automático)</button>
     <nav class="sidebar-nav" id="sidebar-nav">
       <!-- Fica no TOPO e destacado de propósito (pedido do cliente): é a tela
            que abre a reunião técnica, então precisa ser a primeira coisa que a
@@ -4586,18 +4587,20 @@ function aplicarRotulosDoPerfil() {
 }
 // ---- Importar CSV de atividades direto da barra lateral (20/10/2026, pedido do cliente: "quando clicar já importar o arquivo") ----
 // Mesmo caminho da tela PCR (trava de importação → importarCsvPCR → Produção/Prazo dos dias anteriores → salva no servidor), sem precisar abrir a PCR.
-async function importarCsvAtividadesPeloMenu(f) {
-  if (!f) return;
-  toast('Lendo ' + f.name + '…', 'ok', 2000);
-  let texto = ''; try { texto = await f.text(); } catch (e) { toast('Não consegui ler o arquivo.', 'erro'); return; }
+// Devolve true quando o arquivo entrou (e já foi salvo, bem ou mal) e false quando não entrou — a leitura da pasta usa isso pra não marcar como importado o que ficou de fora.
+async function importarCsvAtividadesPeloMenu(f, opts) {
+  opts = opts || {};
+  if (!f) return false;
+  if (!opts.fila) toast('Lendo ' + f.name + '…', 'ok', 2000);
+  let texto = ''; try { texto = await f.text(); } catch (e) { toast('Não consegui ler o arquivo.', 'erro'); return false; }
   const trava = await pcrTravaPegar();
-  if (!trava.ok) { toast(String(pcrTravaAviso(trava)).replace(/<[^>]*>/g, ''), 'aviso', 7000); return; }
+  if (!trava.ok) { toast(String(pcrTravaAviso(trava)).replace(/<[^>]*>/g, ''), 'aviso', 7000); return false; }
   const r = importarCsvPCR(texto);
   if (r.erro || !r.syncPromise) pcrTravaSoltar(); else r.syncPromise.then(pcrTravaSoltar, pcrTravaSoltar);
-  if (r.erro) { toast(String(r.erro).replace(/<[^>]*>/g, ''), 'erro', 7000); return; }
+  if (r.erro) { toast(String(r.erro).replace(/<[^>]*>/g, ''), 'erro', 7000); return false; }
   const comp = complementarProducaoDoCsv(texto, f.name);
-  toast(`${r.total} atividades importadas de ${f.name}${comp ? ' · Produção/Prazo atualizados' : ''}${supa ? ' — salvando…' : ''}`, 'ok', 5000);
-  if (ROTAS_COM_PCR.has(ROTA_ATUAL.nome)) {
+  if (!opts.fila) toast(`${r.total} atividades importadas de ${f.name}${comp ? ' · Produção/Prazo atualizados' : ''}${supa ? ' — salvando…' : ''}`, 'ok', 5000);
+  if (!opts.fila && ROTAS_COM_PCR.has(ROTA_ATUAL.nome)) {
     // 22/10/2026 (pedido do cliente: "o mapa deve atualizar a cada importação do CSV"): a tela é refeita com o CSV novo, mas o filtro de dia lembrado
     // (PCR, Contatos, Relatório do Dia…) segurava o dia antigo e o mapa seguia mostrando o dia de antes — passa pro dia que acabou de entrar
     // (o `navigate` guarda os filtros da tela ANTES de refazê-la, então o dia novo é posto no próprio campo, não só na memória)
@@ -4605,7 +4608,110 @@ async function importarCsvAtividadesPeloMenu(f) {
     if (novo) document.querySelectorAll('#content select[id$="-dia"]').forEach(sel => { if (![...sel.options].some(o => o.value === novo)) sel.add(new Option(novo, novo)); sel.value = novo; });
     navigate(ROTA_ATUAL.nome);
   }
-  if (r.syncPromise) r.syncPromise.then(res => toast(res && res.ok ? 'CSV salvo no servidor (todo mundo vê).' : 'Não consegui salvar no servidor — vale só nesta sessão.', res && res.ok ? 'ok' : 'erro', 5000));
+  if (r.syncPromise) {
+    const res = await r.syncPromise.catch(() => null);
+    if (!opts.fila) toast(res && res.ok ? 'CSV salvo no servidor (todo mundo vê).' : 'Não consegui salvar no servidor — vale só nesta sessão.', res && res.ok ? 'ok' : 'erro', 5000);
+  }
+  return true;
+}
+// ---- PASTA DE CSVs (22/10/2026, pedido do cliente: automatizar o "exporta do OFS → coloca na BASE DE DADOS → importa") ----
+// O OFS não tem API liberada e o login é pelo Microsoft Authenticator, então o download do CSV continua sendo da pessoa. O que o sistema faz sozinho é o RESTO:
+// a pessoa escolhe UMA vez a pasta onde salva os CSVs (File System Access API — Chrome/Edge); a cada entrada no sistema (e no botão) ele lê a pasta e importa
+// os "Atividades-*.csv" que ainda não entraram, pelo MESMO caminho do botão "Importar CSV de atividades" (PCR + Produção/Prazo dos dias anteriores).
+// A pasta fica guardada no navegador (IndexedDB) junto com a lista do que já foi importado (nome + tamanho + data do arquivo). Outro computador/navegador = escolher de novo.
+const PASTA_CSV_CHAVE = 'pasta_csv_handle', PASTA_CSV_VISTOS = 'pasta_csv_vistos', PASTA_CSV_DIAS_INICIAIS = 7;
+let PASTA_CSV_LENDO = false;
+const pastaCsvSuportada = () => typeof window.showDirectoryPicker === 'function';
+const pastaCsvChave = f => `${f.name}|${f.size}|${f.lastModified}`;
+async function pastaCsvListar(dir) {
+  const arqs = [];
+  for await (const [nome, h] of dir.entries()) {
+    if (h.kind !== 'file' || !/\.csv$/i.test(nome) || !/^atividades/i.test(nome)) continue;
+    try { arqs.push(await h.getFile()); } catch (e) { /* arquivo aberto/apagado no meio: pula */ }
+  }
+  return arqs.sort((a, b) => a.lastModified - b.lastModified || a.name.localeCompare(b.name));
+}
+// opts.gesto = true quando veio de um clique (só então o navegador deixa PEDIR permissão); sem gesto só lê se a permissão já está concedida
+async function pastaCsvLer(opts) {
+  opts = opts || {};
+  if (PASTA_CSV_LENDO) return { ocupado: true };
+  PASTA_CSV_LENDO = true;
+  try {
+    const reg = await cacheLer(PASTA_CSV_CHAVE);
+    const dir = reg && reg.handle;
+    if (!dir) return { semPasta: true };
+    let perm = await dir.queryPermission({ mode: 'read' });
+    if (perm !== 'granted' && opts.gesto) perm = await dir.requestPermission({ mode: 'read' });
+    if (perm !== 'granted') return { precisaLiberar: true, nome: dir.name };
+    const vistosReg = (await cacheLer(PASTA_CSV_VISTOS)) || { chaves: [] };
+    const vistos = new Set(vistosReg.chaves || []);
+    const arqs = await pastaCsvListar(dir);
+    // primeira leitura desta pasta: só os dos últimos dias entram (a pasta tem meses de arquivos antigos que já estão no banco); o resto vira "visto"
+    const primeira = !reg.leuUmaVez;
+    const corte = Date.now() - PASTA_CSV_DIAS_INICIAIS * 86400000;
+    const novos = [];
+    for (const f of arqs) {
+      const k = pastaCsvChave(f);
+      if (vistos.has(k)) continue;
+      if (primeira && f.lastModified < corte) { vistos.add(k); continue; }
+      novos.push(f);
+    }
+    let importados = 0, falhas = 0;
+    for (const f of novos) {
+      const ok = await importarCsvAtividadesPeloMenu(f, { fila: true }).catch(() => false);
+      if (ok) { vistos.add(pastaCsvChave(f)); importados++; } else falhas++;
+    }
+    await cacheGravar(PASTA_CSV_VISTOS, { chaves: [...vistos].slice(-3000) });
+    if (primeira) await cacheGravar(PASTA_CSV_CHAVE, { handle: dir, leuUmaVez: true });
+    return { importados, falhas, total: arqs.length, nome: dir.name, nomes: novos.map(f => f.name) };
+  } catch (e) {
+    return { erro: String((e && e.message) || e) };
+  } finally { PASTA_CSV_LENDO = false; }
+}
+function pastaCsvAvisar(r, manual) {
+  if (!r || r.ocupado) return;
+  if (r.erro) { if (manual) toast('Não consegui ler a pasta: ' + r.erro, 'erro', 7000); return; }
+  if (r.semPasta) return;
+  if (r.precisaLiberar) { toast(`Pasta de CSVs "${r.nome}": clique em 📂 Pasta de CSVs (automático) pra liberar a leitura de hoje.`, 'aviso', 9000); return; }
+  if (r.importados) {
+    toast(`📂 ${r.importados} CSV(s) novo(s) importado(s) da pasta "${r.nome}"${r.falhas ? ` · ${r.falhas} não entrou(entraram)` : ''}.`, 'ok', 7000);
+    if (ROTAS_COM_PCR.has(ROTA_ATUAL.nome)) navigate(ROTA_ATUAL.nome);
+  } else if (r.falhas) toast(`${r.falhas} CSV(s) da pasta não entraram (outra pessoa importando?). Tente de novo em instantes.`, 'aviso', 7000);
+  else if (manual) toast(`Pasta "${r.nome}": nenhum CSV novo (${r.total} arquivo(s) já importados).`, 'ok', 5000);
+}
+async function pastaCsvEscolher() {
+  if (!pastaCsvSuportada()) { toast('Este navegador não deixa o sistema ler pastas. Use o Chrome ou o Edge no computador.', 'aviso', 7000); return; }
+  const reg = await cacheLer(PASTA_CSV_CHAVE);
+  if (reg && reg.handle) { pastaCsvAvisar(await pastaCsvLer({ gesto: true }), true); return; }
+  let dir;
+  try { dir = await window.showDirectoryPicker({ id: 'jh-base-de-dados', mode: 'read' }); } catch (e) { return; /* cancelou */ }
+  await cacheGravar(PASTA_CSV_CHAVE, { handle: dir, leuUmaVez: false });
+  toast(`Pasta "${dir.name}" escolhida. Lendo os CSVs dos últimos ${PASTA_CSV_DIAS_INICIAIS} dias…`, 'ok', 4000);
+  pastaCsvAvisar(await pastaCsvLer({ gesto: true }), true);
+}
+// botão: o rótulo mostra a pasta escolhida; clicar lê a pasta (e pede permissão, se precisar). Segurar Shift (ou clicar com o botão direito) escolhe outra pasta.
+async function pastaCsvAtualizarBotao() {
+  const b = document.getElementById('btn-pasta-csv'); if (!b) return;
+  const pode = currentUser && podeAcessar(currentUser.role, 'pcr') && pastaCsvSuportada();
+  b.hidden = !pode; if (!pode) return;
+  const reg = await cacheLer(PASTA_CSV_CHAVE);
+  b.textContent = reg && reg.handle ? `📂 Pasta: ${reg.handle.name} · ler agora` : '📂 Pasta de CSVs (automático)';
+}
+function ligarPastaCsvLateral() {
+  const b = document.getElementById('btn-pasta-csv'); if (!b || b.dataset.ligado) return;
+  b.dataset.ligado = '1';
+  b.addEventListener('click', async e => {
+    if (e.shiftKey) { await cacheGravar(PASTA_CSV_CHAVE, null); }
+    await pastaCsvEscolher();
+    pastaCsvAtualizarBotao();
+  });
+  b.addEventListener('contextmenu', async e => { e.preventDefault(); await cacheGravar(PASTA_CSV_CHAVE, null); await cacheGravar(PASTA_CSV_VISTOS, { chaves: [] }); await pastaCsvEscolher(); pastaCsvAtualizarBotao(); });
+}
+// ao entrar no sistema: se já existe pasta e a permissão continua valendo, importa o que chegou desde a última vez, sem ninguém clicar
+async function pastaCsvAoEntrar() {
+  ligarPastaCsvLateral(); pastaCsvAtualizarBotao();
+  if (!pastaCsvSuportada() || !currentUser || !podeAcessar(currentUser.role, 'pcr')) return;
+  pastaCsvAvisar(await pastaCsvLer({ gesto: false }), false);
 }
 function ligarImportarCsvLateral() {
   const b = document.getElementById('btn-importar-csv'), inp = document.getElementById('menu-csv-pcr'); if (!b || !inp || b.dataset.ligado) return;
@@ -4864,6 +4970,7 @@ async function abrirSistema(user) {
   navigate(rotaDeEntrada(user));
   mostrarAvisoSupabase();
   try { mostrarBalaoCsvEscritorio(); } catch (e) { /* o balão não pode derrubar o login */ }
+  try { setTimeout(() => { pastaCsvAoEntrar().catch(() => {}); }, 2500); } catch (e) { /* idem */ }
   try { if (podeEditarFolhaPagamento()) setTimeout(() => { recuperarRascunhoFolha().catch(() => {}); }, 3000); } catch (e) { /* idem */ }
 }
 // BALÃO DO ESCRITÓRIO (19/10/2026, pedido do cliente): ao logar, explica que o CSV de atividades da PCR atualiza os retornos e prazos do dia
