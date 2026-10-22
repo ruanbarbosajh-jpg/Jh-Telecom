@@ -9046,6 +9046,11 @@ document.addEventListener('click', e => {
 // possível ocultar".
 // seções que a pessoa ocultou (modo novo): chave = rota + título. Sobrevive ao Filtrar e a trocar de aba; some no F5.
 const SECOES_OCULTAS = new Set();
+// 22/10/2026 (pedido do cliente, com print do Relatório Geral todo em "▸ exibir"): nessas telas os TÓPICOS nascem OCULTOS assim que a pessoa entra no sistema —
+// só o título de cada um aparece e ela abre o que quer ver. Vale na PRIMEIRA vez que o tópico aparece na sessão; depois o que a pessoa abriu/fechou é lembrado
+// (SECOES_OCULTAS) até o F5. Tela nova que deva nascer assim = acrescentar a rota aqui.
+const ROTAS_TOPICOS_NASCEM_OCULTOS = new Set(['relgeral']);
+const SECOES_JA_VISTAS = new Set();
 function ativarTogglesDeSecao(raiz) {
   const alvo = raiz || document.getElementById('content');
   if (!alvo) return;
@@ -9053,6 +9058,10 @@ function ativarTogglesDeSecao(raiz) {
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'secao-toggle'; b.textContent = '▾ ocultar';
     const chave = modoNovo() && tituloEl ? (ROTA_ATUAL.nome || '') + '|' + normalizeHeader(textoDoTitulo(tituloEl)) : null;
+    if (chave && !SECOES_JA_VISTAS.has(chave)) {
+      SECOES_JA_VISTAS.add(chave);
+      if (ROTAS_TOPICOS_NASCEM_OCULTOS.has(ROTA_ATUAL.nome) && tituloEl.classList.contains('section-heading')) SECOES_OCULTAS.add(chave);
+    }
     b.addEventListener('click', () => {
       const escondido = alvos[0].classList.contains('secao-oculta');
       alvos.forEach(a => a.classList.toggle('secao-oculta', !escondido));
@@ -19787,6 +19796,8 @@ function relGeralMax(chamados, s, e, cidadeOk, criterio, tipoFiltro) {
   const somaBate = lista.every(c => c.conc + c.naoConc === c.max && c.prod + c.improd + c.outros === c.max);
   return { lista, dist, info, somaBate };
 }
+// "x% dos clientes" dos cartões MAX (22/10/2026, pedido do cliente: "em MAX — reincidência de reparos por cliente me mostre % também")
+const pctClientesMax = (n, total) => total ? `${formatPct(n / total * 100, 1)} dos clientes` : '';
 // resumo por quantidade de chamados (MAX 2, MAX 3…) — mesmo formato da planilha que o cliente usa (09/10/2026)
 function htmlResumoMax(lista, idTab) {
   const por = new Map();
@@ -19794,9 +19805,12 @@ function htmlResumoMax(lista, idTab) {
   const linhas = [...por.values()].sort((a, b) => a.max - b.max);
   if (!linhas.length) return '';
   const t = linhas.reduce((a, l) => { ['clientes', 'reparos', 'conc', 'improd', 'outros'].forEach(k => { a[k] += l[k]; }); return a; }, { clientes: 0, reparos: 0, conc: 0, improd: 0, outros: 0 });
-  return `<div class="panel"><h3>Resumo por MAX (clientes reincidentes)</h3><p class="panel-subtitle">Reparos = nº de clientes × MAX. Concluídos + improdutivos + cancelados/em aberto = reparos.</p><div class="table-wrap"><table class="data-table" id="${idTab}"><thead><tr><th>Tipo</th><th>Nº de clientes</th><th>Reparos</th><th>Concluídos</th><th>Improdutivos</th><th>Cancelados / em aberto</th></tr></thead><tbody>
-    ${linhas.map(l => `<tr><td class="cat-cell">MAX ${l.max}</td><td style="font-weight:700">${l.clientes}</td><td>${l.reparos}</td><td style="color:var(--success);font-weight:600">${l.conc}</td><td>${l.improd}</td><td>${l.outros}</td></tr>`).join('')}
-    <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${t.clientes}</td><td>${t.reparos}</td><td>${t.conc}</td><td>${t.improd}</td><td>${t.outros}</td></tr></tbody></table></div></div>`;
+  // % sobre TODOS os clientes com reparo e TODOS os reparos do período (não só os reincidentes), e a divisão dos reparos de cada linha em concluídos / improdutivos / cancelados-em aberto
+  const totCli = lista.length, totRep = lista.reduce((a, c) => a + c.max, 0);
+  const pc = (n, d) => d ? formatPct(n / d * 100, 1) : '-';
+  return `<div class="panel"><h3>Resumo por MAX (clientes reincidentes)</h3><p class="panel-subtitle">Reparos = nº de clientes × MAX. Concluídos + improdutivos + cancelados/em aberto = reparos. "% dos clientes" e "% dos reparos" são sobre TODOS os clientes e reparos do período (não só os reincidentes); os demais % são sobre os reparos da própria linha.</p><div class="table-wrap"><table class="data-table" id="${idTab}"><thead><tr><th>Tipo</th><th>Nº de clientes</th><th>% dos clientes</th><th>Reparos</th><th>% dos reparos</th><th>Concluídos</th><th>% concluídos</th><th>Improdutivos</th><th>% improdutivos</th><th>Cancelados / em aberto</th><th>% cancel. / em aberto</th></tr></thead><tbody>
+    ${linhas.map(l => `<tr><td class="cat-cell">MAX ${l.max}</td><td style="font-weight:700">${l.clientes}</td><td>${pc(l.clientes, totCli)}</td><td>${l.reparos}</td><td>${pc(l.reparos, totRep)}</td><td style="color:var(--success);font-weight:600">${l.conc}</td><td>${pc(l.conc, l.reparos)}</td><td>${l.improd}</td><td>${pc(l.improd, l.reparos)}</td><td>${l.outros}</td><td>${pc(l.outros, l.reparos)}</td></tr>`).join('')}
+    <tr class="total-row"><td class="cat-cell">TOTAL</td><td>${t.clientes}</td><td>${pc(t.clientes, totCli)}</td><td>${t.reparos}</td><td>${pc(t.reparos, totRep)}</td><td>${t.conc}</td><td>${pc(t.conc, t.reparos)}</td><td>${t.improd}</td><td>${pc(t.improd, t.reparos)}</td><td>${t.outros}</td><td>${pc(t.outros, t.reparos)}</td></tr></tbody></table></div></div>`;
 }
 // motivo com o principal ofensor; clicar no motivo abre todos os ofensores (Relatório Geral e Operacional, 09/10/2026)
 function principalOfensorTxt(tec) {
@@ -20315,10 +20329,10 @@ function renderRelatorioGeral() {
       ${nota(`Só <b>reparo</b>. Cada cliente (ID = número do contrato) é contado pela quantidade de chamados de reparo <b>${crit === 'abertura' ? 'abertos' : 'atendidos'}</b> ${maxHoje ? '' : 'de '}${esc(maxPeriodoTxt)}, concluídos ou não — uma vez por O.S. Concluído = produtivo; improdutivo = "Não Concluído" (é o mesmo status, só muda o nome); o resto (cancelado, pendente, em rota…) vai em "Cancelados / em aberto".`)}
       <div class="cards-grid">
         ${metricCard('Clientes com reparo', fmtN(mx.lista.length), false, { sub: `${fmtN(mx.info.considerados)} reparos (O.S únicas)` })}
-        ${metricCard('MAX 1', fmtN(mx.dist[1]), false, {})}
-        ${metricCard('MAX 2', fmtN(mx.dist[2]), mx.dist[2] > 0, {})}
-        ${metricCard('MAX 3', fmtN(mx.dist[3]), mx.dist[3] > 0, {})}
-        ${metricCard('MAX 4 ou mais', fmtN(mx.dist[4]), mx.dist[4] > 0, { sub: mx.lista.length ? `maior: MAX ${mx.lista[0].max}` : '' })}
+        ${metricCard('MAX 1', fmtN(mx.dist[1]), false, { sub: pctClientesMax(mx.dist[1], mx.lista.length) })}
+        ${metricCard('MAX 2', fmtN(mx.dist[2]), mx.dist[2] > 0, { sub: pctClientesMax(mx.dist[2], mx.lista.length) })}
+        ${metricCard('MAX 3', fmtN(mx.dist[3]), mx.dist[3] > 0, { sub: pctClientesMax(mx.dist[3], mx.lista.length) })}
+        ${metricCard('MAX 4 ou mais', fmtN(mx.dist[4]), mx.dist[4] > 0, { sub: [pctClientesMax(mx.dist[4], mx.lista.length), mx.lista.length ? `maior: MAX ${mx.lista[0].max}` : ''].filter(Boolean).join(' · ') })}
         ${metricCard('Clientes reincidentes (MAX ≥ 2)', fmtN(reinc), reinc > 0, { sub: mx.lista.length ? `${formatPct(pctSobre(reinc, mx.lista.length), 1)} dos clientes` : '' })}
       </div>
       ${htmlResumoMax(mx.lista, 'rg-tab-max-resumo')}
