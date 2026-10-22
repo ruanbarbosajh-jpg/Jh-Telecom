@@ -10874,7 +10874,14 @@ function datasDoPeriodoFolha(periodo) {
 function periodoMaisRecenteFolha() {
   const nomeados = [...new Set(DB.folhaPagamento.map(r => r.periodo).filter(p => p && p !== SEM_PERIODO_FOLHA))]
     .sort((a, b) => String(datasDoPeriodoFolha(b).fim || '').localeCompare(String(datasDoPeriodoFolha(a).fim || '')));
-  return nomeados[0] || '';
+  // 22/10/2026 (pedido do cliente: "quando abrir a aba de folha é pra aparecer o atual, no caso 21/09 a 20/10, porque ainda não foi fechado"):
+  // o ciclo novo (21/10–20/11) nasce sozinho assim que a Produção chega, mas a folha que ainda está sendo conferida e paga é a do ciclo que ACABOU
+  // de terminar. Enquanto ele não for FECHADO, é ele a "folha atual"; fechado, passa pro ciclo em andamento. Só olha o ciclo imediatamente anterior
+  // (um ciclo antigo que nunca foi fechado não pode puxar a tela pra trás).
+  const hoje = hojeISOLocal(), terminou = per => { const f = datasDoPeriodoFolha(per).fim; return !!f && f < hoje; };
+  const topo = nomeados[0] || '';
+  if (topo && !terminou(topo)) { const anterior = nomeados[1]; if (anterior && terminou(anterior) && !folhaFechada(anterior)) return anterior; }
+  return topo;
 }
 // Tabela "Serviços concluídos e valor a receber (GIGA → JH)" — mesma conta do
 // painel "Valor pago pela GIGA" do Relatório de Eficiência/Resumo Geral (ver
@@ -25337,7 +25344,7 @@ function renderFolhaPagamento(modo) {
   // mesmo técnico aparecia uma vez por ciclo e parecia linha duplicada — foi
   // exatamente a dúvida do cliente em 03/09/2026 (dois "MARCO AURÉLIO", um com
   // 258 ordens e outro com 232: eram dois fechamentos diferentes).
-  const periodoPadraoFolha = periodosNomeados[0] || '';
+  const periodoPadraoFolha = periodoMaisRecenteFolha() || periodosNomeados[0] || '';
   // Filtros do bloco do Escritório (só no Relatório — pedido do cliente
   // 14/09/2026: "colocar o do escritório também, com filtro de tempo e
   // colaborador separado"). Separado dos filtros de Técnico/Período de cima
