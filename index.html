@@ -647,6 +647,7 @@
   #modal-chamar .chm-linha { display: grid; grid-template-columns: 28px minmax(150px, 1.2fr) minmax(170px, 1.2fr) minmax(200px, 2fr) minmax(130px, 1fr) 150px; gap: 6px 14px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13.5px; }
   #modal-chamar .chm-linha.chm-chamado { background: color-mix(in srgb, #16a34a 9%, transparent); }
   #modal-chamar .chm-linha.chm-reagendou { background: color-mix(in srgb, #f59e0b 13%, transparent); }
+  #modal-chamar .chm-por { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
   #modal-chamar select.chm-st { width: 100%; padding: 5px 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text-primary); font-size: 13px; font-weight: 600; }
   #modal-chamar [hidden] { display: none !important; }
   #modal-chamar .toolbar { overflow: visible; }
@@ -16273,9 +16274,43 @@ function waAbrir(celular, texto, destino) {
 }
 // situação de cada cliente na lista (22/10/2026, pedido do cliente): Não chamado / Chamado / Cliente reagendou — fica neste navegador por 3 dias
 const WA_ST = { nao: 'Não chamado', chamado: 'Chamado', reagendou: 'Cliente reagendou' };
-function waStatusTodos() { try { const o = JSON.parse(localStorage.getItem(WA_STATUS_CHAVE) || '{}'), lim = Date.now() - 3 * 86400000; Object.keys(o).forEach(k => { if (!o[k] || (o[k].t || 0) < lim) delete o[k]; }); return o; } catch (e) { return {}; } }
+// 22/10/2026 (pedido do cliente: "quero que seja possível ver as marcações de todos, algo realmente compartilhado"): as marcações moram no banco
+// (tabela `contatos_chamadas`, sql/PASSO-63; uma linha por ordem do dia, chave "dia|contrato|O.S"; "Não chamado" = sem linha) e todo mundo vê as dos outros
+// (a janela e a tabela releem a cada 20 s). Sem o SQL rodado (ou sem banco) cai pro navegador local, como antes, e a janela avisa.
+const CHAMADAS = { mapa: new Map(), semTabela: false, avisou: false };
+const waCompartilhado = () => !!supa && !CHAMADAS.semTabela;
+function waQuemChama() { try { return (localStorage.getItem('jh_wa_nome') || '').trim() || (currentUser && (currentUser.nome || currentUser.login)) || 'Escritório'; } catch (e) { return 'Escritório'; } }
+function waStatusLocal() { try { const o = JSON.parse(localStorage.getItem(WA_STATUS_CHAVE) || '{}'), lim = Date.now() - 3 * 86400000; Object.keys(o).forEach(k => { if (!o[k] || (o[k].t || 0) < lim) delete o[k]; }); return o; } catch (e) { return {}; } }
+function waSetLocal(chave, st) { try { const o = waStatusLocal(); if (st === 'nao') delete o[chave]; else o[chave] = { s: st, t: Date.now(), por: waQuemChama() }; localStorage.setItem(WA_STATUS_CHAVE, JSON.stringify(o)); } catch (e) { /* só deixa de lembrar */ } }
+function waStatusTodos() {
+  if (!waCompartilhado()) return waStatusLocal();
+  const o = {}; CHAMADAS.mapa.forEach((v, k) => { o[k] = { s: v.s, t: v.em ? +new Date(v.em) : Date.now(), por: v.por || '' }; }); return o;
+}
 function waStatusDe(chave, todos) { const x = (todos || waStatusTodos())[chave]; return x && WA_ST[x.s] ? x.s : 'nao'; }
-function waSetStatus(chave, st) { try { const o = waStatusTodos(); if (st === 'nao') delete o[chave]; else o[chave] = { s: st, t: Date.now() }; localStorage.setItem(WA_STATUS_CHAVE, JSON.stringify(o)); } catch (e) { /* só deixa de lembrar */ } }
+// relê do banco as marcações de UM dia; devolve true se algo mudou desde a última leitura
+async function chamadasCarregar(dia) {
+  if (!supa || CHAMADAS.semTabela || !dia) return false;
+  try {
+    const { data, error } = await supa.from('contatos_chamadas').select('chave,situacao,por,atualizado_em').eq('dia', dia);
+    if (error) { if (/relation|does not exist|42P01|schema cache|PGRST205/i.test(String(error.message || error.code || ''))) CHAMADAS.semTabela = true; return false; }
+    const m = new Map(); (data || []).forEach(r => m.set(r.chave, { s: r.situacao, por: r.por || '', em: r.atualizado_em }));
+    const mudou = JSON.stringify([...m]) !== JSON.stringify([...CHAMADAS.mapa]); CHAMADAS.mapa = m; return mudou;
+  } catch (e) { return false; }
+}
+function waSetStatus(chave, st) {
+  if (!waCompartilhado()) { waSetLocal(chave, st); return; }
+  const [dia, contrato, os] = String(chave).split('|'), agora = new Date().toISOString();
+  if (st === 'nao') CHAMADAS.mapa.delete(chave); else CHAMADAS.mapa.set(chave, { s: st, por: waQuemChama(), em: agora });   // aparece já; o servidor confirma em seguida
+  const op = st === 'nao' ? supa.from('contatos_chamadas').delete().eq('chave', chave)
+    : supa.from('contatos_chamadas').upsert({ chave, dia, contrato, os, situacao: st, por: waQuemChama(), atualizado_em: agora }, { onConflict: 'chave' });
+  Promise.resolve(op).then(({ error }) => {
+    if (!error) return;
+    if (/relation|does not exist|42P01|schema cache|PGRST205/i.test(String(error.message || error.code || ''))) {
+      CHAMADAS.semTabela = true; waSetLocal(chave, st);
+      if (!CHAMADAS.avisou) { CHAMADAS.avisou = true; toast('As marcações ainda não são compartilhadas: falta rodar o sql/PASSO-63 no Supabase. Por enquanto ficam só neste computador.', 'aviso', 8000); }
+    } else toast('Não consegui salvar a marcação no servidor — tente de novo.', 'erro', 5000);
+  }).catch(() => toast('Sem conexão: a marcação não foi salva no servidor.', 'erro', 5000));
+}
 // o clique no celular: escolhe o destino (1ª vez), abre a conversa com a mensagem, marca como Chamado
 async function waChamarCliente(celular, nome, endereco, dia, chave) {
   const destino = await waEscolherDestino(); if (!destino) return false;
@@ -16289,6 +16324,7 @@ async function waChamarCliente(celular, nome, endereco, dia, chave) {
 // conversa" abre UMA conversa e só ela é marcada como Chamado. O rascunho com a mensagem fica na conversa (aparece como "Rascunho:" na lista do WhatsApp).
 const WA_LOTE_MAX = 10;
 // quem usa o "Chamar Clientes" (WhatsApp com a mensagem pronta + filtros de escolha múltipla): Analista (22/10/2026) e Escritório (liberado no mesmo dia, pedido do cliente)
+let CT_POLL = null;   // timer que relê as marcações do Chamar Clientes
 const podeChamarClientes = () => ehAnalista() || (currentUser && perfilValido(currentUser.role) === 'escritorio');
 // ---- filtros de escolha múltipla da aba Contatos (valem na tela e na janela Chamar Clientes) ----
 // conjunto das opções MARCADAS de uma caixa de seleção (null = todas marcadas = sem filtro)
@@ -16331,6 +16367,8 @@ function abrirChamarClientes(todas, dia, fmtLimite, fPag) {
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button type="button" class="btn-secundario" id="chm-sel10" title="Marca os 10 primeiros que ainda não foram chamados">☑ Marcar os próximos ${WA_LOTE_MAX}</button>
       <button type="button" class="btn-sinalizar" id="chm-lote" title="Marque até ${WA_LOTE_MAX} clientes; cada clique abre UMA conversa no WhatsApp com a mensagem pronta"></button><button type="button" class="btn-secundario" id="chm-parar" hidden title="Cancela a fila">✖ Parar fila</button>
       <button type="button" class="btn-secundario" id="chm-fechar">Fechar</button></div></div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0 0;font-size:12.5px"><label style="display:flex;gap:6px;align-items:center">Quem está chamando <input type="text" id="chm-nome" class="topn-select" maxlength="30" placeholder="seu nome" style="width:150px"></label>
+      <span id="chm-comp" style="color:var(--text-muted)"></span></div>
     <div class="toolbar" style="margin:10px 0 4px">
       ${campo('chm-tec', 'Técnico', opTec, fPag.tecL, 'Todos os técnicos')}${campo('chm-cid', 'Cidade', opCid, fPag.cidL, 'Todas as cidades')}${campo('chm-tipo', 'Tipo de serviço', opTipo, fPag.tipoL, 'Todos os tipos')}
       ${campo('chm-prazo', 'Prazo', Object.keys(PRAZOS_CT), fPag.pzL, 'Todos os prazos')}${campo('chm-faixa', 'Faixa do prazo', Object.keys(FAIXAS_CT), fPag.fxL, 'Todas as faixas')}
@@ -16339,6 +16377,9 @@ function abrirChamarClientes(todas, dia, fmtLimite, fPag) {
     <p style="font-size:12.5px;color:var(--text-muted);margin:4px 0"><span id="chm-total"></span> Clique no <b>celular</b> do cliente: o WhatsApp abre com a mensagem pronta. <span id="chm-dest">${destAtual()}</span></p>
     <details style="margin:4px 0 8px;font-size:12.5px"><summary style="cursor:pointer;color:var(--text-secondary)">Ver a mensagem que será enviada</summary><pre id="chm-msg" style="white-space:pre-wrap;font-family:inherit;margin:6px 0 0;padding:10px;border:1px solid var(--border);border-radius:8px"></pre></details>
     <div id="chm-lista" style="max-height:62vh;overflow:auto"></div></div>`;
+  const nomeIn = m.querySelector('#chm-nome'); try { nomeIn.value = localStorage.getItem('jh_wa_nome') || ''; } catch (e) { /* sem armazenamento */ }
+  nomeIn.addEventListener('input', () => { try { localStorage.setItem('jh_wa_nome', nomeIn.value.trim()); } catch (e) { /* idem */ } });
+  const notaComp = () => { m.querySelector('#chm-comp').innerHTML = waCompartilhado() ? '🔗 As marcações são <b>compartilhadas</b>: todo mundo vê quem já foi chamado (atualiza a cada 20 s).' : `⚠ As marcações ficam só neste computador${ehAnalista() ? ' (rode o sql/PASSO-63 no Supabase pra compartilhar)' : ' — avise o Analista pra liberar o compartilhamento'}.`; };
   const rotuloLote = () => {
     const b = m.querySelector('#chm-lote'), pa = m.querySelector('#chm-parar'); if (!b) return;
     b.innerHTML = fila ? `▶ Próxima conversa (${fila.i + 1} de ${fila.itens.length})` : `📞 Chamar marcados (<span id="chm-n">${marcados.size}</span>)`;
@@ -16352,7 +16393,7 @@ function abrirChamarClientes(todas, dia, fmtLimite, fPag) {
     const pz = l.limite ? `${esc(fmtLimite(l))}${l.faixa ? ' · ' + esc(l.faixa) : ''}` : '';
     return `<div class="chm-linha chm-${s0}" data-k="${esc(k)}"><div><input type="checkbox" class="chm-sel" data-k="${esc(k)}" ${d.cel.length ? '' : 'disabled'} ${marcados.has(k) ? 'checked' : ''} aria-label="Marcar pra chamar em lote"></div><div><b>${esc(String(nomeDe(d) || '-').toUpperCase())}</b></div><div>${tels}</div>
       <div style="font-size:12.5px">${esc(endDe(d) || '-')}${l.cidade ? ' · ' + esc(l.cidade) : ''}</div><div style="font-size:12.5px">${esc(l.tipo)}${l.status ? '<br><span style="color:var(--text-muted)">' + esc(l.status) + '</span>' : ''}${pz ? '<br><span style="color:var(--text-muted)">' + pz + '</span>' : ''}</div>
-      <div><select class="chm-st" data-k="${esc(k)}" aria-label="Situação do cliente">${Object.keys(WA_ST).map(c => `<option value="${c}" ${c === s0 ? 'selected' : ''}>${WA_ST[c]}</option>`).join('')}</select></div></div>`;
+      <div><select class="chm-st" data-k="${esc(k)}" aria-label="Situação do cliente">${Object.keys(WA_ST).map(c => `<option value="${c}" ${c === s0 ? 'selected' : ''}>${WA_ST[c]}</option>`).join('')}</select>${s0 !== 'nao' && st[k] ? `<div class="chm-por">${esc(st[k].por || '')}${st[k].por ? ' · ' : ''}${esc(new Date(st[k].t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}</div>` : ''}</div></div>`;
   };
   // aplica os filtros da janela (+ busca/retorno/contato que estavam na tela) e redesenha
   const refiltra = () => {
@@ -16374,12 +16415,14 @@ function abrirChamarClientes(todas, dia, fmtLimite, fPag) {
     m.querySelector('#chm-total').textContent = `${dados.length} ordem(ns) · ${dados.filter(d => d.cel.length).length} com celular · ${cont.nao} não chamado(s) · ${cont.chamado} chamado(s) · ${cont.reagendou} reagendou(aram).`;
     const ex = dados.find(d => d.cel.length) || dados[0];
     m.querySelector('#chm-msg').textContent = ex ? mensagemChamarCliente(nomeDe(ex), endDe(ex), dia) : mensagemChamarCliente('', '', dia);
-    rotuloLote();
+    rotuloLote(); notaComp();
   };
+  m._repinta = () => { if (m.classList.contains('active')) pinta(); };
   [['chm-tec', 'técnico(s)', 'Todos os técnicos'], ['chm-cid', 'cidade(s)', 'Todas as cidades'], ['chm-tipo', 'tipo(s)', 'Todos os tipos'], ['chm-prazo', 'prazo(s)', 'Todos os prazos'], ['chm-faixa', 'faixa(s)', 'Todas as faixas'], ['chm-sit', 'situação(ões)', 'Todas as situações']]
     .forEach(([id, noun, all]) => wireMultiSelectField(id, { noun, allLabel: all }, refiltra));
   wireMultiSelectField('chm-fil', { noun: 'situação(ões)', allLabel: 'Todas' }, pinta);
   refiltra(); m.classList.add('active');
+  chamadasCarregar(dia).then(mudou => { if (mudou || !waCompartilhado()) pinta(); });   // traz as marcações dos outros ao abrir
   m.querySelector('#chm-fechar').addEventListener('click', () => m.classList.remove('active'));
   m.onclick = async ev => {
     if (ev.target === m) { m.classList.remove('active'); return; }
@@ -16487,6 +16530,10 @@ function renderContatos() {
     const lista = filtrar(todas), sep = true;   // sempre separado por técnico (sem caixinha, pedido do cliente 20/10/2026)
     lista.sort((a, b) => (sep ? (a.tecnico || 'zzzzzz').localeCompare(b.tecnico || 'zzzzzz', 'pt-BR') : 0) || (a.limite || Infinity) - (b.limite || Infinity) || String(a.cliente).localeCompare(String(b.cliente), 'pt-BR'));
     atuais = lista;
+    const stc = podeChamarClientes() ? waStatusTodos() : null, diaSel = g('ct-dia').value;
+    // situação da chamada (compartilhada): "Chamado · Fulano · 15:25"
+    const celChamada = l => { const k = `${diaSel}|${l.contrato}|${l.os}`, s0 = stc ? waStatusDe(k, stc) : 'nao'; if (s0 === 'nao') return '<span style="color:var(--text-muted)">-</span>';
+      const x = stc[k]; return `<b style="color:${s0 === 'chamado' ? 'var(--success)' : '#f59e0b'}">${WA_ST[s0]}</b><br><span style="font-size:11px;color:var(--text-muted)">${esc(x.por || '')}${x.por ? ' · ' : ''}${esc(new Date(x.t).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))}</span>`; };
     const comTel = lista.filter(l => { const c = contatoDe(l); return c && (c.telefone || c.celular || (c.todos && c.todos.length)); }).length, tecs = new Set(lista.map(l => l.tecnico).filter(Boolean)).size;
     const aviso = CONTATOS_ESTADO.semTabela ? '<div style="padding:10px 12px;border:1px solid #f59e0b;border-radius:10px;margin-bottom:12px;font-size:13px;background:color-mix(in srgb, #f59e0b 10%, transparent)">⚠ A tabela de contatos ainda não existe no banco (rode o <b>sql/PASSO-60-contatos-assinantes.sql</b> no Supabase). Por enquanto valem só os contatos importados <b>nesta sessão</b> — use o botão <b>Importar CSV de atividades</b> da barra lateral.</div>' : '';
     g('ct-cards').innerHTML = `${aviso}<div class="cards-grid">
@@ -16497,12 +16544,12 @@ function renderContatos() {
       </div>`;
     corpo.innerHTML = `${!lista.length ? '<div class="panel"><div class="empty">Nenhuma ordem nesse filtro. Importe o CSV de atividades pelo botão da barra lateral (o telefone vem junto) ou ajuste os filtros.</div></div>' : `
       <div class="table-wrap caixa-tabela-fixa rolagem-inteira-na-imagem" style="margin-bottom:1.5rem"><table class="data-table" id="tab-contatos"><thead><tr>
-        <th>Técnico</th><th>Cliente</th><th>Telefone</th><th>E-mail</th><th>Contrato</th><th>O.S</th><th>Endereço</th><th>Cidade</th><th>Tipo de serviço</th><th>Status</th><th>Prazo</th>${podeChamarClientes() ? '<th>Faixa do prazo</th>' : ''}<th>IFI/IRR</th></tr></thead><tbody>
+        <th>Técnico</th><th>Cliente</th><th>Telefone</th><th>E-mail</th><th>Contrato</th><th>O.S</th><th>Endereço</th><th>Cidade</th><th>Tipo de serviço</th><th>Status</th><th>Prazo</th>${podeChamarClientes() ? '<th>Faixa do prazo</th><th>Chamada</th>' : ''}<th>IFI/IRR</th></tr></thead><tbody>
         ${lista.map((l, i) => { const c = contatoDe(l), inicio = sep && (i === 0 || lista[i - 1].tecnico !== l.tecnico), pz = ROT_PRAZO[l.prazo] || ROT_PRAZO.outro;
           return `<tr data-ri="${i}"${inicio ? ' class="ct-inicio"' : ''}><td class="cat-cell">${l.tecnico ? esc(l.tecnico) : '<span style="color:var(--text-muted)">Sem técnico</span>'}</td>
           <td style="font-weight:600">${esc(l.cliente || (c && c.nome) || '-')}</td><td>${celTel(c)}</td><td style="font-size:12px">${esc((c && c.email) || '') || '-'}</td><td>${esc(l.contrato) || '-'}</td><td>${esc(l.os) || '-'}</td>
           <td style="white-space:normal;min-width:200px;font-size:12.5px">${esc(limparEnderecoNull(l.endereco || (c && c.endereco)) || '-')}</td><td>${esc(l.cidade)}</td><td>${esc(l.tipo)}</td><td>${esc(l.status)}</td>
-          <td style="white-space:nowrap">${l.limite ? `<b>${esc(fmtLimite(l))}</b><br>` : ''}<span style="color:${pz[1]};font-weight:700;font-size:12px">${pz[0]}</span></td>${podeChamarClientes() ? `<td>${esc(l.faixa) || '-'}</td>` : ''}
+          <td style="white-space:nowrap">${l.limite ? `<b>${esc(fmtLimite(l))}</b><br>` : ''}<span style="color:${pz[1]};font-weight:700;font-size:12px">${pz[0]}</span></td>${podeChamarClientes() ? `<td>${esc(l.faixa) || '-'}</td><td style="white-space:nowrap">${celChamada(l)}</td>` : ''}
           <td>${l.ret ? `<b style="color:${l.ret === 'IFI' ? 'var(--danger)' : '#f59e0b'}">${l.ret}</b>` : '-'}</td></tr>`; }).join('')}
       </tbody></table></div>`}`;
   }
@@ -16608,6 +16655,7 @@ function renderContatos() {
     if (semTel.length) await contatosCarregar([], semTel.map(l => l.numcli));   // plano B: o mesmo nº do cliente em outro contrato
     if (meu === seq && g('ct-body')) { const aberto = document.activeElement && document.activeElement.id === 'ct-q'; desenhar(todas); if (aberto) g('ct-q').focus(); }
     g('ct-dia')._todas = todas;
+    if (podeChamarClientes() && dia) chamadasCarregar(dia).then(mudou => { if (mudou && g('ct-body')) desenhar(g('ct-dia')._todas || todas); });
   }
   g('ct-aplicar').addEventListener('click', carregar);
   g('ct-dia').addEventListener('change', carregar);
@@ -16627,6 +16675,15 @@ function renderContatos() {
   });
   g('ct-q').addEventListener('input', () => desenhar(g('ct-dia')._todas || []));
   carregar();
+  // marcações dos outros (Chamar Clientes): relê a cada 20 s enquanto a aba está aberta; o timer se desliga sozinho ao sair da tela
+  if (podeChamarClientes()) {
+    if (CT_POLL) clearInterval(CT_POLL);
+    CT_POLL = setInterval(async () => {
+      if (!g('ct-body')) { clearInterval(CT_POLL); CT_POLL = null; return; }
+      const dia = g('ct-dia') && g('ct-dia').value; if (!dia || !waCompartilhado()) return;
+      if (await chamadasCarregar(dia)) { desenhar(g('ct-dia')._todas || []); const mm = document.getElementById('modal-chamar'); if (mm && mm._repinta) mm._repinta(); }
+    }, 20000);
+  }
 }
 // SINALIZAR dos contatos: por cidade e, dentro dela, por técnico — uma linha por assinante: CLIENTE - telefone
 function textoSinalizarContatos(lista, contatoDe, fmtLimite) {
@@ -28994,7 +29051,7 @@ const ARQUIVOS_IMPORT = [
 // do Supabase — o consumo real só o painel dele sabe) e (6) o BACKUP completo.
 // Tudo é leitura; o único botão que "faz" algo é o do backup (que só baixa).
 const BACKUP_TABELAS = [
-  'base_do_dia', 'chamados_giga', 'contatos_assinantes', 'clean_up', 'comparativo_financeiro', 'fechamento', 'financeiro',
+  'base_do_dia', 'chamados_giga', 'contatos_assinantes', 'contatos_chamadas', 'clean_up', 'comparativo_financeiro', 'fechamento', 'financeiro',
   'folha_escritorio', 'folha_escritorio_quadro', 'gasolina_ciclo', 'folha_pagamento_excluidos', 'folha_fechamentos', 'folha_historico', 'financeiro_historico', 'folha_pagamento', 'frota_desvinc', 'frota_links',
   'frota_manutencao', 'frota_multas', 'frota_revisao', 'frota_troca', 'imports_log', 'monitor_olt_clientes', 'monitor_olt_base', 'u2000_onus', 'u2000_alarmes', 'u2000_dia', 'u2000_eventos', 'u2000_eventos_porta', 'u2000_portas_hist', 'ordens_sp', 'pcr', 'pcr_mo',
   'pedagio', 'perfis', 'prazo', 'prazo_reparo_dia', 'presenca', 'presenca_escritorio',
@@ -29018,6 +29075,7 @@ const SAUDE_CHECAGENS_SQL = [
   { passo: 'PASSO-60', rotulo: 'Contatos dos assinantes (aba Contatos)', tabela: 'contatos_assinantes' },
   { passo: 'PASSO-61', rotulo: 'PCR: telefone do assinante vindo do CSV', tabela: 'pcr', coluna: 'telefone,celular,email,numero_cliente' },
   { passo: 'PASSO-62', rotulo: 'Contatos: outros telefones do cliente (Oracle)', tabela: 'contatos_assinantes', coluna: 'outros_telefones' },
+  { passo: 'PASSO-63', rotulo: 'Contatos: marcações do Chamar Clientes compartilhadas', tabela: 'contatos_chamadas' },
   { passo: 'PASSO-33', rotulo: 'Trava da importação da PCR', rpc: 'pcr_trava_status', args: { p_token: 'saude' } },
   { passo: 'PASSO-34', rotulo: 'Fechamento do ciclo da Folha', tabela: 'folha_fechamentos' },
   { passo: 'PASSO-39', rotulo: 'Clientes da JH com o sinal real (Monitoramento OLT)', tabela: 'monitor_olt_clientes' },
