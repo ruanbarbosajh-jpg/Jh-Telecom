@@ -14768,7 +14768,15 @@ const icUpgrade = '<svg viewBox="0 0 18 18"><path d="M5.5 15V3.5M3 6l2.5-2.5L8 6
 const CARTOES_LISTA = {};
 // cartão cuja janela NÃO é lista de ordens da PCR (ex.: Certificações, Retornos, U2000): passa as colunas e as linhas { celulas:[html], tipo } prontas
 const cartaoListaCustom = (chave, titulo, sub, colunas, linhas, opts) => { if (!linhas || !linhas.length) { delete CARTOES_LISTA[chave]; return ''; } CARTOES_LISTA[chave] = { titulo, sub: sub || '', custom: { colunas, linhas, opts: opts || {} } }; return chave; };
-const cartaoLista = (chave, titulo, linhas, sub) => { if (!linhas || !linhas.length) { delete CARTOES_LISTA[chave]; return ''; } CARTOES_LISTA[chave] = { titulo, linhas, sub: sub || '' }; return chave; };
+// 5º parâmetro (opcional): função(linhasVisíveis) → texto pro botão 📲 SINALIZAR da janela do cartão (22/10/2026, pedido do cliente: "no login do escritório, quando clicar no card
+// e aparecer os dados, tenha um botão Sinalizar também, se for prazo ou retornos"). Cartões de prazo em aberto ganham um padrão sozinhos (ver abrirOrdensDoCartao).
+const cartaoLista = (chave, titulo, linhas, sub, sinalizar) => { if (!linhas || !linhas.length) { delete CARTOES_LISTA[chave]; return ''; } CARTOES_LISTA[chave] = { titulo, linhas, sub: sub || '', sinalizar: sinalizar || null }; return chave; };
+// faixa de prazo em texto curto pro SINALIZAR (até 24h / até 48h / +48h / outlier): a da ordem já encerrada ou, se está em aberto, a do tempo corrido desde a abertura
+function faixaSinalizar(r) {
+  const aberta = ['pendente', 'em_rota', 'iniciado'].includes(classifyStatusGranular(r.status));
+  const f = r.faixa || (aberta && r.abertura ? faixaPorAging((Date.now() - new Date(r.abertura)) / 86400000, ehPrazoDeAtivacao(r, true) ? PRAZO_ATIVACAO_HORAS : 24) : null);
+  return !f ? '' : /24/.test(f) ? 'até 24h' : /48/.test(f) ? (/mais|maior|acima|>/.test(f) ? '+48h' : 'até 48h') : f === 'outlier' ? 'outlier' : '';
+}
 // separa as ordens nos mesmos baldes dos cartões de "Status das Ordens" (suspensa = texto do status; improdutiva não inclui suspensa)
 function ordensPorStatusCartao(linhas) {
   const o = { pendente: [], concluido: [], iniciado: [], em_rota: [], nao_concluido: [], suspenso: [], cancelado: [] };
@@ -14779,6 +14787,9 @@ function abrirOrdensDoCartao(chave) {
   const it = CARTOES_LISTA[chave]; if (!it) return;
   if (it.custom) { abrirModalLista(it.titulo, it.sub, it.custom.colunas, it.custom.linhas, { nome: slugTitulo(it.titulo), ...it.custom.opts }); return; }
   const tipoCartao = String(chave).split('|')[1] || '';
+  const sinFn = it.sinalizar || (['venc', 'venc2h', 'aberto'].includes(tipoCartao) || (String(chave).startsWith('vg|') && ['pend', 'rota', 'inic'].includes(tipoCartao))
+    ? (rs => textoSinalizarPrazos(rs.filter(r => r.limite), { porPeriodo: true, faixa: faixaSinalizar })) : null);
+  const sinOpt = sinFn ? { texto: sinFn, rotulo: 'ordem(ns)', vazio: 'Nenhuma ordem com horário limite na lista (confira o filtro).' } : null;
   const t = x => x ? fmtDT(new Date(x)) : '-';
   const ordenadas = [...it.linhas].sort((a, b) => (a.limite ? +new Date(a.limite) : Infinity) - (b.limite ? +new Date(b.limite) : Infinity) || String(a.os).localeCompare(String(b.os)));
   const comum = r => [esc(r.os) || '-', esc(r.contrato) || '-', esc(r.cliente || r.nome || '') || '-', esc(rotuloCidadeGeral(r.cidade)) || '-', esc(extrairBairro(r.endereco) || '') || '-'];
@@ -14797,9 +14808,9 @@ function abrirOrdensDoCartao(chave) {
       const prazo = lim == null ? '-' : tipoCartao === 'venc' ? `<b style="color:var(--danger)">${dur(agora - lim)}</b>` : tipoCartao === 'venc2h' ? `<b style="color:#f59e0b">${dur(lim - agora)}</b>` : (venceu ? `<b style="color:var(--danger)">vencida há ${dur(agora - lim)}</b>` : `faltam ${dur(lim - agora)}`);
       const c = comum(r);
       const resto = [horario, c[0], c[2], c[3], c[4], esc(r.recurso) || '-', c[1]], fim = [esc(r.status) || '-', esc(r.periodo_sistema || r.periodo || '') || '-', t(r.abertura)];
-      return { tipo: '', celulas: tipoCartao === 'venc' ? [prazo, ...resto, ...fim] : [...resto, prazo, ...fim] };
+      return { tipo: '', ref: r, celulas: tipoCartao === 'venc' ? [prazo, ...resto, ...fim] : [...resto, prazo, ...fim] };
     });
-    abrirModalLista(it.titulo, it.sub, colunas, linhas, { nome: slugTitulo(it.titulo) });
+    abrirModalLista(it.titulo, it.sub, colunas, linhas, { nome: slugTitulo(it.titulo), sinalizar: sinOpt });
     return;
   }
   const improd = tipoCartao === 'improd';
@@ -14808,9 +14819,9 @@ function abrirOrdensDoCartao(chave) {
   const linhas = ordenadas.map(r => {
     const c = comum(r), tipo = esc(rotuloTipoServico(r.tipo_atividade) || '') || '-', tec = esc(r.recurso) || '-', st = esc(r.status) || '-', per = esc(r.periodo_sistema || r.periodo || '') || '-';
     const motivo = esc((r.motivo || '').trim()) || '<span style="color:var(--text-muted)">sem motivo informado</span>';
-    return { tipo: rotuloTipoServico(r.tipo_atividade) || '-', celulas: improd ? [c[0], c[1], motivo, c[2], tec, c[3], c[4], tipo, st, per, t(r.abertura), t(r.limite)] : [c[0], c[1], c[2], c[3], c[4], tipo, tec, st, per, t(r.abertura), t(r.limite)] };
+    return { tipo: rotuloTipoServico(r.tipo_atividade) || '-', ref: r, celulas: improd ? [c[0], c[1], motivo, c[2], tec, c[3], c[4], tipo, st, per, t(r.abertura), t(r.limite)] : [c[0], c[1], c[2], c[3], c[4], tipo, tec, st, per, t(r.abertura), t(r.limite)] };
   });
-  abrirModalLista(it.titulo, it.sub, colunas, linhas, { colTipo: improd ? 7 : 5, nome: slugTitulo(it.titulo) });
+  abrirModalLista(it.titulo, it.sub, colunas, linhas, { colTipo: improd ? 7 : 5, nome: slugTitulo(it.titulo), sinalizar: sinOpt });
 }
 document.addEventListener('click', e => { const c = e.target.closest && e.target.closest('.stat-card[data-lista]'); if (c) abrirOrdensDoCartao(c.dataset.lista); });
 document.addEventListener('keydown', e => { if (e.key !== 'Enter') return; const c = e.target.closest && e.target.closest('.stat-card[data-lista]'); if (c) abrirOrdensDoCartao(c.dataset.lista); });
@@ -15244,8 +15255,11 @@ function renderPCR(modoArg) {
     const retornos = [...porOS.values()].sort((a,b) => restamOrdenavel(a) - restamOrdenavel(b) || String(a.os).localeCompare(String(b.os)));
     // clicar nos cartões de retorno abre a lista completa (colunas na MESMA ordem da tabela: O.S → Contrato → Cliente → Com quem está hoje → De quem é → Cidade → Dias → ...)
     const listaRet = (chave, titulo, arr) => cartaoListaCustom(chave, titulo, formatDate(dia), ['O.S de hoje', 'Contrato', 'Nome Cliente', 'Com quem está hoje', 'De quem é o retorno', 'Cidade', 'Dias', 'Restam', 'IFI/IRR', 'Status', 'Data', 'Serviço anterior', 'O.S anterior', 'Data anterior', 'Tipo de Serviço'],
-      arr.map(r => ({ tipo: '', celulas: [esc(r.os) || '-', esc(r.contrato) || '-', esc(r.cliente) || '-', ehRecursoTecnico(r.tecnico_atual) ? esc(r.tecnico_atual) : '-', esc(r.ofensor) || '-', esc(r.cidade) || '-', esc(r.dias) || '-',
-        r.restam === null || r.restam === undefined ? '-' : esc(r.restam) + ' dia(s)', `<b style="color:${r.ifi_irr === 'IFI' ? 'var(--danger)' : '#f59e0b'}">${esc(r.ifi_irr)}</b>`, esc(r.status) || '-', formatDate(r.data), esc(r.tipo_anterior) || '-', esc(r.os_anterior) || '-', formatDate(r.data_anterior), esc(r.tipo) || '-'] })));
+      arr.map(r => ({ tipo: '', ref: r, celulas: [esc(r.os) || '-', esc(r.contrato) || '-', esc(r.cliente) || '-', ehRecursoTecnico(r.tecnico_atual) ? esc(r.tecnico_atual) : '-', esc(r.ofensor) || '-', esc(r.cidade) || '-', esc(r.dias) || '-',
+        r.restam === null || r.restam === undefined ? '-' : esc(r.restam) + ' dia(s)', `<b style="color:${r.ifi_irr === 'IFI' ? 'var(--danger)' : '#f59e0b'}">${esc(r.ifi_irr)}</b>`, esc(r.status) || '-', formatDate(r.data), esc(r.tipo_anterior) || '-', esc(r.os_anterior) || '-', formatDate(r.data_anterior), esc(r.tipo) || '-'] })),
+      { sinalizar: { texto: rs => textoSinalizarRetornos(rs), rotulo: 'retorno(s)', vazio: 'Nenhum retorno na lista (confira o filtro).' } });
+    // texto do SINALIZAR dos cartões de prazo da PCR: igual ao da tabela (faixa + IFI/IRR da ordem)
+    const sinPrazoCard = rs => textoSinalizarPrazos(rs.filter(r => r.limite), { porPeriodo: true, faixa: faixaSinalizar, retorno: r => { const x = retornos.find(y => String(y.os) === String(r.os)); return x && x.ifi_irr ? x.ifi_irr : ''; } });
 
     // Aviso de COBERTURA do histórico. Um retorno só é reconhecido se a Produção
     // tem o serviço anterior: pra achar um IRR de até 30 dias, a Produção
@@ -15342,9 +15356,9 @@ function renderPCR(modoArg) {
       <div class="stat-cards">
         ${statCard('neutral', icPasta, 'Total de O.S no dia', rows.length, '', cartaoLista('pcr|total', 'Total de O.S no dia', rows, subDia))}
         ${statCard('orange', icRelogio, 'Pendentes agora', rowsPendentes.length, '', cartaoLista('pcr|pend', 'Pendentes agora', rowsPendentes, subDia))}
-        ${statCard(vencidas.length > 0 ? 'red' : 'neutral', icAviso, 'Já vencidas', vencidas.length, '', cartaoLista('pcr|venc', 'Reparos já vencidos', vencidas, subDia))}
-        ${statCard(vence2h.length > 0 ? 'orange' : 'neutral', icRelogio, 'Vencem em até 2h', vence2h.length, '', cartaoLista('pcr|venc2h', 'Reparos que vencem em até 2h', vence2h, subDia))}
-        ${statCard('blue', icChave, 'Reparos em aberto', abertasOrdenadas.length, '', cartaoLista('pcr|aberto', 'Reparos em aberto', abertasOrdenadas, subDia))}
+        ${statCard(vencidas.length > 0 ? 'red' : 'neutral', icAviso, 'Já vencidas', vencidas.length, '', cartaoLista('pcr|venc', 'Reparos já vencidos', vencidas, subDia, sinPrazoCard))}
+        ${statCard(vence2h.length > 0 ? 'orange' : 'neutral', icRelogio, 'Vencem em até 2h', vence2h.length, '', cartaoLista('pcr|venc2h', 'Reparos que vencem em até 2h', vence2h, subDia, sinPrazoCard))}
+        ${statCard('blue', icChave, 'Reparos em aberto', abertasOrdenadas.length, '', cartaoLista('pcr|aberto', 'Reparos em aberto', abertasOrdenadas, subDia, sinPrazoCard))}
       </div>
 
       <!-- "Vencendo Agora" e "Prazos do Dia — Detalhado" eram duas tabelas
@@ -19880,12 +19894,12 @@ function abrirModalLista(titulo, sub, colunas, linhas, opts = {}) {
   const pinta = tipo => {
     const vis = linhas.filter(l => !tipo || l.tipo === tipo);
     m.querySelector('#ml-cont').textContent = `${vis.length} registro(s)`;
-    m.querySelector('#ml-tab tbody').innerHTML = vis.map(l => `<tr>${l.celulas.map((c, i) => `<td${i === 0 ? ' class="cat-cell"' : ''}>${c}</td>`).join('')}</tr>`).join('');
+    m.querySelector('#ml-tab tbody').innerHTML = vis.map(l => `<tr data-i="${linhas.indexOf(l)}">${l.celulas.map((c, i) => `<td${i === 0 ? ' class="cat-cell"' : ''}>${c}</td>`).join('')}</tr>`).join('');
     ativarFiltrosDeColuna(m);
   };
   m.innerHTML = `<div class="modal-card modal-largo" style="max-width:min(1700px,97vw);width:97vw"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h3 style="margin:0">${esc(titulo)}</h3>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${tipos.length > 1 ? `<label style="font-size:12px;color:var(--text-muted)">Tipo de serviço <select id="ml-tipo" class="topn-select"><option value="">Todos</option>${tipos.map(t => `<option>${esc(t)}</option>`).join('')}</select></label>` : ''}
-      <button type="button" class="btn-export-xls" id="ml-xls">⤓ Excel</button><button type="button" class="btn-secundario" id="ml-fechar">Fechar</button></div></div>
+      ${opts.sinalizar ? '<button type="button" class="btn-sinalizar" id="ml-sinalizar" title="Copia o que está na tabela pra colar no WhatsApp">📲 SINALIZAR</button>' : ''}<button type="button" class="btn-export-xls" id="ml-xls">⤓ Excel</button><button type="button" class="btn-secundario" id="ml-fechar">Fechar</button></div></div>
     <p style="font-size:12px;color:var(--text-muted);margin:8px 0">${sub ? sub + ' · ' : ''}<span id="ml-cont"></span></p>
     <div class="table-wrap" style="max-height:76vh;overflow:auto"><table class="data-table" id="ml-tab" style="font-size:14.5px"><thead><tr>${colunas.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody></tbody></table></div></div>`;
   pinta('');
@@ -19893,6 +19907,14 @@ function abrirModalLista(titulo, sub, colunas, linhas, opts = {}) {
   m.querySelector('#ml-fechar').addEventListener('click', () => m.classList.remove('active'));
   const st = m.querySelector('#ml-tipo'); if (st) st.addEventListener('change', () => pinta(st.value));
   m.querySelector('#ml-xls').addEventListener('click', () => exportarTabelaVisivel(m.querySelector('#ml-tab'), opts.nome || slugTitulo(titulo)));
+  // SINALIZAR: copia só as linhas que estão VISÍVEIS na tabela (respeita o filtro de tipo e o funil das colunas), no mesmo texto das abas Prazos e Retornos
+  const bs = m.querySelector('#ml-sinalizar');
+  if (bs) bs.addEventListener('click', () => {
+    const refs = [...m.querySelectorAll('#ml-tab tbody tr')].filter(tr => tr.style.display !== 'none' && !tr.hidden).map(tr => (linhas[Number(tr.dataset.i)] || {}).ref).filter(Boolean);
+    const texto = refs.length ? opts.sinalizar.texto(refs) : '';
+    if (!texto) { toast(opts.sinalizar.vazio || 'Nada na tabela pra sinalizar (confira o filtro).', 'aviso'); return; }
+    copiarParaWhatsApp(texto, bs, '📲 SINALIZAR', `${refs.length} ${opts.sinalizar.rotulo || 'linha(s)'}`);
+  });
 }
 // improdutivas (CSV da PCR) por técnico: tentativas "Não Concluído" sem suspensa, uma por data + O.S + técnico
 function improdutivasDoPeriodo(s, e, cidadeOk, tecOk, tipoOk) {
