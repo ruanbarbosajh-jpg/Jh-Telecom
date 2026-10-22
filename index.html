@@ -16282,19 +16282,10 @@ async function waChamarCliente(celular, nome, endereco, dia, chave) {
   toast(`Conversa com ${waPrimeiroNome(nome) || 'o cliente'} aberta — confira a mensagem e aperte Enviar.`, 'ok', 4000);
   return true;
 }
-// VÁRIOS de uma vez (até 10): só com o programa do computador (WhatsApp ou Business). Cada link abre a conversa com a mensagem no campo de texto; a pessoa ainda aperta Enviar em cada uma.
-// O WhatsApp Web não serve: ele só funciona numa aba por vez, então cada link trocaria a conversa anterior.
+// VÁRIOS (até 10): FILA de uma conversa por clique. Tentativa anterior (abrir os 10 de uma vez, com pausa entre eles) falhou no teste do cliente: o navegador só deixa abrir
+// o programa do WhatsApp enquanto há um clique recente (~5 s), e só 3 de 10 abriram — mas o sistema já tinha marcado os 10 como "Chamado". Agora cada clique em "▶ Próxima
+// conversa" abre UMA conversa e só ela é marcada como Chamado. O rascunho com a mensagem fica na conversa (aparece como "Rascunho:" na lista do WhatsApp).
 const WA_LOTE_MAX = 10;
-async function waChamarVarios(itens, dia) {
-  const destino = await waEscolherDestino(); if (!destino) return 0;
-  if (destino === 'web') { toast('O WhatsApp Web só abre uma conversa por vez. Pra chamar vários, escolha o programa do computador (clique em "trocar").', 'aviso', 7000); return 0; }
-  itens.slice(0, WA_LOTE_MAX).forEach((it, i) => {
-    setTimeout(() => waAbrir(it.celular, mensagemChamarCliente(it.nome, it.endereco, dia), destino), i * 1200);
-    waSetStatus(it.chave, 'chamado');
-  });
-  toast(`${Math.min(itens.length, WA_LOTE_MAX)} conversa(s) sendo abertas — em cada uma, confira a mensagem e aperte Enviar.`, 'ok', 6000);
-  return Math.min(itens.length, WA_LOTE_MAX);
-}
 // janela "Chamar Clientes": os clientes da lista filtrada, agrupados por técnico ("Adilson - 5 ordens"), cada um com a situação (Não chamado / Chamado / Cliente reagendou)
 function abrirChamarClientes(lista, contatoDe, dia, fmtLimite) {
   let m = document.getElementById('modal-chamar');
@@ -16308,14 +16299,19 @@ function abrirChamarClientes(lista, contatoDe, dia, fmtLimite) {
   const destAtual = () => { const d = waDestinoSalvo(); return d ? `Abre em: <b>${esc(WA_DESTINOS[d])}</b> · <a href="#" id="chm-trocar">trocar</a>` : 'Na primeira vez o sistema pergunta onde abrir o WhatsApp.'; };
   m.innerHTML = `<div class="modal-card modal-largo" style="max-width:min(1500px,97vw);width:97vw"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h3 style="margin:0">📞 Chamar Clientes</h3>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button type="button" class="btn-secundario" id="chm-sel10" title="Marca os 10 primeiros que ainda não foram chamados">☑ Marcar os próximos ${WA_LOTE_MAX}</button>
-      <button type="button" class="btn-sinalizar" id="chm-lote" title="Abre as conversas marcadas (até ${WA_LOTE_MAX}) no WhatsApp do computador, cada uma com a mensagem pronta">📞 Chamar marcados (<span id="chm-n">0</span>)</button>
+      <button type="button" class="btn-sinalizar" id="chm-lote" title="Marque até ${WA_LOTE_MAX} clientes; cada clique abre UMA conversa no WhatsApp com a mensagem pronta"></button><button type="button" class="btn-secundario" id="chm-parar" hidden title="Cancela a fila">✖ Parar fila</button>
       <button type="button" class="btn-secundario" id="chm-fechar">Fechar</button></div></div>
     <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin:8px 0 4px">${multiSelectField('chm-fil', 'Mostrar', Object.values(WA_ST), { allLabel: 'Todas as situações', noneLabel: 'Nenhuma' })}
       <p style="font-size:12.5px;color:var(--text-muted);margin:0;flex:1;min-width:260px"><span id="chm-total"></span> Clique no <b>celular</b> do cliente: o WhatsApp abre com a mensagem pronta. <span id="chm-dest">${destAtual()}</span></p></div>
     <details style="margin:4px 0 8px;font-size:12.5px"><summary style="cursor:pointer;color:var(--text-secondary)">Ver a mensagem que será enviada</summary><pre style="white-space:pre-wrap;font-family:inherit;margin:6px 0 0;padding:10px;border:1px solid var(--border);border-radius:8px">${esc(exemplo ? mensagemChamarCliente(nomeDe(exemplo), endDe(exemplo), dia) : '')}</pre></details>
     <div id="chm-lista" style="max-height:68vh;overflow:auto"></div></div>`;
   const filtroOk = () => { const on = new Set(getMultiSelectValues('chm-fil')); return d => on.has(WA_ST[waStatusDe(d.k, st)]); };
-  let st = waStatusTodos();
+  let st = waStatusTodos(), fila = null;   // fila = { itens, i } enquanto a pessoa percorre as conversas marcadas
+  const rotuloLote = () => {
+    const b = m.querySelector('#chm-lote'), pa = m.querySelector('#chm-parar'); if (!b) return;
+    b.innerHTML = fila ? `▶ Próxima conversa (${fila.i + 1} de ${fila.itens.length})` : `📞 Chamar marcados (<span id="chm-n">${marcados.size}</span>)`;
+    pa.hidden = !fila;
+  };
   const linha = d => {
     const l = d.l, k = d.k, s0 = waStatusDe(k, st);
     const tels = d.cel.map(n => `<button type="button" class="chm-tel" data-k="${esc(k)}" data-num="${n}" title="Abrir a conversa no WhatsApp com a mensagem pronta">${esc(contatoFmtTel(n))} 💬</button>`).join('')
@@ -16334,7 +16330,7 @@ function abrirChamarClientes(lista, contatoDe, dia, fmtLimite) {
     m.querySelector('#chm-lista').innerHTML = tecs.map(tec => { const ls = grupos.get(tec); return `<div class="chm-tec">${esc(tec || 'Sem técnico')} - ${ls.length} ${ls.length === 1 ? 'ordem' : 'ordens'}</div>${ls.map(linha).join('')}`; }).join('') || '<div class="empty" style="padding:16px">Nenhum cliente nessa situação.</div>';
     const cont = { nao: 0, chamado: 0, reagendou: 0 }; dados.forEach(d => { cont[waStatusDe(d.k, st)]++; });
     m.querySelector('#chm-total').textContent = `${dados.length} ordem(ns) · ${comCel} com celular · ${cont.nao} não chamado(s) · ${cont.chamado} chamado(s) · ${cont.reagendou} reagendou(aram) — segue os filtros da tela.`;
-    m.querySelector('#chm-n').textContent = marcados.size;
+    rotuloLote();
   };
   wireMultiSelectField('chm-fil', { noun: 'situação(ões)', allLabel: 'Todas as situações' }, pinta);
   pinta(); m.classList.add('active');
@@ -16348,17 +16344,25 @@ function abrirChamarClientes(lista, contatoDe, dia, fmtLimite) {
     if (ev.target.closest('#chm-sel10')) {
       marcados.clear(); dados.filter(filtroOk()).filter(d => d.cel.length && waStatusDe(d.k, st) === 'nao').slice(0, WA_LOTE_MAX).forEach(d => marcados.add(d.k)); pinta();
       if (!marcados.size) toast('Não há cliente com celular e ainda não chamado nesse filtro.', 'aviso'); return; }
+    if (ev.target.closest('#chm-parar')) { fila = null; rotuloLote(); toast('Fila cancelada.', 'ok', 2500); return; }
     if (ev.target.closest('#chm-lote')) {
-      const itens = [...marcados].map(k => porK.get(k)).filter(d => d && d.cel.length).map(d => ({ celular: d.cel[0], nome: nomeDe(d), endereco: endDe(d), chave: d.k }));
-      if (!itens.length) { toast(`Marque os clientes (até ${WA_LOTE_MAX}) ou use "Marcar os próximos ${WA_LOTE_MAX}".`, 'aviso'); return; }
-      if (!confirm(`Abrir ${itens.length} conversa(s) no WhatsApp, cada uma com a mensagem pronta?\n\nVocê ainda precisa apertar Enviar em cada conversa. Eles serão marcados como "Chamado".`)) return;
-      if (await waChamarVarios(itens, dia)) { marcados.clear(); pinta(); } return; }
+      if (!fila) {
+        const itens = [...marcados].map(k => porK.get(k)).filter(d => d && d.cel.length).map(d => ({ celular: d.cel[0], nome: nomeDe(d), endereco: endDe(d), chave: d.k }));
+        if (!itens.length) { toast(`Marque os clientes (até ${WA_LOTE_MAX}) ou use "Marcar os próximos ${WA_LOTE_MAX}".`, 'aviso'); return; }
+        fila = { itens, i: 0 }; marcados.clear();
+      }
+      const it = fila.itens[fila.i];
+      if (!(await waChamarCliente(it.celular, it.nome, it.endereco, dia, it.chave))) { rotuloLote(); return; }   // fechou a escolha do aplicativo: a fila continua parada nesse cliente
+      fila.i++;
+      if (fila.i >= fila.itens.length) { fila = null; toast('Fila concluída — todas as conversas foram abertas.', 'ok', 4000); }
+      pinta(); return;
+    }
   };
   m.onchange = ev => {
     const sel = ev.target.closest('select.chm-st'); if (sel) { waSetStatus(sel.dataset.k, sel.value); pinta(); return; }
     const cb = ev.target.closest('input.chm-sel'); if (cb) {
       if (cb.checked && marcados.size >= WA_LOTE_MAX) { cb.checked = false; toast(`No máximo ${WA_LOTE_MAX} conversas de uma vez.`, 'aviso'); return; }
-      if (cb.checked) marcados.add(cb.dataset.k); else marcados.delete(cb.dataset.k); m.querySelector('#chm-n').textContent = marcados.size; }
+      if (cb.checked) marcados.add(cb.dataset.k); else marcados.delete(cb.dataset.k); rotuloLote(); }
   };
 }
 
