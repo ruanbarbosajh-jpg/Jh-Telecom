@@ -15406,7 +15406,7 @@ function renderPCR(modoArg) {
     if (btnSinPrazo) btnSinPrazo.addEventListener('click', () => {
       const vis = osVisiveis(tabPrazos()), lista = prazoUnificado.filter(r => aberta(r) && r.limite && vis.has(String(r.os)));
       if (!lista.length) { toast('Nenhuma ordem em aberto na tabela (confira o filtro).', 'aviso'); return; }
-      copiarParaWhatsApp(textoSinalizarPrazos(lista, { faixa: r => { const f = faixaEfetiva(r); return !f ? '' : /24/.test(f) ? 'até 24h' : /48/.test(f) ? (/mais|maior|acima|>/.test(f) ? '+48h' : 'até 48h') : f === 'outlier' ? 'outlier' : ''; }, retorno: r => { const x = (retornos || []).find(y => String(y.os) === String(r.os)); return x && x.ifi_irr ? x.ifi_irr : ''; } }), btnSinPrazo, '📲 SINALIZAR', `${lista.length} ordem(ns)`);
+      copiarParaWhatsApp(textoSinalizarPrazos(lista, { periodo: ({ 'MANHÃ': 'MANHÃ', 'TARDE': 'TARDE' })[(document.getElementById('pcr-periodo') || {}).value] || 'MANHÃ E TARDE', faixa: r => { const f = faixaEfetiva(r); return !f ? '' : /24/.test(f) ? 'até 24h' : /48/.test(f) ? (/mais|maior|acima|>/.test(f) ? '+48h' : 'até 48h') : f === 'outlier' ? 'outlier' : ''; }, retorno: r => { const x = (retornos || []).find(y => String(y.os) === String(r.os)); return x && x.ifi_irr ? x.ifi_irr : ''; } }), btnSinPrazo, '📲 SINALIZAR', `${lista.length} ordem(ns)`);
     });
     const btnSinRet = document.getElementById('ret-sinalizar');
     if (btnSinRet) btnSinRet.addEventListener('click', () => {
@@ -16044,14 +16044,19 @@ async function contatosLerArquivo(arq, aoMsg) {
 }
 
 // siglas que a equipe usa (e que podem vir na coluna Unidade da GIGA) → nome da cidade por extenso
-const CIDADE_POR_SIGLA_CONTATOS = { gja: 'Guarujá', sts: 'Santos', sve: 'São Vicente', pge: 'Praia Grande', cao: 'Cubatão', bert: 'Bertioga', bertin: 'Bertioga' };
+// 22/10/2026 (pedido do cliente, print do filtro com BERTN/STSN/MAUA/SAO SEBASTIAO misturados com Santos/Bertioga): nada de abreviação e tudo em MAIÚSCULAS — STS e STSN = SANTOS, BERTN = BERTIOGA
+const CIDADE_POR_SIGLA_CONTATOS = { gja: 'GUARUJÁ', sts: 'SANTOS', stsn: 'SANTOS', sve: 'SÃO VICENTE', pge: 'PRAIA GRANDE', cao: 'CUBATÃO', bert: 'BERTIOGA', bertin: 'BERTIOGA', bertn: 'BERTIOGA' };
 // situações do filtro "Situação da ordem" (caixas de seleção, várias ao mesmo tempo) → bucket de `classifyStatusGranular`
 const SITUACOES_CONTATOS = { 'Concluído': 'concluido', 'Em rota': 'em_rota', 'Pendente': 'pendente', 'Iniciado': 'iniciado', 'Não concluído': 'nao_concluido', 'Cancelado': 'cancelado' };
 // endereço do CSV às vezes vem com pedaços "null" ("RUA X, null BAIRRO, null - null"): tira só o que é null, o resto fica
 function limparEnderecoNull(e) {
   return String(e == null ? '' : e).replace(/\bnull\b/gi, '').replace(/\s*-\s*(?=,|$)/g, '').replace(/\s{2,}/g, ' ').replace(/(\s*,\s*)+/g, ', ').replace(/^[\s,-]+|[\s,-]+$/g, '').trim();
 }
-function cidadeDaSiglaContatos(c) { const t = String(c || '').trim(); return CIDADE_POR_SIGLA_CONTATOS[normalizeHeader(t)] || t; }
+function cidadeDaSiglaContatos(c) {
+  const t = String(c || '').trim(); if (!t) return '';
+  const sigla = CIDADE_POR_SIGLA_CONTATOS[normalizeHeader(t)]; if (sigla) return sigla;
+  return String(rotuloCidadeGeral(t)).toUpperCase();   // cidade conhecida ganha o acento certo (Guarujá, São Vicente…); o resto só vai pra maiúsculas
+}
 
 function renderContatos() {
   const dias = [...new Set(DB.pcr.map(r => r.data).filter(Boolean))].sort().reverse();
@@ -16082,7 +16087,7 @@ function renderContatos() {
     const linhas = doDia.map(r => {
       const gr = classifyStatusGranular(r.status), aberta = ['pendente', 'em_rota', 'iniciado'].includes(gr), lim = r.limite ? +new Date(r.limite) : null;
       const prazo = !lim ? 'semprazo' : gr === 'concluido' ? 'concluida' : !aberta ? 'outro' : lim < agora ? 'vencida' : lim - agora < 2 * 36e5 ? 'vence2h' : 'noprazo';
-      return { os: r.os, contrato: contatoSoDigitos(r.contrato), cliente: r.cliente || '', endereco: r.endereco || '', cidade: rotuloCidadeGeral(r.cidade), tipo: rotuloTipoServico(r.tipo_atividade), status: r.status || '',
+      return { os: r.os, contrato: contatoSoDigitos(r.contrato), cliente: r.cliente || '', endereco: r.endereco || '', cidade: cidadeDaSiglaContatos(r.cidade), tipo: rotuloTipoServico(r.tipo_atividade), status: r.status || '',
         tecnico: ehRecursoTecnico(r.recurso) ? r.recurso : '', gr, aberta, limite: lim, prazo, ret: ret.get(String(r.os)) || '',
         csv: { telefone: r.telefone || '', celular: r.celular || '', email: r.email || '' }, numcli: r.numero_cliente || '' };
     });
@@ -34037,14 +34042,18 @@ function textoSinalizarPrazos(lista, ext) {
   const hm = d => { const x = new Date(d); return `${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}`; };
   const por = new Map();
   [...lista].sort((a, b) => +new Date(a.limite) - +new Date(b.limite)).forEach(r => { const c = String(rotuloCidadeGeral(r.cidade) || 'Não informado').toUpperCase(); if (!por.has(c)) por.set(c, []); por.get(c).push(r); });
-  return [...por.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt-BR')).map(([c, rs]) => c + '\n' + rs.map(r => {
+  // 22/10/2026 (pedido do cliente, modelo do WhatsApp): título "CIDADE - PRAZO MANHÃ" (o período do filtro da tabela: MANHÃ, TARDE ou MANHÃ E TARDE),
+  // técnico com @ (menção no WhatsApp) e, no fim, a menção da coordenação
+  const titulo = c => ext && ext.periodo ? `${c} - PRAZO ${ext.periodo}` : c;
+  const corpo = [...por.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt-BR')).map(([c, rs]) => titulo(c) + '\n' + rs.map(r => {
     // horário copiado = limite MENOS 30 min (21/10/2026, pedido do cliente: "o horário vai ser copiado 30min antes") — a ordem das linhas continua pelo limite real
-    const partes = [String(r.cliente || '').trim().toUpperCase(), hm(new Date(+new Date(r.limite) - 30 * 60000)), ehRecursoTecnico(r.recurso) ? String(r.recurso).trim() : 'sem técnico'];
+    const partes = [String(r.cliente || '').trim().toUpperCase(), hm(new Date(+new Date(r.limite) - 30 * 60000)), ehRecursoTecnico(r.recurso) ? '@' + String(r.recurso).trim() : 'sem técnico'];
     const f = ext && ext.faixa ? ext.faixa(r) : '', ret = ext && ext.retorno ? ext.retorno(r) : '';
     if (f) partes.push(f);
     if (ret) partes.push(ret);
     return partes.join(' - ');
   }).join('\n')).join('\n\n');
+  return ext && ext.periodo ? corpo + '\n\n@Thais JH coor @seba 2 JH' : corpo;
 }
 function textoSinalizarRetornos(lista) {
   return 'RETORNOS\n\n' + lista.map(r => {
