@@ -8533,8 +8533,10 @@ function abrirDetalheLupa(tipo, chave) {
 // Continuam SÓ do Analista, por pedido expresso: Relatório Geral, U2000/Analítico (o banco também só libera o Analista), alterar a Frota,
 // Saúde/Importar (listas de bloqueio) e as colunas Taxa de Conclusão/Execução da Caixa (ehAnalista). Cada perfil continua vendo só as telas dele.
 const modoNovo = () => !!currentUser;
-// saíram do sistema (só do Analista): Produção (o conteúdo foi pro Relatório Geral), os 4 Comparativos e o "Gerar Relatório"
-const ROTAS_FORA_DO_MODO_NOVO = new Set(['production', 'cmpproducao', 'cmpifiirr', 'cmpprazo', 'comparisons', 'relatorios']);
+// saíram do sistema (só do Analista): Produção (o conteúdo foi pro Relatório Geral) e o "Gerar Relatório".
+// Os 4 Comparativos (Produção, IFI/IRR, Prazo e Financeiro) VOLTARAM pro Analista em 22/10/2026 (pedido do cliente: "adicione para o analista aquelas abas de comparativo");
+// os outros perfis continuam sem eles (ROUTE_PERMISSIONS / listas de permissão).
+const ROTAS_FORA_DO_MODO_NOVO = new Set(['production', 'relatorios']);
 const ESTRUTURA_NOVA = [
   { id: 'dashboards', rota: 'area_dashboards', nome: 'Dashboards', grupos: [{ nome: 'Relatórios', rotas: ['reuniaoprazos', 'relgeral', 'reldia', 'dashboard'] }, { nome: 'Produção e comparativos', rotas: ['production', 'cmpproducao', 'cmpifiirr', 'cmpprazo', 'comparisons', 'relatorios'] }],
     desc: 'Relatório Operacional, Relatório Geral, Relatório do Dia (Parcial do Dia + PCR) e o Dashboard de eficiência.',
@@ -10493,6 +10495,7 @@ function renderDashboard() {
       ${resumoFinanceiro}
       <div class="section-heading sem-toggle">Produção por tipo de serviço<span class="sec-nota">${totalOrdens.toLocaleString('pt-BR')} ordens concluídas no ciclo</span></div>
       <div class="panel" style="margin-bottom:1.5rem"><div id="dash-prod-tipo"></div></div>
+      ${htmlComparativoProducaoCiclos(colunasComparativoProducao(faixas, ciclos))}
       <div class="section-heading sem-toggle">Valor das Ordens — pago pela GIGA<span class="sec-nota">${soSintetico ? 'Ordens concluídas na Produção' : 'Contagem da aba RELATORIO (fechamento do ciclo)'} × valor de contrato por serviço</span><button type="button" class="btn-export-img" id="dash-valor-giga-img">🖼 Gerar imagem</button></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table dash-tab" id="dash-valor-giga-tab">
         <thead><tr><th>Serviço</th><th class="num">GIGA paga à JH</th><th class="num">JH paga ao técnico</th>
@@ -10594,6 +10597,67 @@ function renderDashboard() {
     const btnComplementar = tituloComplementar && tituloComplementar.querySelector('.secao-toggle');
     if (btnComplementar) btnComplementar.click();
   }
+}
+// ---- COMPARATIVO DE PRODUÇÃO ENTRE CICLOS no Dashboard (22/10/2026, pedido do cliente: "coloque no dashboard o comparativo de produção — fechamento
+// passado com o atual e outros fechamentos também"). Uma coluna por ciclo, do mais novo pro mais antigo; a pastilha em cada número compara com o
+// ciclo logo à direita (o anterior). Fonte: o fechamento oficial (aba RELATORIO) quando o ciclo tem; senão o fechamento sintético da Produção.
+// Colunas: os ciclos marcados no filtro (2 ou mais); com UM só marcado, ele + os 5 ciclos anteriores; com "todos", os 8 mais novos.
+function colunasComparativoProducao(faixas, ciclos) {
+  if (!faixas || !faixas.length) return [];
+  if (faixas.length >= 2 && faixas.length < ciclos.length) return faixas.slice(0, 8);
+  // o filtro do Dashboard só lista ciclos COM fechamento/financeiro; o ciclo atual (e o recém-fechado) ainda não têm — entram pela Produção + CSV da PCR
+  const vistos = new Set(ciclos.map(c => c.start + '|' + c.end));
+  const ultimoFim = ciclos.reduce((m, c) => String(c.end) > m ? String(c.end) : m, '');
+  const extras = new Map();
+  if (ultimoFim) {
+    const add = p => {
+      if (!p.data || p.data <= ultimoFim || !isConcluido(p.status) || !ehRecursoTecnico(p.recurso)) return;
+      const c = cicloCalendarioDe(p.data), k = c.start + '|' + c.end;
+      if (!vistos.has(k) && !extras.has(k)) extras.set(k, { start: c.start, end: c.end });
+    };
+    DB.producao.forEach(add); DB.pcr.forEach(add);
+  }
+  const todos = [...extras.values(), ...ciclos].sort((a, b) => String(b.end).localeCompare(String(a.end)));
+  const ref = faixas.length === ciclos.length ? todos[0] : faixas[0];
+  const i = Math.max(0, todos.findIndex(c => c.start === ref.start && c.end === ref.end));
+  return todos.slice(i, i + (faixas.length === ciclos.length ? 8 : 6));
+}
+function resumoProducaoDoCiclo(c) {
+  let fech = DB.fechamento.filter(f => overlaps(f.inicio, f.ate_o_dia, c.start, c.end));
+  const sintetico = !fech.length;
+  if (sintetico) fech = fechamentoSintetico(c.start, c.end);
+  const soma = k => fech.reduce((a, f) => a + (Number(f[k]) || 0), 0);
+  const total = soma('total_geral'), dias = soma('dias_trabalhados'), tecnicos = fech.filter(f => (Number(f.total_geral) || 0) > 0).length;
+  const ativacao = soma('ativacao'), me = soma('me'), reparos = soma('reparos'), qIfi = soma('qtd_ifi'), qIrr = soma('qtd_irr');
+  return { ativacao, me, mc: soma('mc'), reparos, upgrade: soma('upgrade'), total, tecnicos, dias, sintetico,
+    media: tecnicos ? total / tecnicos : 0, porDia: dias ? total / dias : 0, qIfi, qIrr,
+    pIfi: (ativacao + me) ? qIfi / (ativacao + me) * 100 : 0, pIrr: reparos ? qIrr / reparos * 100 : 0 };
+}
+function htmlComparativoProducaoCiclos(colunas) {
+  if (!colunas || !colunas.length) return '';
+  const hoje = hojeISOLocal();
+  const res = colunas.map(c => ({ c, r: resumoProducaoDoCiclo(c) }));
+  const f0 = v => (Number(v) || 0).toLocaleString('pt-BR');
+  const f1 = v => (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const linhas = [
+    ['Ativação', 'ativacao', f0, false], ['Mudança de Endereço', 'me', f0, false], ['Mudança de Cômodo', 'mc', f0, false],
+    ['Reparo', 'reparos', f0, false], ['Upgrade / Downgrade', 'upgrade', f0, false],
+    ['Total de serviços', 'total', f0, false, true],
+    ['Técnicos com produção', 'tecnicos', f0, false], ['Serviços por técnico', 'media', f1, false], ['Dias trabalhados (soma)', 'dias', f0, false],
+    ['Serviços por técnico por dia', 'porDia', f1, false],
+    ['Qtd. IFI', 'qIfi', f0, true], ['Qtd. IRR', 'qIrr', f0, true],
+    ['% IFI', 'pIfi', v => formatPct(v, 2), true], ['% IRR', 'pIrr', v => formatPct(v, 2), true],
+  ];
+  return `
+      <div class="section-heading sem-toggle">Comparativo de produção entre ciclos<span class="sec-nota">${res.length} ciclo(s) · a pastilha compara com o ciclo à direita (o anterior)</span></div>
+      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table cmp-dash" id="dash-cmp-prod"><thead><tr><th>Indicador</th>
+        ${res.map(x => `<th class="num">${formatDate(x.c.start).slice(0, 5)} a ${formatDate(x.c.end).slice(0, 5)}${x.c.end >= hoje ? '<br><small style="font-weight:500">em andamento</small>' : ''}${x.r.sintetico ? '<br><small style="font-weight:500">da Produção</small>' : ''}</th>`).join('')}</tr></thead><tbody>
+        ${linhas.map(([rot, k, fmt, invert, destaque]) => `<tr${destaque ? ' class="total-row"' : ''}><td class="cat-cell">${rot}</td>${res.map((x, i) => {
+          const ant = res[i + 1];
+          return `<td class="num">${fmt(x.r[k])}${ant ? ' ' + setaPill(ant.r[k], x.r[k], invert) : ''}</td>`;
+        }).join('')}</tr>`).join('')}
+      </tbody></table></div>
+      <p style="font-size:var(--fs-sm);color:var(--text-muted);margin:-8px 0 20px">Ciclo com fechamento oficial usa a aba RELATORIO; ciclo sem ele (ex.: o que está em andamento) usa as ordens concluídas da Produção — sem Upgrade/Mudança de Cômodo até a planilha completa ser importada.</p>`;
 }
 // Painel "Comparar Técnico A × Técnico B" do Relatório Geral — lê os dois
 // nomes digitados no toolbar e mostra os indicadores da aba RELATORIO lado a
@@ -11746,7 +11810,7 @@ function gerarPeriodoFolha(inicio, fim) {
     const ordens = porTecnico[tecnico];
     // mesma regra da Tabela de Bônus: dias trabalhados = dias DISTINTOS com
     // pelo menos 1 ordem concluída baixada nesse período
-    const diasTrab = Math.max(new Set(ordens.map(p => p.data)).size, diasDoFechamentoDoCiclo(tecnico, inicio, fim));
+    const diasTrab = Math.max(new Set(ordens.map(p => p.data)).size, diasDoFechamentoDoCiclo(tecnico, inicio, fim), diasDoTecnicoNoPeriodo(tecnico, inicio, fim));
     const ret = retornos[tecnico] || { ifi: 0, irr: 0 };
     const base = baseDoTecnico(tecnico, inicio, fim);
     const ifiPct = base.ativacao ? (ret.ifi / base.ativacao) * 100 : 0;
@@ -25787,6 +25851,7 @@ function renderFolhaPagamento(modo) {
         <button type="button" class="secao-toggle" id="folha-hist-btn">${histAberto ? '▾ ocultar' : '▸ exibir'}</button>
       </div>
       <div id="folha-hist" class="${histAberto ? '' : 'secao-oculta'}" style="margin-bottom:1.5rem"></div>
+      ${htmlProducaoDoTecnicoFolha(ranking)}
       <div class="section-heading">Holerite<span class="sec-nota">extrato de serviços do técnico, no formato que vai pra assinatura</span></div>
       <div class="panel" style="margin-bottom:1.5rem">
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:6px">
@@ -25827,6 +25892,7 @@ function renderFolhaPagamento(modo) {
       }
     }
 
+    if (!soRelatorio) ligarProducaoDoTecnicoFolha(ranking, ordensPorTecnicoFolha, pct, IFI_TARGET, IRR_TARGET);
     // ---- marcar / desmarcar linha (clique numa célula que não seja campo de edição) ----
     const tabFolhaMarca = document.getElementById('folha-tab');
     if (tabFolhaMarca) tabFolhaMarca.addEventListener('click', ev => {
@@ -26599,6 +26665,31 @@ function quebraPorTipoDoTecnico(ordens, janela, apto, periodo) {
 // aparecia — conferido em 01/10/2026 contra a folha do cliente (ciclo 21/08 a
 // 20/09): Marcos 25 × 27 e Samuel 25 × 26, e o Samuel caía pra INAPTO por isso.
 // 0 quando o ciclo ainda não tem fechamento.
+// Dias com ordem CONCLUÍDA de cada técnico — Produção (planilha) + CSV da PCR. 22/10/2026, pedido do cliente: "a folha não está puxando os dias
+// trabalhados certo". Conferido no site real: ciclo fechado (21/09–20/10) tinha os dias certos, mas o ciclo NOVO (21/10–20/11) mostrava 1 dia
+// pra todo mundo — a Produção só vai até ontem (21/10) e o CSV da PCR já tinha o dia 22/10. O dia só existia no CSV, e a folha só olhava a Produção.
+// Índice montado UMA vez por tarefa (a folha pergunta isso por técnico, várias vezes): técnico normalizado -> Set de datas ISO.
+function indiceDiasConcluidos() {
+  return memoDaTarefa('diasConcluidosPorTecnico', () => {
+    const m = new Map();
+    const add = p => {
+      if (!p.data || !isConcluido(p.status) || !ehRecursoTecnico(p.recurso)) return;
+      const k = normalizeHeader(p.recurso);
+      let st = m.get(k); if (!st) m.set(k, st = new Set());
+      st.add(p.data);
+    };
+    DB.producao.forEach(add);
+    DB.pcr.forEach(add);
+    return m;
+  });
+}
+function diasDoTecnicoNoPeriodo(tecnico, inicio, fim) {
+  if (!inicio || !fim) return 0;
+  const st = indiceDiasConcluidos().get(normalizeHeader(tecnico));
+  if (!st) return 0;
+  let n = 0; st.forEach(d => { if (inRange(d, inicio, fim)) n++; });
+  return n;
+}
 function diasDoFechamentoDoCiclo(tecnico, inicio, fim) {
   if (!inicio || !fim) return 0;
   const f = (DB.fechamento || []).find(x => normalizeHeader(x.tecnico) === normalizeHeader(tecnico)
@@ -26610,7 +26701,7 @@ function diasDoFechamentoDoCiclo(tecnico, inicio, fim) {
 // incompleta deixou pra menos).
 function diasTrabDaLinha(linha) {
   const j = datasDoPeriodoFolha(linha.periodo);
-  return Math.max(Number(linha.dias_trab) || 0, diasDoFechamentoDoCiclo(linha.tecnico, j.inicio, j.fim));
+  return Math.max(Number(linha.dias_trab) || 0, diasDoFechamentoDoCiclo(linha.tecnico, j.inicio, j.fim), diasDoTecnicoNoPeriodo(linha.tecnico, j.inicio, j.fim));
 }
 // Base do % do BÔNUS — a fórmula da planilha do cliente (01/10/2026):
 //   % IRR = IRR do bônus ÷ REPARO CORRETIVO do ciclo
@@ -26901,6 +26992,92 @@ function holeriteTecnicoHTML(linha) {
   </div>`;
 }
 
+// ---- PRODUÇÃO POR TÉCNICO + IFI / IRR, acima do Holerite (22/10/2026, pedido do cliente com o print da tabela dinâmica do Excel) ----
+// Mesma tabela da planilha: Serviço | Contagem de O.S | Valor O.S, Total Geral, Aluguel veículo e Valor total, mais a contagem de O.S por DATA;
+// o filtro "Técnico" faz o papel do "Recurso" da planilha (vazio = todos). Os números saem da MESMA conta da folha (`quebraPorTipoDaLinha`:
+// APTO/INAPTO, tarifas do ciclo, ajustes digitados), então a tabela e a coluna da folha nunca discordam.
+function htmlProducaoDoTecnicoFolha(ranking) {
+  if (!ranking || !ranking.length) return '';
+  const opcoes = [...ranking].sort((a, b) => String(a.tecnico).localeCompare(String(b.tecnico), 'pt-BR'))
+    .map(r => `<option value="${esc(r.tecnico)}|${esc(r.periodo)}">${esc(r.tecnico)}${new Set(ranking.map(x => x.periodo)).size > 1 ? ' — ' + esc(r.periodo) : ''}</option>`).join('');
+  return `
+      <div class="section-heading">Produção por técnico<span class="sec-nota">serviços, valores e dias do ciclo — mesmos números da folha</span></div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <div class="toolbar" style="margin:0 0 12px"><div class="field"><label>Técnico</label><select id="fol-prod-tec"><option value="">Todos os técnicos</option>${opcoes}</select></div></div>
+        <div id="fol-prod-resumo" style="margin-bottom:10px"></div>
+        <div class="panels-grid" style="align-items:start"><div id="fol-prod-servicos"></div><div id="fol-prod-dias"></div></div>
+      </div>
+      <div class="section-heading">IFI e IRR por técnico<span class="sec-nota">retornos atribuídos ao técnico ofensor</span></div>
+      <div class="table-wrap" style="margin-bottom:1.5rem" id="fol-ifirr"></div>`;
+}
+function ligarProducaoDoTecnicoFolha(ranking, ordensPorTec, pct, IFI_TARGET, IRR_TARGET) {
+  const sel = document.getElementById('fol-prod-tec');
+  if (!sel) return;
+  const num = v => (Number(v) || 0).toLocaleString('pt-BR');
+  const calc = r => {
+    const apto = /apto/i.test(r.bonus || '') && !/inapto/i.test(r.bonus || '');
+    return { r, q: quebraPorTipoDaLinha(r, apto, ordensPorTec[normalizeHeader(r.tecnico)] || []) };
+  };
+  const dados = ranking.map(calc);
+  // ordens por dia: as concluídas da Produção + os dias que só existem no CSV da PCR (ainda não importados na planilha)
+  const soCsv = new Set();   // dias que só existem no CSV da PCR (a Produção ainda não tem)
+  const porDia = (r, mapa) => {
+    const j = datasDoPeriodoFolha(r.periodo); if (!j.inicio) return;
+    const chave = normalizeHeader(r.tecnico), diasProd = new Set();
+    (ordensPorTec[chave] || []).forEach(p => {
+      if (!isConcluido(p.status) || !inRange(p.data, j.inicio, j.fim)) return;
+      diasProd.add(p.data); mapa.set(p.data, (mapa.get(p.data) || 0) + 1);
+    });
+    const vistas = new Set();
+    DB.pcr.forEach(p => {
+      if (!isConcluido(p.status) || normalizeHeader(p.recurso) !== chave || !p.data || diasProd.has(p.data) || !inRange(p.data, j.inicio, j.fim)) return;
+      const k = p.data + '|' + p.os; if (vistas.has(k)) return; vistas.add(k);
+      soCsv.add(p.data);
+      mapa.set(p.data, (mapa.get(p.data) || 0) + 1);
+    });
+  };
+  const desenhar = () => {
+    const alvo = sel.value ? dados.filter(d => `${d.r.tecnico}|${d.r.periodo}` === sel.value) : dados;
+    const linhas = TIPOS_FOLHA.map(t => ({
+      rot: t.rot, qtd: alvo.reduce((a, d) => a + (d.q[t.chave] || 0), 0), val: alvo.reduce((a, d) => a + (d.q['v_' + t.chave] || 0), 0),
+    })).filter(l => l.qtd > 0 || l.val > 0);
+    const totQtd = linhas.reduce((a, l) => a + l.qtd, 0);
+    const valorOrdens = alvo.reduce((a, d) => a + (Number(d.r.valor_total_ordens) || 0), 0);
+    const aluguel = alvo.reduce((a, d) => a + (Number(d.r.valor_aluguel) || 0), 0);
+    const dias = new Map(); alvo.forEach(d => porDia(d.r, dias));
+    const listaDias = [...dias.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const um = sel.value ? alvo[0] : null;
+    document.getElementById('fol-prod-resumo').innerHTML = um
+      ? `<div class="cards-grid">${metricCard('Dias trabalhados', num(um.r.dias_trab))}${metricCard('Serviços no ciclo', num(totQtd))}${metricCard('IFI / IRR', `${num(um.r.qtd_ifi)} / ${num(um.r.qtd_irr)}`)}${metricCard('Bônus', esc(um.r.bonus || '-'), false, { positive: /apto/i.test(um.r.bonus || '') && !/inapto/i.test(um.r.bonus || '') })}</div>`
+      : `<div class="cards-grid">${metricCard('Técnicos', num(alvo.length))}${metricCard('Serviços no ciclo', num(totQtd))}${metricCard('Valor das ordens', formatCurrency(valorOrdens))}${metricCard('IFI / IRR', `${num(alvo.reduce((a, d) => a + (Number(d.r.qtd_ifi) || 0), 0))} / ${num(alvo.reduce((a, d) => a + (Number(d.r.qtd_irr) || 0), 0))}`)}</div>`;
+    document.getElementById('fol-prod-servicos').innerHTML = `<div class="table-wrap"><table class="data-table" id="fol-prod-tab"><thead><tr><th>Serviço</th><th class="num">Contagem de O.S</th><th class="num">Valor O.S</th></tr></thead><tbody>
+      ${linhas.length ? linhas.map(l => `<tr><td class="cat-cell">${esc(l.rot)}</td><td class="num">${num(l.qtd)}</td><td class="num">${formatCurrency(l.val)}</td></tr>`).join('') : '<tr><td colspan="3" class="empty">Sem serviços concluídos no ciclo.</td></tr>'}
+      <tr class="total-row"><td class="cat-cell">Total Geral</td><td class="num">${num(totQtd)}</td><td class="num">${formatCurrency(valorOrdens)}</td></tr>
+      <tr class="total-row"><td class="cat-cell">Aluguel veículo</td><td class="num"></td><td class="num">${aluguel ? formatCurrency(aluguel) : '-'}</td></tr>
+      <tr class="total-row"><td class="cat-cell">Valor total</td><td class="num"></td><td class="num">${formatCurrency(valorOrdens + aluguel)}</td></tr>
+    </tbody></table></div>`;
+    document.getElementById('fol-prod-dias').innerHTML = `<div class="table-wrap" style="max-height:420px;overflow:auto"><table class="data-table" id="fol-prod-dia-tab"><thead><tr><th>Data</th><th class="num">Contagem de O.S</th></tr></thead><tbody>
+      ${listaDias.length ? listaDias.map(([d, n]) => `<tr><td>${formatDate(d)}${soCsv.has(d) ? ' <small style="color:var(--text-muted)">(CSV da PCR — ainda fora da Produção)</small>' : ''}</td><td class="num">${num(n)}</td></tr>`).join('') : '<tr><td colspan="2" class="empty">Sem dias com ordem concluída.</td></tr>'}
+      ${listaDias.length ? `<tr class="total-row"><td class="cat-cell">${listaDias.length} dia(s)</td><td class="num">${num(listaDias.reduce((a, x) => a + x[1], 0))}</td></tr>` : ''}
+    </tbody></table></div>`;
+  };
+  sel.addEventListener('change', desenhar);
+  desenhar();
+  // IFI e IRR de CADA técnico (sempre todos): quantidade, base e % contra a meta (IFI ≤ 2,50% · IRR ≤ 4,50%)
+  const alvoIfi = document.getElementById('fol-ifirr');
+  if (alvoIfi) {
+    const lin = [...dados].map(d => ({ ...d, baseIfi: (d.q.ativacao || 0) + (d.q.mudanca_endereco || 0), baseIrr: d.q.reparo || 0 }))
+      .sort((a, b) => ((Number(b.r.qtd_ifi) || 0) + (Number(b.r.qtd_irr) || 0)) - ((Number(a.r.qtd_ifi) || 0) + (Number(a.r.qtd_irr) || 0)) || String(a.r.tecnico).localeCompare(String(b.r.tecnico), 'pt-BR'));
+    const tot = lin.reduce((a, d) => ({ ifi: a.ifi + (Number(d.r.qtd_ifi) || 0), irr: a.irr + (Number(d.r.qtd_irr) || 0), bi: a.bi + d.baseIfi, br: a.br + d.baseIrr }), { ifi: 0, irr: 0, bi: 0, br: 0 });
+    const corPct = (v, meta) => `<span class="badge ${v <= meta ? 'ok' : 'warn'}">${formatPct(v, 2)}</span>`;
+    alvoIfi.innerHTML = `<table class="data-table" id="fol-ifirr-tab"><thead><tr><th>Técnico</th><th class="num">Base IFI (ativ. + M.E.)</th><th class="num">IFI</th><th class="num">% IFI</th><th class="num">Base IRR (reparos)</th><th class="num">IRR</th><th class="num">% IRR</th><th>Bônus</th></tr></thead><tbody>
+      ${lin.map(d => `<tr><td class="cat-cell">${esc(d.r.tecnico)}</td><td class="num">${num(d.baseIfi)}</td><td class="num"${(Number(d.r.qtd_ifi) || 0) > 0 ? ' style="color:var(--danger);font-weight:700"' : ''}>${num(d.r.qtd_ifi)}</td><td class="num">${corPct(pct(d.r.ifi_pct, d.r), IFI_TARGET)}</td>
+        <td class="num">${num(d.baseIrr)}</td><td class="num"${(Number(d.r.qtd_irr) || 0) > 0 ? ' style="color:var(--danger);font-weight:700"' : ''}>${num(d.r.qtd_irr)}</td><td class="num">${corPct(pct(d.r.irr_pct, d.r), IRR_TARGET)}</td>
+        <td><span class="badge ${/apto/i.test(d.r.bonus || '') && !/inapto/i.test(d.r.bonus || '') ? 'ok' : 'warn'}">${esc(d.r.bonus || '-')}</span></td></tr>`).join('')}
+      <tr class="total-row"><td class="cat-cell">TOTAL</td><td class="num">${num(tot.bi)}</td><td class="num">${num(tot.ifi)}</td><td class="num">${corPct(tot.bi ? tot.ifi / tot.bi * 100 : 0, IFI_TARGET)}</td><td class="num">${num(tot.br)}</td><td class="num">${num(tot.irr)}</td><td class="num">${corPct(tot.br ? tot.irr / tot.br * 100 : 0, IRR_TARGET)}</td><td></td></tr>
+    </tbody></table>`;
+  }
+}
 // linhas marcadas (tecnico|periodo) — fica de pé enquanto a página estiver aberta, mesmo depois de Filtrar/Salvar
 const FOLHA_LINHAS_MARCADAS = new Set();
 function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
@@ -26968,8 +27145,7 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
     const janela = datasDoPeriodoFolha(r.periodo);
     let real = null;
     if (janela.inicio && janela.fim) {
-      const ordens = (producaoPorTecnico[normalizeHeader(r.tecnico)] || []).filter(p => inRange(p.data, janela.inicio, janela.fim));
-      real = new Set(ordens.map(p => p.data)).size;
+      real = diasDoTecnicoNoPeriodo(r.tecnico, janela.inicio, janela.fim);   // Produção + CSV da PCR (22/10/2026)
     }
     cacheDiasReais.set(chave, real);
     return real;
@@ -27063,7 +27239,7 @@ function renderFolhaCompleta(rows, pct, IFI_TARGET, IRR_TARGET) {
       const editor = podePagamento(r) ? inputNumero(r, 'dias_trab', r.dias_trab) : String(r.dias_trab ?? '-');
       const real = diasTrabalhadosReaisDaLinha(r);
       if (real === null || Number(r.dias_trab) === real) return editor;
-      return `${editor} <span style="color:var(--warn-text);font-size:11px;white-space:nowrap" title="A Produção mostra ${real} dia(s) distinto(s) com ordem concluída nesse período — mesma conta da tela Acompanhamento Técnico, 'Bônus dos técnicos — situação de agora'. A folha traz ${r.dias_trab}.">⚠ Prod.: ${real}</span>`;
+      return `${editor} <span style="color:var(--warn-text);font-size:11px;white-space:nowrap" title="A Produção e o CSV da PCR mostram ${real} dia(s) distinto(s) com ordem concluída nesse período. A folha traz ${r.dias_trab}.">⚠ Prod.: ${real}</span>`;
     }],
     ['Bônus', r => podePagamento(r)
       // cor no PRÓPRIO <select> (não só num badge ao lado) — verde quando a
