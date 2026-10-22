@@ -15981,12 +15981,15 @@ function contatosIndiceCliente() {
 function contatoDaOrdem(l) {
   const base = CONTATOS.get(l.contrato) || null, idx = contatosIndiceCsv();
   const tem = c => c && (c.telefone || c.celular);
-  const fecha = (c, origem) => ({ telefone: c.telefone || '', celular: c.celular || '', email: c.email || (base && base.email) || '', nome: c.nome || (base && base.nome) || '', endereco: c.endereco || (base && base.endereco) || '', origem });
+  // 22/10/2026: os OUTROS telefones do cliente (tela "Detalhes da atividade" do Oracle) só aparecem pro Analista, por enquanto
+  const outros = base && base.outros && ehAnalista() ? base.outros : '';
+  const fecha = (c, origem) => ({ outros, telefone: c.telefone || '', celular: c.celular || '', email: c.email || (base && base.email) || '', nome: c.nome || (base && base.nome) || '', endereco: c.endereco || (base && base.endereco) || '', origem });
   if (tem(l.csv)) return fecha({ ...l.csv, nome: l.cliente, endereco: l.endereco }, 'CSV do dia');
   const outro = idx.porCtt.get(l.contrato); if (tem(outro)) return fecha(outro, `CSV de ${formatDate(outro.data)}`);
   if (tem(base)) return fecha(base, 'planilha');
   const n = contatoSoDigitos(l.numcli);
   if (n) { const oc = idx.porCli.get(n); if (tem(oc)) return fecha(oc, `CSV de ${formatDate(oc.data)} (nº do cliente)`); const pl = contatosIndiceCliente().get(n); if (tem(pl)) return fecha(pl, 'planilha (nº do cliente)'); }
+  if (outros) { const p = outros.split(',')[0]; return fecha({ telefone: p }, 'Oracle'); }   // nenhum telefone nas outras fontes: vale o 1º do Oracle
   return base ? fecha({}, '') : null;
 }
 // busca no banco só os contratos pedidos que ainda não conheço (100 por consulta, até 4 ao mesmo tempo); `numerosCliente` = plano B pra quem não tem telefone pelo contrato
@@ -16000,7 +16003,7 @@ async function contatosCarregar(contratos, numerosCliente) {
       try {
         const { data, error } = await supa.from('contatos_assinantes').select('*').in('numero_cliente', parte);
         if (error) return; parte.forEach(n => CONTATOS_TENTADOS.add('cli:' + n));
-        (data || []).forEach(r => { if (!CONTATOS.has(r.contrato)) CONTATOS.set(r.contrato, { contrato: r.contrato, nome: r.nome || '', telefone: r.telefone || '', celular: r.celular || '', email: r.email || '', endereco: r.endereco || '', cidade: r.cidade || '', cep: r.cep || '', numero_cliente: r.numero_cliente || '', data: '', fonte: r.fonte || '' }); });
+        (data || []).forEach(r => { if (!CONTATOS.has(r.contrato)) CONTATOS.set(r.contrato, { contrato: r.contrato, nome: r.nome || '', telefone: r.telefone || '', celular: r.celular || '', email: r.email || '', endereco: r.endereco || '', cidade: r.cidade || '', cep: r.cep || '', numero_cliente: r.numero_cliente || '', outros: r.outros_telefones || '', data: '', fonte: r.fonte || '' }); });
       } catch (e) { /* tenta de novo na próxima abertura */ }
     })));
   }
@@ -16012,8 +16015,8 @@ async function contatosCarregar(contratos, numerosCliente) {
       const { data, error } = await supa.from('contatos_assinantes').select('*').in('contrato', parte);
       if (error) { if (/relation|does not exist|42P01|schema cache|PGRST205/i.test(String(error.message || error.code || ''))) CONTATOS_ESTADO.semTabela = true; return; }
       parte.forEach(c => CONTATOS_TENTADOS.add(c));
-      (data || []).forEach(r => { const a = CONTATOS.get(r.contrato), nv = { contrato: r.contrato, nome: r.nome || '', telefone: r.telefone || '', celular: r.celular || '', email: r.email || '', endereco: r.endereco || '', cidade: r.cidade || '', cep: r.cep || '', numero_cliente: r.numero_cliente || '', data: '', fonte: r.fonte || '' };
-        if (!a) CONTATOS.set(r.contrato, nv); else ['telefone', 'celular', 'email', 'endereco', 'cidade', 'nome'].forEach(f => { if (!a[f] && nv[f]) a[f] = nv[f]; }); });
+      (data || []).forEach(r => { const a = CONTATOS.get(r.contrato), nv = { contrato: r.contrato, nome: r.nome || '', telefone: r.telefone || '', celular: r.celular || '', email: r.email || '', endereco: r.endereco || '', cidade: r.cidade || '', cep: r.cep || '', numero_cliente: r.numero_cliente || '', outros: r.outros_telefones || '', data: '', fonte: r.fonte || '' };
+        if (!a) CONTATOS.set(r.contrato, nv); else ['telefone', 'celular', 'email', 'endereco', 'cidade', 'nome', 'outros'].forEach(f => { if (!a[f] && nv[f]) a[f] = nv[f]; }); });
     } catch (e) { /* sem rede: tenta de novo na próxima abertura */ }
   })));
 }
@@ -16064,7 +16067,8 @@ function renderContatos() {
     <div id="ct-cards"></div>
     <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span>Assinantes e técnicos</span>
       <button type="button" class="btn-sinalizar" id="ct-sinalizar" title="Copia a lista pra colar no WhatsApp: por cidade e técnico, CLIENTE - telefone">📲 SINALIZAR</button>
-      <button type="button" class="btn-export-xls" id="ct-excel">⤓ Excel (só o filtrado)</button></div>
+      <button type="button" class="btn-export-xls" id="ct-excel">⤓ Excel (só o filtrado)</button>
+      ${ehAnalista() ? '<button type="button" class="btn-export-xls" id="ct-oracle" title="Traz pro sistema os telefones que a extensão do Chrome leu nas telas abertas do Oracle Field Service (Detalhes da atividade › Todos os telefones do cliente)">📞 Telefones do Oracle</button><span id="ct-oracle-st" style="font-size:12px;color:var(--text-muted)"></span>' : ''}</div>
     <div class="toolbar">
       <div class="field"><label>Data (CSV de atividades)</label><select id="ct-dia">${dias.length ? dias.map(d => `<option value="${d}">${formatDate(d)}</option>`).join('') : '<option value="">sem CSV importado</option>'}</select></div>
       <div class="field"><label>Técnico</label><select id="ct-tec"><option value="">Todos os técnicos</option></select></div>
@@ -16107,7 +16111,11 @@ function renderContatos() {
     if (!c || (!c.telefone && !c.celular)) return '<span style="color:var(--text-muted)">sem telefone</span>';
     const un = (num, rot) => { const d = contatoTelValido(num); return d ? `<div style="white-space:nowrap">${rot ? `<span style="font-size:11px;color:var(--text-muted)">${rot} </span>` : ''}<a href="tel:+55${d}" class="ct-tel">${esc(contatoFmtTel(d))}</a> <a href="https://wa.me/55${d}" target="_blank" rel="noopener" class="ct-wa" title="Abrir conversa no WhatsApp">💬</a></div>` : ''; };
     const origem = c.origem && c.origem !== 'CSV do dia' ? `<div style="font-size:10.5px;color:var(--text-muted)" title="O CSV deste dia não trazia telefone dessa ordem: o número veio de outra fonte">↳ ${esc(c.origem)}</div>` : '';
-    return un(c.celular, c.telefone ? 'cel' : '') + un(c.telefone, c.celular ? 'fixo' : '') + origem;
+    // outros números do cliente (Oracle), sem repetir os que já estão acima — só Analista (vem vazio pros outros perfis)
+    const ja = new Set([c.celular, c.telefone].map(contatoTelValido).filter(Boolean));
+    const extras = String(c.outros || '').split(',').map(contatoTelValido).filter(d => d && !ja.has(d));
+    const mais = extras.map(d => un(d, 'outro')).join('');
+    return un(c.celular, c.telefone ? 'cel' : '') + un(c.telefone, c.celular ? 'fixo' : '') + mais + origem;
   }
   // ---- aplica os filtros ----
   function filtrar(todas) {
@@ -16157,6 +16165,37 @@ function renderContatos() {
       if (!vis.length) { toast('Nada com técnico visível na tabela (confira o filtro).', 'aviso'); return; }
       copiarParaWhatsApp(textoSinalizarContatos(vis, contatoDe, fmtLimite), bs, '📲 SINALIZAR', `${vis.length} assinante(s)`);
     }); }
+  // ---- Telefones do Oracle Field Service (22/10/2026, só Analista) ----
+  // A extensão (v1.5.0+) lê, em silêncio, as telas "Detalhes da atividade" que a pessoa abre no Oracle e guarda os telefones por contrato.
+  // Aqui o Analista leva esses números pro banco (contatos_assinantes.outros_telefones, sql/PASSO-62) e a extensão apaga o que já foi gravado.
+  async function sincronizarTelefonesOracle(silencioso) {
+    const st = g('ct-oracle-st'), bt = g('ct-oracle'); if (!st || !bt) return;
+    const diz = (t, cor) => { st.textContent = t; st.style.color = cor || 'var(--text-muted)'; };
+    if (!EXT_JH.presente) { if (!silencioso) diz('Extensão do Chrome não encontrada nesta página.', 'var(--danger)'); return; }
+    if (!extensaoAtende('1.5.0')) { if (!silencioso) diz('Atualize a extensão para a versão 1.5.0 (baixe o zip de novo e use ⟳ em chrome://extensions).', 'var(--danger)'); return; }
+    bt.disabled = true; if (!silencioso) diz('Lendo da extensão…');
+    try {
+      const r = await telefonesDaExtensao('jh-ext-telefones-ler');
+      if (!r.ok) { if (!silencioso) diz(r.erro, 'var(--danger)'); return; }
+      const itens = (r.itens || []).filter(i => i && /^\d{5,}$/.test(String(i.contrato)));
+      if (!itens.length) { if (!silencioso) diz('Nada novo: abra a atividade no Oracle ("Detalhes da atividade") e volte aqui.'); return; }
+      if (!supa) { diz('Sem conexão com o banco.', 'var(--danger)'); return; }
+      const quando = new Date().toISOString(), lote = [];
+      itens.forEach(i => {
+        const nums = [...new Set([...(i.telefones || []), i.celular].map(contatoTelValido).filter(Boolean))];
+        if (nums.length) lote.push({ contrato: i.contrato, outros_telefones: nums.join(','), atualizado_em: quando });
+      });
+      let erro = null;
+      for (let k = 0; k < lote.length && !erro; k += 500) { const { error } = await supa.from('contatos_assinantes').upsert(lote.slice(k, k + 500), { onConflict: 'contrato' }); if (error) erro = error; }
+      if (erro) { diz(/outros_telefones|column|schema cache|PGRST/i.test(String(erro.message || erro.code || '')) ? 'Falta rodar o sql/PASSO-62-contatos-outros-telefones.sql no Supabase.' : 'Não consegui gravar: ' + (erro.message || erro), 'var(--danger)'); return; }
+      lote.forEach(o => { const a = CONTATOS.get(o.contrato); if (a) a.outros = o.outros_telefones; else CONTATOS.set(o.contrato, { contrato: o.contrato, nome: '', telefone: '', celular: '', email: '', endereco: '', cidade: '', cep: '', numero_cliente: '', outros: o.outros_telefones, data: '', fonte: 'Oracle' }); });
+      await telefonesDaExtensao('jh-ext-telefones-baixa', { itens: itens.map(i => ({ contrato: i.contrato, em: i.em })) });
+      diz(`✔ ${lote.length} contrato(s) com telefones do Oracle gravados.`, 'var(--success)');
+      desenhar(g('ct-dia')._todas || []);
+    } catch (e) { if (!silencioso) diz('Erro: ' + (e.message || e), 'var(--danger)'); }
+    finally { bt.disabled = false; }
+  }
+  if (g('ct-oracle')) { g('ct-oracle').addEventListener('click', () => sincronizarTelefonesOracle(false)); setTimeout(() => { if (g('ct-oracle')) sincronizarTelefonesOracle(true); }, 1500); }
   async function carregar() {
     const meu = ++seq, dia = g('ct-dia').value, giga = true;   // sempre inclui os chamados da GIGA sem técnico (sem caixinha)
     if (!dia && !giga) { g('ct-cards').innerHTML = ''; g('ct-body').innerHTML = '<div class="panel"><div class="empty">Importe o CSV de atividades pelo botão <b>Importar CSV de atividades</b> da barra lateral (ele traz o telefone do assinante).</div></div>'; return; }
@@ -28349,6 +28388,7 @@ const SAUDE_CHECAGENS_SQL = [
   { passo: 'PASSO-59', rotulo: 'Folha do Escritório: parcelas do vale', tabela: 'folha_escritorio', coluna: 'parcela_vale' },
   { passo: 'PASSO-60', rotulo: 'Contatos dos assinantes (aba Contatos)', tabela: 'contatos_assinantes' },
   { passo: 'PASSO-61', rotulo: 'PCR: telefone do assinante vindo do CSV', tabela: 'pcr', coluna: 'telefone,celular,email,numero_cliente' },
+  { passo: 'PASSO-62', rotulo: 'Contatos: outros telefones do cliente (Oracle)', tabela: 'contatos_assinantes', coluna: 'outros_telefones' },
   { passo: 'PASSO-33', rotulo: 'Trava da importação da PCR', rpc: 'pcr_trava_status', args: { p_token: 'saude' } },
   { passo: 'PASSO-34', rotulo: 'Fechamento do ciclo da Folha', tabela: 'folha_fechamentos' },
   { passo: 'PASSO-39', rotulo: 'Clientes da JH com o sinal real (Monitoramento OLT)', tabela: 'monitor_olt_clientes' },
@@ -28693,6 +28733,20 @@ function consultarExtensao(acao, args) {
     const limite = setTimeout(() => fim({ ok: false, erro: 'A extensão não respondeu. Recarregue a página (F5) e tente de novo.' }), 90 * 1000);
     window.addEventListener('message', ouvir);
     window.postMessage({ tipo: 'jh-ext-consulta', id, acao, args }, location.origin);
+  });
+}
+// v1.5.0: telefones lidos no Oracle Field Service (ponte.js responde "jh-ext-telefones-resp")
+function telefonesDaExtensao(tipo, extra) {
+  return new Promise(resolve => {
+    const id = 't' + Date.now() + Math.random().toString(36).slice(2, 7);
+    const fim = r => { window.removeEventListener('message', ouvir); clearTimeout(limite); resolve(r); };
+    const ouvir = ev => {
+      if (ev.source !== window || ev.origin !== location.origin || !ev.data || ev.data.id !== id || ev.data.tipo !== 'jh-ext-telefones-resp') return;
+      fim(ev.data.ok ? { ok: true, itens: ev.data.itens || [], removidos: ev.data.removidos || 0 } : { ok: false, erro: String(ev.data.erro || 'erro') });
+    };
+    const limite = setTimeout(() => fim({ ok: false, erro: 'A extensão não respondeu. Recarregue a página (F5).' }), 15000);
+    window.addEventListener('message', ouvir);
+    window.postMessage(Object.assign({ tipo, id }, extra || {}), location.origin);
   });
 }
 // "há 5 min" / "há 3 h" / "há 2 dia(s)"
