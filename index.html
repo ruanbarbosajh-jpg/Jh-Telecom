@@ -15406,7 +15406,7 @@ function renderPCR(modoArg) {
     if (btnSinPrazo) btnSinPrazo.addEventListener('click', () => {
       const vis = osVisiveis(tabPrazos()), lista = prazoUnificado.filter(r => aberta(r) && r.limite && vis.has(String(r.os)));
       if (!lista.length) { toast('Nenhuma ordem em aberto na tabela (confira o filtro).', 'aviso'); return; }
-      copiarParaWhatsApp(textoSinalizarPrazos(lista, { periodo: ({ 'MANHÃ': 'MANHÃ', 'TARDE': 'TARDE' })[(document.getElementById('pcr-periodo') || {}).value] || 'MANHÃ E TARDE', faixa: r => { const f = faixaEfetiva(r); return !f ? '' : /24/.test(f) ? 'até 24h' : /48/.test(f) ? (/mais|maior|acima|>/.test(f) ? '+48h' : 'até 48h') : f === 'outlier' ? 'outlier' : ''; }, retorno: r => { const x = (retornos || []).find(y => String(y.os) === String(r.os)); return x && x.ifi_irr ? x.ifi_irr : ''; } }), btnSinPrazo, '📲 SINALIZAR', `${lista.length} ordem(ns)`);
+      copiarParaWhatsApp(textoSinalizarPrazos(lista, { porPeriodo: true, faixa: r => { const f = faixaEfetiva(r); return !f ? '' : /24/.test(f) ? 'até 24h' : /48/.test(f) ? (/mais|maior|acima|>/.test(f) ? '+48h' : 'até 48h') : f === 'outlier' ? 'outlier' : ''; }, retorno: r => { const x = (retornos || []).find(y => String(y.os) === String(r.os)); return x && x.ifi_irr ? x.ifi_irr : ''; } }), btnSinPrazo, '📲 SINALIZAR', `${lista.length} ordem(ns)`);
     });
     const btnSinRet = document.getElementById('ret-sinalizar');
     if (btnSinRet) btnSinRet.addEventListener('click', () => {
@@ -34038,14 +34038,23 @@ const FAIXA_LABEL = { ate24: 'Até 24h', ate48: 'Até 48h', maior48: 'Maior que 
 // Retornos: RETORNOS / CLIENTE @Técnico [Retorno do @Ofensor quando o retorno caiu pra OUTRO técnico]
 const primeiroNomeTec = n => { const w = String(n || '').trim().split(/\s+/)[0] || ''; return w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ''; };
 function textoSinalizarPrazos(lista, ext) {
-  // CLIENTE - HORA - TÉCNICO (nome completo) - faixa (até 24h / até 48h...) [- IFI|IRR]; do mais cedo pro mais tarde dentro de cada cidade
+  // CLIENTE - HORA - @TÉCNICO (nome completo) - faixa (até 24h / até 48h...) [- IFI|IRR]; do mais cedo pro mais tarde dentro de cada bloco
   const hm = d => { const x = new Date(d); return `${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}`; };
+  // 22/10/2026 (pedido do cliente, modelo do WhatsApp): um bloco por CIDADE + PERÍODO, título "CIDADE - PRAZO MANHÃ". O período é o da coluna
+  // "Período" da tabela (MANHÃ/TARDE pela hora do limite, `r.periodo`), não o filtro — cidade com ordens de manhã e de tarde vira dois blocos.
+  // Técnico com @ (menção no WhatsApp) e, no fim, a menção da coordenação.
+  const porPeriodo = !!(ext && ext.porPeriodo);
+  const perDe = r => String(r.periodo || '').trim().toUpperCase() || (r.limite ? (new Date(r.limite).getHours() < 12 ? 'MANHÃ' : 'TARDE') : '');   // sem o campo, a regra oficial: hora do limite < 12h = manhã
+  const ordemPer = p => p === 'MANHÃ' ? 0 : p === 'TARDE' ? 1 : 2;
   const por = new Map();
-  [...lista].sort((a, b) => +new Date(a.limite) - +new Date(b.limite)).forEach(r => { const c = String(rotuloCidadeGeral(r.cidade) || 'Não informado').toUpperCase(); if (!por.has(c)) por.set(c, []); por.get(c).push(r); });
-  // 22/10/2026 (pedido do cliente, modelo do WhatsApp): título "CIDADE - PRAZO MANHÃ" (o período do filtro da tabela: MANHÃ, TARDE ou MANHÃ E TARDE),
-  // técnico com @ (menção no WhatsApp) e, no fim, a menção da coordenação
-  const titulo = c => ext && ext.periodo ? `${c} - PRAZO ${ext.periodo}` : c;
-  const corpo = [...por.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt-BR')).map(([c, rs]) => titulo(c) + '\n' + rs.map(r => {
+  [...lista].sort((a, b) => +new Date(a.limite) - +new Date(b.limite)).forEach(r => {
+    const c = String(rotuloCidadeGeral(r.cidade) || 'Não informado').toUpperCase(), per = porPeriodo ? perDe(r) : '';
+    const k = c + '|' + per;
+    if (!por.has(k)) por.set(k, { c, per, rs: [] });
+    por.get(k).rs.push(r);
+  });
+  const titulo = g => porPeriodo ? `${g.c} - PRAZO${g.per ? ' ' + g.per : ''}` : g.c;
+  const corpo = [...por.values()].sort((a, b) => a.c.localeCompare(b.c, 'pt-BR') || ordemPer(a.per) - ordemPer(b.per)).map(g => titulo(g) + '\n' + g.rs.map(r => {
     // horário copiado = limite MENOS 30 min (21/10/2026, pedido do cliente: "o horário vai ser copiado 30min antes") — a ordem das linhas continua pelo limite real
     const partes = [String(r.cliente || '').trim().toUpperCase(), hm(new Date(+new Date(r.limite) - 30 * 60000)), ehRecursoTecnico(r.recurso) ? '@' + String(r.recurso).trim() : 'sem técnico'];
     const f = ext && ext.faixa ? ext.faixa(r) : '', ret = ext && ext.retorno ? ext.retorno(r) : '';
@@ -34053,7 +34062,7 @@ function textoSinalizarPrazos(lista, ext) {
     if (ret) partes.push(ret);
     return partes.join(' - ');
   }).join('\n')).join('\n\n');
-  return ext && ext.periodo ? corpo + '\n\n@Thais JH coor @seba 2 JH' : corpo;
+  return porPeriodo ? corpo + '\n\n@Thais JH coor @seba 2 JH' : corpo;
 }
 function textoSinalizarRetornos(lista) {
   return 'RETORNOS\n\n' + lista.map(r => {
