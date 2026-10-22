@@ -16299,7 +16299,7 @@ async function chamadasCarregar(dia) {
 }
 function waSetStatus(chave, st) {
   if (!waCompartilhado()) { waSetLocal(chave, st); return; }
-  const [dia, contrato, os] = String(chave).split('|'), agora = new Date().toISOString();
+  const [dia, contrato, os] = String(chave).replace(/^cert:/, '').split('|'), agora = new Date().toISOString();   // "cert:" = marcação da tela Certificações (não mistura com a do Contatos)
   if (st === 'nao') CHAMADAS.mapa.delete(chave); else CHAMADAS.mapa.set(chave, { s: st, por: waQuemChama(), em: agora });   // aparece já; o servidor confirma em seguida
   const op = st === 'nao' ? supa.from('contatos_chamadas').delete().eq('chave', chave)
     : supa.from('contatos_chamadas').upsert({ chave, dia, contrato, os, situacao: st, por: waQuemChama(), atualizado_em: agora }, { onConflict: 'chave' });
@@ -16312,9 +16312,9 @@ function waSetStatus(chave, st) {
   }).catch(() => toast('Sem conexão: a marcação não foi salva no servidor.', 'erro', 5000));
 }
 // o clique no celular: escolhe o destino (1ª vez), abre a conversa com a mensagem, marca como Chamado
-async function waChamarCliente(celular, nome, endereco, dia, chave) {
+async function waChamarCliente(celular, nome, endereco, dia, chave, texto) {
   const destino = await waEscolherDestino(); if (!destino) return false;
-  waAbrir(celular, mensagemChamarCliente(nome, endereco, dia), destino);
+  waAbrir(celular, texto || mensagemChamarCliente(nome, endereco, dia), destino);
   waSetStatus(chave, 'chamado');
   toast(`Conversa com ${waPrimeiroNome(nome) || 'o cliente'} aberta — confira a mensagem e aperte Enviar.`, 'ok', 4000);
   return true;
@@ -16350,20 +16350,22 @@ function filtrarContatos(todas, f) {
 // janela "Chamar Clientes": parte de TODAS as ordens do dia, com os mesmos filtros da tela (começam iguais aos da tela e dá pra mudar aqui dentro:
 // técnico, cidade, tipo de serviço, prazo, faixa do prazo, situação da ordem — inclusive "Não concluído (improdutiva)" — e situação da chamada), agrupadas por
 // técnico ("Adilson - 5 ordens"), cada cliente com a situação Não chamado / Chamado / Cliente reagendou
-function abrirChamarClientes(todas, dia, fmtLimite, fPag) {
+function abrirChamarClientes(todas, dia, fmtLimite, fPag, opts = {}) {
   let m = document.getElementById('modal-chamar');
   if (!m) { m = document.createElement('div'); m.id = 'modal-chamar'; m.className = 'modal-backdrop'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); document.body.appendChild(m); }
   const contatoDe = l => contatoDaOrdem(l);
-  const chaveDe = l => `${dia}|${l.contrato}|${l.os}`;
+  const chaveDe = l => `${opts.ns || ''}${dia}|${l.contrato}|${l.os}`;
   let dados = [], porK = new Map(), fila = null, st = waStatusTodos();
   const marcados = new Set();
   const nomeDe = d => d.l.cliente || d.c.nome || '', endDe = d => limparEnderecoNull(d.l.endereco || d.c.endereco);
+  const modeloAtual = () => (m.querySelector('#chm-modelo') || {}).value || '';
+  const msgDe = d => opts.mensagem ? opts.mensagem(d.l, nomeDe(d), endDe(d), modeloAtual()) : mensagemChamarCliente(nomeDe(d), endDe(d), dia);
   const destAtual = () => { const d = waDestinoSalvo(); return d ? `Abre em: <b>${esc(WA_DESTINOS[d])}</b> · <a href="#" id="chm-trocar">trocar</a>` : 'Na primeira vez o sistema pergunta onde abrir o WhatsApp.'; };
   // opções do dia + o que estava marcado na tela da aba
   const opTec = [...ordUnicos(todas.map(l => l.tecnico)), ...(todas.some(l => !l.tecnico) ? [SEM_TEC_CT] : [])], opCid = ordUnicos(todas.map(l => l.cidade)), opTipo = ordUnicos(todas.map(l => l.tipo));
   const campo = (id, rot, op, L, all) => multiSelectField(id, rot, op, { preset: L ? op.filter(v => L.has(v)) : op, allLabel: all, noneLabel: 'Nenhuma', emptyMsg: 'Sem opções' });
   const sitOps = Object.keys(SITUACOES_CONTATOS), sitPre = new Set(fPag.sitL || sitOps);
-  m.innerHTML = `<div class="modal-card modal-largo" style="max-width:min(1500px,97vw);width:97vw"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h3 style="margin:0">📞 Chamar Clientes</h3>
+  m.innerHTML = `<div class="modal-card modal-largo" style="max-width:min(1500px,97vw);width:97vw"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h3 style="margin:0">📞 ${esc(opts.titulo || 'Chamar Clientes')}</h3>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button type="button" class="btn-secundario" id="chm-sel10" title="Marca os 10 primeiros que ainda não foram chamados">☑ Marcar os próximos ${WA_LOTE_MAX}</button>
       <button type="button" class="btn-sinalizar" id="chm-lote" title="Marque até ${WA_LOTE_MAX} clientes; cada clique abre UMA conversa no WhatsApp com a mensagem pronta"></button><button type="button" class="btn-secundario" id="chm-parar" hidden title="Cancela a fila">✖ Parar fila</button>
       <button type="button" class="btn-secundario" id="chm-fechar">Fechar</button></div></div>
@@ -16371,8 +16373,10 @@ function abrirChamarClientes(todas, dia, fmtLimite, fPag) {
       <span id="chm-comp" style="color:var(--text-muted)"></span></div>
     <div class="toolbar" style="margin:10px 0 4px">
       ${campo('chm-tec', 'Técnico', opTec, fPag.tecL, 'Todos os técnicos')}${campo('chm-cid', 'Cidade', opCid, fPag.cidL, 'Todas as cidades')}${campo('chm-tipo', 'Tipo de serviço', opTipo, fPag.tipoL, 'Todos os tipos')}
-      ${campo('chm-prazo', 'Prazo', Object.keys(PRAZOS_CT), fPag.pzL, 'Todos os prazos')}${campo('chm-faixa', 'Faixa do prazo', Object.keys(FAIXAS_CT), fPag.fxL, 'Todas as faixas')}
-      ${multiSelectField('chm-sit', 'Situação da ordem', sitOps, { preset: sitOps.filter(v => sitPre.has(v)), allLabel: 'Todas as situações', noneLabel: 'Nenhuma' })}
+      ${opts.semPrazo ? '' : campo('chm-prazo', 'Prazo', Object.keys(PRAZOS_CT), fPag.pzL, 'Todos os prazos')}${campo('chm-faixa', 'Faixa do prazo', Object.keys(FAIXAS_CT), fPag.fxL, 'Todas as faixas')}
+      ${opts.semSituacao ? '' : multiSelectField('chm-sit', 'Situação da ordem', sitOps, { preset: sitOps.filter(v => sitPre.has(v)), allLabel: 'Todas as situações', noneLabel: 'Nenhuma' })}
+      ${opts.extra ? multiSelectField('chm-extra', opts.extra.rot, opts.extra.opcoes, { allLabel: 'Todas', noneLabel: 'Nenhuma' }) : ''}
+      ${opts.modelos ? `<div class="field"><label>Modelo da mensagem</label><select id="chm-modelo">${opts.modelos.map(([v, r]) => `<option value="${v}">${esc(r)}</option>`).join('')}</select></div>` : ''}
       ${multiSelectField('chm-fil', 'Chamada', Object.values(WA_ST), { allLabel: 'Todas', noneLabel: 'Nenhuma' })}</div>
     <p style="font-size:12.5px;color:var(--text-muted);margin:4px 0"><span id="chm-total"></span> Clique no <b>celular</b> do cliente: o WhatsApp abre com a mensagem pronta. <span id="chm-dest">${destAtual()}</span></p>
     <details style="margin:4px 0 8px;font-size:12.5px"><summary style="cursor:pointer;color:var(--text-secondary)">Ver a mensagem que será enviada</summary><pre id="chm-msg" style="white-space:pre-wrap;font-family:inherit;margin:6px 0 0;padding:10px;border:1px solid var(--border);border-radius:8px"></pre></details>
@@ -16398,8 +16402,9 @@ function abrirChamarClientes(todas, dia, fmtLimite, fPag) {
   // aplica os filtros da janela (+ busca/retorno/contato que estavam na tela) e redesenha
   const refiltra = () => {
     st = waStatusTodos();
-    const f = { rt: fPag.rt, tem: fPag.tem, q: fPag.q, tecS: marcadosDe('chm-tec'), cidS: marcadosDe('chm-cid'), tipoS: marcadosDe('chm-tipo'), pzS: mapaSet(marcadosDe('chm-prazo'), PRAZOS_CT), fxS: mapaSet(marcadosDe('chm-faixa'), FAIXAS_CT), sits: new Set(getMultiSelectValues('chm-sit').map(v => SITUACOES_CONTATOS[v])) };
-    const lista = filtrarContatos(todas, f).sort((a, b) => (a.limite || Infinity) - (b.limite || Infinity) || String(a.cliente).localeCompare(String(b.cliente), 'pt-BR'));
+    const f = { rt: fPag.rt, tem: fPag.tem, q: fPag.q, tecS: marcadosDe('chm-tec'), cidS: marcadosDe('chm-cid'), tipoS: marcadosDe('chm-tipo'), pzS: mapaSet(marcadosDe('chm-prazo'), PRAZOS_CT), fxS: mapaSet(marcadosDe('chm-faixa'), FAIXAS_CT), sits: document.getElementById('chm-sit-panel') ? new Set(getMultiSelectValues('chm-sit').map(v => SITUACOES_CONTATOS[v])) : null };
+    const exS = opts.extra ? marcadosDe('chm-extra') : null;
+    const lista = filtrarContatos(todas, f).filter(l => !exS || exS.has(opts.extra.valor(l))).sort((a, b) => (a.limite || Infinity) - (b.limite || Infinity) || String(a.cliente).localeCompare(String(b.cliente), 'pt-BR'));
     dados = lista.map(l => { const c = contatoDe(l) || {}, tels = c.todos || []; return { l, c, cel: tels.filter(waCelularValido), fixos: tels.filter(d => !waCelularValido(d)), k: chaveDe(l) }; });
     porK = new Map(dados.map(d => [d.k, d]));
     [...marcados].forEach(k => { if (!porK.has(k)) marcados.delete(k); });
@@ -16414,45 +16419,69 @@ function abrirChamarClientes(todas, dia, fmtLimite, fPag) {
     const cont = { nao: 0, chamado: 0, reagendou: 0 }; dados.forEach(d => { cont[waStatusDe(d.k, st)]++; });
     m.querySelector('#chm-total').textContent = `${dados.length} ordem(ns) · ${dados.filter(d => d.cel.length).length} com celular · ${cont.nao} não chamado(s) · ${cont.chamado} chamado(s) · ${cont.reagendou} reagendou(aram).`;
     const ex = dados.find(d => d.cel.length) || dados[0];
-    m.querySelector('#chm-msg').textContent = ex ? mensagemChamarCliente(nomeDe(ex), endDe(ex), dia) : mensagemChamarCliente('', '', dia);
+    m.querySelector('#chm-msg').textContent = opts.exemplos ? opts.exemplos(dados, modeloAtual(), nomeDe, endDe) : ex ? mensagemChamarCliente(nomeDe(ex), endDe(ex), dia) : mensagemChamarCliente('', '', dia);
     rotuloLote(); notaComp();
   };
   m._repinta = () => { if (m.classList.contains('active')) pinta(); };
-  [['chm-tec', 'técnico(s)', 'Todos os técnicos'], ['chm-cid', 'cidade(s)', 'Todas as cidades'], ['chm-tipo', 'tipo(s)', 'Todos os tipos'], ['chm-prazo', 'prazo(s)', 'Todos os prazos'], ['chm-faixa', 'faixa(s)', 'Todas as faixas'], ['chm-sit', 'situação(ões)', 'Todas as situações']]
+  [['chm-tec', 'técnico(s)', 'Todos os técnicos'], ['chm-cid', 'cidade(s)', 'Todas as cidades'], ['chm-tipo', 'tipo(s)', 'Todos os tipos'], ['chm-prazo', 'prazo(s)', 'Todos os prazos'], ['chm-faixa', 'faixa(s)', 'Todas as faixas'], ['chm-sit', 'situação(ões)', 'Todas as situações'], ['chm-extra', 'opção(ões)', 'Todas']]
     .forEach(([id, noun, all]) => wireMultiSelectField(id, { noun, allLabel: all }, refiltra));
   wireMultiSelectField('chm-fil', { noun: 'situação(ões)', allLabel: 'Todas' }, pinta);
   refiltra(); m.classList.add('active');
   chamadasCarregar(dia).then(mudou => { if (mudou || !waCompartilhado()) pinta(); });   // traz as marcações dos outros ao abrir
+  if (m._poll) clearInterval(m._poll);
+  m._poll = setInterval(async () => { if (!m.classList.contains('active')) { clearInterval(m._poll); m._poll = null; return; } if (await chamadasCarregar(dia)) pinta(); }, 20000);   // e a cada 20 s enquanto a janela está aberta
   m.querySelector('#chm-fechar').addEventListener('click', () => m.classList.remove('active'));
   m.onclick = async ev => {
     if (ev.target === m) { m.classList.remove('active'); return; }
     if (ev.target.closest('#chm-trocar')) { ev.preventDefault(); try { localStorage.removeItem(WA_DESTINO_CHAVE); } catch (e) { /* idem */ } m.querySelector('#chm-dest').innerHTML = destAtual(); return; }
     const b = ev.target.closest('button.chm-tel');
     if (b) { const d = porK.get(b.dataset.k); if (!d) return;
-      if (await waChamarCliente(b.dataset.num, nomeDe(d), endDe(d), dia, b.dataset.k)) { marcados.delete(b.dataset.k); pinta(); m.querySelector('#chm-dest').innerHTML = destAtual(); } return; }
+      if (await waChamarCliente(b.dataset.num, nomeDe(d), endDe(d), dia, b.dataset.k, msgDe(d))) { marcados.delete(b.dataset.k); pinta(); m.querySelector('#chm-dest').innerHTML = destAtual(); } return; }
     if (ev.target.closest('#chm-sel10')) {
       marcados.clear(); dados.filter(d => d.cel.length && waStatusDe(d.k, st) === 'nao').slice(0, WA_LOTE_MAX).forEach(d => marcados.add(d.k)); pinta();
       if (!marcados.size) toast('Não há cliente com celular e ainda não chamado nesses filtros.', 'aviso'); return; }
     if (ev.target.closest('#chm-parar')) { fila = null; rotuloLote(); toast('Fila cancelada.', 'ok', 2500); return; }
     if (ev.target.closest('#chm-lote')) {
       if (!fila) {
-        const itens = [...marcados].map(k => porK.get(k)).filter(d => d && d.cel.length).map(d => ({ celular: d.cel[0], nome: nomeDe(d), endereco: endDe(d), chave: d.k }));
+        const itens = [...marcados].map(k => porK.get(k)).filter(d => d && d.cel.length).map(d => ({ celular: d.cel[0], nome: nomeDe(d), endereco: endDe(d), chave: d.k, d }));
         if (!itens.length) { toast(`Marque os clientes (até ${WA_LOTE_MAX}) ou use "Marcar os próximos ${WA_LOTE_MAX}".`, 'aviso'); return; }
         fila = { itens, i: 0 }; marcados.clear();
       }
       const it = fila.itens[fila.i];
-      if (!(await waChamarCliente(it.celular, it.nome, it.endereco, dia, it.chave))) { rotuloLote(); return; }   // fechou a escolha do aplicativo: a fila continua parada nesse cliente
+      if (!(await waChamarCliente(it.celular, it.nome, it.endereco, dia, it.chave, msgDe(it.d)))) { rotuloLote(); return; }   // fechou a escolha do aplicativo: a fila continua parada nesse cliente
       fila.i++;
       if (fila.i >= fila.itens.length) { fila = null; toast('Fila concluída — todas as conversas foram abertas.', 'ok', 4000); }
       pinta(); return;
     }
   };
   m.onchange = ev => {
+    if (ev.target.id === 'chm-modelo') { pinta(); return; }
     const sel = ev.target.closest('select.chm-st'); if (sel) { waSetStatus(sel.dataset.k, sel.value); pinta(); return; }
     const cb = ev.target.closest('input.chm-sel'); if (cb) {
       if (cb.checked && marcados.size >= WA_LOTE_MAX) { cb.checked = false; toast(`No máximo ${WA_LOTE_MAX} conversas de uma vez.`, 'aviso'); return; }
       if (cb.checked) marcados.add(cb.dataset.k); else marcados.delete(cb.dataset.k); rotuloLote(); }
   };
+}
+
+// ordens do dia (uma por O.S, do CSV de atividades) no formato da aba Contatos; `incluirGiga` acrescenta os chamados da GIGA ainda sem técnico
+function montarLinhasContatos(dia, incluirGiga) {
+  const doDia = linhasDoCsvPorDia(dia), agora = Date.now();
+  const ret = new Map(retornosDoDiaCalc(doDia.filter(r => ehServicoReparo(r.tipo_atividade))).map(r => [String(r.os), r.ifi_irr]));
+  const linhas = doDia.map(r => {
+    const gr = classifyStatusGranular(r.status), aberta = ['pendente', 'em_rota', 'iniciado'].includes(gr), lim = r.limite ? +new Date(r.limite) : null;
+    const prazo = !lim ? 'semprazo' : gr === 'concluido' ? 'concluida' : !aberta ? 'outro' : lim < agora ? 'vencida' : lim - agora < 2 * 36e5 ? 'vence2h' : 'noprazo';
+    return { os: r.os, contrato: contatoSoDigitos(r.contrato), cliente: r.cliente || '', endereco: r.endereco || '', cidade: cidadeDaSiglaContatos(r.cidade), tipo: rotuloTipoServico(r.tipo_atividade), tipoRaw: r.tipo_atividade || '', status: r.status || '',
+      tecnico: ehRecursoTecnico(r.recurso) ? r.recurso : '', gr, aberta, limite: lim, prazo, faixa: faixaSinalizar(r), ret: ret.get(String(r.os)) || '',
+      csv: { telefone: r.telefone || '', celular: r.celular || '', email: r.email || '' }, numcli: r.numero_cliente || '' };
+  });
+  if (incluirGiga) {
+    const emCampo = new Set(doDia.filter(r => !/nao conclu/.test(normalizeHeader(r.status))).map(r => contatoSoDigitos(r.contrato)));
+    DB.chamadosGiga.filter(r => chamadoGigaEmAberto(r.status) && !emCampo.has(contatoSoDigitos(r.contrato))).forEach(r => {
+      linhas.push({ os: '', contrato: contatoSoDigitos(r.contrato), cliente: r.cliente || '', endereco: [r.logradouro, r.bairro].filter(Boolean).join(' - '), cidade: cidadeDaSiglaContatos(r.unidade) || 'GIGA', tipo: r.fila || 'GIGA', tipoRaw: '', status: 'Chamado GIGA (sem técnico)',
+        tecnico: '', gr: 'pendente', aberta: true, limite: null, prazo: 'semprazo', faixa: '', ret: '', giga: true, csv: null, numcli: '' });
+    });
+  }
+  return linhas;
 }
 
 function renderContatos() {
@@ -16482,25 +16511,7 @@ function renderContatos() {
   const g = id => document.getElementById(id);
   const hoje = () => hojeISOLocal();
   // ---- ordens do dia, uma por O.S, com a situação do prazo e o retorno ----
-  function montarLinhas(dia, incluirGiga) {
-    const doDia = linhasDoCsvPorDia(dia), agora = Date.now();
-    const ret = new Map(retornosDoDiaCalc(doDia.filter(r => ehServicoReparo(r.tipo_atividade))).map(r => [String(r.os), r.ifi_irr]));
-    const linhas = doDia.map(r => {
-      const gr = classifyStatusGranular(r.status), aberta = ['pendente', 'em_rota', 'iniciado'].includes(gr), lim = r.limite ? +new Date(r.limite) : null;
-      const prazo = !lim ? 'semprazo' : gr === 'concluido' ? 'concluida' : !aberta ? 'outro' : lim < agora ? 'vencida' : lim - agora < 2 * 36e5 ? 'vence2h' : 'noprazo';
-      return { os: r.os, contrato: contatoSoDigitos(r.contrato), cliente: r.cliente || '', endereco: r.endereco || '', cidade: cidadeDaSiglaContatos(r.cidade), tipo: rotuloTipoServico(r.tipo_atividade), status: r.status || '',
-        tecnico: ehRecursoTecnico(r.recurso) ? r.recurso : '', gr, aberta, limite: lim, prazo, faixa: faixaSinalizar(r), ret: ret.get(String(r.os)) || '',
-        csv: { telefone: r.telefone || '', celular: r.celular || '', email: r.email || '' }, numcli: r.numero_cliente || '' };
-    });
-    if (incluirGiga) {
-      const emCampo = new Set(doDia.filter(r => !/nao conclu/.test(normalizeHeader(r.status))).map(r => contatoSoDigitos(r.contrato)));
-      DB.chamadosGiga.filter(r => chamadoGigaEmAberto(r.status) && !emCampo.has(contatoSoDigitos(r.contrato))).forEach(r => {
-        linhas.push({ os: '', contrato: contatoSoDigitos(r.contrato), cliente: r.cliente || '', endereco: [r.logradouro, r.bairro].filter(Boolean).join(' - '), cidade: cidadeDaSiglaContatos(r.unidade) || 'GIGA', tipo: r.fila || 'GIGA', status: 'Chamado GIGA (sem técnico)',
-          tecnico: '', gr: 'pendente', aberta: true, limite: null, prazo: 'semprazo', faixa: '', ret: '', giga: true, csv: null, numcli: '' });
-      });
-    }
-    return linhas;
-  }
+  const montarLinhas = (dia, incluirGiga) => montarLinhasContatos(dia, incluirGiga);
   const contatoDe = l => contatoDaOrdem(l);
   const fmtLimite = l => l.limite ? new Date(l.limite).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
   const ROT_PRAZO = { vencida: ['Vencido', 'var(--danger)'], vence2h: ['Vence em até 2h', '#f59e0b'], noprazo: ['No prazo', 'var(--success)'], concluida: ['Concluído', 'var(--text-secondary)'], semprazo: ['Sem prazo', 'var(--text-muted)'], outro: ['—', 'var(--text-muted)'] };
@@ -19006,6 +19017,41 @@ function parseDataHoraCertificacao(s) {
   if (!m) return null;
   return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0));
 }
+// ---- CHAMAR CLIENTES na tela Certificações (22/10/2026, pedido do cliente): só ordens CONCLUÍDAS; ativação e mudança de endereço levam o roteiro de instalação, reparo o de reparo ----
+// Dois modelos por tipo: "curto" (a versão mais recente que o cliente mandou, padrão) e "completo" (a primeira versão, que também pergunta se o serviço está funcionando).
+const CERT_MODELOS = [['curto', 'Mensagem curta (padrão)'], ['completo', 'Mensagem completa (pergunta se está funcionando)']];
+function mensagemCertificacao(l, nome, modelo) {
+  const n = waPrimeiroNome(nome), inst = ehBaseDoIfi(l.tipoRaw);
+  if (modelo === 'completo') {
+    return inst
+      ? `Olá${n ? ', ' + n : ''}!\n\nEstamos realizando uma verificação de qualidade referente ao atendimento de instalação realizado.\n\nPoderia nos informar se o técnico utilizou materiais novos (cabos, roteador e conectores)?\n\nSeu serviço está funcionando corretamente após a instalação?\n\nLembrando que, pelos próximos 15 dias, qualquer dúvida ou necessidade, você pode falar diretamente conosco por este número, sem precisar entrar em contato com a central.\n\nAgradecemos pela atenção!`
+      : `Olá${n ? ', ' + n : ''}!\n\nEstamos realizando uma verificação de qualidade referente ao atendimento de reparo realizado.\n\nO atendimento ocorreu conforme o esperado? Seu serviço está funcionando normalmente após a visita do técnico?\n\nLembrando que, pelos próximos 30 dias, qualquer dúvida ou necessidade, você pode falar diretamente conosco por este número, sem precisar entrar em contato com a central.\n\nAgradecemos pela atenção!`;
+  }
+  return inst
+    ? `Olá${n ? ', ' + n : ''},\n\nEstamos fazendo uma verificação de qualidade e gostaríamos de saber:\nO técnico utilizou materiais novos (cabos, roteador, conectores) durante a instalação?\n\nAh, e lembrando: nos próximos 15 dias, qualquer dúvida ou necessidade, pode falar direto com a gente por este número. Não precisa entrar em contato com a central!\n\nAgradecemos pela atenção!`
+    : `Olá Tudo bem?\n\nInformamos que o atendimento técnico foi concluído com sucesso. Caso enfrente qualquer dificuldade com a sua conexão de internet, solicitamos que entre em contato conosco através deste mesmo número nos próximos 30 dias. Agradecemos pela sua colaboração e informamos que não é necessário contatar a central de atendimento`;
+}
+async function abrirChamarCertificacoes(data, baseCert, botao) {
+  const lin = montarLinhasContatos(data, false).filter(l => l.gr === 'concluido' && (ehBaseDoIfi(l.tipoRaw) || ehServicoReparo(l.tipoRaw)));
+  if (!lin.length) { toast('Nenhuma ordem concluída de ativação, mudança de endereço ou reparo nesse dia.', 'aviso'); return; }
+  lin.forEach(l => { const m = l.os ? baseCert.get(l.os) : undefined; l.certTxt = /^certificada$/i.test(m ? m.status : 'NÃO CERTIFICADA') ? 'Certificada' : 'Não certificada'; });
+  if (botao) botao.disabled = true;
+  try {   // completa os telefones pelo banco (mesmo caminho da aba Contatos)
+    await contatosCarregar(lin.map(l => l.contrato));
+    const semTel = lin.filter(l => { const c = contatoDaOrdem(l); return !(c && (c.telefone || c.celular || (c.todos && c.todos.length))) && l.numcli; });
+    if (semTel.length) await contatosCarregar([], semTel.map(l => l.numcli));
+  } finally { if (botao) botao.disabled = false; }
+  const fmtLimite = l => l.limite ? new Date(l.limite).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  abrirChamarClientes(lin, data, fmtLimite, { sitL: null }, {
+    titulo: 'Chamar Clientes — Certificações', ns: 'cert:', semSituacao: true, semPrazo: true, modelos: CERT_MODELOS,
+    extra: { rot: 'Certificação', opcoes: ['Certificada', 'Não certificada'], valor: l => l.certTxt },
+    mensagem: (l, nome, end, modelo) => mensagemCertificacao(l, nome, modelo),
+    exemplos: (dados, modelo, nomeDe) => {
+      const a = dados.find(d => ehBaseDoIfi(d.l.tipoRaw)), r = dados.find(d => ehServicoReparo(d.l.tipoRaw));
+      return [a ? '— ATIVAÇÃO / MUDANÇA DE ENDEREÇO —\n' + mensagemCertificacao(a.l, nomeDe(a), modelo) : '', r ? '— REPARO —\n' + mensagemCertificacao(r.l, nomeDe(r), modelo) : ''].filter(Boolean).join('\n\n') || '(nenhuma ordem nesses filtros)';
+    },
+  });
+}
 function renderCertificacoes() {
   const diasComPcr = [...new Set(DB.pcr.map(r => r.data))].sort().reverse();
   const dataPadrao = diasComPcr[0] || hojeISOLocal();
@@ -19122,6 +19168,7 @@ function renderCertificacoes() {
       <div class="section-heading" id="cert-detalhe-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <span>Detalhe</span>
         <button type="button" class="btn-export-xls" id="cert-export">⤓ Excel</button>
+        ${podeChamarClientes() ? '<button type="button" class="btn-sinalizar" id="cert-chamar" title="Só ordens concluídas de ativação, mudança de endereço e reparo: abre o WhatsApp de cada cliente com a mensagem de verificação de qualidade">📞 Chamar Clientes</button>' : ''}
       </div>
       <div class="table-wrap"><table class="data-table" id="tab-certificacoes-detalhe"><thead><tr>
         <th>O.S</th><th>Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th>Período</th><th>Status</th><th>Atendente</th><th>Certificada por</th><th>Horário Concluída</th><th>Horário Certificada</th><th>Tempo</th>
@@ -19135,6 +19182,8 @@ function renderCertificacoes() {
     });
     const xlsCid = document.getElementById('cert-cid-xls');
     if (xlsCid) xlsCid.addEventListener('click', () => { const r = exportarTabelaVisivel(document.getElementById('tab-cert-cidade'), 'certificacoes-por-cidade-' + data); if (r) avisoBotao(xlsCid, `⤓ ${r.linhas} linha(s)`, '⤓ Exportar Excel'); });
+    const btnChamar = document.getElementById('cert-chamar');
+    if (btnChamar) btnChamar.addEventListener('click', () => abrirChamarCertificacoes(data, baseCert, btnChamar));
     const btnExport = document.getElementById('cert-export');
     if (btnExport) btnExport.addEventListener('click', () => {
       const r = exportarTabelaVisivel(document.getElementById('tab-certificacoes-detalhe'), 'certificacoes-' + data);
