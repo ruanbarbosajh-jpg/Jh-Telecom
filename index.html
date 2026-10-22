@@ -15969,26 +15969,30 @@ async function contatosGravarNoBanco(mapa, aoProgresso) {
 let _CT_IDX = null, _CT_IDX_N = -1;
 function contatosIndiceCsv() {
   if (_CT_IDX && _CT_IDX_N === DB.pcr.length) return _CT_IDX;
-  const porCtt = new Map(), porCli = new Map();
+  const porCtt = new Map(), porCli = new Map(), telsCtt = new Map(), telsCli = new Map();
+  const juntaTels = (mapa, k, tels) => { if (!k) return; let st = mapa.get(k); if (!st) mapa.set(k, st = new Set()); tels.forEach(t => { if (t) st.add(t); }); };
   DB.pcr.forEach(r => {
     if (!r.telefone && !r.celular) return;
     const c = { telefone: r.telefone || '', celular: r.celular || '', email: r.email || '', nome: r.cliente || '', endereco: r.endereco || '', data: r.data || '' };
     const k = contatoSoDigitos(r.contrato), n = contatoSoDigitos(r.numero_cliente);
     if (k && (!porCtt.has(k) || c.data > porCtt.get(k).data)) porCtt.set(k, c);
     if (n && (!porCli.has(n) || c.data > porCli.get(n).data)) porCli.set(n, c);
+    // 22/10/2026 (pedido do cliente: "se tiver mais de um telefone, é para aparecer todos"): o cliente pode ter números diferentes em dias/ordens diferentes
+    juntaTels(telsCtt, k, [contatoTelValido(r.celular), contatoTelValido(r.telefone)]); juntaTels(telsCli, n, [contatoTelValido(r.celular), contatoTelValido(r.telefone)]);
   });
-  _CT_IDX = { porCtt, porCli }; _CT_IDX_N = DB.pcr.length; return _CT_IDX;
+  _CT_IDX = { porCtt, porCli, telsCtt, telsCli }; _CT_IDX_N = DB.pcr.length; return _CT_IDX;
 }
 let _CT_CLI = null, _CT_CLI_N = -1;   // planilhas/GIGA guardadas, também por nº do cliente
 function contatosIndiceCliente() {
   if (_CT_CLI && _CT_CLI_N === CONTATOS.size) return _CT_CLI;
   const m = new Map(); CONTATOS.forEach(c => { if (c.numero_cliente && (c.telefone || c.celular) && (!m.has(c.numero_cliente) || (c.data || '') > (m.get(c.numero_cliente).data || ''))) m.set(c.numero_cliente, c); });
+  m.tels = new Map(); CONTATOS.forEach(c => { if (!c.numero_cliente) return; let st = m.tels.get(c.numero_cliente); if (!st) m.tels.set(c.numero_cliente, st = new Set()); [c.celular, c.telefone].forEach(t => { if (t) st.add(contatoTelValido(t)); }); });
   _CT_CLI = m; _CT_CLI_N = CONTATOS.size; return m;
 }
 // O contato de UMA ordem. Ordem de preferência (pedido do cliente: "considerar o CSV importado, e se não tiver telefone procurar na planilha de produção"):
 //   1) o telefone da própria linha do CSV desta ordem; 2) o do mesmo contrato em outro dia do CSV; 3) o da planilha / GIGA guardados (mesmo contrato);
 //   4) o mesmo nº do cliente (CSV de outro dia ou planilha) — o cliente pode ter outro contrato. Devolve também DE ONDE veio (`origem`).
-function contatoDaOrdem(l) {
+function contatoDaOrdemBase(l) {
   const base = CONTATOS.get(l.contrato) || null, idx = contatosIndiceCsv();
   const tem = c => c && (c.telefone || c.celular);
   // 22/10/2026: os OUTROS telefones do cliente (tela "Detalhes da atividade" do Oracle) só aparecem pro Analista, por enquanto
@@ -16001,6 +16005,20 @@ function contatoDaOrdem(l) {
   if (n) { const oc = idx.porCli.get(n); if (tem(oc)) return fecha(oc, `CSV de ${formatDate(oc.data)} (nº do cliente)`); const pl = contatosIndiceCliente().get(n); if (tem(pl)) return fecha(pl, 'planilha (nº do cliente)'); }
   if (outros) { const p = outros.split(',')[0]; return fecha({ telefone: p }, 'Oracle'); }   // nenhum telefone nas outras fontes: vale o 1º do Oracle
   return base ? fecha({}, '') : null;
+}
+// Todos os telefones do cliente (22/10/2026, pedido do cliente: "se tiver mais de um telefone, é para aparecer todos os telefones desse cliente"):
+// junta o da linha do CSV, os de outros dias do CSV, os da planilha/GIGA (mesmo contrato e mesmo nº do cliente) e, só pro Analista, os do Oracle. Sem repetir; o principal vem primeiro.
+function contatoDaOrdem(l) {
+  const c = contatoDaOrdemBase(l); if (!c) return c;
+  const idx = contatosIndiceCsv(), base = CONTATOS.get(l.contrato) || null, n = contatoSoDigitos(l.numcli);
+  const todos = [], add = v => { String(v == null ? '' : v).split(',').forEach(x => { const d = contatoTelValido(x); if (d && !todos.includes(d)) todos.push(d); }); };
+  add(c.celular); add(c.telefone);
+  if (l.csv) { add(l.csv.celular); add(l.csv.telefone); }
+  (idx.telsCtt.get(l.contrato) || []).forEach(add);
+  if (base) { add(base.celular); add(base.telefone); }
+  if (n) { (idx.telsCli.get(n) || []).forEach(add); ((contatosIndiceCliente().tels || new Map()).get(n) || []).forEach(add); }
+  if (c.outros) add(c.outros);
+  c.todos = todos; return c;
 }
 // busca no banco só os contratos pedidos que ainda não conheço (100 por consulta, até 4 ao mesmo tempo); `numerosCliente` = plano B pra quem não tem telefone pelo contrato
 async function contatosCarregar(contratos, numerosCliente) {
@@ -16118,14 +16136,13 @@ function renderContatos() {
   const fmtLimite = l => l.limite ? new Date(l.limite).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
   const ROT_PRAZO = { vencida: ['Vencido', 'var(--danger)'], vence2h: ['Vence em até 2h', '#f59e0b'], noprazo: ['No prazo', 'var(--success)'], concluida: ['Concluído', 'var(--text-secondary)'], semprazo: ['Sem prazo', 'var(--text-muted)'], outro: ['—', 'var(--text-muted)'] };
   function celTel(c) {
-    if (!c || (!c.telefone && !c.celular)) return '<span style="color:var(--text-muted)">sem telefone</span>';
+    if (!c || (!c.telefone && !c.celular && !(c.todos && c.todos.length))) return '<span style="color:var(--text-muted)">sem telefone</span>';
     const un = (num, rot) => { const d = contatoTelValido(num); return d ? `<div style="white-space:nowrap">${rot ? `<span style="font-size:11px;color:var(--text-muted)">${rot} </span>` : ''}<a href="tel:+55${d}" class="ct-tel">${esc(contatoFmtTel(d))}</a> <a href="https://wa.me/55${d}" target="_blank" rel="noopener" class="ct-wa" title="Abrir conversa no WhatsApp">💬</a></div>` : ''; };
     const origem = c.origem && c.origem !== 'CSV do dia' ? `<div style="font-size:10.5px;color:var(--text-muted)" title="O CSV deste dia não trazia telefone dessa ordem: o número veio de outra fonte">↳ ${esc(c.origem)}</div>` : '';
-    // outros números do cliente (Oracle), sem repetir os que já estão acima — só Analista (vem vazio pros outros perfis)
-    const ja = new Set([c.celular, c.telefone].map(contatoTelValido).filter(Boolean));
-    const extras = String(c.outros || '').split(',').map(contatoTelValido).filter(d => d && !ja.has(d));
-    const mais = extras.map(d => un(d, 'outro')).join('');
-    return un(c.celular, c.telefone ? 'cel' : '') + un(c.telefone, c.celular ? 'fixo' : '') + mais + origem;
+    // TODOS os números do cliente, um embaixo do outro (11 dígitos = cel, 10 = fixo); o do Oracle só chega aqui pro Analista (`contatoDaOrdemBase`)
+    const lista = c.todos && c.todos.length ? c.todos : [c.celular, c.telefone].map(contatoTelValido).filter(Boolean);
+    const rot = d => lista.length > 1 ? (d.length === 11 ? 'cel' : d.length === 10 ? 'fixo' : '') : '';
+    return lista.map(d => un(d, rot(d))).join('') + origem;
   }
   // ---- aplica os filtros ----
   function filtrar(todas) {
@@ -16136,7 +16153,7 @@ function renderContatos() {
       if (pz && l.prazo !== pz) return false;
       if (rt === 'retorno' ? !l.ret : rt === 'nao' ? !!l.ret : (rt && l.ret !== rt)) return false;
       if (!sits.has(l.gr)) return false;
-      const c = contatoDe(l), temTel = !!(c && (c.telefone || c.celular));
+      const c = contatoDe(l), temTel = !!(c && (c.telefone || c.celular || (c.todos && c.todos.length)));
       if (tem === 'com' ? !temTel : (tem === 'sem' && temTel)) return false;
       if (q && !normalizeHeader([l.cliente, l.contrato, l.os, l.endereco, l.tecnico, c && c.nome].join(' ')).includes(q)) return false;
       return true;
@@ -16148,7 +16165,7 @@ function renderContatos() {
     const lista = filtrar(todas), sep = true;   // sempre separado por técnico (sem caixinha, pedido do cliente 20/10/2026)
     lista.sort((a, b) => (sep ? (a.tecnico || 'zzzzzz').localeCompare(b.tecnico || 'zzzzzz', 'pt-BR') : 0) || (a.limite || Infinity) - (b.limite || Infinity) || String(a.cliente).localeCompare(String(b.cliente), 'pt-BR'));
     atuais = lista;
-    const comTel = lista.filter(l => { const c = contatoDe(l); return c && (c.telefone || c.celular); }).length, tecs = new Set(lista.map(l => l.tecnico).filter(Boolean)).size;
+    const comTel = lista.filter(l => { const c = contatoDe(l); return c && (c.telefone || c.celular || (c.todos && c.todos.length)); }).length, tecs = new Set(lista.map(l => l.tecnico).filter(Boolean)).size;
     const aviso = CONTATOS_ESTADO.semTabela ? '<div style="padding:10px 12px;border:1px solid #f59e0b;border-radius:10px;margin-bottom:12px;font-size:13px;background:color-mix(in srgb, #f59e0b 10%, transparent)">⚠ A tabela de contatos ainda não existe no banco (rode o <b>sql/PASSO-60-contatos-assinantes.sql</b> no Supabase). Por enquanto valem só os contatos importados <b>nesta sessão</b> — use o botão <b>Importar CSV de atividades</b> da barra lateral.</div>' : '';
     g('ct-cards').innerHTML = `${aviso}<div class="cards-grid">
         ${metricCard('Ordens listadas', lista.length.toLocaleString('pt-BR'))}
@@ -16216,7 +16233,7 @@ function renderContatos() {
     preenche('ct-cid', [...new Set(todas.map(l => l.cidade).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR')), 'Todas as cidades');
     desenhar(todas);                                       // já mostra o que está em memória…
     await contatosCarregar(todas.map(l => l.contrato));    // …e completa com o banco (só os contratos desta tela)
-    const semTel = todas.filter(l => { const c = contatoDaOrdem(l); return !(c && (c.telefone || c.celular)) && l.numcli; });
+    const semTel = todas.filter(l => { const c = contatoDaOrdem(l); return !(c && (c.telefone || c.celular || (c.todos && c.todos.length))) && l.numcli; });
     if (semTel.length) await contatosCarregar([], semTel.map(l => l.numcli));   // plano B: o mesmo nº do cliente em outro contrato
     if (meu === seq && g('ct-body')) { const aberto = document.activeElement && document.activeElement.id === 'ct-q'; desenhar(todas); if (aberto) g('ct-q').focus(); }
     g('ct-dia')._todas = todas;
@@ -16239,7 +16256,7 @@ function textoSinalizarContatos(lista, contatoDe, fmtLimite) {
   const cmp = (a, b) => a.localeCompare(b, 'pt-BR');
   return [...porCidade.entries()].sort((a, b) => (a[0] === 'SEM CIDADE') - (b[0] === 'SEM CIDADE') || cmp(a[0], b[0])).map(([cid, tecs]) =>
     cid + '\n' + [...tecs.entries()].sort((a, b) => (a[0] === 'SEM TÉCNICO') - (b[0] === 'SEM TÉCNICO') || cmp(a[0], b[0])).map(([tec, ls]) => tec + '\n' + ls.map(l => {
-      const c = contatoDe(l), tel = c ? contatoFmtTel(c.celular || c.telefone) : '';
+      const c = contatoDe(l), tel = c ? (c.todos && c.todos.length ? c.todos : [c.celular || c.telefone]).map(contatoFmtTel).filter(Boolean).join(' / ') : '';
       return [String(l.cliente || (c && c.nome) || '').trim().toUpperCase(), tel || 'sem telefone'].filter(Boolean).join(' - ');
     }).join('\n')).join('\n\n')).join('\n\n');
 }
