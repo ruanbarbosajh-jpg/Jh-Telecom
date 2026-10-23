@@ -19907,20 +19907,24 @@ function renderFormCertificacao() {
     box.innerHTML = `<section class="fc-card fc-ok${local ? ' fc-ok-local' : ''}" role="status"><div class="fc-ok-corpo"><span class="fc-ok-ic">${fcIc(local ? 'alert' : 'check')}</span><div><h2>${local ? 'Guardada só neste navegador' : 'Certificação registrada!'}</h2>
       <p>O.S <b>${esc(reg.os)}</b>${reg.cliente ? ' · ' + esc(reg.cliente) : ''} · técnico <b>${esc(reg.tecnico)}</b> · atendente ${esc(reg.atendente)}.</p>
       ${local ? '<p class="fc-ok-av">⚠ Ainda NÃO foi para a planilha do Google (ela não está ligada ao sistema — falta configurar o Apps Script). Não conte como registrada para a equipe.</p>' : ''}
-      <p>${agora ? 'Você escolheu chamar o cliente <b>agora</b>.' : 'Você escolheu chamar o cliente <b>depois</b>: ele aparece em Certificações › Chamar Clientes, no filtro "Chamar (formulário)".'}</p></div></div>
-      <div class="fc-ok-acoes">${agora ? '<button type="button" class="fc-btn fc-btn-pri" id="fc-chamar-ja">📞 Chamar o cliente agora</button>' : ''}<button type="button" class="fc-btn fc-btn-sec" id="fc-nova">Nova certificação</button></div></section>`;
+      <p>${agora ? `Você escolheu chamar o cliente <b>agora</b>: o botão abaixo abre o WhatsApp direto em <b>${esc(fcMascaraTel(reg.telefone))}</b> com a mensagem pronta.` : 'Você escolheu chamar o cliente <b>depois</b>: ele aparece em Certificações › Chamar Clientes, no filtro "Chamar (formulário)".'}</p></div></div>
+      <div class="fc-ok-acoes">${agora ? '<button type="button" class="fc-btn fc-btn-pri" id="fc-chamar-ja">📞 Chamar no WhatsApp agora</button>' : ''}<button type="button" class="fc-btn fc-btn-sec" id="fc-nova">Nova certificação</button></div></section>`;
     box.hidden = false; form.hidden = true; box.scrollIntoView({ behavior: 'smooth', block: 'start' });
     const ja = $('chamar-ja');
-    if (ja) ja.addEventListener('click', () => chamarAgora(reg, ja));
+    if (ja) ja.addEventListener('click', () => chamarAgora(reg));
     $('nova').addEventListener('click', () => { box.hidden = true; box.innerHTML = ''; zerar(); form.hidden = false; $('os').focus(); });
     pintaRecentes();
   };
-  // abre o Chamar Clientes só desta O.S (a mesma janela/mensagem da tela Certificações); se a O.S não está no CSV da PCR, abre o WhatsApp direto com o telefone digitado
-  const chamarAgora = async (reg, botao) => {
-    const entrada = { status: 'CERTIFICADA', atendente: reg.atendente, certificadaPor: reg.certificada_por, correta: reg.certificada_corretamente, chamar: 'AGORA', telefone: reg.telefone, _q: Date.now() };
-    if (fcBuscaOs(reg.os)) { await abrirChamarCertificacoesDoFormulario(new Map([[reg.os, entrada]]), botao); return; }
+  // 23/10/2026 (pedido do cliente: "no botão do forms pra chamar o cliente não quero que abra a tela de Chamar Clientes, quero que vá direto pro WhatsApp do número informado"):
+  // abre direto a conversa do WhatsApp com o telefone digitado no formulário e a MESMA mensagem da tela Certificações (nome completo, roteiro de instalação ou de reparo pelo tipo da O.S).
+  // Só abre quando a pessoa clica (nunca sozinho); a conversa fica com o texto pronto e quem confere aperta Enviar. Se a O.S está no CSV, marca "Chamado" na lista compartilhada.
+  const chamarAgora = async reg => {
+    const r = fcBuscaOs(reg.os), nome = reg.cliente || (r && r.cliente) || '';
+    const texto = mensagemCertificacao({ tipoRaw: r ? r.tipo_atividade : '' }, nome, 'curto');
     const destino = await waEscolherDestino(); if (!destino) return;
-    waAbrir(reg.telefone.length === 11 ? reg.telefone : '', mensagemCertificacao({ tipoRaw: 'Reparo' }, reg.cliente || '', 'curto'), destino);
+    waAbrir(fcSoDigitos(reg.telefone), texto, destino);
+    if (r) waSetStatus(`cert:${r.data}|${contatoSoDigitos(r.contrato)}|${reg.os}`, 'chamado');
+    toast(`WhatsApp aberto em ${fcMascaraTel(reg.telefone)} — confira a mensagem e aperte Enviar.`, 'ok', 4500);
   };
   const zerar = () => {
     form.reset(); form.querySelectorAll('[data-auto]').forEach(el => { delete el.dataset.auto; el.classList.remove('fc-auto-ok'); });
