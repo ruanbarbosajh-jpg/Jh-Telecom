@@ -13892,7 +13892,10 @@ function pcrParseDataDia(s) {                       // "19/08/26" -> Date
   const ano = m[3].length === 2 ? 2000 + (+m[3]) : +m[3];
   return new Date(ano, (+m[2]) - 1, +m[1]);
 }
-function pcrParseAbertura(s, dataDia) {             // "18/08 09:32" -> Date
+function pcrParseAbertura(s, dataDia) {             // "18/08 09:32" (ou "18/08/26 09:32") -> Date
+  // 23/10/2026: o export novo do Oracle (sem "Data Abertura Chamado") traz "Horário de Criação/Acionamento" com o ANO: "20/10/26 15:10"
+  const comAno = String(s||'').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})$/);
+  if (comAno) return new Date(comAno[3].length === 2 ? 2000 + (+comAno[3]) : +comAno[3], (+comAno[2]) - 1, +comAno[1], +comAno[4], +comAno[5]);
   const m = String(s||'').trim().match(/^(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})$/);
   if (!m || !dataDia) return null;
   let d = new Date(dataDia.getFullYear(), (+m[2]) - 1, +m[1], +m[3], +m[4]);
@@ -14222,7 +14225,11 @@ function importarCsvPCR(texto) {
   const cab = linhas[0].map(normalizeHeader);
   // colunas repetidas ("Tipo de Atividade" aparece 2x): a última é a que vale
   const col = nome => cab.lastIndexOf(nome);
-  const iData = col('data'), iAbert = col('data abertura chamado'), iFim = col('fim');
+  // "Data Abertura Chamado" era a coluna da abertura (dd/mm hh:mm); o export de 23/10/2026 veio sem ela — só "Data De Abertura Solicitação" (data, sem hora) e
+  // "Horário de Criação/Acionamento" (dd/mm/aa hh:mm). Sem a antiga, vale a de criação, que tem a hora (o prazo de 24h/36h depende dela).
+  const iAbertAntiga = col('data abertura chamado');
+  const iAbert = iAbertAntiga >= 0 ? iAbertAntiga : col('horario de criacao acionamento');
+  const iData = col('data'), iFim = col('fim');
   const iStatus = col('status da atividade'), iCidade = col('cidade'), iRec = col('recurso');
   const iOS = col('ordem de servico'), iCtt = col('numero do contrato'), iNome = col('nome');
   const iTipo = col('tipo de atividade'), iInterv = col('intervalo de tempo'), iMotivo = col('motivo de encerramento das atividades');
@@ -14234,7 +14241,7 @@ function importarCsvPCR(texto) {
   // contato do assinante (20/10/2026, aba Contatos): o CSV de atividades traz Telefone / Telefone Celular / E-mail — agora cada linha da PCR guarda isso
   const iTel = col('telefone'), iCel = col('telefone celular'), iMail = col('e mail'), iNumCli = col('numero do cliente');
   contatosGuardarDoCsv(linhas, 'CSV de atividades');   // telefone / celular / e-mail do assinante (aba Contatos); nunca atrapalha a importação
-  if (iData < 0 || iAbert < 0 || iOS < 0) return { erro: 'Não encontrei as colunas "Data", "Data Abertura Chamado" e "Ordem de Serviço" nesse CSV.' };
+  if (iData < 0 || iAbert < 0 || iOS < 0) return { erro: 'Não encontrei as colunas "Data", "Data Abertura Chamado" (ou "Horário de Criação/Acionamento") e "Ordem de Serviço" nesse CSV.' };
 
   const out = [];
   for (const l of linhas.slice(1)) {
@@ -14356,7 +14363,8 @@ function planejarConcluidasDoCsv(texto, opts = {}) {
   const linhas = parseCSV(texto);
   if (linhas.length < 2) return { erro: 'CSV vazio ou sem linhas de dados.' };
   const cab = linhas[0].map(normalizeHeader), col = nome => cab.lastIndexOf(nome);   // "Tipo de Atividade" repete: a última vale
-  const iData = col('data'), iAbert = col('data abertura chamado'), iFim = col('fim'), iStatus = col('status da atividade'), iCidade = col('cidade'),
+  const iAbert = col('data abertura chamado') >= 0 ? col('data abertura chamado') : col('horario de criacao acionamento');   // ver importarCsvPCR (export de 23/10/2026)
+  const iData = col('data'), iFim = col('fim'), iStatus = col('status da atividade'), iCidade = col('cidade'),
     iRec = col('recurso'), iOS = col('ordem de servico'), iCtt = col('numero do contrato'), iNome = col('nome'), iTipo = col('tipo de atividade'),
     iMotivo = col('motivo de encerramento das atividades'), iInicio = col('inicio'), iEnd = col('endereco');
   if (iData < 0 || iOS < 0 || iStatus < 0 || iRec < 0) return { erro: 'Não encontrei as colunas "Data", "Status da Atividade", "Recurso" e "Ordem de Serviço" nesse CSV.' };
