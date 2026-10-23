@@ -5119,7 +5119,7 @@ async function abrirSistema(user) {
   document.getElementById('app-shell').classList.add('active');
   applySidebarPermissions();
   recolherMenuLateralNoLogin();
-  navigate(CHAMAR_CLIENTE_PEDIDO && podeAcessar(user.role, 'certificacoes') && podeChamarClientes() ? 'certificacoes' : rotaDeEntrada(user));
+  navigate(CHAMAR_CLIENTE_PEDIDO && podeAcessar(user.role, 'certificacoes') && ehAnalista() ? 'certificacoes' : rotaDeEntrada(user));
   mostrarAvisoSupabase();
   try { mostrarBalaoCsvEscritorio(); } catch (e) { /* o balão não pode derrubar o login */ }
   try { if (podeEditarFolhaPagamento()) setTimeout(() => { recuperarRascunhoFolha().catch(() => {}); }, 3000); } catch (e) { /* idem */ }
@@ -19371,6 +19371,7 @@ async function buscarBaseCertificacoes() {
 const FORM_CERT_CSV_URL = 'https://docs.google.com/spreadsheets/d/12PHgaxppbBtkn-l5SFYmQvb-foBhnDUatqo4x6Wb86c/export?format=csv&gid=97656694';
 async function buscarRespostasFormCertificacao() {
   const porOS = new Map();
+  if (!ehAnalista()) return porOS;   // 23/10/2026: o formulário novo (e tudo que vem dele) é só do Analista por enquanto — os outros perfis seguem só com a Base antiga
   try {
     const res = await fetch(FORM_CERT_CSV_URL, { credentials: 'omit' });
     if (!res.ok) return porOS;
@@ -19455,7 +19456,7 @@ async function abrirChamarCertificacoes(data, baseCert, botao) {
   abrirChamarClientes(lin, data, fmtLimite, { sitL: null }, {
     titulo: 'Chamar Clientes — Certificações', ns: 'cert:', semSituacao: true, semPrazo: true, modelos: CERT_MODELOS,
     extra: { rot: 'Certificação', opcoes: ['Certificada', 'Não certificada'], valor: l => l.certTxt },
-    extra2: { rot: 'Chamar (formulário)', opcoes: ['Agora', 'Depois', 'Sem resposta'], valor: l => l.chamarTxt },
+    extra2: ehAnalista() ? { rot: 'Chamar (formulário)', opcoes: ['Agora', 'Depois', 'Sem resposta'], valor: l => l.chamarTxt } : null,
     mensagem: (l, nome, end, modelo) => mensagemCertificacao(l, nome, modelo),
     exemplos: (dados, modelo, nomeDe) => {
       const a = dados.find(d => ehBaseDoIfi(d.l.tipoRaw)), r = dados.find(d => ehServicoReparo(d.l.tipoRaw));
@@ -19498,7 +19499,7 @@ function renderCertificacoes() {
       document.getElementById('cert-atualizado').textContent = 'Base Certificações atualizada às ' + new Date().toLocaleTimeString('pt-BR') + ` (${baseCert.size.toLocaleString('pt-BR')} O.S no histórico)`;
     }
     render();
-    if (CHAMAR_CLIENTE_PEDIDO) { CHAMAR_CLIENTE_PEDIDO = false; abrirChamarCertificacoesDoFormulario(baseCert, document.getElementById('cert-chamar')); }   // veio do link do formulário
+    if (CHAMAR_CLIENTE_PEDIDO) { CHAMAR_CLIENTE_PEDIDO = false; if (ehAnalista()) abrirChamarCertificacoesDoFormulario(baseCert, document.getElementById('cert-chamar')); }   // veio do link do formulário
   }
   function render() {
     const body = document.getElementById('cert-body');
@@ -19583,9 +19584,9 @@ function renderCertificacoes() {
         ${podeChamarClientes() ? '<button type="button" class="btn-sinalizar fora-da-imagem" id="cert-chamar" title="Só ordens concluídas de ativação, mudança de endereço e reparo: abre o WhatsApp de cada cliente com a mensagem de verificação de qualidade">📞 Chamar Clientes</button>' : ''}
       </div>
       <div class="table-wrap"><table class="data-table" id="tab-certificacoes-detalhe"><thead><tr>
-        <th class="fora-da-imagem">O.S</th><th class="fora-da-imagem">Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th class="fora-da-imagem">Período</th><th>Status</th><th class="fora-da-imagem">Atendente</th><th class="fora-da-imagem">Certificada por</th><th class="fora-da-imagem">Certificada corretamente pelo técnico?</th><th class="fora-da-imagem">Horário Concluída</th><th class="fora-da-imagem">Horário Certificada</th><th class="fora-da-imagem">Tempo</th>
+        <th class="fora-da-imagem">O.S</th><th class="fora-da-imagem">Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th class="fora-da-imagem">Período</th><th>Status</th><th class="fora-da-imagem">Atendente</th><th class="fora-da-imagem">Certificada por</th>${ehAnalista() ? '<th class="fora-da-imagem">Certificada corretamente pelo técnico?</th>' : ''}<th class="fora-da-imagem">Horário Concluída</th><th class="fora-da-imagem">Horário Certificada</th><th class="fora-da-imagem">Tempo</th>
       </tr></thead><tbody>
-        ${linhas.map(l => `<tr><td class="fora-da-imagem">${esc(l.os)||'-'}</td><td class="fora-da-imagem">${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td class="fora-da-imagem">${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td><td class="fora-da-imagem">${l.correta === 'SIM' ? '<span class="badge ok">Sim</span>' : l.correta === 'NÃO' || l.correta === 'NAO' ? '<span class="badge warn">Não</span>' : '-'}</td><td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td></tr>`).join('')}
+        ${linhas.map(l => `<tr><td class="fora-da-imagem">${esc(l.os)||'-'}</td><td class="fora-da-imagem">${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td class="fora-da-imagem">${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td>${ehAnalista() ? `<td class="fora-da-imagem">${l.correta === 'SIM' ? '<span class="badge ok">Sim</span>' : l.correta === 'NÃO' || l.correta === 'NAO' ? '<span class="badge warn">Não</span>' : '-'}</td>` : ''}<td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td></tr>`).join('')}
       </tbody></table></div>`;
     const verLista = document.getElementById('cert-ver-lista');
     if (verLista) verLista.addEventListener('click', ev => {
