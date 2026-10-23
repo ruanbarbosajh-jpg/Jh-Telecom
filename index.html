@@ -636,6 +636,16 @@
   .u2f-cab { display: flex; align-items: center; gap: 14px; margin: 0 0 14px; padding: 0 0 12px; border-bottom: 1px solid var(--border); }
   .btn-sinalizar { background: #16a34a; color: #fff; border: none; border-radius: 8px; padding: 6px 14px; font-weight: 800; font-size: 12.5px; cursor: pointer; letter-spacing: .02em; }
   .btn-sinalizar:hover { background: #15803d; }
+  /* "Produção por técnico" do Relatório Geral/Operacional (23/10/2026, pedido do cliente: "ajuste a largura pra ficar enxuta e aumente o tamanho dos números, a visibilidade não está boa"):
+     colunas mais juntas (menos respiro lateral, sem quebrar número) e números maiores, em negrito leve, com algarismos de mesma largura */
+  table.data-table.tab-tec-geral { width: auto !important; min-width: 0 !important; }   /* só a largura que o conteúdo pede, sem esticar as colunas */
+  table.data-table.tab-tec-geral th { padding: 9px 6px !important; font-size: 11.5px; line-height: 1.2; white-space: normal !important; max-width: 92px; vertical-align: bottom; }
+  table.data-table.tab-tec-geral th:first-child { max-width: 200px; }
+  table.data-table.tab-tec-geral td { padding: 10px 6px !important; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.data-table.tab-tec-geral td.cat-cell { white-space: normal; min-width: 150px; max-width: 220px; font-size: 14px; font-weight: 700; line-height: 1.25; }
+  table.data-table.tab-tec-geral td:nth-child(2) { font-size: 14px; font-weight: 500; }
+  table.data-table.tab-tec-geral td .badge { font-size: 12px; padding: 3px 8px; }
+  table.data-table.tab-tec-geral td span[style*="font-weight"] { font-size: inherit; }
   /* aba Contatos: separador entre técnicos e links de telefone / WhatsApp */
   #tab-contatos tr.ct-inicio td { border-top: 3px solid var(--accent); }
   #tab-contatos a.ct-tel { color: var(--text-primary); font-weight: 600; text-decoration: none; }
@@ -13020,9 +13030,11 @@ function capturarElementoComoImagem(elemento, nomeArquivo, aoTerminar) {
   const limpar = () => { if (aoTerminar) aoTerminar(); };
   if (!elemento) { limpar(); return; }
   if (typeof html2canvas !== 'function') { toast('Biblioteca de imagem não carregou (sem internet?).', 'aviso'); limpar(); return; }
+  const escalaImg = escalaDeImagem(elemento.scrollWidth || elemento.clientWidth, elemento.scrollHeight || elemento.clientHeight);
+  let corteLargura = null;   // largura (px de tela) que a imagem deve ter quando as tabelas encolhem pro conteúdo
   html2canvas(elemento, {
     backgroundColor: modoNovo() ? '#ffffff' : tokenTemaClaro('--bg-page', '#ffffff'),
-    scale: escalaDeImagem(elemento.scrollWidth || elemento.clientWidth, elemento.scrollHeight || elemento.clientHeight),
+    scale: escalaImg,
     useCORS: true,
     ignoreElements: el => el.classList && (el.classList.contains('secao-toggle') || el.classList.contains('gerar-imagem-btn') || el.classList.contains('btn-xls-auto') || el.classList.contains('btn-ampliar')),
     // A lib é de 2022 e não conhece as funções de cor novas: o Chrome resolve
@@ -13083,9 +13095,27 @@ function capturarElementoComoImagem(elemento, nomeArquivo, aoTerminar) {
       });
       clone.querySelectorAll('.fora-da-imagem').forEach(el => el.remove());
       clone.querySelectorAll('.rolagem-inteira-na-imagem').forEach(el => { el.style.maxHeight = 'none'; el.style.overflowY = 'visible'; });
+      // TABELAS ENXUTAS NA IMAGEM (23/10/2026, pedido do cliente: "ajuste a largura nas tabelas do gerar imagem, está muito distante os dados; aproxime mais os dados e
+      // aumente um pouco o tamanho dos números"): na tela a tabela estica até a borda do painel; na imagem as colunas ficam só do tamanho do conteúdo, com número maior.
+      // Fora: tabelas com desenho próprio (cartões de prazo, Resumo financeiro, holerite).
+      { const stc = doc.createElement('style');
+        stc.textContent = `table.data-table:not(.pzcard-table):not(.cmp-dash):not(.hol-tab) { width: auto !important; min-width: 0 !important; }
+          table.data-table:not(.pzcard-table):not(.cmp-dash):not(.hol-tab) th { padding: 9px 14px !important; font-size: 13px !important; white-space: normal; }
+          table.data-table:not(.pzcard-table):not(.cmp-dash):not(.hol-tab) td { padding: 9px 14px !important; font-size: 15.5px !important; font-variant-numeric: tabular-nums; }
+          table.data-table:not(.pzcard-table):not(.cmp-dash):not(.hol-tab) td.cat-cell { font-size: 14.5px !important; }`;
+        (doc.head || doc.documentElement).appendChild(stc);
+        // sem gráfico, cartões nem mapa dentro: a própria imagem também encolhe pra largura do conteúdo (senão sobra faixa branca à direita da tabela)
+        if (clone.querySelector('table.data-table') && !clone.querySelector('[data-grafico], canvas, .leaflet-container, .panels-grid, .stat-cards, .cards-grid, .pzcard, .iq-card, .toolbar')) {
+          clone.style.width = 'fit-content'; clone.style.maxWidth = 'none'; clone.style.minWidth = '0';
+          const w = Math.ceil(clone.getBoundingClientRect().width); if (w > 120) corteLargura = w;
+        } }
     },
   }).then(cv => {
     limpar();
+    if (corteLargura && Math.ceil(corteLargura * escalaImg) < cv.width) {   // recorta a faixa vazia da direita
+      const c2 = document.createElement('canvas'); c2.width = Math.ceil(corteLargura * escalaImg); c2.height = cv.height;
+      const g2 = c2.getContext('2d'); g2.fillStyle = '#ffffff'; g2.fillRect(0, 0, c2.width, c2.height); g2.drawImage(cv, 0, 0); cv = c2;
+    }
     cv.toBlob(blob => {
       if (!blob) { toast('Não consegui gerar a imagem — tente de novo.', 'aviso'); return; }
       entregarImagemPng(blob, nomeArquivo);
@@ -20059,7 +20089,7 @@ function htmlTabelaTecnicosGeral(tecs, tot, idTab, inicio, fim) {
       ${tdPct(pPz, PRAZO_META, true)}</tr>`;
   }).join('');
   const pI = pctSobre(tot.ifi, tot.ativ + tot.me), pR = pctSobre(tot.irr, tot.rep), pPz = pctSobre(tot.prazoDentro, tot.prazoTotal);
-  return `<div class="table-wrap"><table class="data-table" id="${idTab}"><thead><tr>
+  return `<div class="table-wrap"><table class="data-table tab-tec-geral" id="${idTab}"><thead><tr>
     <th>Técnico</th><th>Cidade principal</th><th>Frota / próprio</th><th>Produção</th><th>Dias trab.</th><th>Produtividade (ord./dia)</th><th>Ativação</th><th>M.E</th><th>Reparos</th><th>Outros (M.C/Upg.)</th>
     <th>IFI</th><th>% IFI</th><th>IRR</th><th>% IRR</th><th>Indicador</th><th>Bônus</th><th>Reparos ≤ 24h</th></tr></thead><tbody>${linhas}
     <tr class="total-row"><td class="cat-cell">Total</td><td>-</td><td>-</td><td>${fmtN(tot.producao)}</td><td>${fmtN(tot.tecDias)}</td><td>${tot.tecDias ? fmtDec(tot.producao / tot.tecDias) : '-'}</td>
