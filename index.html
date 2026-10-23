@@ -638,6 +638,7 @@
   .btn-sinalizar:hover { background: #15803d; }
   /* "Produção por técnico" do Relatório Geral/Operacional (23/10/2026, pedido do cliente: "ajuste a largura pra ficar enxuta e aumente o tamanho dos números, a visibilidade não está boa"):
      colunas mais juntas (menos respiro lateral, sem quebrar número) e números maiores, em negrito leve, com algarismos de mesma largura */
+  .table-wrap:has(> table.tab-tec-geral) { width: fit-content; max-width: 100%; }   /* 23/10/2026: a caixa abraça a tabela (afastando o zoom, a caixa ficava larga e vazia) */
   table.data-table.tab-tec-geral { width: auto !important; min-width: 0 !important; }   /* só a largura que o conteúdo pede, sem esticar as colunas */
   table.data-table.tab-tec-geral th { padding: 9px 6px !important; font-size: 11.5px; line-height: 1.2; white-space: normal !important; max-width: 92px; vertical-align: bottom; }
   table.data-table.tab-tec-geral th:first-child { max-width: 200px; }
@@ -2154,7 +2155,7 @@
   .multiselect-panel {
     display: none; position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
     background: var(--card-bg); border: 1px solid var(--border); border-radius: 14px;
-    padding: 10px; min-width: 220px; max-height: 280px; overflow-y: auto;
+    padding: 10px; min-width: 220px; width: max-content; max-width: min(460px, calc(100vw - 32px)); max-height: 280px; overflow-y: auto;   /* 23/10/2026: acompanha o texto mais largo (a data do ciclo quebrava em 2 linhas) */
     box-shadow: 0 14px 34px rgba(0,0,0,.3);
   }
   .multiselect-panel.open { display: block; }
@@ -2533,6 +2534,7 @@
   .ampliar-larga.ampliar-zoom .ampliar-corpo > .ampliado { zoom: 1.15; }   /* 21/10/2026: sem width:calc(100%/1.15) — com o zoom padronizado do Chrome sobrava ~13% de espaço à direita */
   .ampliado table.data-table { width: 100% !important; margin: 0; }   /* 16/10/2026: preenche a janela inteira (a janela já tem o tamanho do conteúdo) */
   .ampliado table.data-table td, .ampliado table.data-table th { padding-left: 14px !important; padding-right: 14px !important; }
+  .ampliado table.data-table.cmp-dash td.cat-cell { padding-left: 32px !important; }   /* 23/10/2026: a barrinha colorida não cobre a 1ª letra no Ampliar */
   .ampliar-topo { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 15px; color: var(--text-primary); }
   .ampliar-topo .ampliar-fechar { margin-left: auto; }
   .ampliar-corpo { overflow: auto; padding: 16px; }
@@ -2671,6 +2673,7 @@
   :root[data-estilo="novo"] .trend-legend { justify-content: flex-end; }
   :root[data-estilo="novo"] .graf-classificar { display: flex; justify-content: flex-end; margin: -4px 0 8px; font-size: 12px; color: var(--text-muted); }
   :root[data-estilo="novo"] .graf-classificar select { margin-left: 6px; }
+  :root[data-estilo="novo"] .ph-acoes .graf-classificar, :root[data-estilo="novo"] h3 > .graf-classificar, :root[data-estilo="novo"] .section-heading > .graf-classificar { margin: 0; align-items: center; white-space: nowrap; font-weight: 600; }
   .sidebar-subgrupo { padding: 10px 14px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; color: var(--text-muted); text-transform: uppercase; opacity: .8; }
   .btn-importar-lateral { margin: 0 12px 12px; width: calc(100% - 24px); padding: 11px 12px; border-radius: 10px; border: 1.5px dashed color-mix(in srgb, var(--nav-inactive) 60%, transparent); background: transparent; color: var(--nav-inactive); font-weight: 700; font-size: 13px; cursor: pointer; text-align: center; }
   .btn-importar-lateral:hover { background: var(--nav-hover-bg); color: var(--text-primary); border-style: solid; }
@@ -2757,6 +2760,9 @@
   :root[data-estilo="novo"] #u2-bres .panel > h3 { flex-wrap: wrap !important; }
   :root[data-estilo="novo"] #u2-bres .panel > h3 .ph-acoes { flex-wrap: wrap !important; flex-shrink: 1 !important; margin-left: 0 !important; }
   #u2-bres .panel { overflow: hidden; }
+  /* painel em meia largura (lado a lado): título e botões (com o Classificar) podem quebrar linha em vez de espremer o título (23/10/2026) */
+  :root[data-estilo="novo"] .panels-grid .panel > h3 { flex-wrap: wrap !important; }
+  :root[data-estilo="novo"] .panels-grid .panel > h3 .ph-acoes { flex-wrap: wrap !important; flex-shrink: 1 !important; }
   /* lupa (busca global) */
   .cmdk-grupo-tit { padding: 8px 12px 4px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
   .cmdk-item .cmdk-sub { display: block; font-size: 11.5px; color: var(--text-muted); font-weight: 400; margin-top: 2px; }
@@ -6575,13 +6581,14 @@ function barsChart(elId, items, opts = {}) {
   // parecia que "faltava preencher". Agora todo mundo termina na mesma borda.
   const maiorValor = Math.max(...items.map(i => String(i.display !== undefined ? i.display : i.value).length));
   const seletorOrdem = classificar ? `<div class="graf-classificar"><label>Classificar <select class="topn-select">${[['orig', 'Padrão'], ['desc', 'Maior → menor'], ['asc', 'Menor → maior'], ['az', 'A → Z']].map(([v, r]) => `<option value="${v}"${(el._ordem || 'orig') === v ? ' selected' : ''}>${r}</option>`).join('')}</select></label></div>` : '';
+  if (el._classifH) { el._classifH.remove(); el._classifH = null; }   // o seletor antigo (já levado pro cabeçalho) sai antes de redesenhar
   el.innerHTML = seletorOrdem + `<div class="bars-chart${opts.fill?' fill':''}">${items.map(i => `
     <div class="bar-row${opts.clicavel?' bar-row-clicavel':''}"${opts.clicavel?` data-label="${esc(i.label)}" title="Clique para ver o detalhe"`:''}>
       <div class="bar-label"${i.labelColor?` style="color:${i.labelColor};font-weight:600"`:''}${opts.clicavel?'':` title="${esc(i.label)}"`}>${esc(i.label)}</div>
       <div class="bar-track"><div class="bar-fill" style="--bar-final:${Math.max((i.value/max)*100,2)}%;background:${i.color||color}"></div></div>
       <div class="bar-value" style="min-width:${maiorValor}ch">${i.display !== undefined ? i.display : i.value}</div>
     </div>`).join('')}</div>`;
-  if (classificar) el.querySelector('.graf-classificar select').addEventListener('change', ev => { el._ordem = ev.target.value; barsChart(elId, itensOriginais, opts); });
+  if (classificar) el.querySelector('.graf-classificar select').addEventListener('change', ev => { el._ordem = ev.target.value; barsChart(elId, itensOriginais, opts); moverClassificar(document.getElementById('content')); });
 }
 // Cor de texto que contrasta com o fundo da fatia. O rótulo fica DENTRO da
 // fatia colorida, então a cor certa depende da fatia, não do tema — branco em
@@ -8294,6 +8301,23 @@ function ampliarElemento(alvo, titulo) {
   fundo.addEventListener('click', ev => { if (ev.target === fundo || ev.target.closest('.ampliar-fechar')) fechar(); });
   document.addEventListener('keydown', tecla); ajustar();
 }
+// 23/10/2026 (pedido do cliente: "deixe o botão Classificar ao lado de Excel etc"): o "Classificar" dos gráficos de barras sai de dentro do gráfico e vai pro cabeçalho do painel/tópico,
+// junto dos botões. Só quando o painel (ou tópico) tem UM gráfico só — com vários, ficaria ambíguo qual ele ordena e o seletor continua em cima do próprio gráfico.
+function moverClassificar(raiz) {
+  if (!raiz || !modoNovo()) return;
+  raiz.querySelectorAll('[data-grafico] > .graf-classificar').forEach(c => {
+    const el = c.parentElement;
+    const painel = el.closest('.panel'), caixa = el.closest('.topico-caixa');
+    let cab = null, cont = null;
+    if (painel && painel.querySelector(':scope > h3')) { cab = painel.querySelector(':scope > h3'); cont = painel; }
+    else if (caixa && caixa.querySelector(':scope > .section-heading')) { cab = caixa.querySelector(':scope > .section-heading'); cont = caixa; }
+    if (!cab || cont.querySelectorAll('[data-grafico]').length !== 1) return;
+    c.classList.add('fora-da-imagem');
+    const acoes = cab.querySelector(':scope > .ph-acoes');
+    if (acoes) acoes.insertBefore(c, acoes.firstChild); else cab.appendChild(c);
+    el._classifH = c;
+  });
+}
 function ativarBotoesAnalista() {
   if (!modoNovo()) return;
   const alvo = document.getElementById('content'); if (!alvo) return;
@@ -8368,6 +8392,7 @@ function ativarBotoesAnalista() {
     cabecalhoNovo(h3, p.querySelector('[data-grafico]') ? IC_GRAFICO : p.querySelector('.leaflet-container, .mapa-cidades') ? IC_MAPA : IC_TABELA);
   });
   alvo.querySelectorAll('.topico-caixa > .section-heading').forEach(h => cabecalhoNovo(h, iconeDoTopico(textoDoTitulo(h))));
+  moverClassificar(alvo);
 }
 // ---- CAIXAS POR TÓPICO e FILTRO PRÓPRIO DE CADA TÓPICO (modo novo, 09/10/2026) ----
 // Pedido do cliente: "o título Prazo com uma caixa que envolve tudo sobre prazo, igual ao Pedágio do Dia", "tire os números dos tópicos" e
@@ -8392,7 +8417,7 @@ function iconeDoTopico(texto) {
 function cabecalhoNovo(h, icone) {
   if (!h.querySelector(':scope > .ph-ic')) { const ic = document.createElement('span'); ic.className = 'ph-ic'; ic.innerHTML = icone; h.insertBefore(ic, h.firstChild); }
   let acoes = h.querySelector(':scope > .ph-acoes');
-  const soltos = [...h.children].filter(c => c !== acoes && (c.tagName === 'BUTTON' || c.tagName === 'SELECT' || c.classList.contains('btn-export-xls')));
+  const soltos = [...h.children].filter(c => c !== acoes && (c.tagName === 'BUTTON' || c.tagName === 'SELECT' || c.classList.contains('btn-export-xls') || c.classList.contains('graf-classificar')));
   if (!soltos.length) return;
   if (!acoes) { acoes = document.createElement('span'); acoes.className = 'ph-acoes'; h.appendChild(acoes); }
   soltos.forEach(b => acoes.appendChild(b));
@@ -10912,7 +10937,7 @@ function resumoProducaoDoCiclo(c) {
 function htmlComparativoProducaoCiclos(colunas) {
   if (!colunas || !colunas.length) return '';
   const hoje = hojeISOLocal();
-  const res = colunas.map(c => ({ c, r: resumoProducaoDoCiclo(c) }));
+  const res = colunas.map(c => ({ c, r: resumoProducaoDoCiclo(c) })).reverse();   // 23/10/2026: do fechamento mais antigo (esquerda) pro mais novo (direita)
   const f0 = v => (Number(v) || 0).toLocaleString('pt-BR');
   const f1 = v => (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const linhas = [
@@ -10925,11 +10950,11 @@ function htmlComparativoProducaoCiclos(colunas) {
     ['% IFI', 'pIfi', v => formatPct(v, 2), true], ['% IRR', 'pIrr', v => formatPct(v, 2), true],
   ];
   return `
-      <div class="section-heading sem-toggle">Comparativo de produção entre ciclos<span class="sec-nota">${res.length} ciclo(s) · a pastilha compara com o ciclo à direita (o anterior)</span></div>
+      <div class="section-heading sem-toggle">Comparativo de produção entre ciclos<span class="sec-nota">${res.length} ciclo(s) · a pastilha compara com o ciclo à esquerda (o anterior)</span></div>
       <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table cmp-dash" id="dash-cmp-prod"><thead><tr><th>Indicador</th>
         ${res.map(x => `<th class="num">${formatDate(x.c.start).slice(0, 5)} a ${formatDate(x.c.end).slice(0, 5)}${x.c.end >= hoje ? '<br><small style="font-weight:500">em andamento</small>' : ''}${x.r.sintetico ? '<br><small style="font-weight:500">da Produção</small>' : ''}</th>`).join('')}</tr></thead><tbody>
         ${linhas.map(([rot, k, fmt, invert, destaque]) => `<tr${destaque ? ' class="total-row"' : ''}><td class="cat-cell">${rot}</td>${res.map((x, i) => {
-          const ant = res[i + 1];
+          const ant = res[i - 1];
           return `<td class="num">${fmt(x.r[k])}${ant ? ' ' + setaPill(ant.r[k], x.r[k], invert) : ''}</td>`;
         }).join('')}</tr>`).join('')}
       </tbody></table></div>
@@ -16583,10 +16608,10 @@ async function waChamarCliente(celular, nome, endereco, dia, chave, texto) {
   toast(`Conversa com ${waPrimeiroNome(nome) || 'o cliente'} aberta — confira a mensagem e aperte Enviar.`, 'ok', 4000);
   return true;
 }
-// VÁRIOS (até 10): FILA de uma conversa por clique. Tentativa anterior (abrir os 10 de uma vez, com pausa entre eles) falhou no teste do cliente: o navegador só deixa abrir
+// VÁRIOS (até 5): FILA de uma conversa por clique. Tentativa anterior (abrir os 10 de uma vez, com pausa entre eles) falhou no teste do cliente: o navegador só deixa abrir
 // o programa do WhatsApp enquanto há um clique recente (~5 s), e só 3 de 10 abriram — mas o sistema já tinha marcado os 10 como "Chamado". Agora cada clique em "▶ Próxima
 // conversa" abre UMA conversa e só ela é marcada como Chamado. O rascunho com a mensagem fica na conversa (aparece como "Rascunho:" na lista do WhatsApp).
-const WA_LOTE_MAX = 10;
+const WA_LOTE_MAX = 5;   // 23/10/2026: o cliente pediu 5 por vez (antes 10)
 // quem usa o "Chamar Clientes" (WhatsApp com a mensagem pronta + filtros de escolha múltipla): Analista (22/10/2026) e Escritório (liberado no mesmo dia, pedido do cliente)
 let CT_POLL = null;   // timer que relê as marcações do Chamar Clientes
 const podeChamarClientes = () => ehAnalista() || (currentUser && perfilValido(currentUser.role) === 'escritorio');
@@ -16631,7 +16656,7 @@ function abrirChamarClientes(todas, dia, fmtLimite, fPag, opts = {}) {
   const campo = (id, rot, op, L, all) => multiSelectField(id, rot, op, { preset: L ? op.filter(v => L.has(v)) : op, allLabel: all, noneLabel: 'Nenhuma', emptyMsg: 'Sem opções' });
   const sitOps = Object.keys(SITUACOES_CONTATOS), sitPre = new Set(fPag.sitL || sitOps);
   m.innerHTML = `<div class="modal-card modal-largo" style="max-width:min(1500px,97vw);width:97vw"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h3 style="margin:0">📞 ${esc(opts.titulo || 'Chamar Clientes')}</h3>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button type="button" class="btn-secundario" id="chm-sel10" title="Marca os 10 primeiros que ainda não foram chamados">☑ Marcar os próximos ${WA_LOTE_MAX}</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button type="button" class="btn-secundario" id="chm-sel10" title="Marca os ${WA_LOTE_MAX} primeiros que ainda não foram chamados">☑ Marcar os próximos ${WA_LOTE_MAX}</button>
       <button type="button" class="btn-sinalizar" id="chm-lote" title="Marque até ${WA_LOTE_MAX} clientes; cada clique abre UMA conversa no WhatsApp com a mensagem pronta"></button><button type="button" class="btn-secundario" id="chm-parar" hidden title="Cancela a fila">✖ Parar fila</button>
       <button type="button" class="btn-secundario" id="chm-fechar">Fechar</button></div></div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0 0;font-size:12.5px"><label style="display:flex;gap:6px;align-items:center">Quem está chamando <input type="text" id="chm-nome" class="topn-select" maxlength="30" placeholder="seu nome" style="width:150px"></label>
