@@ -5119,7 +5119,7 @@ async function abrirSistema(user) {
   document.getElementById('app-shell').classList.add('active');
   applySidebarPermissions();
   recolherMenuLateralNoLogin();
-  navigate(rotaDeEntrada(user));
+  navigate(CHAMAR_CLIENTE_PEDIDO && podeAcessar(user.role, 'certificacoes') && podeChamarClientes() ? 'certificacoes' : rotaDeEntrada(user));
   mostrarAvisoSupabase();
   try { mostrarBalaoCsvEscritorio(); } catch (e) { /* o balão não pode derrubar o login */ }
   try { if (podeEditarFolhaPagamento()) setTimeout(() => { recuperarRascunhoFolha().catch(() => {}); }, 3000); } catch (e) { /* idem */ }
@@ -16727,6 +16727,7 @@ function abrirChamarClientes(todas, dia, fmtLimite, fPag, opts = {}) {
       ${opts.semSituacao ? '' : multiSelectField('chm-sit', 'Situação da ordem', sitOps, { preset: sitOps.filter(v => sitPre.has(v)), allLabel: 'Todas as situações', noneLabel: 'Nenhuma' })}
       <div class="field"><label>Aberta de</label><input type="date" id="chm-ab-de"></div><div class="field"><label>Aberta até</label><input type="date" id="chm-ab-ate"></div>
       ${opts.extra ? multiSelectField('chm-extra', opts.extra.rot, opts.extra.opcoes, { allLabel: 'Todas', noneLabel: 'Nenhuma' }) : ''}
+      ${opts.extra2 ? multiSelectField('chm-extra2', opts.extra2.rot, opts.extra2.opcoes, { preset: opts.extra2.preset || opts.extra2.opcoes, allLabel: 'Todas', noneLabel: 'Nenhuma' }) : ''}
       ${opts.modelos ? `<div class="field"><label>Modelo da mensagem</label><select id="chm-modelo">${opts.modelos.map(([v, r]) => `<option value="${v}">${esc(r)}</option>`).join('')}</select></div>` : ''}
       ${multiSelectField('chm-fil', 'Chamada', Object.values(WA_ST), { allLabel: 'Todas', noneLabel: 'Nenhuma' })}</div>
     <p style="font-size:12.5px;color:var(--text-muted);margin:4px 0"><span id="chm-total"></span> Clique no <b>celular</b> do cliente: o WhatsApp abre com a mensagem pronta. <span id="chm-dest">${destAtual()}</span></p>
@@ -16754,8 +16755,8 @@ function abrirChamarClientes(todas, dia, fmtLimite, fPag, opts = {}) {
   const refiltra = () => {
     st = waStatusTodos();
     const f = { rt: fPag.rt, tem: fPag.tem, q: fPag.q, abDe: m.querySelector('#chm-ab-de').value, abAte: m.querySelector('#chm-ab-ate').value, tecS: marcadosDe('chm-tec'), cidS: marcadosDe('chm-cid'), tipoS: marcadosDe('chm-tipo'), pzS: mapaSet(marcadosDe('chm-prazo'), PRAZOS_CT), fxS: mapaSet(marcadosDe('chm-faixa'), FAIXAS_CT), sits: document.getElementById('chm-sit-panel') ? new Set(getMultiSelectValues('chm-sit').map(v => SITUACOES_CONTATOS[v])) : null };
-    const exS = opts.extra ? marcadosDe('chm-extra') : null;
-    const lista = filtrarContatos(todas, f).filter(l => !exS || exS.has(opts.extra.valor(l))).sort((a, b) => (a.limite || Infinity) - (b.limite || Infinity) || String(a.cliente).localeCompare(String(b.cliente), 'pt-BR'));
+    const exS = opts.extra ? marcadosDe('chm-extra') : null, exS2 = opts.extra2 ? marcadosDe('chm-extra2') : null;
+    const lista = filtrarContatos(todas, f).filter(l => !exS || exS.has(opts.extra.valor(l))).filter(l => !exS2 || exS2.has(opts.extra2.valor(l))).sort((a, b) => (a.limite || Infinity) - (b.limite || Infinity) || String(a.cliente).localeCompare(String(b.cliente), 'pt-BR'));
     dados = lista.map(l => { const c = contatoDe(l) || {}, tels = c.todos || []; return { l, c, cel: tels.filter(waCelularValido), fixos: tels.filter(d => !waCelularValido(d)), k: chaveDe(l) }; });
     porK = new Map(dados.map(d => [d.k, d]));
     [...marcados].forEach(k => { if (!porK.has(k)) marcados.delete(k); });
@@ -19376,7 +19377,7 @@ async function buscarRespostasFormCertificacao() {
     const linhas = parseCSV(await res.text());
     const cab = (linhas[0] || []).map(normalizeHeader);
     const col = (...nomes) => cab.findIndex(c => nomes.some(n => c.startsWith(n)));
-    const iOS = col('numero da ordem'), iQuando = col('carimbo'), iPor = col('certificada por'), iAtend = col('atendente'), iCorreta = col('a ordem foi certificada corretamente');
+    const iOS = col('numero da ordem'), iQuando = col('carimbo'), iPor = col('certificada por'), iAtend = col('atendente'), iCorreta = col('a ordem foi certificada corretamente'), iChamar = col('chamar o cliente');
     if (iOS < 0) return porOS;   // não parece a planilha do formulário
     const pega = (l, i) => i >= 0 ? String(l[i] || '').trim() : '';
     for (const l of linhas.slice(1)) {
@@ -19386,7 +19387,7 @@ async function buscarRespostasFormCertificacao() {
       const qMs = +(parseDataHoraCertificacao(quando) || 0);
       if (ant && ant._q >= qMs) continue;   // mais de uma resposta pra mesma O.S: vale a mais recente
       porOS.set(os, { status: 'CERTIFICADA', atendente: pega(l, iAtend), certificadaPor: pega(l, iPor), dataHoraTexto: quando,
-        correta: pega(l, iCorreta).toUpperCase(), _q: qMs });
+        correta: pega(l, iCorreta).toUpperCase(), chamar: pega(l, iChamar).toUpperCase(), _q: qMs });
     }
   } catch (e) { /* planilha privada ou sem rede: fica só a Base antiga */ }
   return porOS;
@@ -19413,10 +19414,37 @@ function mensagemCertificacao(l, nome, modelo) {
     ? `Olá${n ? ', ' + n : ''},\n\nEstamos fazendo uma verificação de qualidade e gostaríamos de saber:\nO técnico utilizou materiais novos (cabos, roteador, conectores) durante a instalação?\n\nAh, e lembrando: nos próximos 15 dias, qualquer dúvida ou necessidade, pode falar direto com a gente por este número. Não precisa entrar em contato com a central!\n\nAgradecemos pela atenção!`
     : `Olá Tudo bem?\n\nInformamos que o atendimento técnico foi concluído com sucesso. Caso enfrente qualquer dificuldade com a sua conexão de internet, solicitamos que entre em contato conosco através deste mesmo número nos próximos 30 dias. Agradecemos pela sua colaboração e informamos que não é necessário contatar a central de atendimento`;
 }
+// "Chamar o cliente: AGORA / DEPOIS" respondido no fim do formulário de certificação (23/10/2026)
+const chamarTxtDoForm = m => m && m.chamar === 'AGORA' ? 'Agora' : m && m.chamar === 'DEPOIS' ? 'Depois' : 'Sem resposta';
+// Vindo do link da mensagem de confirmação do formulário (`?chamar-cliente=1`): abre direto a janela Chamar Clientes com as ordens que a pessoa marcou "AGORA" ("DEPOIS" fica no filtro),
+// de QUALQUER dia (a O.S certificada pode ser de ontem) — acha cada O.S no CSV da PCR e monta a mesma linha da aba Contatos.
+async function abrirChamarCertificacoesDoFormulario(baseCert, botao) {
+  const doForm = [...baseCert.entries()].filter(([, v]) => v && (v.chamar === 'AGORA' || v.chamar === 'DEPOIS'));
+  if (!doForm.length) { toast('Nenhuma resposta do formulário com "chamar o cliente" ainda. Confira se a planilha de respostas está compartilhada (leitor com o link).', 'aviso', 6000); return; }
+  const porOs = new Map(doForm.map(([os, v]) => [String(os), v])), dias = new Set();
+  DB.pcr.forEach(r => { if (porOs.has(String(r.os)) && isConcluido(r.status)) dias.add(r.data); });
+  const lin = []; dias.forEach(d => montarLinhasContatos(d, false).forEach(l => { if (l.os && porOs.has(String(l.os)) && l.gr === 'concluido') lin.push(l); }));
+  if (!lin.length) { toast('As O.S do formulário não estão no CSV da PCR importado (importe o CSV do dia da ordem).', 'aviso', 6000); return; }
+  lin.forEach(l => { const m = baseCert.get(String(l.os)); l.certTxt = /^certificada$/i.test(m ? m.status : 'NÃO CERTIFICADA') ? 'Certificada' : 'Não certificada'; l.chamarTxt = chamarTxtDoForm(m); });
+  if (botao) botao.disabled = true;
+  try {
+    await contatosCarregar(lin.map(l => l.contrato));
+    const semTel = lin.filter(l => { const c = contatoDaOrdem(l); return !(c && (c.telefone || c.celular || (c.todos && c.todos.length))) && l.numcli; });
+    if (semTel.length) await contatosCarregar([], semTel.map(l => l.numcli));
+  } finally { if (botao) botao.disabled = false; }
+  const fmtLimite = l => l.limite ? new Date(l.limite).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  abrirChamarClientes(lin, hojeISOLocal(), fmtLimite, { sitL: null }, {
+    titulo: 'Chamar Clientes — certificações do formulário', ns: 'cert:', semSituacao: true, semPrazo: true, modelos: CERT_MODELOS,
+    extra: { rot: 'Certificação', opcoes: ['Certificada', 'Não certificada'], valor: l => l.certTxt },
+    extra2: { rot: 'Chamar (formulário)', opcoes: ['Agora', 'Depois'], valor: l => l.chamarTxt, preset: ['Agora'] },
+    mensagem: (l, nome, end, modelo) => mensagemCertificacao(l, nome, modelo),
+    exemplos: (dados, modelo, nomeDe) => { const a = dados[0]; return a ? mensagemCertificacao(a.l, nomeDe(a), modelo) : '(nenhuma ordem nesses filtros)'; },
+  });
+}
 async function abrirChamarCertificacoes(data, baseCert, botao) {
   const lin = montarLinhasContatos(data, false).filter(l => l.gr === 'concluido' && (ehBaseDoIfi(l.tipoRaw) || ehServicoReparo(l.tipoRaw)));
   if (!lin.length) { toast('Nenhuma ordem concluída de ativação, mudança de endereço ou reparo nesse dia.', 'aviso'); return; }
-  lin.forEach(l => { const m = l.os ? baseCert.get(l.os) : undefined; l.certTxt = /^certificada$/i.test(m ? m.status : 'NÃO CERTIFICADA') ? 'Certificada' : 'Não certificada'; });
+  lin.forEach(l => { const m = l.os ? baseCert.get(l.os) : undefined; l.certTxt = /^certificada$/i.test(m ? m.status : 'NÃO CERTIFICADA') ? 'Certificada' : 'Não certificada'; l.chamarTxt = chamarTxtDoForm(m); });
   if (botao) botao.disabled = true;
   try {   // completa os telefones pelo banco (mesmo caminho da aba Contatos)
     await contatosCarregar(lin.map(l => l.contrato));
@@ -19427,6 +19455,7 @@ async function abrirChamarCertificacoes(data, baseCert, botao) {
   abrirChamarClientes(lin, data, fmtLimite, { sitL: null }, {
     titulo: 'Chamar Clientes — Certificações', ns: 'cert:', semSituacao: true, semPrazo: true, modelos: CERT_MODELOS,
     extra: { rot: 'Certificação', opcoes: ['Certificada', 'Não certificada'], valor: l => l.certTxt },
+    extra2: { rot: 'Chamar (formulário)', opcoes: ['Agora', 'Depois', 'Sem resposta'], valor: l => l.chamarTxt },
     mensagem: (l, nome, end, modelo) => mensagemCertificacao(l, nome, modelo),
     exemplos: (dados, modelo, nomeDe) => {
       const a = dados.find(d => ehBaseDoIfi(d.l.tipoRaw)), r = dados.find(d => ehServicoReparo(d.l.tipoRaw));
@@ -19469,6 +19498,7 @@ function renderCertificacoes() {
       document.getElementById('cert-atualizado').textContent = 'Base Certificações atualizada às ' + new Date().toLocaleTimeString('pt-BR') + ` (${baseCert.size.toLocaleString('pt-BR')} O.S no histórico)`;
     }
     render();
+    if (CHAMAR_CLIENTE_PEDIDO) { CHAMAR_CLIENTE_PEDIDO = false; abrirChamarCertificacoesDoFormulario(baseCert, document.getElementById('cert-chamar')); }   // veio do link do formulário
   }
   function render() {
     const body = document.getElementById('cert-body');
@@ -29882,6 +29912,8 @@ function renderSaude() {
 // com problema, 198 consultas em 73 s, 0 erro.
 const MONITOR_OLT_ORIGEM = 'https://auto.alloha.com';
 const MONITOR_OLT_PEDIDO = /[?&]monitor-olt=1(&|$)/.test(location.search);
+// link da mensagem de confirmação do formulário de certificação (23/10/2026): depois do login abre Certificações já com a janela "Chamar Clientes" das respostas "AGORA"
+let CHAMAR_CLIENTE_PEDIDO = /[?&]chamar-cliente=1(&|$)/.test(location.search);
 const MONITOR_OLT_LS = 'jh_monitor_olt_ultima';
 const MONITOR_OLT = { lista: null, cache: new Map() };
 let MONITOR_OLT_TIMER = null;
