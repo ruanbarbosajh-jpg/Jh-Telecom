@@ -8416,7 +8416,7 @@ function atualizarIndiceAba() {
   // 15/10/2026 (revisão visual): com muitas seções o painel empurrava o conteúdo pra baixo -> botão recolher (nasce recolhido acima de 12 seções)
   const btnRec = barra.querySelector('.idx-recolher');
   const marcarRec = r => { barra.classList.toggle('idx-recolhido', r); btnRec.textContent = r ? '▸ mostrar seções' : '▾ recolher'; btnRec.setAttribute('aria-expanded', String(!r)); };
-  marcarRec(itens.length > 12);
+  marcarRec(false);   // 23/10/2026 (pedido do cliente: "não é pra deixar oculto Nesta aba"): sempre nasce aberto; quem quiser recolhe no botão
   btnRec.addEventListener('click', () => marcarRec(!barra.classList.contains('idx-recolhido')));
   barra.querySelectorAll('.idx-chip').forEach(c => c.addEventListener('click', () => {
     const it = INDICE_ITENS[+c.dataset.i]; if (!it || !it.el.isConnected) return;
@@ -21278,6 +21278,13 @@ function renderReuniaoPrazos(opcoes) {
       if (noPrazo(r)) porCidadePrazo[c].dentro++; else porCidadePrazo[c].fora++;
     });
     const cidadesRank = Object.values(porCidadePrazo).sort((a, b) => pctF(b) - pctF(a) || b.total - a.total);
+    // principal OFENSOR de prazo de cada cidade (23/10/2026, pedido do cliente: "em relatório geral não tem ofensor por cidade de prazo"): o técnico com mais reparos fora das 24h na cidade
+    const ofPrazoCid = {};
+    foraPrazo.forEach(r => { const c = r.cidade || 'Não informado', tcn = r.recurso || 'Não informado'; if (!ofPrazoCid[c]) ofPrazoCid[c] = {}; ofPrazoCid[c][tcn] = (ofPrazoCid[c][tcn] || 0) + 1; });
+    const prazoOfensorPorCidade = Object.entries(ofPrazoCid).map(([cidade, mapa]) => {
+      const lista = Object.entries(mapa).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'pt-BR')), cp = porCidadePrazo[cidade] || { fora: 0, total: 0 };
+      return { cidade, ofensor: lista[0][0], qtd: lista[0][1], fora: cp.fora, total: cp.total, outros: lista.slice(1, 4) };
+    }).sort((a, b) => (b.fora / (b.total || 1)) - (a.fora / (a.total || 1)) || b.fora - a.fora);
 
     // ---------- Período ofensor (manhã × tarde) ----------
     const contaPeriodo = { manha: 0, tarde: 0, outro: 0 };
@@ -21598,6 +21605,23 @@ function renderReuniaoPrazos(opcoes) {
           valor: `<span style="color:${pctF(c) > (100 - PRAZO_META) ? 'var(--danger)' : 'var(--success)'}">${formatPct(pctF(c), 1)}</span>`,
           sub: formatPct(pctD(c), 1),
         })), { rotuloNome: 'Cidade', rotuloValor: '% fora do prazo', rotuloSub: '% no prazo' })}
+      </div>
+
+      <div class="section-heading">Prazo — principal ofensor por cidade</div>
+      ${nota('O técnico que mais perdeu prazo (reparo concluído fora das 24h) em cada cidade. O % é sobre os reparos fora do prazo da própria cidade.')}
+      <div class="panel" style="margin-bottom:1.5rem">
+        ${!prazoOfensorPorCidade.length ? '<div class="empty">Nenhum reparo fora do prazo no período/cidades.</div>' : `
+        <div class="table-wrap"><table class="data-table"><thead><tr>
+          <th>Cidade</th><th>% fora do prazo da cidade</th><th>Principal ofensor</th><th>% dos fora do prazo da cidade</th><th>Outros ofensores (top 3)</th>
+        </tr></thead><tbody>
+          ${prazoOfensorPorCidade.map(c => `<tr>
+            <td class="cat-cell">${esc(c.cidade)}</td>
+            <td><span style="font-weight:700;color:${(c.fora / (c.total || 1)) * 100 > (100 - PRAZO_META) ? 'var(--danger)' : 'var(--success)'}">${formatPct(c.total ? (c.fora / c.total) * 100 : 0, 1)}</span> <span style="color:var(--text-muted);font-size:12px">(${c.fora} de ${c.total})</span></td>
+            <td>${esc(c.ofensor)}</td>
+            <td style="font-weight:700">${formatPct(c.fora ? (c.qtd / c.fora) * 100 : 0, 1)} <span style="font-weight:600;color:var(--text-muted)">(${c.qtd} de ${c.fora})</span></td>
+            <td style="white-space:normal;font-size:12px;color:var(--text-secondary)">${esc(c.outros.map(([n, v]) => `${n} (${v})`).join(', ')) || '-'}</td>
+          </tr>`).join('')}
+        </tbody></table></div>`}
       </div>
 
       <div class="section-heading" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${novoOp ? '4. Perda de prazo por período (manhã × tarde)' : '4. Período ofensor de prazo'}
