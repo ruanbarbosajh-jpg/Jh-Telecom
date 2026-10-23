@@ -16581,10 +16581,16 @@ const WA_DESTINOS = { app: 'WhatsApp (programa do computador)', business: 'Whats
 function waDestinoSalvo() { try { const d = localStorage.getItem(WA_DESTINO_CHAVE); return WA_DESTINOS[d] ? d : ''; } catch (e) { return ''; } }
 function waCelularValido(d) { return /^\d{11}$/.test(String(d || '')); }   // só celular (DDD + 9 dígitos) tem WhatsApp; fixo não
 function waPrimeiroNome(n) { const p = String(n || '').trim().split(/\s+/)[0] || ''; return p ? p.charAt(0).toUpperCase() + p.slice(1).toLowerCase() : ''; }
+// 23/10/2026 (pedido do cliente: "no chamar cliente coloque o nome completo do cliente no script"): a mensagem usa o NOME INTEIRO. Tira o CNPJ/número que alguns cadastros trazem na frente
+// ("59.837.723 NATHALIA JENIFFER DE SOUSA GOMES") e põe só a inicial de cada nome em maiúscula (de/da/do/dos/das/e ficam minúsculos).
+function waNomeCompleto(n) {
+  const palavras = String(n || '').replace(/^[\d.\/\-\s]+/, '').trim().split(/\s+/).filter(Boolean);
+  return palavras.map((p, i) => { const m = p.toLowerCase(); return i > 0 && /^(de|da|do|dos|das|e)$/.test(m) ? m : m.charAt(0).toUpperCase() + m.slice(1); }).join(' ');
+}
 function waSaudacao() { const h = new Date().getHours(); return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'; }
-// o texto combinado com o cliente — {nome} é só o primeiro nome; "de hoje" vira "do dia dd/mm" quando a lista é de outro dia
+// o texto combinado com o cliente — {nome} agora é o nome completo; "de hoje" vira "do dia dd/mm" quando a lista é de outro dia
 function mensagemChamarCliente(nome, endereco, dia) {
-  const n = waPrimeiroNome(nome), quando = !dia || dia === hojeISOLocal() ? 'de hoje' : `do dia ${formatDate(dia).slice(0, 5)}`;
+  const n = waNomeCompleto(nome), quando = !dia || dia === hojeISOLocal() ? 'de hoje' : `do dia ${formatDate(dia).slice(0, 5)}`;
   return `${waSaudacao()}${n ? ', ' + n : ''}! 👋\n\nAqui é da equipe da Giga+Fibra.\n\nEstamos entrando em contato para confirmar a visita técnica ${quando}.\n\n📍 Endereço: ${endereco || '(não informado)'}\n\nHaverá alguém no local para receber nossa equipe? Por favor, informe também qual janela de horário estará disponível para a visita.\n\nAguardamos sua confirmação. 😊`;
 }
 // janelinha da 1ª escolha; devolve 'app' | 'business' | 'web' ou null (fechou sem escolher)
@@ -19353,6 +19359,36 @@ async function buscarBaseCertificacoes() {
       dataHoraTexto: (l[1] || '').trim(),    // coluna B ("DD/MM/AAAA HH:MM:SS")
     });
   }
+  // formulário NOVO (23/10/2026): as respostas dele valem por cima da Base antiga (ver buscarRespostasFormCertificacao)
+  const novas = await buscarRespostasFormCertificacao();
+  novas.forEach((v, os) => porOS.set(os, { ...(porOS.get(os) || {}), ...v }));
+  return porOS;
+}
+// ---- FORMULÁRIO NOVO DE CERTIFICAÇÃO (23/10/2026, pedido do cliente): o mesmo formulário de antes + a pergunta "A ordem foi certificada corretamente pelo técnico?" ----
+// As respostas caem numa planilha própria (aba "Respostas ao formulário 1"). Aqui a leitura é pelo NOME das colunas (não pela posição), então reordenar/inserir pergunta no formulário não quebra.
+// A planilha precisa estar com o acesso "qualquer pessoa com o link pode ver" (como a Base antiga); enquanto estiver privada o fetch falha e o sistema segue só com a Base antiga, sem erro na tela.
+const FORM_CERT_CSV_URL = 'https://docs.google.com/spreadsheets/d/12PHgaxppbBtkn-l5SFYmQvb-foBhnDUatqo4x6Wb86c/export?format=csv&gid=97656694';
+async function buscarRespostasFormCertificacao() {
+  const porOS = new Map();
+  try {
+    const res = await fetch(FORM_CERT_CSV_URL, { credentials: 'omit' });
+    if (!res.ok) return porOS;
+    const linhas = parseCSV(await res.text());
+    const cab = (linhas[0] || []).map(normalizeHeader);
+    const col = (...nomes) => cab.findIndex(c => nomes.some(n => c.startsWith(n)));
+    const iOS = col('numero da ordem'), iQuando = col('carimbo'), iPor = col('certificada por'), iAtend = col('atendente'), iCorreta = col('a ordem foi certificada corretamente');
+    if (iOS < 0) return porOS;   // não parece a planilha do formulário
+    const pega = (l, i) => i >= 0 ? String(l[i] || '').trim() : '';
+    for (const l of linhas.slice(1)) {
+      const os = pega(l, iOS).replace(/\D/g, ''); if (!os) continue;
+      const quando = pega(l, iQuando).replace(/\s+/g, ' ');
+      const ant = porOS.get(os);
+      const qMs = +(parseDataHoraCertificacao(quando) || 0);
+      if (ant && ant._q >= qMs) continue;   // mais de uma resposta pra mesma O.S: vale a mais recente
+      porOS.set(os, { status: 'CERTIFICADA', atendente: pega(l, iAtend), certificadaPor: pega(l, iPor), dataHoraTexto: quando,
+        correta: pega(l, iCorreta).toUpperCase(), _q: qMs });
+    }
+  } catch (e) { /* planilha privada ou sem rede: fica só a Base antiga */ }
   return porOS;
 }
 // "30/09/2026 09:44:14" -> Date. Formato fixo da coluna B da Base
@@ -19367,7 +19403,7 @@ function parseDataHoraCertificacao(s) {
 // Dois modelos por tipo: "curto" (a versão mais recente que o cliente mandou, padrão) e "completo" (a primeira versão, que também pergunta se o serviço está funcionando).
 const CERT_MODELOS = [['curto', 'Mensagem curta (padrão)'], ['completo', 'Mensagem completa (pergunta se está funcionando)']];
 function mensagemCertificacao(l, nome, modelo) {
-  const n = waPrimeiroNome(nome), inst = ehBaseDoIfi(l.tipoRaw);
+  const n = waNomeCompleto(nome), inst = ehBaseDoIfi(l.tipoRaw);
   if (modelo === 'completo') {
     return inst
       ? `Olá${n ? ', ' + n : ''}!\n\nEstamos realizando uma verificação de qualidade referente ao atendimento de instalação realizado.\n\nPoderia nos informar se o técnico utilizou materiais novos (cabos, roteador e conectores)?\n\nSeu serviço está funcionando corretamente após a instalação?\n\nLembrando que, pelos próximos 15 dias, qualquer dúvida ou necessidade, você pode falar diretamente conosco por este número, sem precisar entrar em contato com a central.\n\nAgradecemos pela atenção!`
@@ -19464,7 +19500,7 @@ function renderCertificacoes() {
         os: r.os, contrato: r.contrato, tecnico: r.recurso, cliente: r.cliente,
         cidade: r.cidade || 'Não informado', periodo: r.periodo || '-',
         certificada, statusTexto,
-        atendente: m ? m.atendente : '', certificadaPor: m ? m.certificadaPor : '',
+        atendente: m ? m.atendente : '', certificadaPor: m ? m.certificadaPor : '', correta: m && m.correta ? m.correta : '',
         horarioConcluida: fmtHora(r.encerramento),
         horarioCertificada: dataHoraCert ? fmtHora(dataHoraCert) : '-',
         tempo: certificada ? tempoEntre(r.encerramento, dataHoraCert) : tempoEntre(r.encerramento, agora),
@@ -19517,9 +19553,9 @@ function renderCertificacoes() {
         ${podeChamarClientes() ? '<button type="button" class="btn-sinalizar fora-da-imagem" id="cert-chamar" title="Só ordens concluídas de ativação, mudança de endereço e reparo: abre o WhatsApp de cada cliente com a mensagem de verificação de qualidade">📞 Chamar Clientes</button>' : ''}
       </div>
       <div class="table-wrap"><table class="data-table" id="tab-certificacoes-detalhe"><thead><tr>
-        <th>O.S</th><th>Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th>Período</th><th>Status</th><th class="fora-da-imagem">Atendente</th><th class="fora-da-imagem">Certificada por</th><th class="fora-da-imagem">Horário Concluída</th><th class="fora-da-imagem">Horário Certificada</th><th class="fora-da-imagem">Tempo</th>
+        <th class="fora-da-imagem">O.S</th><th class="fora-da-imagem">Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th class="fora-da-imagem">Período</th><th>Status</th><th class="fora-da-imagem">Atendente</th><th class="fora-da-imagem">Certificada por</th><th class="fora-da-imagem">Certificada corretamente pelo técnico?</th><th class="fora-da-imagem">Horário Concluída</th><th class="fora-da-imagem">Horário Certificada</th><th class="fora-da-imagem">Tempo</th>
       </tr></thead><tbody>
-        ${linhas.map(l => `<tr><td>${esc(l.os)||'-'}</td><td>${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td>${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td><td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td></tr>`).join('')}
+        ${linhas.map(l => `<tr><td class="fora-da-imagem">${esc(l.os)||'-'}</td><td class="fora-da-imagem">${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td class="fora-da-imagem">${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td><td class="fora-da-imagem">${l.correta === 'SIM' ? '<span class="badge ok">Sim</span>' : l.correta === 'NÃO' || l.correta === 'NAO' ? '<span class="badge warn">Não</span>' : '-'}</td><td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td></tr>`).join('')}
       </tbody></table></div>`;
     const verLista = document.getElementById('cert-ver-lista');
     if (verLista) verLista.addEventListener('click', ev => {
