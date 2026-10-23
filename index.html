@@ -2895,6 +2895,8 @@
   html[data-v2="1"] .tb-chev { width: 18px; height: 18px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
   html[data-v2="1"] .tb-menu { position: absolute; right: 0; top: calc(100% + 8px); min-width: 210px; background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,.28); padding: 6px; z-index: 50; }
   html[data-v2="1"] .tb-menu button { display: block; width: 100%; text-align: left; background: none; border: 0; color: var(--text-primary); padding: 10px 12px; border-radius: 8px; font-size: 13.5px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  html[data-v2="1"] .tb-menu .tb-menu-tit { padding: 6px 12px 4px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+  html[data-v2="1"] .tb-menu button.tb-menu-atual { color: var(--accent); background: var(--accent-bg); }
   html[data-v2="1"] .tb-menu button:hover { background: var(--accent-bg); color: var(--accent); }
   html[data-v2="1"] .tb-aviso-pop { position: fixed; top: 74px; right: 150px; width: min(420px, calc(100vw - 24px)); max-height: 70vh; overflow: auto; background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 18px 50px rgba(0,0,0,.3); padding: 14px 16px; z-index: 2600; font-size: 13.5px; }
   html[data-v2="1"] .tb-aviso-pop h4 { margin: 0 0 8px; font-size: 14px; }
@@ -4792,8 +4794,16 @@ function montarTopoV2() {
     if (!jaLigado) un.addEventListener('click', ev => {
       ev.stopPropagation(); const velho = un.querySelector('.tb-menu'); if (velho) { velho.remove(); return; }
       const m = document.createElement('div'); m.className = 'tb-menu';
-      m.innerHTML = '<button type="button" data-a="trocar">⇄ Alterar usuário</button>' + (USA_AUTH ? '' : '');
-      m.addEventListener('click', e2 => { e2.stopPropagation(); const a = e2.target.closest('button'); if (!a) return; m.remove(); if (a.dataset.a === 'trocar') { const b = document.getElementById('btn-trocar-usuario'); if (b) b.click(); } });
+      // 23/10/2026 (pedido do cliente: "quando eu clicar no perfil quero que já apareça os perfis"): o menu já lista os perfis; escolher um abre a troca com ele marcado e pede a senha
+      const selPerfil = document.getElementById('tr-user');
+      const atual = currentUser ? (currentUser.perfilLogin || currentUser.login) : '';
+      m.innerHTML = '<div class="tb-menu-tit">Entrar como</div>' + [...(selPerfil ? selPerfil.options : [])].map(o => `<button type="button" data-perfil="${esc(o.value)}"${o.value === atual ? ' class="tb-menu-atual"' : ''}>${esc(o.textContent.trim())}${o.value === atual ? ' ✓' : ''}</button>`).join('');
+      m.addEventListener('click', e2 => {
+        e2.stopPropagation(); const a = e2.target.closest('button'); if (!a) return; m.remove();
+        abrirTrocaUsuario();
+        if (selPerfil && a.dataset.perfil) { selPerfil.value = a.dataset.perfil; selPerfil.dispatchEvent(new Event('change')); }
+        setTimeout(() => { const f = document.getElementById('tr-password'); if (f) f.focus(); }, 60);
+      });
       un.appendChild(m);
     });
     if (!jaLigado) document.addEventListener('click', () => { const m = document.querySelector('.tb-menu'); if (m) m.remove(); const p = document.getElementById('tb-aviso-pop'); if (p) p.remove(); });
@@ -15447,7 +15457,7 @@ function renderPCR(modoArg) {
         <td style="color:${corFalta};font-weight:700">${h!==null && h<0 ? '⚠️ ' : ''}${textoFalta(r)}</td>
         <td>${esc(r.cidade) || '-'}</td>
         <td>${tec?`<a href="#" class="link-tec" data-tec="${esc(tec)}">${esc(tec)}</a>`:'-'}</td>
-        <td>${formatDate(r.data)}</td><td class="cat-cell">${esc(r.os) || '-'}</td><td>${esc(r.cliente) || '-'}</td><td>${marcaRetornoDaOS(r)}</td>
+        <td>${formatDate(r.data)}</td><td class="cat-cell">${esc(r.os) || '-'}</td><td>${esc(r.cliente) || '-'}</td><td>${marcaRetornoDaOS(r)}</td><td>${esc(ofensorDoRetorno(retornoDaOsPrazo(retornos, r))) || '-'}</td>
         <td style="${estiloSituacao(classifyStatusGranular(r.status))}">${esc(r.status) || '-'}</td>
         <td>${fmtDT(r.abertura)}</td><td>${fmtH(r.limite)}</td><td>${fmtDT(r.limite)}</td>
         <td>${esc(r.periodo) || '-'}</td>
@@ -15607,7 +15617,7 @@ function renderPCR(modoArg) {
         r.restam === null || r.restam === undefined ? '-' : esc(r.restam) + ' dia(s)', `<b style="color:${r.ifi_irr === 'IFI' ? 'var(--danger)' : '#f59e0b'}">${esc(r.ifi_irr)}</b>`, esc(r.status) || '-', formatDate(r.data), esc(r.tipo_anterior) || '-', esc(r.os_anterior) || '-', formatDate(r.data_anterior), esc(r.tipo) || '-'] })),
       { sinalizar: { texto: rs => textoSinalizarRetornos(rs), rotulo: 'retorno(s)', vazio: 'Nenhum retorno na lista (confira o filtro).' } });
     // texto do SINALIZAR dos cartões de prazo da PCR: igual ao da tabela (faixa + IFI/IRR da ordem)
-    const sinPrazoCard = rs => textoSinalizarPrazos(rs.filter(r => r.limite), { porPeriodo: true, faixa: faixaSinalizar, retorno: r => { const x = retornos.find(y => String(y.os) === String(r.os)); return x && x.ifi_irr ? x.ifi_irr : ''; } });
+    const sinPrazoCard = rs => textoSinalizarPrazos(rs.filter(r => r.limite), { porPeriodo: true, faixa: faixaSinalizar, retorno: r => textoRetornoPrazo(retornos, r) });
 
     // Aviso de COBERTURA do histórico. Um retorno só é reconhecido se a Produção
     // tem o serviço anterior: pra achar um IRR de até 30 dias, a Produção
@@ -15785,7 +15795,7 @@ function renderPCR(modoArg) {
         <button type="button" class="btn-export-img" id="pcr-img">🖼 Gerar imagem</button>
       </div>
       <div class="table-wrap" style="margin-bottom:1.5rem;max-height:560px;overflow:auto"><table class="data-table" id="tab-prazos"><thead><tr>
-        <th>Falta</th><th>Cidade</th><th>Técnico</th><th>Data</th><th>O.S</th><th>Nome Cliente</th><th>IFI/IRR</th><th>Status O.S</th>
+        <th>Falta</th><th>Cidade</th><th>Técnico</th><th>Data</th><th>O.S</th><th>Nome Cliente</th><th>IFI/IRR</th><th>Retorno de quem</th><th>Status O.S</th>
         <th>Data de Abertura</th><th>Vencimento</th><th>Limite</th><th>Período</th><th>Período da Ordem</th><th>Status Prazo</th>
       </tr></thead><tbody>
         ${prazoUnificado.map(linhaPrazoUnificado).join('')}
@@ -15842,7 +15852,7 @@ function renderPCR(modoArg) {
     if (btnSinPrazo) btnSinPrazo.addEventListener('click', () => {
       const vis = osVisiveis(tabPrazos()), lista = prazoUnificado.filter(r => aberta(r) && r.limite && vis.has(String(r.os)));
       if (!lista.length) { toast('Nenhuma ordem em aberto na tabela (confira o filtro).', 'aviso'); return; }
-      copiarParaWhatsApp(textoSinalizarPrazos(lista, { porPeriodo: true, faixa: r => { const f = faixaEfetiva(r); return !f ? '' : /24/.test(f) ? 'até 24h' : /48/.test(f) ? (/mais|maior|acima|>/.test(f) ? '+48h' : 'até 48h') : f === 'outlier' ? 'outlier' : ''; }, retorno: r => { const x = (retornos || []).find(y => String(y.os) === String(r.os)); return x && x.ifi_irr ? x.ifi_irr : ''; } }), btnSinPrazo, '📲 SINALIZAR', `${lista.length} ordem(ns)`);
+      copiarParaWhatsApp(textoSinalizarPrazos(lista, { porPeriodo: true, faixa: r => { const f = faixaEfetiva(r); return !f ? '' : /24/.test(f) ? 'até 24h' : /48/.test(f) ? (/mais|maior|acima|>/.test(f) ? '+48h' : 'até 48h') : f === 'outlier' ? 'outlier' : ''; }, retorno: r => textoRetornoPrazo(retornos, r) }), btnSinPrazo, '📲 SINALIZAR', `${lista.length} ordem(ns)`);
     });
     const btnSinRet = document.getElementById('ret-sinalizar');
     if (btnSinRet) btnSinRet.addEventListener('click', () => {
@@ -35204,6 +35214,10 @@ const FAIXA_LABEL = { ate24: 'Até 24h', ate48: 'Até 48h', maior48: 'Maior que 
 // Prazos:   GUARUJÁ / IVAN FERREIRA DOS SANTOS - 16:48 - Adilson / ... (CLIENTE - HORA DO LIMITE - TÉCNICO, confirmado pelo cliente em 20/10/2026; linha em branco entre as cidades) — só ordem em aberto
 // Retornos: RETORNOS / CLIENTE @Técnico [Retorno do @Ofensor quando o retorno caiu pra OUTRO técnico]
 const primeiroNomeTec = n => { const w = String(n || '').trim().split(/\s+/)[0] || ''; return w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ''; };
+// 23/10/2026 (pedido do cliente: "nos prazos mostra de quem é o retorno? e no sinalizar?"): o retorno da ordem do prazo, com o OFENSOR (de quem é o IFI/IRR)
+const retornoDaOsPrazo = (retornos, r) => (retornos || []).find(y => String(y.os) === String(r.os) && y.ifi_irr) || null;
+const ofensorDoRetorno = x => x && ehRecursoTecnico(x.ofensor) ? String(x.ofensor).trim() : '';
+const textoRetornoPrazo = (retornos, r) => { const x = retornoDaOsPrazo(retornos, r); if (!x) return ''; const o = ofensorDoRetorno(x); return x.ifi_irr + (o ? ' - Retorno do @' + o : ''); };
 function textoSinalizarPrazos(lista, ext) {
   // CLIENTE - HORA - @TÉCNICO (nome completo) - faixa (até 24h / até 48h...) [- IFI|IRR]; do mais cedo pro mais tarde dentro de cada bloco
   const hm = d => { const x = new Date(d); return `${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}`; };
