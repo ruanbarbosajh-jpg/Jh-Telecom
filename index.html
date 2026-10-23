@@ -1522,6 +1522,10 @@
   /* célula selecionada pelo teclado nas folhas (ligarNavegacaoPorSetas): moldura azul por dentro, sem mudar o tamanho da célula */
   table.tab-col1-fixa td.celula-ativa, table.tab-col1-fixa td.celula-ativa:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
   table.data-table#folha-tab tbody tr[data-tr-chave] { cursor: pointer; }
+  /* 23/10/2026 (pedido do cliente: "pode aumentar o tamanho da folha de pagamento"): letra e linha maiores na Folha dos técnicos e na do Escritório */
+  table.data-table#folha-tab th, table.data-table#folha-tab td, #fe-body table.tab-col1-fixa th, #fe-body table.tab-col1-fixa td { font-size: 14.5px; }
+  table.data-table#folha-tab td, #fe-body table.tab-col1-fixa td { padding-top: 12px; padding-bottom: 12px; }
+  table.data-table#folha-tab .folha-edit, #fe-body table.tab-col1-fixa input, #fe-body table.tab-col1-fixa select { font-size: 14px; }
   table.data-table#folha-tab tbody tr.total-row > td { font-weight: 800; border-top: 2px solid var(--accent); white-space: nowrap; }
   .folha-auto { border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 0 4px; font-size: 14px; }
   .folha-auto:hover { color: var(--accent); }
@@ -1667,7 +1671,8 @@
   }
   /* barra de filtro acompanhando a rolagem: a Folha tem 2.300px de altura, e
      o seletor de período ficava lá em cima, fora de alcance */
-  .toolbar.toolbar-fixa { position: sticky; top: 0; z-index: 20; }
+  .toolbar.toolbar-fixa { position: sticky; top: var(--altura-topo, 0px); z-index: 9; }   /* 23/10/2026: gruda ABAIXO do topo (antes ficava por cima dele, z-index 20) */
+  @media (max-width: 900px), (max-height: 640px) { .toolbar.toolbar-fixa { position: static; } }   /* tela pequena: não gruda (a barra ocuparia metade da tela) */
   /* ---- CADASTRO FINANCEIRO em grade ----
      Antes: 5 tabelas empilhadas de 2 colunas, cada uma ocupando a largura
      toda pra mostrar um rótulo e um número — 1.800px de rolagem pra 17
@@ -2901,6 +2906,14 @@
   html[data-v2="1"] .tb-aviso-pop { position: fixed; top: 74px; right: 150px; width: min(420px, calc(100vw - 24px)); max-height: 70vh; overflow: auto; background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 18px 50px rgba(0,0,0,.3); padding: 14px 16px; z-index: 2600; font-size: 13.5px; }
   html[data-v2="1"] .tb-aviso-pop h4 { margin: 0 0 8px; font-size: 14px; }
   html[data-v2="1"] .tb-aviso-pop .tb-av { padding: 9px 0; border-top: 1px solid var(--border); }
+  /* 23/10/2026 (pedido do cliente: "verifique a responsividade", Dashboard com rolagem lateral e topo cortado): entre 901 e ~1280 px o bloco da esquerda (marca + nome da tela, ~490 px) mais as ações (~540 px)
+     passavam da largura da janela e empurravam a página pro lado. O bloco da esquerda agora encolhe (nome da tela com reticências) e as ações nunca encolhem. */
+  .topbar { min-width: 0; }
+  .topbar > div:first-child { min-width: 0; flex: 0 1 auto; }
+  .topbar-actions { flex-shrink: 0; }
+  html[data-v2="1"] .tb-pagina h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  @media (max-width: 1280px) { html[data-v2="1"] .tb-marca small, html[data-v2="1"] .tb-sep { display: none; } html[data-v2="1"] .topbar { padding-left: 14px; padding-right: 14px; } }
+  @media (max-width: 1100px) { html[data-v2="1"] .tb-pagina-ic, html[data-v2="1"] #topo-atualizar #atualizar-status { display: none; } }
   @media (max-width: 900px) { html[data-v2="1"] .tb-marca small, html[data-v2="1"] .tb-nome, html[data-v2="1"] .tb-sep, html[data-v2="1"] .tb-chev, html[data-v2="1"] .tb-pagina-ic { display: none; } html[data-v2="1"] .tb-marca b { font-size: 17px; } html[data-v2="1"] .tb-marca svg { width: 32px; height: 32px; } }
 
   /* ---- cartões (imagem 3): barra colorida na borda esquerda, ícone redondo, título + número grande em azul-marinho e selo à direita ---- */
@@ -4762,6 +4775,7 @@ const IC_AGENDA = '<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" heigh
 const IC_SINO = '<svg viewBox="0 0 24 24"><path d="M6 17V11a6 6 0 0 1 12 0v6l1.6 2H4.4L6 17Z"/><path d="M10 21a2.2 2.2 0 0 0 4 0"/></svg>';
 const IC_PESSOA = '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4.2"/><path d="M3.8 21c.6-4.4 4-6.8 8.2-6.8s7.6 2.4 8.2 6.8H3.8Z"/></svg>';
 function montarTopoV2() {
+  setTimeout(() => { try { medirAlturaDoTopo(); } catch (e) { /* sem topo */ } }, 80);
   const raiz = document.documentElement, tb = document.querySelector('.topbar'); if (!tb) return;
   const ligado = !!currentUser && perfilValido(currentUser.role) === 'analista';
   if (!ligado) {   // outro perfil: desmonta tudo que o v2 acrescentou
@@ -4810,6 +4824,11 @@ function montarTopoV2() {
   }
   atualizarSinoV2();
 }
+function medirAlturaDoTopo() {
+  const tb = document.querySelector('.topbar'); if (!tb) return;
+  document.documentElement.style.setProperty('--altura-topo', Math.round(tb.getBoundingClientRect().height) + 'px');
+}
+window.addEventListener('resize', () => { try { medirAlturaDoTopo(); } catch (e) { /* topo ainda não existe */ } });
 function atualizarSinoV2() {
   const b = document.querySelector('.tb-sino .tb-badge'); if (!b) return;
   let n = 0; try { n = avisosRevisaoFrota().length; } catch (e) { n = 0; }
@@ -9291,6 +9310,7 @@ function navigate(route) {
   iniciarFerramentasAnalista();
   try { mostrarAvisosRevisaoFrota(); } catch (e) { /* aviso não pode derrubar a tela */ }
   try { atualizarSinoV2(); iconizarBotoesV2(); } catch (e) { /* só enfeite */ }
+  try { medirAlturaDoTopo(); } catch (e) { /* sem topo */ }
 }
 // ---------- Filtro por coluna estilo Excel, em TODAS as tabelas ----------
 // Cada cabeçalho ganha um funil. Clicando, abre a lista de valores únicos
@@ -10026,6 +10046,7 @@ function metricCard(label, value, negative, opts = {}) {
   // Cor: vermelho quando `negative` (o que antes pintava o número de vermelho),
   // verde quando `positive`, azul no resto.
   const cor = opts.positive ? 'green' : negative ? 'red' : 'blue';
+  const selo = opts.semSelo ? '' : pillCardV2(cor);   // 23/10/2026: `semSelo` tira o "Ok"/"Atenção" do cartão (Financeiro da Folha)
   // opts.nivel: 'heroi' (ocupa 2 colunas, número maior) | 'compacto' (cartão
   // pequeno de barra de filtro) | 'primario' (igual ao normal).
   const nivel = opts.nivel === 'heroi' ? ' stat-card--heroi' : opts.nivel === 'compacto' ? ' stat-card--compacto' : '';
@@ -10040,7 +10061,7 @@ function metricCard(label, value, negative, opts = {}) {
   const rotulo = String(label).replace(/^\s*(\p{Extended_Pictographic}\uFE0F?|[◆⇅])\s*/u, '');
   // opts.lista = chave registrada por cartaoListaCustom(): o clique no cartão abre a janela com os dados completos dele
   const lista = opts.lista;
-  return `<div class="stat-card stat-card--${cor}${nivel}${ehV2() && !pillCardV2(cor) && opts.nivel !== 'compacto' ? ' stat-card--sempill' : ''}${lista ? ' stat-card--clicavel' : ''}"${lista ? ` data-lista="${esc(lista)}" tabindex="0" role="button" title="Clique para ver os dados"` : ''}><div class="stat-top"><div class="stat-ic">${iconeDoCard(label, opts.icon)}</div><div class="stat-text"><div class="stat-label">${rotulo}</div><div class="stat-value${escala}">${value}</div></div>${opts.nivel === 'compacto' ? '' : pillCardV2(cor)}</div>${variacao}${sub}</div>`;
+  return `<div class="stat-card stat-card--${cor}${nivel}${ehV2() && !selo && opts.nivel !== 'compacto' ? ' stat-card--sempill' : ''}${lista ? ' stat-card--clicavel' : ''}"${lista ? ` data-lista="${esc(lista)}" tabindex="0" role="button" title="Clique para ver os dados"` : ''}><div class="stat-top"><div class="stat-ic">${iconeDoCard(label, opts.icon)}</div><div class="stat-text"><div class="stat-label">${rotulo}</div><div class="stat-value${escala}">${value}</div></div>${opts.nivel === 'compacto' ? '' : selo}</div>${variacao}${sub}</div>`;
 }
 // Selo de ícone + linha pro resumo Receita/Despesa/Lucro — mesmo visual no
 // Financeiro e no Dashboard (08/09/2026, pedido do cliente: "melhore o
@@ -25896,6 +25917,21 @@ function renderCmpPrazo() {
 // mostra a tabela de contrato (VALORES_ORDENS_HISTORICO) que vale no FIM do período escolhido — a mesma
 // que a folha usa pra calcular o valor das ordens e o desconto de IFI/IRR (valoresVigentesEm). Nada aqui
 // é digitado; o valor de São Paulo é o do painel "Valor por ordem de São Paulo" (editável por ciclo).
+// 23/10/2026 (pedido do cliente: "já deixe oculto Valor por ordem de São Paulo e Valores por ordem"): os dois painéis do topo da Folha nascem recolhidos.
+// O estado (aberto/fechado) fica em memória, porque o painel de SP é redesenhado a cada alteração e o de tarifas a cada Filtrar.
+const FOLHA_PAINEIS_ABERTOS = {};
+function folhaPainelRecolhivel(painel, chave) {
+  if (!painel) return;
+  const h3 = painel.querySelector(':scope > h3'); if (!h3) return;
+  h3.querySelectorAll('.secao-toggle').forEach(b => b.remove());   // o botão automático (ativarTogglesDeSecao) sai: este é o único
+  painel.classList.add('sem-toggle');
+  const alvos = [...painel.children].filter(c => c !== h3);
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'secao-toggle';
+  const aplicar = aberto => { alvos.forEach(a => a.classList.toggle('secao-oculta', !aberto)); b.textContent = aberto ? '▾ ocultar' : '▸ exibir'; h3.style.marginBottom = aberto ? '' : '0'; };
+  b.addEventListener('click', () => { const abrir = alvos[0] && alvos[0].classList.contains('secao-oculta'); FOLHA_PAINEIS_ABERTOS[chave] = !!abrir; aplicar(!!abrir); });
+  h3.style.display = 'flex'; h3.style.alignItems = 'center'; h3.style.gap = '12px'; h3.style.flexWrap = 'wrap';
+  h3.appendChild(b); aplicar(!!FOLHA_PAINEIS_ABERTOS[chave]);
+}
 function painelValoresPorOrdemFolha(fimISO, periodo) {
   const tabela = valoresVigentesEm(fimISO);
   let desde = '';
@@ -26330,6 +26366,7 @@ function renderFolhaPagamento(modo) {
       </details>
       <div id="fol-sp-aviso" style="font-size:13px;margin-top:8px"></div>
     </div>`;
+    folhaPainelRecolhivel(alvo.querySelector('.panel'), 'sp');
     const aviso = alvo.querySelector('#fol-sp-aviso');
     const gravar = async (chave, valor, padrao) => {
       aviso.innerHTML = '<span style="color:var(--text-muted)">Salvando…</span>';
@@ -26568,9 +26605,9 @@ function renderFolhaPagamento(modo) {
       ${!escPeriodo ? '<div class="panel"><div class="empty">Escolha um período do Escritório no filtro do topo pra ver os números.</div></div>' : !linhasEsc.length ? '<div class="panel"><div class="empty">Nenhum colaborador do Escritório nesse filtro.</div></div>' : `
       <div class="cards-grid">
         ${metricCard('Colaboradores', linhasEsc.length)}
-        ${metricCard('Total de proventos', formatCurrency(totalProventosEsc))}
-        ${metricCard('Total de descontos', formatCurrency(totalDescontosEsc), totalDescontosEsc>0)}
-        ${metricCard('Total a receber (escritório)', formatCurrency(totalReceberEsc), false, {positive:true})}
+        ${metricCard('Total de proventos', formatCurrency(totalProventosEsc), false, { semSelo: true })}
+        ${metricCard('Total de descontos', formatCurrency(totalDescontosEsc), totalDescontosEsc>0, { semSelo: true })}
+        ${metricCard('Total a receber (escritório)', formatCurrency(totalReceberEsc), false, { positive: true, semSelo: true })}
       </div>
       <div class="panels-grid">
         <div class="panel"><h3>Quem mais ganha (escritório)</h3><div id="c-esc-top"></div></div>
@@ -26591,8 +26628,8 @@ function renderFolhaPagamento(modo) {
     const blocoRelatorio = `
       <div class="section-heading">Financeiro da equipe</div>
       <div class="cards-grid">
-        ${metricCard('Total a receber (equipe)', formatCurrency(totalReceber), false, {positive:true})}
-        ${metricCard('Total de descontos', formatCurrency(totalDescontos), totalDescontos>0)}
+        ${metricCard('Total a receber (equipe)', formatCurrency(totalReceber), false, { positive: true, semSelo: true })}
+        ${metricCard('Total de descontos', formatCurrency(totalDescontos), totalDescontos>0, { semSelo: true })}
         ${metricCard('Total de ordens', totalOrdens)}
         ${metricCard('Técnicos aptos a bônus', aptos+' / '+rows.length)}
       </div>
@@ -26966,6 +27003,7 @@ function renderFolhaPagamento(modo) {
     document.querySelectorAll('button.folha-auto-aj').forEach(btn => {
       btn.addEventListener('click', () => aplicarAjuste(btn, btn.dataset.ajuste, null));
     });
+    folhaPainelRecolhivel(document.getElementById('fol-tarifas'), 'tarifas');
     // ---- tarifas do ciclo (painel "Valores por ordem", 19/10/2026) ----
     const gravarTarifa = async (el, item, campo, valor, padrao) => {
       const painel = el.closest('#fol-tarifas'); if (!painel) return;
@@ -28596,9 +28634,9 @@ function renderFolhaEscritorio() {
     document.getElementById('fe-body').innerHTML = `
       <div class="cards-grid">
         ${metricCard('Colaboradores', linhas.length)}
-        ${metricCard('Total de proventos', money(tot('proventos')))}
-        ${metricCard('Total de descontos', money(tot('descontos')), tot('descontos') > 0)}
-        ${metricCard('Total a receber', money(tot('total_receber')), false, { positive: true })}
+        ${metricCard('Total de proventos', money(tot('proventos')), false, { semSelo: true })}
+        ${metricCard('Total de descontos', money(tot('descontos')), tot('descontos') > 0, { semSelo: true })}
+        ${metricCard('Total a receber', money(tot('total_receber')), false, { positive: true, semSelo: true })}
       </div>
       <div class="section-heading">Folha do Escritório<span class="sec-nota">${esc(periodo)}</span></div>
       <div class="table-wrap caixa-tabela-fixa rolagem-inteira-na-imagem" style="margin-bottom:1.5rem"><table class="data-table tab-col1-fixa">
