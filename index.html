@@ -19663,8 +19663,20 @@ async function certFormCarregar(forcar) {
   let daPlanilha = [];
   try {
     const j = await certSheetsChamar({ acao: 'listar' });
-    if (j) daPlanilha = (j.linhas || []).map(r => ({ ...r, nota: r.nota === '' ? null : r.nota })).sort((a, b) => String(b.criado_em).localeCompare(String(a.criado_em)));
-    else CERTFORM.semPlanilha = true;
+    if (j) {
+      daPlanilha = (j.linhas || []).map(r => ({ ...r, nota: r.nota === '' ? null : r.nota })).sort((a, b) => String(b.criado_em).localeCompare(String(a.criado_em)));
+      // o que foi guardado só neste navegador (antes de a planilha estar ligada, ou sem rede) sobe sozinho agora; o id é o mesmo, então nunca duplica
+      const pend = certFormLocal();
+      if (pend.length) {
+        const sobraram = [];
+        for (const r of pend) {
+          if (daPlanilha.some(x => x.id === r.id)) continue;   // já está na planilha
+          try { await certSheetsChamar({ acao: 'salvar', reg: r }); daPlanilha.unshift({ ...r, nota: r.nota === '' ? null : r.nota }); } catch (e) { sobraram.push(r); }
+        }
+        try { localStorage.setItem(CERTFORM_LOCAL, JSON.stringify(sobraram)); } catch (e) { /* sem armazenamento: segue */ }
+        daPlanilha.sort((a, b) => String(b.criado_em).localeCompare(String(a.criado_em)));
+      }
+    } else CERTFORM.semPlanilha = true;
   } catch (e) { CERTFORM.semPlanilha = true; /* sem rede / script fora do ar: fica só o que está neste navegador */ }
   const doBanco = daPlanilha;
   CERTFORM.linhas = [...certFormLocal().map(r => ({ ...r, _local: true })), ...doBanco]; CERTFORM.carregou = true;
