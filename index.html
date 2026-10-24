@@ -21803,11 +21803,10 @@ function renderImprodutivasDoDia() {
       ${multiCityField('imp-cidades', 'Cidades')}
       ${campoTiposServico('imp-tipos')}
       <div class="field"><label>Situação agora</label><select id="imp-sit"><option value="">Em campo (todas)</option><option value="pendente">Pendente</option><option value="em_rota">Em rota</option><option value="iniciado">Iniciado</option></select></div>
-      <div class="field"><label>Improdutiva nos últimos</label><select id="imp-dias"><option value="7">7 dias</option><option value="15">15 dias</option><option value="32">32 dias</option><option value="60" selected>60 dias</option><option value="90">90 dias</option><option value="0">Todo o histórico</option></select></div>
       <div class="field"><label>Visitas improdutivas</label><select id="imp-vis"><option value="1">1 ou mais</option><option value="2">2 ou mais</option><option value="3">3 ou mais</option></select></div>
       <button class="btn" id="f-apply">Filtrar</button>
     </div>
-    <p style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">Ordens que estão em campo hoje (pendente, em rota ou iniciado) e que já tiveram visita improdutiva — quem visitou na 1ª, na 2ª, na 3ª… e o motivo de cada uma. Vem do CSV de atividades importado na PCR.</p>
+    <p style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">Ordens que estão em campo hoje (pendente, em rota ou iniciado) e que já tiveram visita improdutiva — quem visitou na 1ª, na 2ª, na 3ª… e o motivo de cada uma. <b>Clique na linha da O.S</b> pra ver a 1ª improdutiva, os motivos e os técnicos que visitaram. Vem do CSV de atividades importado na PCR.</p>
     <div id="imp-body"></div>`;
   wireMultiCityField('imp-cidades');
   ligarCampoTipos('imp-tipos');
@@ -21822,7 +21821,7 @@ function renderImprodutivasDoDia() {
     const sit = document.getElementById('imp-sit').value, minVis = +document.getElementById('imp-vis').value || 1;
     const body = document.getElementById('imp-body');
     if (!doCsv.length) { body.innerHTML = '<div class="panel"><div class="empty">Sem atividades do CSV nesse dia. Importe o CSV de atividades na aba PCR (ou pelo botão da barra lateral).</div></div>'; return; }
-    const todas = improdutivasDoDia(dia, +document.getElementById('imp-dias').value || 0)
+    const todas = improdutivasDoDia(dia, 0)
       .filter(o => cids.has(normalizeCidade(o.r.cidade)) && tipoOk(o.r.tipo_atividade) && (!sit || o.bucket === sit) && o.n >= minVis)
       .sort((a, b) => b.n - a.n || (a.r.limite ? +new Date(a.r.limite) : Infinity) - (b.r.limite ? +new Date(b.r.limite) : Infinity));
     const sub = formatDate(dia), SIT = { pendente: 'Pendente', em_rota: 'Em rota', iniciado: 'Iniciado' };
@@ -21833,12 +21832,6 @@ function renderImprodutivasDoDia() {
     const agora = Date.now();
     const falta = r => { if (!r.limite) return '-'; const h = (new Date(r.limite) - agora) / 36e5, a = Math.abs(h), hh = Math.floor(a), mm = Math.round((a - hh) * 60); return h < 0 ? `<span style="color:var(--danger);font-weight:700">vencida há ${hh}h${String(mm).padStart(2, '0')}</span>` : `faltam ${hh}h${String(mm).padStart(2, '0')}`; };
     const quando = v => v.inicio ? fmtDT(new Date(v.inicio)) : formatDate(v.data);
-    const celVisita = v => v ? `<b>${esc(v.tecnico || 'sem técnico')}</b> · ${esc(quando(v))}` : '-';
-    const celMotivo = v => v ? (esc(v.motivo) || '<span style="color:var(--text-muted)">sem motivo</span>') : '-';
-    const celMais = o => o.visitas.length > 2 ? o.visitas.slice(2).map((v, i) => `${i + 3}ª: <b>${esc(v.tecnico || 'sem técnico')}</b> · ${esc(quando(v))}${v.motivo ? ' · ' + esc(v.motivo) : ''}`).join('<br>') : '-';
-    // técnicos e motivos das visitas improdutivas dessas ordens
-    const contar = f => { const m = new Map(); todas.forEach(o => o.visitas.forEach(v => { const k = f(v) || '(sem informação)'; m.set(k, (m.get(k) || 0) + 1); })); return [...m.entries()].sort((a, b) => b[1] - a[1]); };
-    const tabelinha = (id, rot, dados) => `<div class="table-wrap" style="max-height:340px;overflow:auto"><table class="data-table" id="${id}"><thead><tr><th>${rot}</th><th>Visitas improdutivas</th></tr></thead><tbody>${dados.map(([k, q]) => `<tr><td class="cat-cell">${esc(k)}</td><td>${q}</td></tr>`).join('')}</tbody></table></div>`;
     body.innerHTML = `
       <div class="stat-cards">
         ${statCard('red', icAviso, 'Em campo com improdutiva', todas.length, `no dia ${sub}`, cartaoLista('imp|todas', 'Em campo com visita improdutiva', linhas(todas), sub))}
@@ -21849,15 +21842,21 @@ function renderImprodutivasDoDia() {
       </div>
       <div class="panel"><h3>Ordens em campo que já tiveram visita improdutiva</h3>
         <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px;line-height:1.5">Mais visitas primeiro. "Técnico agora" é quem está com a ordem hoje; da 1ª visita em diante é quem já foi até o cliente e não conseguiu concluir.</p>
-        <div class="table-wrap"><table class="data-table" id="imp-tab"><thead><tr><th>O.S</th><th>Contrato</th><th>Cliente</th><th>Cidade</th><th>Bairro</th><th>Tipo de serviço</th><th>Técnico agora</th><th>Situação agora</th><th>Janela</th><th>Abertura</th><th>Limite</th><th>Prazo</th><th>Visitas improdutivas</th><th>1ª visita</th><th>Motivo da 1ª</th><th>2ª visita</th><th>Motivo da 2ª</th><th>3ª em diante</th></tr></thead><tbody>
-        ${todas.map(o => { const r = o.r; return `<tr><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td><td class="cat-cell">${esc(r.cliente || r.nome || '')}</td><td>${esc(rotuloCidadeGeral(r.cidade))}</td><td>${esc(extrairBairro(r.endereco) || '-')}</td><td>${esc(r.tipo_atividade)}</td><td>${esc(r.recurso) || '-'}</td><td>${SIT[o.bucket]}</td><td>${esc(r.periodo_sistema || '-')}</td>
-          <td>${r.abertura ? fmtDT(new Date(r.abertura)) : '-'}</td><td>${r.limite ? fmtDT(new Date(r.limite)) : '-'}</td><td>${falta(r)}</td>
-          <td><span class="badge warn">${o.n}</span></td><td>${celVisita(o.visitas[0])}</td><td>${celMotivo(o.visitas[0])}</td><td>${celVisita(o.visitas[1])}</td><td>${celMotivo(o.visitas[1])}</td><td>${celMais(o)}</td></tr>`; }).join('')}
-        </tbody></table></div></div>
-      <div class="panels-grid">
-        <div class="panel"><h3>Quem fez essas visitas improdutivas</h3>${tabelinha('imp-tab-tec', 'Técnico', contar(v => v.tecnico))}</div>
-        <div class="panel"><h3>Motivos das visitas improdutivas</h3>${tabelinha('imp-tab-mot', 'Motivo', contar(v => v.motivo))}</div>
-      </div>`;
+        <div class="table-wrap"><table class="data-table" id="imp-tab"><thead><tr><th>Visitas improdutivas</th><th>Tipo de serviço</th><th>O.S</th><th>Contrato</th><th>Cliente</th><th>Cidade</th><th>Bairro</th><th>Técnico agora</th><th>Situação agora</th><th>Janela</th><th>Abertura</th><th>Limite</th><th>Prazo</th></tr></thead><tbody>
+        ${todas.map((o, i) => { const r = o.r; return `<tr data-i="${i}" style="cursor:pointer" title="Clique pra ver as visitas improdutivas desta O.S"><td><span class="badge warn">${o.n}</span></td><td>${esc(r.tipo_atividade)}</td><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td><td class="cat-cell">${esc(r.cliente || r.nome || '')}</td><td>${esc(rotuloCidadeGeral(r.cidade))}</td><td>${esc(extrairBairro(r.endereco) || '-')}</td><td>${esc(r.recurso) || '-'}</td><td>${SIT[o.bucket]}</td><td>${esc(r.periodo_sistema || '-')}</td>
+          <td>${r.abertura ? fmtDT(new Date(r.abertura)) : '-'}</td><td>${r.limite ? fmtDT(new Date(r.limite)) : '-'}</td><td>${falta(r)}</td></tr>`; }).join('')}
+        </tbody></table></div></div>`;
+    // clicar na linha da O.S: janela com a 1ª improdutiva, o motivo e o técnico de cada visita (e quem está com a ordem agora)
+    body.querySelector('#imp-tab tbody').addEventListener('click', ev => {
+      const tr = ev.target.closest('tr[data-i]'); if (!tr || ev.target.closest('a,button,input,select')) return;
+      const o = todas[Number(tr.dataset.i)]; if (!o) return;
+      const r = o.r, rot = n => n + 'ª improdutiva';
+      const cel = o.visitas.map((v, i) => ({ tipo: '', celulas: [`<b>${rot(i + 1)}</b>`, esc(v.tecnico || 'sem técnico'), esc(quando(v)), esc(v.motivo) || '<span style="color:var(--text-muted)">sem motivo informado</span>'] }));
+      cel.push({ tipo: '', celulas: ['<b>Agora</b>', esc((r.recurso || '').trim() || 'sem técnico'), esc(r.inicio ? quando({ inicio: r.inicio, data: r.data }) : formatDate(r.data)), `<b>${SIT[o.bucket]}</b> — ordem ainda em campo`] });
+      abrirModalLista(`O.S ${r.os} — ${r.cliente || r.nome || ''}`,
+        `${o.n} visita(s) improdutiva(s) · ${rotuloTipoServico(r.tipo_atividade)} · ${rotuloCidadeGeral(r.cidade)}${r.contrato ? ' · contrato ' + r.contrato : ''}`,
+        ['Visita', 'Técnico que visitou', 'Data e hora', 'Motivo'], cel, { nome: `improdutivas-os-${slugTitulo(String(r.os))}` });
+    });
   }
 }
 function renderRelatorioDoDia() {
