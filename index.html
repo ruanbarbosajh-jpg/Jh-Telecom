@@ -3176,8 +3176,7 @@
   :root[data-v2="1"]:not([data-sx]):not([data-sy]) .sidebar-secao-btn::after { content: ''; order: 1; flex: 1; height: 1px; background: rgba(59, 130, 246, .5); }
   :root[data-v2="1"]:not([data-sx]):not([data-sy]) .sidebar-secao-btn .chev { order: 2; color: #6ea8ff; }
   :root[data-v2="1"]:not([data-sx]):not([data-sy]) .sidebar-secao-btn:hover { color: #7db8ff; }
-  :root[data-v2="1"]:not([data-sx]):not([data-sy]) .sidebar-subgrupo { display: flex; align-items: center; gap: 12px; padding: 16px 6px 6px; font-size: 11.5px; font-weight: 700; letter-spacing: .16em; color: #5d9bf0; opacity: 1; }
-  :root[data-v2="1"]:not([data-sx]):not([data-sy]) .sidebar-subgrupo::after { content: ''; flex: 1; height: 1px; background: rgba(59, 130, 246, .38); }
+  :root[data-v2="1"]:not([data-sx]):not([data-sy]) .sidebar-subgrupo { display: none; }   /* 24/10/2026 (pedido do cliente: "tire os subtítulos"): sem "Relatórios", "Produção e comparativos"... — ficam só as áreas */
 </style>
 </head>
 <body>
@@ -14114,21 +14113,22 @@ function diaDoRelatorioReparo(r) { return r.data || r.abertura_chamado; }
 // dia 19/08, que é justamente o problema de "prazo até as 9h aparecendo como
 // tarde". Por isso a tabela usa o período calculado, não o do sistema.
 function parseCSV(texto) {
-  const linhas = [];
-  let campo = '', linha = [], dentroDeAspas = false;
-  const t = texto.replace(/^﻿/, ''); // tira o BOM do export
-  for (let i = 0; i < t.length; i++) {
-    const c = t[i];
-    if (dentroDeAspas) {
-      if (c === '"') { if (t[i+1] === '"') { campo += '"'; i++; } else dentroDeAspas = false; }
-      else campo += c;
-    } else if (c === '"') dentroDeAspas = true;
-    else if (c === ',' || c === ';') { linha.push(campo); campo = ''; }
-    else if (c === '\n') { linha.push(campo); linhas.push(linha); linha = []; campo = ''; }
-    else if (c !== '\r') campo += c;
+  // 24/10/2026: reescrita sem concatenar caractere a caractere (fatia o texto) — o resultado é idêntico (conferido nos 21.823 registros da Base Certificações e em casos
+  // com aspas, \r, quebra dentro de aspas e BOM), mas a tela Certificações travava ~0,9 s só nesta função.
+  const t = texto.charCodeAt(0) === 0xFEFF ? texto.slice(1) : texto;   // tira o BOM do export
+  const n = t.length, linhas = []; let linha = [], campo = '', ini = 0, aspas = false;
+  for (let i = 0; i < n; i++) {
+    const c = t.charCodeAt(i);
+    if (aspas) {
+      if (c === 34) { campo += t.slice(ini, i); if (t.charCodeAt(i + 1) === 34) { campo += '"'; i++; } else aspas = false; ini = i + 1; }
+    } else if (c === 34) { campo += t.slice(ini, i); aspas = true; ini = i + 1; }
+    else if (c === 44 || c === 59) { campo += t.slice(ini, i); linha.push(campo); campo = ''; ini = i + 1; }
+    else if (c === 10) { campo += t.slice(ini, i); linha.push(campo); linhas.push(linha); linha = []; campo = ''; ini = i + 1; }
+    else if (c === 13) { campo += t.slice(ini, i); ini = i + 1; }
   }
+  campo += t.slice(ini);
   if (campo !== '' || linha.length) { linha.push(campo); linhas.push(linha); }
-  return linhas.filter(l => l.some(c => String(c).trim() !== ''));
+  return linhas.filter(l => l.some(c => c !== '' && String(c).trim() !== ''));
 }
 function pcrParseDataDia(s) {                       // "19/08/26" -> Date
   const m = String(s||'').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
@@ -19572,7 +19572,12 @@ function motivoDoPrazo(r) {
 // última. Gid descoberto na metadata pública da planilha
 // (`/htmlview`, campo "name") — não veio de adivinhação.
 const BASE_CERTIFICACOES_CSV_URL = 'https://docs.google.com/spreadsheets/d/1-sGUvyI78cQnLnSJnHTrcpOs4TqOlr-WmXg4wuMC7aY/export?format=csv&gid=147430900';
-async function buscarBaseCertificacoes() {
+// guarda a Base já lida por 5 min (abrir/voltar na tela não refaz os ~700 KB nem o Apps Script); "Atualizar Base Certificações" e salvar uma certificação zeram
+const CERT_BASE_CACHE = { quando: 0, mapa: null };
+// 24/10/2026 (pedido do cliente: "verifique por que está travando"): medido no Chrome do cliente — Base 0,75 s + leitura do CSV 0,86 s (tela congelada) + Apps Script 3,2 s, TUDO em fila = 4,4 s
+// com "Carregando…". Agora as respostas do formulário (Apps Script) são pedidas EM PARALELO e a tela abre assim que a Base chega; quando as respostas chegam, `aoChegarForm` redesenha.
+async function buscarBaseCertificacoes(aoChegarForm) {
+  const pNovas = buscarRespostasFormCertificacao().catch(() => new Map());
   const res = await fetch(BASE_CERTIFICACOES_CSV_URL, { credentials: 'omit' });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const texto = await res.text();
@@ -19592,8 +19597,9 @@ async function buscarBaseCertificacoes() {
     });
   }
   // formulário NOVO (23/10/2026): as respostas dele valem por cima da Base antiga (ver buscarRespostasFormCertificacao)
-  const novas = await buscarRespostasFormCertificacao();
-  novas.forEach((v, os) => porOS.set(os, { ...(porOS.get(os) || {}), ...v }));
+  const juntar = novas => novas.forEach((v, os) => porOS.set(os, { ...(porOS.get(os) || {}), ...v }));
+  if (aoChegarForm) { pNovas.then(novas => { juntar(novas); aoChegarForm(porOS); }); return porOS; }
+  juntar(await pNovas);
   return porOS;
 }
 // ---- FORMULÁRIO NOVO DE CERTIFICAÇÃO (23/10/2026, pedido do cliente): o mesmo formulário de antes + a pergunta "A ordem foi certificada corretamente pelo técnico?" ----
@@ -19723,7 +19729,8 @@ const CERT_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwA4QdXScdKM6jB
 async function certSheetsChamar(corpo) {
   if (!CERT_SHEETS_URL || !supa) return null;
   const { data } = await supa.auth.getSession(); const jwt = data && data.session && data.session.access_token; if (!jwt) return null;
-  const res = await fetch(CERT_SHEETS_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ...corpo, jwt }) });
+  const ctl = new AbortController(), limite = setTimeout(() => ctl.abort(), corpo.acao === 'listar' ? 15000 : 30000);   // a planilha às vezes demora: não espera pra sempre
+  let res; try { res = await fetch(CERT_SHEETS_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ...corpo, jwt }), signal: ctl.signal }); } finally { clearTimeout(limite); }
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const j = await res.json(); if (!j.ok) throw new Error(j.erro || 'erro do script'); return j;
 }
@@ -19756,7 +19763,7 @@ async function certFormCarregar(forcar) {
 async function certFormSalvar(reg) {
   try {
     const j = await certSheetsChamar({ acao: 'salvar', reg });
-    if (j) { CERTFORM.linhas = [reg, ...CERTFORM.linhas.filter(r => r.id !== reg.id)]; CERTFORM.semPlanilha = false; return { ok: true, reg }; }
+    if (j) { CERTFORM.linhas = [reg, ...CERTFORM.linhas.filter(r => r.id !== reg.id)]; CERTFORM.semPlanilha = false; CERT_BASE_CACHE.quando = 0; return { ok: true, reg }; }
   } catch (e) { return { ok: false, erro: String(e && e.message || 'sem conexão com a planilha') }; }
   try {   // planilha não configurada: guarda neste navegador (não se perde ao fechar a aba)
     const loc = certFormLocal().filter(r => r.id !== reg.id); loc.unshift(reg);
@@ -20080,9 +20087,14 @@ function renderCertificacoes() {
   async function load(forcarBusca) {
     const body = document.getElementById('cert-body');
     if (!baseCert || forcarBusca) {
-      body.innerHTML = '<div class="panel"><div class="empty">Carregando…</div></div>';
+      const cacheOk = !forcarBusca && CERT_BASE_CACHE.mapa && Date.now() - CERT_BASE_CACHE.quando < 5 * 60000;
+      if (!cacheOk) body.innerHTML = '<div class="panel"><div class="empty">Carregando…</div></div>';
       try {
-        baseCert = await buscarBaseCertificacoes();
+        if (cacheOk) baseCert = CERT_BASE_CACHE.mapa;
+        else {
+          baseCert = await buscarBaseCertificacoes(() => { if (document.body.contains(body)) render(); });
+          CERT_BASE_CACHE.mapa = baseCert; CERT_BASE_CACHE.quando = Date.now();
+        }
       } catch (e) {
         // pode ter navegado pra outra tela enquanto a busca ainda estava no
         // ar — sem essa checagem, a resposta tardia tentava escrever num
@@ -20092,7 +20104,7 @@ function renderCertificacoes() {
         return;
       }
       if (!document.body.contains(body)) return;
-      document.getElementById('cert-atualizado').textContent = 'Base Certificações atualizada às ' + new Date().toLocaleTimeString('pt-BR') + ` (${baseCert.size.toLocaleString('pt-BR')} O.S no histórico)`;
+      document.getElementById('cert-atualizado').textContent = 'Base Certificações atualizada às ' + new Date(CERT_BASE_CACHE.quando || Date.now()).toLocaleTimeString('pt-BR') + ` (${baseCert.size.toLocaleString('pt-BR')} O.S no histórico)`;
     }
     render();
     if (CHAMAR_CLIENTE_PEDIDO) { CHAMAR_CLIENTE_PEDIDO = false; if (ehAnalista()) abrirChamarCertificacoesDoFormulario(baseCert, document.getElementById('cert-chamar')); }   // veio do link do formulário
@@ -20183,7 +20195,16 @@ function renderCertificacoes() {
         <th class="fora-da-imagem">O.S</th><th class="fora-da-imagem">Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th class="fora-da-imagem">Período</th><th>Status</th><th class="fora-da-imagem">Atendente</th><th class="fora-da-imagem">Certificada por</th>${ehAnalista() ? '<th class="fora-da-imagem">Certificada corretamente pelo técnico?</th>' : ''}<th class="fora-da-imagem">Horário Concluída</th><th class="fora-da-imagem">Horário Certificada</th><th class="fora-da-imagem">Tempo</th>
       </tr></thead><tbody>
         ${linhas.map(l => `<tr><td class="fora-da-imagem">${esc(l.os)||'-'}</td><td class="fora-da-imagem">${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td class="fora-da-imagem">${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td>${ehAnalista() ? `<td class="fora-da-imagem">${l.correta === 'SIM' ? '<span class="badge ok">Sim</span>' : l.correta === 'NÃO' || l.correta === 'NAO' ? '<span class="badge warn">Não</span>' : '-'}</td>` : ''}<td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td></tr>`).join('')}
-      </tbody></table></div>`;
+      </tbody></table></div>
+      <div class="panels-grid" id="cert-graficos" style="margin-top:1.25rem">
+        <div class="panel"><h3>Certificadas × Não certificadas</h3><div id="cert-g1"></div></div>
+        ${ehAnalista() ? '<div class="panel"><h3>Certificadas corretamente pelo técnico?</h3><div id="cert-g2"></div></div>' : ''}
+      </div>`;
+    donutChart('cert-g1', [{ label: 'Certificadas', value: certificadas.length, color: '#16a34a' }, { label: 'Não certificadas', value: naoCertificadas.length, color: '#dc2626' }].filter(x => x.value), { centroLabel: 'O.S' });
+    if (ehAnalista()) {   // "certificada corretamente pelo técnico?" só existe nas respostas do formulário novo: conta só as certificadas
+      const sim = certificadas.filter(l => l.correta === 'SIM').length, nao = certificadas.filter(l => l.correta === 'NÃO' || l.correta === 'NAO').length, sem = certificadas.length - sim - nao;
+      donutChart('cert-g2', [{ label: 'Corretamente (Sim)', value: sim, color: '#16a34a' }, { label: 'Não corretamente (Não)', value: nao, color: '#dc2626' }, { label: 'Sem resposta no formulário', value: sem, color: '#9ca3af' }].filter(x => x.value), { centroLabel: 'certificadas' });
+    }
     const verLista = document.getElementById('cert-ver-lista');
     if (verLista) verLista.addEventListener('click', ev => {
       ev.stopPropagation();   // senão o clique também abre a janela do cartão
