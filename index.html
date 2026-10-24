@@ -21842,6 +21842,27 @@ function renderImprodutivasDoDia() {
     const agora = Date.now();
     const falta = r => { if (!r.limite) return '-'; const h = (new Date(r.limite) - agora) / 36e5, a = Math.abs(h), hh = Math.floor(a), mm = Math.round((a - hh) * 60); return h < 0 ? `<span style="color:var(--danger);font-weight:700">vencida há ${hh}h${String(mm).padStart(2, '0')}</span>` : `faltam ${hh}h${String(mm).padStart(2, '0')}`; };
     const quando = v => v.inicio ? fmtDT(new Date(v.inicio)) : formatDate(v.data);
+    // MOTIVOS DAS IMPRODUTIVAS x CIDADE (24/10/2026, pedido do cliente): quantas O.S em aberto tiveram cada motivo, por cidade; clicar abre as ordens.
+    // Uma O.S conta UMA vez em cada motivo que já teve (se teve dois motivos diferentes, aparece nos dois) — por isso o TOTAL é de O.S distintas, não a soma da coluna.
+    const rotM = m => (m || '').trim() || 'Sem motivo informado';
+    const cidadeDe = o => rotuloCidadeGeral(o.r.cidade) || 'Sem cidade';
+    const motivos = new Map();
+    todas.forEach((o, i) => o.visitas.forEach(v => {
+      const k = normalizeHeader(rotM(v.motivo));
+      if (!motivos.has(k)) motivos.set(k, { rot: rotM(v.motivo), ords: new Map(), vis: 0 });
+      const m = motivos.get(k); m.vis++; m.ords.set(i, (m.ords.get(i) || 0) + 1);
+    }));
+    const cidCont = new Map(); todas.forEach(o => cidCont.set(cidadeDe(o), (cidCont.get(cidadeDe(o)) || 0) + 1));
+    const cidList = [...cidCont.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'pt-BR')).map(x => x[0]);
+    const motList = [...motivos.entries()].sort((a, b) => b[1].ords.size - a[1].ords.size || a[1].rot.localeCompare(b[1].rot, 'pt-BR'));
+    const celMot = (k, cid, qtd) => qtd ? `<td style="text-align:center;cursor:pointer;font-weight:700" class="imp-mot-cel" data-m="${esc(k)}" data-c="${esc(cid)}" title="Clique pra ver essas ordens">${qtd}</td>` : '<td style="text-align:center;color:var(--text-muted)">-</td>';
+    const painelMot = `
+      <div class="panel" id="imp-motivos"><h3>Motivos das improdutivas — O.S em aberto por cidade</h3>
+        <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px;line-height:1.5"><b>Clique num número</b> pra ver essas ordens (com o total de visitas, técnicos que visitaram etc.). Uma O.S aparece em cada motivo que já teve — por isso o total é de O.S distintas.</p>
+        <div class="table-wrap"><table class="data-table" id="imp-tab-mot"><thead><tr><th>Motivo da improdutiva</th>${cidList.map(c => `<th>${esc(c)}</th>`).join('')}<th>Total de O.S</th><th>Visitas</th></tr></thead><tbody>
+        ${motList.map(([k, m]) => `<tr><td class="cat-cell">${esc(m.rot)}</td>${cidList.map(c => { const q = [...m.ords.keys()].filter(i => cidadeDe(todas[i]) === c).length; return celMot(k, c, q); }).join('')}${celMot(k, '', m.ords.size)}<td style="text-align:center">${m.vis}</td></tr>`).join('')}
+        <tr class="total-row"><td>TOTAL (O.S distintas)</td>${cidList.map(c => celMot('*', c, cidCont.get(c))).join('')}${celMot('*', '', todas.length)}<td style="text-align:center">${totalVis}</td></tr>
+        </tbody></table></div></div>`;
     body.innerHTML = `
       <div class="stat-cards">
         ${statCard('red', icAviso, 'Total de O.S com improdutiva', todas.length, `no dia ${sub}`, cartaoLista('imp|todas', 'Em campo com visita improdutiva', linhas(todas), sub))}
@@ -21855,7 +21876,8 @@ function renderImprodutivasDoDia() {
         <div class="table-wrap"><table class="data-table" id="imp-tab"><thead><tr><th>Visitas improdutivas</th><th>Tipo de serviço</th><th>O.S</th><th>Contrato</th><th>Cliente</th><th>Cidade</th><th>Bairro</th><th>Técnico agora</th><th>Situação agora</th><th>Janela</th><th>Abertura</th><th>Limite</th><th>Prazo</th></tr></thead><tbody>
         ${todas.map((o, i) => { const r = o.r; return `<tr data-i="${i}" style="cursor:pointer" title="Clique pra ver as visitas improdutivas desta O.S"><td><span class="badge warn">${o.n}</span></td><td>${esc(r.tipo_atividade)}</td><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td><td class="cat-cell">${esc(r.cliente || r.nome || '')}</td><td>${esc(rotuloCidadeGeral(r.cidade))}</td><td>${esc(extrairBairro(r.endereco) || '-')}</td><td>${esc(r.recurso) || '-'}</td><td>${SIT[o.bucket]}</td><td>${esc(r.periodo_sistema || '-')}</td>
           <td>${r.abertura ? fmtDT(new Date(r.abertura)) : '-'}</td><td>${r.limite ? fmtDT(new Date(r.limite)) : '-'}</td><td>${falta(r)}</td></tr>`; }).join('')}
-        </tbody></table></div></div>`;
+        </tbody></table></div></div>
+      ${painelMot}`;
     // clicar na linha da O.S: janela com a 1ª improdutiva, o motivo e o técnico de cada visita (e quem está com a ordem agora)
     body.querySelector('#imp-tab tbody').addEventListener('click', ev => {
       const tr = ev.target.closest('tr[data-i]'); if (!tr || ev.target.closest('a,button,input,select')) return;
@@ -21866,6 +21888,24 @@ function renderImprodutivasDoDia() {
       abrirModalLista(`O.S ${r.os} — ${r.cliente || r.nome || ''}`,
         `${o.n} visita(s) improdutiva(s) · ${rotuloTipoServico(r.tipo_atividade)} · ${rotuloCidadeGeral(r.cidade)}${r.contrato ? ' · contrato ' + r.contrato : ''}`,
         ['Visita', 'Técnico que visitou', 'Data e hora', 'Motivo'], cel, { nome: `improdutivas-os-${slugTitulo(String(r.os))}` });
+    });
+    // clicar num número da tabela de motivos: as ordens daquele motivo (e cidade) com total de visitas, técnicos que visitaram e o prazo
+    body.querySelector('#imp-tab-mot tbody').addEventListener('click', ev => {
+      const td = ev.target.closest('td.imp-mot-cel'); if (!td) return;
+      const k = td.dataset.m, cid = td.dataset.c, todosMot = k === '*', m = todosMot ? null : motivos.get(k);
+      const idxs = todosMot ? todas.map((_, i) => i) : [...m.ords.keys()];
+      const sel = idxs.filter(i => !cid || cidadeDe(todas[i]) === cid).sort((a, b) => todas[b].n - todas[a].n);
+      const linhasM = sel.map(i => {
+        const o = todas[i], r = o.r;
+        const comEste = todosMot ? o.n : m.ords.get(i);
+        const tecs = [...new Set(o.visitas.map(v => (v.tecnico || 'sem técnico')))].join(', ');
+        const motivosDaOs = [...new Set(o.visitas.map(v => rotM(v.motivo)))].join(' · ');
+        return { tipo: '', celulas: [`<b>${o.n}</b>`, `${comEste}`, esc(r.os), esc(r.contrato), esc(r.cliente || r.nome || ''), esc(cidadeDe(o)), esc(extrairBairro(r.endereco) || '-'), esc(rotuloTipoServico(r.tipo_atividade)), esc((r.recurso || '').trim() || '-'), SIT[o.bucket], esc(tecs), esc(motivosDaOs), falta(r)] };
+      });
+      abrirModalLista(`Improdutiva: ${todosMot ? 'todos os motivos' : m.rot}${cid ? ' — ' + cid : ''}`,
+        `${sel.length} O.S em aberto · ${sel.reduce((s, i) => s + todas[i].n, 0)} visita(s) improdutiva(s) no total · ${sub}`,
+        ['Total de visitas', todosMot ? 'Visitas improdutivas' : 'Visitas com este motivo', 'O.S', 'Contrato', 'Cliente', 'Cidade', 'Bairro', 'Tipo de serviço', 'Técnico agora', 'Situação agora', 'Técnicos que visitaram', 'Motivos da O.S', 'Prazo'],
+        linhasM, { nome: `improdutivas-motivo-${slugTitulo(todosMot ? 'todos' : m.rot)}${cid ? '-' + slugTitulo(cid) : ''}` });
     });
   }
 }
