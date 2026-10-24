@@ -4120,7 +4120,7 @@ const USERS = [
   // aqui só pra saber quem mexeu na Gestão de Presença.
   { login: 'SEBASTIAO', nome: 'Sebastião', role: 'admin' },
   { login: 'MATHEUS', nome: 'Matheus', role: 'admin' },
-  { login: 'THAIS', nome: 'Thaís', role: 'admin' },
+  { login: 'THAIS', nome: 'Thaís', role: 'escritorio' },   // 24/10/2026: login da Thaís = Escritório (+ Frota, ver NOMES_ESCRITORIO_COM_FROTA)
   { login: 'REBECA', nome: 'Rebeca', role: 'admin' }
 ];
 // Nomes específicos do perfil Supervisor/Coordenador — o e-mail é a conta de
@@ -4354,6 +4354,8 @@ const ROTAS_SO_PERMITIDAS = {
   escritorio: ['inicio', 'cleanup', 'table', 'prazo', 'prazoativacao', 'parcialdia',
                'pcr', 'chamadosgiga', 'ofensoresprazo', 'certificacoes', 'u2000', 'relu2000', 'prazosesc', 'retornosesc', 'contatos', 'improdutivas'],
 };
+// Pessoas do perfil Escritório que também veem a Frota (24/10/2026, pedido do cliente: "libere para thais ver a frota"). Só leitura: alterar a Frota segue só do Analista.
+const NOMES_ESCRITORIO_COM_FROTA = ['Thaís'];
 function podeAcessar(role, route) {
   // Presença (Técnicos + Escritório): oculta pra TODO MUNDO, sem exceção,
   // desde 22/09/2026 (pedido do cliente) — nem o Analista, nem Thaís/Rebeca
@@ -4400,6 +4402,7 @@ function podeAcessar(role, route) {
   // telas", isso vazava: cada rota criada no futuro apareceria pra ele sem
   // ninguém perceber. Aqui é o contrário: rota nova nasce fechada.
   const soPermitidas = ROTAS_SO_PERMITIDAS[perfil];
+  if (soPermitidas && perfil === 'escritorio' && route === 'fleet' && currentUser && NOMES_ESCRITORIO_COM_FROTA.includes(currentUser.nome)) return true;
   if (soPermitidas) return soPermitidas.includes(route);
   const bloqueadas = ROUTE_PERMISSIONS[perfil];
   return !bloqueadas || !bloqueadas.includes(route);
@@ -5220,6 +5223,9 @@ async function perfilDoUsuario(u) {
     if (data) { role = data.role || role; nome = data.nome || nome; }
   } catch (e) { /* tabela ainda não criada: cai no metadata / no padrão abaixo */ }
   role = perfilValido(role);
+  // Thaís (24/10/2026, pedido do cliente: "deixe o login da Thais igual o escritorio"): a conta dela segue como 'admin' no banco (perfis) e continua escolhendo
+  // Supervisor/Coordenador > Thaís no login, mas dentro do sistema ela enxerga EXATAMENTE o que o Escritório enxerga (+ Frota). Pra mudar, é só tirar esta linha.
+  if (String(u.email || '').toLowerCase() === 'thais@jhtelecom.com.br') role = 'escritorio';
   const perfilLogin = perfilLoginDoEmail(u.email);
   return { login: u.email, email: u.email, nome: nome || u.email, role: role || 'escritorio', perfilLogin };
 }
@@ -13538,7 +13544,10 @@ function capturarElementoComoImagem(elemento, nomeArquivo, aoTerminar) {
       // Fora: tabelas com desenho próprio (cartões de prazo, Resumo financeiro, holerite).
       // CARTÃO "Acompanhamento de Prazos" (DIA e MÊS) (23/10/2026, pedido do cliente: "no gerar imagem ajuste mais as colunas, está muito distante"): na tela o cartão ocupa a largura toda
       // e as 7 colunas se espalham; na imagem o cartão encolhe pro tamanho do conteúdo (banner + selo de um lado, tabela do outro) e as colunas ficam juntas, com número maior.
-      if (clone.classList && clone.classList.contains('pzcard')) {
+      // o cartão pode ser o próprio elemento (botão do cartão) OU estar dentro de um wrapper/caixa (botão da faixa DIA/MÊS, do tópico, "Gerar imagem" do modo novo) —
+      // 24/10/2026, pedido do cliente ("arrume a responsividade no gerar imagem dos prazos"): nesses casos o cartão saía com a largura da tela, colunas espalhadas.
+      const pzAlvo = (clone.classList && clone.classList.contains('pzcard')) ? clone : (clone.querySelector ? clone.querySelector('.pzcard') : null);
+      if (pzAlvo) {
         const stp = doc.createElement('style');
         stp.textContent = `.pzcard { width: fit-content !important; min-width: 0 !important; max-width: none !important; }
           .pzcard-top { flex-wrap: nowrap !important; }
@@ -13549,7 +13558,9 @@ function capturarElementoComoImagem(elemento, nomeArquivo, aoTerminar) {
           table.pzcard-table tbody td, table.pzcard-table tfoot td { padding: 11px 18px !important; font-size: 17px !important; font-variant-numeric: tabular-nums; }
           table.pzcard-table td:first-child { padding-right: 28px !important; }`;
         (doc.head || doc.documentElement).appendChild(stp);
-        const wpz = Math.ceil(clone.getBoundingClientRect().width); if (wpz > 300) corteLargura = wpz;
+        // só encolhe a imagem inteira quando o bloco é só o cartão (+ títulos): com outra tabela/gráfico ao lado, o cartão fica compacto mas a imagem mantém a largura
+        const soCartao = clone === pzAlvo || !clone.querySelector('table.data-table:not(.pzcard-table), [data-grafico], canvas, .leaflet-container, .panels-grid, .stat-cards, .cards-grid, .iq-card, .toolbar, .pzcard ~ .pzcard');
+        if (soCartao) { if (clone !== pzAlvo) { clone.style.width = 'fit-content'; clone.style.maxWidth = 'none'; clone.style.minWidth = '0'; } const wpz = Math.ceil(clone.getBoundingClientRect().width); if (wpz > 300) corteLargura = wpz; }
       }
       { const stc = doc.createElement('style');
         stc.textContent = `table.data-table:not(.pzcard-table):not(.cmp-dash):not(.hol-tab) { width: auto !important; min-width: 0 !important; }
