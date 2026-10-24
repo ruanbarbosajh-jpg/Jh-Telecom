@@ -3315,6 +3315,7 @@
       <a data-route="parcialdia"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2" y="3.8" width="14" height="12" rx="1.5"/><line x1="2" y1="7.2" x2="16" y2="7.2"/><line x1="5.5" y1="1.8" x2="5.5" y2="4.8"/><line x1="12.5" y1="1.8" x2="12.5" y2="4.8"/><path d="M5.7 11.2 7.4 12.9 11 9"/></svg></i><span class="nav-txt">Parcial do Dia</span></a>
       <a data-route="prazosesc"><i class="nav-ic"><svg viewBox="0 0 18 18"><circle cx="9" cy="9.5" r="6.8"/><line x1="9" y1="9.5" x2="9" y2="5.7"/><line x1="9" y1="9.5" x2="11.6" y2="11.3"/></svg></i><span class="nav-txt">Prazos Reparo</span></a>
       <a data-route="retornosesc"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M3 9a6 6 0 0 1 10.4-4.1L15 6.5"/><path d="M15 2.8v3.7h-3.7"/><path d="M15 9a6 6 0 0 1-10.4 4.1L3 11.5"/><path d="M3 15.2v-3.7h3.7"/></svg></i><span class="nav-txt">Retornos do Dia</span></a>
+      <a data-route="improdutivas"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M9 2.2 1.8 15h14.4L9 2.2Z"/><line x1="9" y1="7.4" x2="9" y2="10.8"/><line x1="9" y1="12.9" x2="9" y2="12.92"/></svg></i><span class="nav-txt">Improdutivas do Dia</span></a>
       <a data-route="pcr"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M1.5 9.3h3.3l1.5-5 3 10 1.5-5h5.7"/></svg></i><span class="nav-txt">PCR</span></a>
       <a data-route="chamadosgiga"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="2" y="3" width="14" height="12" rx="1.5"/><line x1="2" y1="6.6" x2="16" y2="6.6"/><line x1="5.5" y1="1.3" x2="5.5" y2="4.3"/><line x1="12.5" y1="1.3" x2="12.5" y2="4.3"/><line x1="9" y1="10" x2="9" y2="10.02"/><line x1="9" y1="8.6" x2="9" y2="9.3"/></svg></i><span class="nav-txt">Chamados em Aberto (GIGA)</span></a>
       <a data-route="ofensoresprazo"><i class="nav-ic"><svg viewBox="0 0 18 18"><line x1="4" y1="1.8" x2="4" y2="16.2"/><path d="M4 2.8h10l-2.6 3.5L14 9.8H4"/></svg></i><span class="nav-txt">Ofensores de Prazo</span></a>
@@ -4376,6 +4377,8 @@ function podeAcessar(role, route) {
   if (route === 'contatos') return perfil === 'analista' || perfil === 'admin' || perfil === 'escritorio';
   // Formulário de Certificação (23/10/2026): só o Analista por enquanto (pedido do cliente); pra liberar pro Escritório, acrescente 'formcert' em ROTAS_SO_PERMITIDAS.escritorio e troque esta linha
   if (route === 'formcert') return perfil === 'analista';
+  // Improdutivas do Dia (24/10/2026): só o Analista por enquanto (pedido do cliente); depois é pro Escritório — acrescente 'improdutivas' em ROTAS_SO_PERMITIDAS.escritorio e troque esta linha
+  if (route === 'improdutivas') return perfil === 'analista';
   // MODO NOVO (08/10/2026, pedido do cliente: "a partir de agora as mudanças afetam SÓ o login Analista, pra depois que tudo
   // estiver pronto eu liberar para os outros"): a Produção, os 4 Comparativos e o Gerar Relatório saíram só pro Analista e as 3
   // páginas de área (Dashboards / Operação / Monitoramento) só existem pra ele. Os outros perfis seguem com o sistema de antes.
@@ -8985,6 +8988,7 @@ const ESTRUTURA_NOVA = [
       { nome: 'Técnicos e qualidade', rotas: ['acomtec', 'ofensor', 'table'] },
       { nome: 'Prazos', rotas: ['prazosesc', 'prazo', 'prazoativacao', 'ofensoresprazo'] },
       { nome: 'Retornos', rotas: ['retornosesc'] },
+      { nome: 'Improdutivas', rotas: ['improdutivas'] },
       { nome: 'PCR e Parcial', rotas: ['pcr', 'parcialdia', 'chamadosgiga'] },
       { nome: 'Certificação e Clean Up', rotas: ['formcert', 'certificacoes', 'cleanup', 'contatos'] },
     ],
@@ -9099,6 +9103,7 @@ const DESCRICAO_ROTAS = {
   pcr: 'Prazo em tempo real: o que está vencendo agora e quem está em rota.',
   prazosesc: 'Só prazos, tudo numa aba: prazo do dia por cidade, o que está vencendo agora e os prazos do dia, ordem por ordem.',
   retornosesc: 'Só retornos: IFI e IRR do dia, de quem é cada retorno e quanto falta da janela.',
+  improdutivas: 'Ordens em campo que já tiveram visita improdutiva: total de visitas e quem visitou na 1ª, 2ª, 3ª, com o motivo de cada uma.',
   ofensoresprazo: 'Quem mais estourou prazo no período, por técnico e por cidade.',
   reldia: 'Relatório do dia (Parcial do Dia + PCR): status das ordens, status detalhado, prazo do reparo, retornos IFI/IRR, improdutivas, ordens após as 18h e bairros.',
   relgeral: 'Relatório geral: produção por técnico (dias, produtividade, IFI/IRR, prazo), produção por cidade, gráficos da operação e MAX de chamados por cliente.',
@@ -9254,6 +9259,7 @@ const PAGES = {
   pcr: { title: 'PCR — Prazo Controle Real', render: () => renderPCR() },
   prazosesc: { title: 'Prazos Reparo', render: () => renderPCR('prazos') },
   retornosesc: { title: 'Retornos do Dia', render: () => renderPCR('retornos') },
+  improdutivas: { title: 'Improdutivas do Dia', render: renderImprodutivasDoDia },
   chamadosgiga: { title: 'Chamados em Aberto (GIGA)', render: renderChamadosGiga },
   ofensoresprazo: { title: 'Ofensores de Prazo', render: renderOfensoresPrazo },
   certificacoes: { title: 'Certificações', render: renderCertificacoes },
@@ -14911,7 +14917,7 @@ function agendarAtualizacaoAoVivo(route) {
 }
 // Telas que leem DB.pcr — só nelas vale ficar conferindo (quando a conferência
 // automática estiver ligada de novo).
-const ROTAS_COM_PCR = new Set(['pcr', 'parcialdia', 'chamadosgiga', 'reuniaoprazos', 'relgeral', 'reldia', 'prazosesc', 'retornosesc', 'contatos', 'formcert']);
+const ROTAS_COM_PCR = new Set(['pcr', 'parcialdia', 'chamadosgiga', 'reuniaoprazos', 'relgeral', 'reldia', 'prazosesc', 'retornosesc', 'contatos', 'formcert', 'improdutivas']);
 let PCR_POLL_TIMER = null;
 function agendarConferenciaPCR(route) {
   if (PCR_POLL_TIMER) { clearInterval(PCR_POLL_TIMER); PCR_POLL_TIMER = null; }
@@ -21762,6 +21768,97 @@ function htmlPendentesDoDia(rows, idTab) {
     ${pend.map(r => `<tr><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td><td class="cat-cell">${esc(r.cliente || r.nome || '')}</td><td>${esc(rotuloCidadeGeral(r.cidade))}</td><td>${esc(extrairBairro(r.endereco) || '-')}</td><td>${esc(r.tipo_atividade)}</td><td>${esc(r.recurso) || '-'}</td><td>${esc(r.periodo_sistema || '-')}</td>
       <td>${r.abertura ? fmtDT(new Date(r.abertura)) : '-'}</td><td>${r.limite ? fmtDT(new Date(r.limite)) : '-'}</td><td>${falta(r)}</td></tr>`).join('')}
     </tbody></table></div>`;
+}
+// ===================== IMPRODUTIVAS DO DIA (24/10/2026, pedido do cliente, só Analista por enquanto) =====================
+// Ordens que estão EM CAMPO agora (pendente, em rota ou iniciado no CSV do dia) mas que JÁ tiveram ao menos uma visita improdutiva
+// ("Não Concluído", a mesma regra do mapa da PCR: suspensa e cancelada não contam). Mostra o total de visitas e quem visitou na 1ª, 2ª, 3ª…
+// A história vem de TODAS as linhas da PCR dessa O.S até o dia escolhido (o CSV de cada dia traz a tentativa daquele dia).
+function improdutivasDoDia(dia, diasAtras) {
+  const ehNaoConc = st => /nao conclu/.test(normalizeHeader(st));
+  const limiteIso = diasAtras ? (() => { const d = new Date(dia + 'T12:00:00'); d.setDate(d.getDate() - diasAtras); return isoLocalDe(d); })() : '';
+  const porOS = new Map();
+  DB.pcr.forEach(l => {
+    if (!l.os || !l.data || l.data > dia || (limiteIso && l.data < limiteIso) || !ehNaoConc(l.status)) return;
+    if (!porOS.has(l.os)) porOS.set(l.os, []);
+    porOS.get(l.os).push(l);
+  });
+  const hora = x => x ? +new Date(x) : 0;
+  return linhasDoCsvPorDia(dia)
+    .filter(r => r.os && ['pendente', 'em_rota', 'iniciado'].includes(classifyStatusGranular(r.status)) && !/suspen/i.test(r.status || ''))
+    .map(r => {
+      const vistos = new Set();
+      const visitas = (porOS.get(r.os) || []).filter(l => l !== r)
+        .sort((a, b) => String(a.data).localeCompare(String(b.data)) || hora(a.inicio) - hora(b.inicio))
+        .filter(l => { const k = `${l.data}|${normalizeHeader(l.recurso || '')}|${l.inicio ? hora(l.inicio) : (l.motivo || '')}`; if (vistos.has(k)) return false; vistos.add(k); return true; })
+        .map(l => ({ data: l.data, tecnico: (l.recurso || '').trim(), motivo: (l.motivo || '').trim(), inicio: l.inicio, tipo: l.tipo_atividade }));
+      return { r, visitas, n: visitas.length, bucket: classifyStatusGranular(r.status) };
+    })
+    .filter(o => o.n > 0);
+}
+function renderImprodutivasDoDia() {
+  const datas = [...new Set(DB.pcr.map(r => r.data).filter(Boolean))].sort().reverse();
+  document.getElementById('content').innerHTML = `
+    <div class="toolbar">
+      <div class="field"><label>Data</label><input type="date" id="imp-data" value="${datas[0] || hojeISOLocal()}"></div>
+      ${multiCityField('imp-cidades', 'Cidades')}
+      ${campoTiposServico('imp-tipos')}
+      <div class="field"><label>Situação agora</label><select id="imp-sit"><option value="">Em campo (todas)</option><option value="pendente">Pendente</option><option value="em_rota">Em rota</option><option value="iniciado">Iniciado</option></select></div>
+      <div class="field"><label>Improdutiva nos últimos</label><select id="imp-dias"><option value="7">7 dias</option><option value="15">15 dias</option><option value="32">32 dias</option><option value="60" selected>60 dias</option><option value="90">90 dias</option><option value="0">Todo o histórico</option></select></div>
+      <div class="field"><label>Visitas improdutivas</label><select id="imp-vis"><option value="1">1 ou mais</option><option value="2">2 ou mais</option><option value="3">3 ou mais</option></select></div>
+      <button class="btn" id="f-apply">Filtrar</button>
+    </div>
+    <p style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">Ordens que estão em campo hoje (pendente, em rota ou iniciado) e que já tiveram visita improdutiva — quem visitou na 1ª, na 2ª, na 3ª… e o motivo de cada uma. Vem do CSV de atividades importado na PCR.</p>
+    <div id="imp-body"></div>`;
+  wireMultiCityField('imp-cidades');
+  ligarCampoTipos('imp-tipos');
+  document.getElementById('f-apply').addEventListener('click', load);
+  load();
+  function load() {
+    const dia = document.getElementById('imp-data').value;
+    const doCsv = linhasDoCsvPorDia(dia);
+    refreshCityField('imp-cidades', doCsv, { label: 'Cidades' });
+    const cids = new Set(getSelectedCities('imp-cidades').map(normalizeCidade));
+    const tipoOk = filtroTiposDe('imp-tipos');
+    const sit = document.getElementById('imp-sit').value, minVis = +document.getElementById('imp-vis').value || 1;
+    const body = document.getElementById('imp-body');
+    if (!doCsv.length) { body.innerHTML = '<div class="panel"><div class="empty">Sem atividades do CSV nesse dia. Importe o CSV de atividades na aba PCR (ou pelo botão da barra lateral).</div></div>'; return; }
+    const todas = improdutivasDoDia(dia, +document.getElementById('imp-dias').value || 0)
+      .filter(o => cids.has(normalizeCidade(o.r.cidade)) && tipoOk(o.r.tipo_atividade) && (!sit || o.bucket === sit) && o.n >= minVis)
+      .sort((a, b) => b.n - a.n || (a.r.limite ? +new Date(a.r.limite) : Infinity) - (b.r.limite ? +new Date(b.r.limite) : Infinity));
+    const sub = formatDate(dia), SIT = { pendente: 'Pendente', em_rota: 'Em rota', iniciado: 'Iniciado' };
+    if (!todas.length) { body.innerHTML = '<div class="panel"><div class="empty">Nenhuma ordem em campo com visita improdutiva nesse dia/filtros. 👍</div></div>'; return; }
+    const linhas = lista => lista.map(o => o.r);
+    const com = n => todas.filter(o => n >= 3 ? o.n >= 3 : o.n === n);
+    const totalVis = todas.reduce((s, o) => s + o.n, 0);
+    const agora = Date.now();
+    const falta = r => { if (!r.limite) return '-'; const h = (new Date(r.limite) - agora) / 36e5, a = Math.abs(h), hh = Math.floor(a), mm = Math.round((a - hh) * 60); return h < 0 ? `<span style="color:var(--danger);font-weight:700">vencida há ${hh}h${String(mm).padStart(2, '0')}</span>` : `faltam ${hh}h${String(mm).padStart(2, '0')}`; };
+    const quando = v => v.inicio ? fmtDT(new Date(v.inicio)) : formatDate(v.data);
+    const celVisita = v => v ? `<b>${esc(v.tecnico || 'sem técnico')}</b> · ${esc(quando(v))}` : '-';
+    const celMotivo = v => v ? (esc(v.motivo) || '<span style="color:var(--text-muted)">sem motivo</span>') : '-';
+    const celMais = o => o.visitas.length > 2 ? o.visitas.slice(2).map((v, i) => `${i + 3}ª: <b>${esc(v.tecnico || 'sem técnico')}</b> · ${esc(quando(v))}${v.motivo ? ' · ' + esc(v.motivo) : ''}`).join('<br>') : '-';
+    // técnicos e motivos das visitas improdutivas dessas ordens
+    const contar = f => { const m = new Map(); todas.forEach(o => o.visitas.forEach(v => { const k = f(v) || '(sem informação)'; m.set(k, (m.get(k) || 0) + 1); })); return [...m.entries()].sort((a, b) => b[1] - a[1]); };
+    const tabelinha = (id, rot, dados) => `<div class="table-wrap" style="max-height:340px;overflow:auto"><table class="data-table" id="${id}"><thead><tr><th>${rot}</th><th>Visitas improdutivas</th></tr></thead><tbody>${dados.map(([k, q]) => `<tr><td class="cat-cell">${esc(k)}</td><td>${q}</td></tr>`).join('')}</tbody></table></div>`;
+    body.innerHTML = `
+      <div class="stat-cards">
+        ${statCard('red', icAviso, 'Em campo com improdutiva', todas.length, `no dia ${sub}`, cartaoLista('imp|todas', 'Em campo com visita improdutiva', linhas(todas), sub))}
+        ${statCard('orange', icChave, 'Com 1 visita improdutiva', com(1).length, '', cartaoLista('imp|1', 'Em campo — 1 visita improdutiva', linhas(com(1)), sub))}
+        ${statCard('orange', icChave, 'Com 2 visitas improdutivas', com(2).length, '', cartaoLista('imp|2', 'Em campo — 2 visitas improdutivas', linhas(com(2)), sub))}
+        ${statCard(com(3).length ? 'red' : 'neutral', icAviso, 'Com 3 ou mais visitas', com(3).length, '', cartaoLista('imp|3', 'Em campo — 3 ou mais visitas improdutivas', linhas(com(3)), sub))}
+        ${statCard('blue', icRelogio, 'Total de visitas improdutivas', totalVis, 'somando todas as ordens')}
+      </div>
+      <div class="panel"><h3>Ordens em campo que já tiveram visita improdutiva</h3>
+        <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px;line-height:1.5">Mais visitas primeiro. "Técnico agora" é quem está com a ordem hoje; da 1ª visita em diante é quem já foi até o cliente e não conseguiu concluir.</p>
+        <div class="table-wrap"><table class="data-table" id="imp-tab"><thead><tr><th>O.S</th><th>Contrato</th><th>Cliente</th><th>Cidade</th><th>Bairro</th><th>Tipo de serviço</th><th>Técnico agora</th><th>Situação agora</th><th>Janela</th><th>Abertura</th><th>Limite</th><th>Prazo</th><th>Visitas improdutivas</th><th>1ª visita</th><th>Motivo da 1ª</th><th>2ª visita</th><th>Motivo da 2ª</th><th>3ª em diante</th></tr></thead><tbody>
+        ${todas.map(o => { const r = o.r; return `<tr><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td><td class="cat-cell">${esc(r.cliente || r.nome || '')}</td><td>${esc(rotuloCidadeGeral(r.cidade))}</td><td>${esc(extrairBairro(r.endereco) || '-')}</td><td>${esc(r.tipo_atividade)}</td><td>${esc(r.recurso) || '-'}</td><td>${SIT[o.bucket]}</td><td>${esc(r.periodo_sistema || '-')}</td>
+          <td>${r.abertura ? fmtDT(new Date(r.abertura)) : '-'}</td><td>${r.limite ? fmtDT(new Date(r.limite)) : '-'}</td><td>${falta(r)}</td>
+          <td><span class="badge warn">${o.n}</span></td><td>${celVisita(o.visitas[0])}</td><td>${celMotivo(o.visitas[0])}</td><td>${celVisita(o.visitas[1])}</td><td>${celMotivo(o.visitas[1])}</td><td>${celMais(o)}</td></tr>`; }).join('')}
+        </tbody></table></div></div>
+      <div class="panels-grid">
+        <div class="panel"><h3>Quem fez essas visitas improdutivas</h3>${tabelinha('imp-tab-tec', 'Técnico', contar(v => v.tecnico))}</div>
+        <div class="panel"><h3>Motivos das visitas improdutivas</h3>${tabelinha('imp-tab-mot', 'Motivo', contar(v => v.motivo))}</div>
+      </div>`;
+  }
 }
 function renderRelatorioDoDia() {
   const datas = [...new Set(DB.pcr.map(r => r.data).filter(Boolean))].sort().reverse();
