@@ -3212,6 +3212,10 @@
   .ia-bot .ia-bolha { background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px 16px 16px 4px; }
   .ia-bolha { padding: 10px 14px; font-size: 14px; line-height: 1.5; }
   .ia-bolha p { margin: 6px 0 0; font-weight: 400; color: var(--text-secondary); }
+  .ia-conversa p { margin: 0 0 8px; color: var(--text-primary); }
+  .ia-conversa p:last-child { margin-bottom: 0; }
+  .ia-conversa ul { margin: 2px 0 8px 18px; padding: 0; }
+  .ia-conversa li { margin: 2px 0; }
   .ia-bolha.ia-erro { border-color: var(--danger); color: var(--danger); }
   .ia-bolha.ia-aviso { background: var(--warn-bg, rgba(245, 158, 11, .12)); border: 1px solid rgba(245, 158, 11, .35); color: var(--text-primary); margin: 8px 0; }
   .ia-res { background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px; padding: 14px; min-width: 0; }
@@ -11457,6 +11461,31 @@ const IA = (() => {
     if ((seg || refPessoa) && !info.tec.unico && !info.tec.candidatos.length && CTX.tecnico) { info.tec = { unico: CTX.tecnico, candidatos: [CTX.tecnico] }; notas.push(`Mantive o técnico da pergunta anterior: ${CTX.tecnico}.`); }
     return notas;
   }
+  // CONVERSA LOCAL (sem IA externa): saudação, agradecimento, "o que você faz?" e definições das regras do negócio (CLAUDE.md §3).
+  // Só responde quando a mensagem é só isso; se tiver pedido de dado (hoje, quantos, mostre...) deixa pro motor de relatórios.
+  const GLOSSARIO = [
+    ['ifi', '**IFI** é o retorno de uma **ativação ou mudança de endereço**: o cliente volta a abrir um reparo em até **15 dias**. Conta para o técnico **ofensor** (quem fez o serviço anterior), não para quem fez o reparo. Meta: até **2,50%** das ativações.'],
+    ['irr', '**IRR** é o retorno de um **reparo**: o cliente abre outro reparo em até **30 dias**. Conta para o técnico **ofensor**. Meta: até **4,50%** dos reparos.'],
+    ['retorno', '**Retorno** é um reparo aberto de novo dentro da janela de garantia do serviço anterior: **IFI** (ativação/mudança de endereço, 15 dias) ou **IRR** (reparo, 30 dias). Mudança de cômodo e upgrade/downgrade não geram retorno. A conta fica com o técnico que fez o serviço anterior (o ofensor).'],
+    ['prazo', 'O **prazo** de **reparo** é de **24h** a partir da abertura; **ativação e mudança de endereço** têm **36h**. As faixas são até 24h, até 48h, mais de 48h e outliers. A meta é **85%** dentro do prazo.'],
+    ['sla', 'O **SLA** aqui é o prazo: **24h** para reparo e **36h** para ativação e mudança de endereço, com meta de **85%** dentro do prazo.'],
+    ['ciclo', 'O **ciclo** da folha vai do **dia 21 de um mês ao dia 20 do seguinte** (ex.: 21/09 a 20/10).'],
+    ['bonus', 'O **bônus** do técnico exige **26 dias trabalhados** e os indicadores dentro da meta (IFI até 2,50% e IRR até 4,50%). Quem atinge fica **APTO** e recebe a tarifa de 26 dias.'],
+    ['improdutiva', '**Improdutiva** é a visita com status **Não Concluído** (cliente ausente, endereço não encontrado etc.). Ela não conta como ordem concluída.'],
+    ['max', '**MAX** é quantas vezes o mesmo cliente abriu chamado de reparo no período (contado por contrato e por O.S única). MAX 2 ou mais indica cliente reincidente.'],
+  ];
+  function conversaLocal(texto) {
+    const q = prep(texto), n = q.n.trim(), len = q.t.length;
+    if (!len || len > 9) return null;
+    const dado = /\b(hoje|ontem|amanha|semana|mes|ciclo atual|ciclo anterior|quanto|quantos|quantas|tenho|mostre|mostra|lista|listar|total|numero)\b/.test(n);
+    if (len <= 5 && /^(oi|ola|opa|eai|e ai|salve|hey|hello|bom dia|boa tarde|boa noite|tudo bem|tudo bom|como vai)/.test(n) && !dado) return 'Olá! 👋 Posso mostrar relatórios do sistema (produção, prazos, retornos, improdutivas, financeiro), explicar as regras (IFI, IRR, prazo, ciclo, bônus) e achar O.S, contrato, cliente ou técnico. Pergunte do jeito que quiser.';
+    if (len <= 4 && /(obrigad|brigad|valeu|show|perfeito|otimo|beleza|certo|ok)/.test(n) && !dado) return 'De nada! 😊 Se precisar de mais alguma coisa, é só pedir.';
+    if (/(o que (voce|vc) (faz|sabe|pode)|quem e (voce|vc)|como (voce|vc) funciona|o que posso (perguntar|pedir)|^ajuda$|^help$)/.test(n)) return 'Eu sou o assistente do sistema. Posso:\n- **Mostrar relatórios** com as mesmas contas das telas (produção, prazos, retornos, improdutivas, financeiro, folha, frota);\n- **Responder** o que está acontecendo no dia (pendentes, em campo, prazos vencendo);\n- **Explicar as regras** (IFI, IRR, prazo, ciclo, bônus);\n- **Buscar** O.S, contrato, cliente ou técnico e abrir a tela certa.\nExemplo: “retornos de hoje”, “prazo de reparo do mês passado”, “o que é IFI?”.';
+    if (/^(o que (e|significa|quer dizer)|me explica|explique|explica|como funciona|qual (e )?a regra|qual (e )?o prazo)/.test(n) && !dado) {
+      const hit = GLOSSARIO.find(g => new RegExp('\\b' + g[0] + '\\b').test(n)); if (hit) return hit[1];
+    }
+    return null;
+  }
   function perguntar(texto, forcar, rotuloExibido, ia) {
     if (!ehAnalista()) return;
     // resposta digitada à pergunta do assistente ("hoje", "mês passado", "em Santos"): junta com o pedido que ficou esperando
@@ -11469,6 +11498,7 @@ const IA = (() => {
     let resp; const notasIA = [];
     try {
       if (ia) resp = respostaViaIA(texto, ia, notasIA);
+      if (!resp && !forcar) { const cl = conversaLocal(texto); if (cl) resp = { papel: 'ia', conversa: cl }; }   // papo simples e definições respondidos sem gastar cota da IA
       if (!resp) {
       ULTIMO_PLANO = null;
       const info = entender(texto, forcar), notas = herdarContexto(info, forcar), r = executar(info, texto);
@@ -11534,6 +11564,20 @@ const IA = (() => {
     const g = ACOES.push(lista) - 1;
     return `<div class="ia-abrir${foraImg ? ' fora-da-imagem' : ''}">${lista.map((a, i) => `<button type="button" class="ia-btn-abrir" data-g="${g}" data-i="${i}">↗ ${esc(a.rotulo)}${a.sub ? `<small>${esc(a.sub)}</small>` : ''}</button>`).join('')}</div>`;
   }
+  // resposta de conversa da IA: escapa TUDO e só entende **negrito**, listas com "- " e parágrafos (nunca HTML vindo do modelo)
+  function htmlConversa(txt) {
+    const linhas = String(txt || '').split('\n'), saida = []; let lista = false;
+    const fmt = l => esc(l).replace(/[*]{2}([^*]+)[*]{2}/g, '<b>$1</b>');
+    linhas.forEach(l => {
+      const t = l.trim();
+      const item = t.match(/^(?:-|[*]|•|[0-9]+[.)])\s+(.*)$/);
+      if (item) { if (!lista) { saida.push('<ul>'); lista = true; } saida.push('<li>' + fmt(item[1]) + '</li>'); return; }
+      if (lista) { saida.push('</ul>'); lista = false; }
+      if (t) saida.push('<p>' + fmt(t) + '</p>');
+    });
+    if (lista) saida.push('</ul>');
+    return saida.join('');
+  }
   function desenhar() {
     const box = document.getElementById('ia-msgs'); if (!box) return;
     ACOES = [];
@@ -11548,6 +11592,7 @@ const IA = (() => {
       let h = '';
       if (m.erro) h = `<div class="ia-bolha ia-erro">${esc(m.erro)}</div>`;
       else if (m.pergunta) h = `<div class="ia-bolha">${esc(m.pergunta.texto)}</div><div class="ia-opcoes">${m.pergunta.opcoes.map((o, oi) => `<button type="button" class="ia-chip" data-m="${mi}" data-o="${oi}">${esc(o.rotulo)}</button>`).join('')}</div>`;
+      else if (m.conversa) h = `<div class="ia-bolha ia-conversa">${htmlConversa(m.conversa)}</div><div class="ia-acoes fora-da-imagem"><button type="button" class="ia-ac" data-ac="ouvir" title="Ler esta resposta em voz alta">🔊 Ouvir</button></div>`;
       else if (m.texto) h = `<div class="ia-bolha"><b>${esc(m.texto.titulo)}</b>${m.texto.msg ? `<p>${esc(m.texto.msg)}</p>` : ''}</div>` + botoesAbrir(m.abrir);
       else if (m.vazio) h = `<div class="ia-bolha">${esc(m.vazio)}</div>${m.sugestoes ? `<div class="ia-opcoes">${SUGESTOES.slice(0, 4).map(s => `<button type="button" class="ia-chip" data-s="${esc(s)}">${esc(s)}</button>`).join('')}</div>` : ''}`;
       else if (m.resultados) {
@@ -11938,7 +11983,7 @@ const IA = (() => {
     rec.onend = () => { REC = null; if (mic) { mic.classList.remove('gravando'); mic.setAttribute('aria-pressed', 'false'); } campo.focus(); };
     try { rec.start(); REC = rec; mic.classList.add('gravando'); mic.setAttribute('aria-pressed', 'true'); toast('Pode falar… a pergunta aparece no campo para você conferir antes de enviar.', 'ok', 2500); } catch (e) { REC = null; toast('Não consegui iniciar o microfone.', 'aviso'); }
   }
-  const textoDaResposta = m => { const rs = (m && m.resultados) || []; const r = rs.find(x => x.resumo) || rs[0]; return r ? (r.resumo || r.vazio || r.titulo || '') : (m && m.pergunta ? m.pergunta.texto : (m && m.texto ? (m.texto.titulo + '. ' + (m.texto.msg || '')) : '')); };
+  const textoDaResposta = m => { if (m && m.conversa) return String(m.conversa).replace(/[*]{2}/g, ''); const rs = (m && m.resultados) || []; const r = rs.find(x => x.resumo) || rs[0]; return r ? (r.resumo || r.vazio || r.titulo || '') : (m && m.pergunta ? m.pergunta.texto : (m && m.texto ? (m.texto.titulo + '. ' + (m.texto.msg || '')) : '')); };
 
   // ---------- ponto de entrada: planeja com a IA e cai na busca local se ela não puder ----------
   function pensando(on) {
@@ -11988,6 +12033,12 @@ const IA = (() => {
     const pl = ia.plano, nota = HIST_IA.push({ papel: 'usuario', texto: ia.anon });
     if (HIST_IA.length > 12) HIST_IA = HIST_IA.slice(-12);
     if (pl.acao === 'fora_do_escopo') { HIST_IA.push({ papel: 'assistente', texto: 'Assunto fora das ferramentas de IFI/IRR/improdutivas; respondi com a busca comum.' }); ULTIMO_PLANO = null; return null; }
+    if (pl.acao === 'responder') {   // conversa: o texto vem do modelo (sem dado do sistema); os códigos TECNICO_n voltam a ser os nomes reais só aqui no navegador
+      const nomeReal = t => t.replace(/TECNICO_[0-9]+/g, m => { const n = TOK.mapa[m]; return n && n.length === 1 ? n[0] : (n && n.length ? n[0] : m); });
+      const conv = nomeReal(pl.texto);
+      HIST_IA.push({ papel: 'assistente', texto: pl.texto.slice(0, 300) });
+      return { papel: 'ia', conversa: conv, viaIA: true };
+    }
     const paraTexto = (rotulo, base) => ({ rotulo, forcar: { __texto: base ? `${texto} — ${rotulo}` : rotulo } });
     if (pl.acao === 'perguntar') { HIST_IA.push({ papel: 'assistente', texto: 'Perguntei: ' + pl.pergunta }); return { papel: 'ia', pergunta: { texto: pl.pergunta, opcoes: (pl.opcoes || []).map(o => paraTexto(o, false)) }, origem: texto, viaIA: true }; }
     let r;
@@ -21427,9 +21478,12 @@ async function buscarBaseCertificacoes(aoChegarForm) {
 const FORM_CERT_CSV_URL = 'https://docs.google.com/spreadsheets/d/12PHgaxppbBtkn-l5SFYmQvb-foBhnDUatqo4x6Wb86c/export?format=csv&gid=97656694';
 // quem usa o formulário de certificação do sistema (Analista e Escritório): também decide quem lê as respostas dele na tela Certificações
 function podeUsarFormCert() { return !!currentUser && podeAcessar(currentUser.role, 'formcert'); }
+// quem LÊ as certificações feitas pelo formulário (Google Forms + formulário do sistema): todo perfil que abre a tela Certificações.
+// (28/10/2026: era podeUsarFormCert — o Supervisor/Coordenador abre Certificações mas não usa o formulário, então via O.S certificadas como "Não certificada")
+function podeVerRespostasCert() { return !!currentUser && podeAcessar(currentUser.role, 'certificacoes'); }
 async function buscarRespostasFormCertificacao() {
   const porOS = await buscarRespostasFormPlanilha();
-  if (!podeUsarFormCert()) return porOS;
+  if (!podeVerRespostasCert()) return porOS;
   try {   // respostas do formulário do SISTEMA (aba do Google Sheets): a mais recente de cada O.S vale
     (await certFormCarregar(true)).forEach(r => {
       const os = fcSoDigitos(r.os); if (!os) return;
@@ -21441,7 +21495,7 @@ async function buscarRespostasFormCertificacao() {
 }
 async function buscarRespostasFormPlanilha() {
   const porOS = new Map();
-  if (!podeUsarFormCert()) return porOS;   // 23/10/2026: o formulário novo (e tudo que vem dele) é só do Analista por enquanto — os outros perfis seguem só com a Base antiga
+  if (!podeVerRespostasCert()) return porOS;   // quem abre a tela Certificações lê as respostas do formulário (antes só Analista/Escritório e o resto via tudo como "Não certificada")
   try {
     const res = await fetch(FORM_CERT_CSV_URL, { credentials: 'omit' });
     if (!res.ok) return porOS;
@@ -22006,11 +22060,11 @@ function renderCertificacoes() {
     const listaCert = (chave, titulo, arr) => cartaoListaCustom(chave, titulo, formatDate(data), ['O.S', 'Contrato', 'Cliente', 'Técnico', 'Cidade', 'Período', 'Status', 'Atendente', 'Certificada por', 'Horário concluída', 'Horário certificada', 'Tempo'],
       arr.map(l => ({ tipo: '', celulas: [esc(l.os) || '-', esc(l.contrato) || '-', esc(l.cliente) || '-', esc(l.tecnico) || '-', esc(l.cidade) || '-', esc(l.periodo) || '-', l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>', esc(l.atendente) || '-', esc(l.certificadaPor) || '-', esc(l.horarioConcluida), esc(l.horarioCertificada), esc(l.tempo)] })));
     // 28/10/2026 (pedido do cliente): cartão "Certificadas incorretamente" = certificadas em que a resposta do formulário diz que o técnico NÃO certificou corretamente
-    const incorretas = podeUsarFormCert() ? certificadas.filter(l => l.correta === 'NÃO' || l.correta === 'NAO') : [];
+    const incorretas = podeVerRespostasCert() ? certificadas.filter(l => l.correta === 'NÃO' || l.correta === 'NAO') : [];
     body.innerHTML = `
       <div class="stat-cards">
         ${statCard('green', icCert, 'Certificadas', certificadas.length, '', listaCert('cert|ok', 'Certificadas', certificadas))}
-        ${podeUsarFormCert() ? statCard('orange', icAlerta, 'Certificadas incorretamente', incorretas.length, 'o técnico não certificou corretamente (resposta do formulário)', listaCert('cert|inc', 'Certificadas incorretamente', incorretas)) : ''}
+        ${podeVerRespostasCert() ? statCard('orange', icAlerta, 'Certificadas incorretamente', incorretas.length, 'o técnico não certificou corretamente (resposta do formulário)', listaCert('cert|inc', 'Certificadas incorretamente', incorretas)) : ''}
         ${statCard('red', icAlerta, 'Não certificadas', naoCertificadas.length, naoCertificadas.length ? '<button type="button" class="stat-link" id="cert-ver-lista">Ver lista de revisão →</button>' : '', listaCert('cert|nao', 'Não certificadas', naoCertificadas))}
         ${statCard('blue', icPct, '% de Certificação', formatPct(pct, 1), `<div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.min(100, Math.max(0, pct))}%"></div></div>`, listaCert('cert|todas', '% de Certificação — todas as O.S', linhas))}
         ${statCard('neutral', icPasta, 'Total de O.S', linhas.length, `Cálculo: Certificadas (${certificadas.length}) + Não certificadas (${naoCertificadas.length})`, listaCert('cert|total', 'Total de O.S', linhas))}
@@ -22032,16 +22086,16 @@ function renderCertificacoes() {
         ${podeChamarClientes() ? '<button type="button" class="btn-sinalizar fora-da-imagem" id="cert-chamar" title="Só ordens concluídas de ativação, mudança de endereço e reparo: abre o WhatsApp de cada cliente com a mensagem de verificação de qualidade">📞 Chamar Clientes</button>' : ''}
       </div>
       <div class="table-wrap rolagem-inteira-na-imagem"><table class="data-table" id="tab-certificacoes-detalhe"><thead><tr>
-        <th class="fora-da-imagem">O.S</th><th class="fora-da-imagem">Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th class="fora-da-imagem">Período</th><th>Status</th><th class="fora-da-imagem">Atendente</th><th class="fora-da-imagem">Certificada por</th>${podeUsarFormCert() ? '<th class="fora-da-imagem">Certificada corretamente pelo técnico?</th>' : ''}<th class="fora-da-imagem">Horário Concluída</th><th class="fora-da-imagem">Horário Certificada</th><th class="fora-da-imagem">Tempo</th>
+        <th class="fora-da-imagem">O.S</th><th class="fora-da-imagem">Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th class="fora-da-imagem">Período</th><th>Status</th><th class="fora-da-imagem">Atendente</th><th class="fora-da-imagem">Certificada por</th>${podeVerRespostasCert() ? '<th class="fora-da-imagem">Certificada corretamente pelo técnico?</th>' : ''}<th class="fora-da-imagem">Horário Concluída</th><th class="fora-da-imagem">Horário Certificada</th><th class="fora-da-imagem">Tempo</th>
       </tr></thead><tbody>
-        ${linhas.map(l => `<tr><td class="fora-da-imagem">${esc(l.os)||'-'}</td><td class="fora-da-imagem">${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td class="fora-da-imagem">${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td>${podeUsarFormCert() ? `<td class="fora-da-imagem">${l.correta === 'SIM' ? '<span class="badge ok">Sim</span>' : l.correta === 'NÃO' || l.correta === 'NAO' ? '<span class="badge warn">Não</span>' : '-'}</td>` : ''}<td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td></tr>`).join('')}
+        ${linhas.map(l => `<tr><td class="fora-da-imagem">${esc(l.os)||'-'}</td><td class="fora-da-imagem">${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td class="fora-da-imagem">${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td>${podeVerRespostasCert() ? `<td class="fora-da-imagem">${l.correta === 'SIM' ? '<span class="badge ok">Sim</span>' : l.correta === 'NÃO' || l.correta === 'NAO' ? '<span class="badge warn">Não</span>' : '-'}</td>` : ''}<td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td></tr>`).join('')}
       </tbody></table></div>
       <div class="panels-grid fora-da-imagem" id="cert-graficos" style="margin-top:1.25rem">
         <div class="panel"><h3>Certificadas × Não certificadas</h3><div id="cert-g1"></div></div>
-        ${podeUsarFormCert() ? '<div class="panel"><h3>Certificadas corretamente pelo técnico?</h3><div id="cert-g2"></div></div>' : ''}
+        ${podeVerRespostasCert() ? '<div class="panel"><h3>Certificadas corretamente pelo técnico?</h3><div id="cert-g2"></div></div>' : ''}
       </div>`;
     donutChart('cert-g1', [{ label: 'Certificadas', value: certificadas.length, color: '#16a34a' }, { label: 'Não certificadas', value: naoCertificadas.length, color: '#dc2626' }].filter(x => x.value), { centroLabel: 'O.S' });
-    if (podeUsarFormCert()) {   // "certificada corretamente pelo técnico?" só existe nas respostas do formulário novo: conta só as certificadas
+    if (podeVerRespostasCert()) {   // "certificada corretamente pelo técnico?" só existe nas respostas do formulário novo: conta só as certificadas
       const sim = certificadas.filter(l => l.correta === 'SIM').length, nao = certificadas.filter(l => l.correta === 'NÃO' || l.correta === 'NAO').length, sem = certificadas.length - sim - nao;
       donutChart('cert-g2', [{ label: 'Corretamente (Sim)', value: sim, color: '#16a34a' }, { label: 'Não corretamente (Não)', value: nao, color: '#dc2626' }, { label: 'Sem resposta no formulário', value: sem, color: '#9ca3af' }].filter(x => x.value), { centroLabel: 'certificadas' });
     }
