@@ -10383,7 +10383,7 @@ const IA = (() => {
   function semanaDe(iso) { const ini = addDias(iso, -diaDaSemana(iso)); return { inicio: ini, fim: addDias(ini, 6) }; }
   function mesDe(a, m) { return { inicio: `${a}-${pad2(m)}-01`, fim: `${a}-${pad2(m)}-${pad2(ultimoDiaMes(a, m))}` }; }
   const mk = (tipo, inicio, fim, rotulo, extra) => ({ tipo, inicio, fim, rotulo, ...(extra || {}) });
-  function cicloAtual() { const c = ciclosDoFechamento().atual; return mk('ciclo', c.start, c.end, `ciclo atual (${fmtP(c.start, c.end)})`); }
+  function cicloAtual() { const c = cicloCalendarioDe(hojeIso()); return mk('ciclo', c.start, c.end, `ciclo atual (${fmtP(c.start, c.end)})`); }   // o que contém HOJE (o "atual" do Dashboard pode ser o último fechamento importado)
   function cicloAnteriorA(c) { const x = cicloCalendarioDe(addDias(c.inicio, -1)); return mk('ciclo', x.start, x.end, `ciclo ${fmtP(x.start, x.end)}`); }
   function listaCiclos(n) { const lista = []; let c = cicloAtual(); for (let k = 0; k < n; k++) { lista.unshift(c); c = cicloAnteriorA(c); } return lista; }   // do mais antigo ao atual
   function anteriorDe(p) {
@@ -10443,6 +10443,14 @@ const IA = (() => {
     const porTamanho = [...achados].sort((x, y) => (y.fim - y.i) - (x.fim - x.i) || x.i - y.i), final = [];
     porTamanho.forEach(a => { if (!final.some(f => a.i < f.fim && f.i < a.fim)) final.push(a); });
     final.sort((x, y) => x.i - y.i);
+    // "21.09 a 20.10": intervalo que começa num dia 21 e termina num dia 20 certinho é o(s) ciclo(s) da folha, não um intervalo qualquer
+    final.forEach(a => {
+      const p = a.p; if (p.tipo !== 'intervalo' || p.inicio.slice(8) !== '21' || p.fim.slice(8) !== '20') return;
+      const lista = []; let ini = p.inicio;
+      while (ini <= p.fim && lista.length < 24) { const c = cicloCalendarioDe(ini); if (c.start !== ini) return; lista.push(mk('ciclo', c.start, c.end, `ciclo ${fmtP(c.start, c.end)}`)); ini = addDias(c.end, 1); }
+      if (!lista.length || lista[lista.length - 1].fim !== p.fim) return;
+      a.p = lista.length === 1 ? lista[0] : mk('ciclos', lista[0].inicio, lista[lista.length - 1].fim, `${lista.length} ciclos (${fmtP(p.inicio, p.fim)})`, { lista });
+    });
     return { lista: final.map(a => a.p), pos: final };
   }
 
@@ -10806,6 +10814,7 @@ const IA = (() => {
     return res;
   }
   function skFinanceiro(p, pers) {
+    const tabelaPrimeiro = !!(p.conc && (p.conc.has('fechamento') || p.conc.has('tabela')));   // "quero o fechamento…": é a tabela do Dashboard que a pessoa quer ver
     const titulo = 'Receitas e despesas', pers2 = (pers.length === 1 && pers[0].tipo === 'ciclos') ? pers[0].lista : pers;
     const abrirFin = [{ rota: 'dashboard', rotulo: 'Abrir tela original: Dashboard (Resumo financeiro)', secao: 'Resumo financeiro' }, { rota: 'recdesp', rotulo: 'Abrir Receitas e Despesas' }];
     if (pers2.length > 1) {
@@ -10820,7 +10829,7 @@ const IA = (() => {
     const per = pers2[0], f = finDoCiclo(per), ant = finDoCiclo(anteriorDe(per));
     if (f.semDados) return vazio(titulo, `O ciclo ${fmtP(per.inicio, per.fim)} ainda não tem receita nem despesas lançadas.`, abrirFin);
     const vs = (v, a) => { if (!a || v === null || a === null) return ''; const d = (v - a) / Math.abs(a) * 100; return `${d > 0 ? '▲ +' : d < 0 ? '▼ ' : '= '}${fmtDec(d, 1)}% vs. ciclo anterior`; };
-    const foco = p.conc, res = { titulo, sub: `Ciclo ${fmtP(per.inicio, per.fim)}`, cartoes: [], graficos: [], blocos: [], abrir: abrirFin, notas: ['Fonte: ' + f.fonte + '. Valores por ciclo (21→20), como no Dashboard.'] };
+    const foco = p.conc, res = { titulo, sub: `Ciclo ${fmtP(per.inicio, per.fim)}`, blocosPrimeiro: tabelaPrimeiro, cartoes: [], graficos: [], blocos: [], abrir: abrirFin, notas: ['Fonte: ' + f.fonte + '. Valores por ciclo (21→20), como no Dashboard.'] };
     const soReceita = foco && foco.has('receita') && !foco.has('despesa') && !foco.has('lucro'), soDesp = foco && foco.has('despesa') && !foco.has('receita') && !foco.has('lucro');
     if (!soDesp) res.cartoes.push(cartao('Receita (ordens)', formatCurrency(f.receita), { positive: true, sub: vs(f.receita, ant.receita) }));
     if (!soReceita) res.cartoes.push(cartao('Despesas', f.despesa === null ? '-' : formatCurrency(f.despesa), { sub: vs(f.despesa, ant.despesa) }));
@@ -10865,7 +10874,9 @@ const IA = (() => {
     const abrir = [{ rota: 'dashboard', rotulo: 'Abrir tela original: Dashboard' }, abrirRG(per, 'relgeral', 'Abrir Relatório Geral')];
     if (!tem.length) return vazio(titulo, `Nada importado para ${per.rotulo}.`, abrir);
     const cartoes = []; tem.forEach(g => g.m.lista.forEach(m => cartoes.push(cartao(m.label, fmtV(m), { negative: (m.k === 'lucro' && m.v < 0) || (m.k === 'pzp' && m.v < PRAZO_META) || (m.k === 'ifip' && m.v > BONUS_IFI_MAX) || (m.k === 'irrp' && m.v > BONUS_IRR_MAX) }))));
-    return { titulo, sub: escopo(per, p), cartoes, abrir, notas: [(!temFin ? 'Os valores financeiros são por ciclo (21→20): peça “ciclo atual” para incluí-los. ' : '') + 'Cada indicador usa a mesma conta da tela correspondente.'] };
+    const res = { titulo, sub: escopo(per, p), cartoes, abrir, blocos: [], blocosPrimeiro: temFin, notas: [(!temFin ? 'Os valores financeiros são por ciclo (21→20): peça “ciclo atual” para incluí-los. ' : '') + 'Cada indicador usa a mesma conta da tela correspondente.'] };
+    if (temFin) { const piv = pivot(); if (piv && piv.periodos.includes(rotCiclo(per))) comRel(res, 'resumoFin', p, [per, ...(piv.periodos.includes(rotCiclo(anteriorDe(per))) ? [anteriorDe(per)] : [])]); }   // "fechamento": a tabela do Resumo financeiro do Dashboard vem junto
+    return res;
   }
   // comparação de 2+ períodos — usa as funções existentes; quando são ciclos, mostra também as tabelas comparativas que o Dashboard já tem
   function skComparar(p, pers, skills) {
@@ -11185,8 +11196,9 @@ const IA = (() => {
           let x = `<div class="ia-res"><h4>${esc(r.titulo)}</h4><div class="ia-sub">${esc(r.sub || '')}</div>`;
           if (r.cartoes && r.cartoes.length) x += `<div class="cards-grid ia-cards">${r.cartoes.map(c => metricCard(c.r, c.v, c.negative, { positive: c.positive, sub: c.sub })).join('')}</div>`;
           (r.avisos || []).forEach(a => { x += `<div class="ia-bolha ia-aviso">${esc(a)}</div>`; });
-          (r.graficos || []).forEach(g => { const id = `ia-g-${++SEQ}`; x += `<div class="ia-graf"><h5>${esc(g.titulo)}</h5><div id="${id}"></div></div>`; pos.push(() => g.fn(id)); });
-          (r.blocos || []).forEach(b => { const id = `ia-b-${++SEQ}`; x += `<div class="ia-bloco"><h5>${esc(b.titulo)}</h5><div id="${id}-w" class="ia-html"></div></div>`; pos.push(() => { const w = document.getElementById(`${id}-w`); if (w) { w.innerHTML = b.fn(id); if (b.depois) b.depois(id); } }); });
+          const htmlGraficos = () => (r.graficos || []).forEach(g => { const id = `ia-g-${++SEQ}`; x += `<div class="ia-graf"><h5>${esc(g.titulo)}</h5><div id="${id}"></div></div>`; pos.push(() => g.fn(id)); });
+          const htmlBlocos = () => (r.blocos || []).forEach(b => { const id = `ia-b-${++SEQ}`; x += `<div class="ia-bloco"><h5>${esc(b.titulo)}</h5><div id="${id}-w" class="ia-html"></div></div>`; pos.push(() => { const w = document.getElementById(`${id}-w`); if (w) { w.innerHTML = b.fn(id); if (b.depois) b.depois(id); } }); });
+          if (r.blocosPrimeiro) { htmlBlocos(); htmlGraficos(); } else { htmlGraficos(); htmlBlocos(); }
           (r.tabelas || []).forEach(t => { x += htmlTabela(t, `ia-t-${++SEQ}`); });
           if (r.mostrar && r.mostrar.length) x += `<div class="ia-opcoes">${r.mostrar.map(o => `<button type="button" class="ia-chip" data-cat="${esc(o.id)}" data-nome="${esc(o.rotulo)}">Mostrar aqui: ${esc(o.rotulo)}</button>`).join('')}</div>`;
           x += botoesAbrir(r.abrir) + (r.notas && r.notas.length ? `<div class="ia-nota">${[...new Set(r.notas.filter(Boolean))].map(esc).join('<br>')}</div>` : '');
