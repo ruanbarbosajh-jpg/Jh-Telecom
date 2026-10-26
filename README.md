@@ -5,6 +5,7 @@ financeiro e folha de pagamento).
 
 - `index.html` — o sistema inteiro (HTML + CSS + JavaScript num arquivo só).
 - `vercel.json` — configuração da hospedagem.
+- `api/` e `lib/` — função do assistente de IA (`/api/assistente`); precisam ir junto, na raiz. Chaves de IA ficam em Settings › Environment Variables da Vercel (`GEMINI_API_KEY` etc.), nunca no código.
 
 ## Atualizar o site
 

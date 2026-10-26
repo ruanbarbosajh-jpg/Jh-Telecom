@@ -3280,6 +3280,17 @@
   /* Folha / Folha do Escritório / Relatório do Financeiro: tela cheia (28/10/2026) */
   body.tela-larga .content { padding: 12px 8px 24px; }
   body.tela-larga .content .toolbar { margin-left: 0; margin-right: 0; }
+
+  /* ASSISTENTE — planejador de IA e voz (28/10/2026) */
+  .ia-pens { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 13px; }
+  .ia-pens span { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); opacity: .35; animation: iaPonto 1s infinite ease-in-out; }
+  .ia-pens span:nth-child(2) { animation-delay: .15s; } .ia-pens span:nth-child(3) { animation-delay: .3s; margin-right: 4px; }
+  @keyframes iaPonto { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+  .ia-mic { border: 1px solid var(--border); background: var(--card-bg); color: var(--text-primary); border-radius: 12px; padding: 0 12px; font-size: 17px; cursor: pointer; }
+  .ia-mic:hover { background: var(--accent-bg); }
+  .ia-mic.gravando { background: #dc2626; color: #fff; border-color: #dc2626; animation: iaGrava 1.1s infinite; }
+  @keyframes iaGrava { 0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, .5); } 50% { box-shadow: 0 0 0 7px rgba(220, 38, 38, 0); } }
+  .ia-head-btns button.ligado { background: rgba(255, 255, 255, .35); border-color: #fff; }
 </style>
 </head>
 <body>
@@ -11331,23 +11342,27 @@ const IA = (() => {
     const el = document.createElement('aside');
     el.id = 'ia-painel'; el.className = 'ia-painel'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Assistente de análise');
     el.innerHTML = `<header class="ia-head"><div class="ia-tit"><span class="ia-logo" aria-hidden="true">✦</span><div><b>Assistente</b><small>Usa só os dados deste sistema · nada sai do navegador</small></div></div>
-        <div class="ia-head-btns"><button type="button" id="ia-larg" title="Ampliar / reduzir" aria-label="Ampliar">⤢</button><button type="button" id="ia-cheia" title="Tela cheia" aria-label="Tela cheia">⛶</button><button type="button" id="ia-nova" title="Nova conversa" aria-label="Nova conversa">↺</button><button type="button" id="ia-fechar" title="Fechar (Esc)" aria-label="Fechar">✕</button></div></header>
+        <div class="ia-head-btns"><button type="button" id="ia-larg" title="Ampliar / reduzir" aria-label="Ampliar">⤢</button><button type="button" id="ia-cheia" title="Tela cheia" aria-label="Tela cheia">⛶</button><button type="button" id="ia-voz" title="Ler as respostas em voz alta" aria-label="Ler as respostas em voz alta">🔊</button><button type="button" id="ia-parar" hidden title="Parar a leitura" aria-label="Parar a leitura">⏹</button><button type="button" id="ia-nova" title="Nova conversa" aria-label="Nova conversa">↺</button><button type="button" id="ia-fechar" title="Fechar (Esc)" aria-label="Fechar">✕</button></div></header>
       <div class="ia-msgs" id="ia-msgs" aria-live="polite"></div>
-      <form class="ia-form" id="ia-form" autocomplete="off"><input id="ia-in" type="text" placeholder="Pergunte ou busque: “prazo de ontem”, O.S, contrato, cliente, técnico, tela…" maxlength="300" aria-label="Pergunta ao assistente"><button type="submit" class="ia-enviar">Enviar</button></form>`;
+      <form class="ia-form" id="ia-form" autocomplete="off"><input id="ia-in" type="text" placeholder="Pergunte ou busque: “prazo de ontem”, O.S, contrato, cliente, técnico, tela…" maxlength="300" aria-label="Pergunta ao assistente"><button type="button" class="ia-mic" id="ia-mic" aria-label="Falar a pergunta" aria-pressed="false" title="Falar a pergunta (microfone do navegador; o áudio é processado pelo serviço de voz do navegador)">🎤</button><button type="submit" class="ia-enviar">Enviar</button></form>`;
     document.body.appendChild(el);
     PAINEL = el;
     el.querySelector('#ia-fechar').addEventListener('click', fechar);
+    el.querySelector('#ia-mic').addEventListener('click', alternarMicrofone);
+    el.querySelector('#ia-voz').addEventListener('click', alternarVozLeitura);
+    el.querySelector('#ia-parar').addEventListener('click', pararFala);
+    atualizarBotaoVoz();
     el.querySelector('#ia-larg').addEventListener('click', () => { el.classList.toggle('ia-larga'); el.classList.remove('ia-cheia'); });
-    el.querySelector('#ia-nova').addEventListener('click', () => { MSGS = []; ULTIMO = null; CTX = { periodos: null, cidades: [], tecnico: null, fech: false }; desenhar(); });
+    el.querySelector('#ia-nova').addEventListener('click', () => { MSGS = []; ULTIMO = null; CTX = { periodos: null, cidades: [], tecnico: null, fech: false }; ULTIMO_PLANO = null; HIST_IA = []; TOK = { n: 0, porChave: {}, mapa: {} }; pararFala(); desenhar(); });
     el.querySelector('#ia-cheia').addEventListener('click', () => { el.classList.toggle('ia-cheia'); el.classList.remove('ia-larga'); });
-    el.querySelector('#ia-form').addEventListener('submit', ev => { ev.preventDefault(); const i = el.querySelector('#ia-in'); const t = i.value.trim(); if (!t) return; i.value = ''; perguntar(t); });
+    el.querySelector('#ia-form').addEventListener('submit', ev => { ev.preventDefault(); const i = el.querySelector('#ia-in'); const t = i.value.trim(); if (!t) return; i.value = ''; enviar(t); });
     // cliques de dentro das mensagens (botões, chips, Excel e nomes clicáveis dos relatórios reaproveitados)
     const tratarClique = ev => {
       const t = ev.target;
       const ac = t.closest('.ia-ac'); if (ac) { acaoResultado(ac.dataset.ac, ac.closest('.ia-res')); return; }
       const chip = t.closest('.ia-chip[data-m]');
-      if (chip) { const msg = MSGS[Number(chip.dataset.m)], op = msg.pergunta.opcoes[Number(chip.dataset.o)]; msg.respondida = true; perguntar(msg.origem, { ...(msg.forcarBase || {}), ...op.forcar }, op.rotulo); return; }
-      const sug = t.closest('.ia-chip[data-s]'); if (sug) { perguntar(sug.dataset.s); return; }
+      if (chip) { const msg = MSGS[Number(chip.dataset.m)], op = msg.pergunta.opcoes[Number(chip.dataset.o)]; msg.respondida = true; if (op.forcar && op.forcar.__texto) { enviar(op.forcar.__texto); return; } perguntar(msg.origem, { ...(msg.forcarBase || {}), ...op.forcar }, op.rotulo); return; }
+      const sug = t.closest('.ia-chip[data-s]'); if (sug) { enviar(sug.dataset.s); return; }
       const mostrar = t.closest('.ia-chip[data-cat]'); if (mostrar) { perguntar(`mostrar ${mostrar.dataset.nome}`, { catalogo: mostrar.dataset.cat }, mostrar.dataset.nome); return; }
       const ab = t.closest('.ia-btn-abrir'); if (ab) { abrirTela(ACOES[Number(ab.dataset.g)][Number(ab.dataset.i)]); return; }
       const xl = t.closest('.ia-xls'); if (xl) { const tab = document.getElementById(xl.dataset.t); if (tab) exportarTabelaVisivel(tab, `assistente-${hojeISOLocal()}`); return; }
@@ -11382,6 +11397,7 @@ const IA = (() => {
   function acaoResultado(ac, res) {
     if (!res) return;
     const d = coletarResposta(res), nome = nomeArquivo(d.titulo);
+    if (ac === 'ouvir') { if (FALANDO) pararFala(); else falar(d.resumo || d.titulo); return; }
     if (ac === 'cheia') { ampliarElemento(res, d.titulo); return; }
     if (ac === 'img') { capturarElementoComoImagem(res, nome); return; }
     if (ac === 'xls') {
@@ -11406,9 +11422,9 @@ const IA = (() => {
     if (!ehAnalista()) return;
     const el = garantirPainel(); el.classList.add('aberto'); document.body.classList.add('ia-aberto');
     if (!MSGS.length) desenhar();
-    if (texto) perguntar(texto); else setTimeout(() => { const i = el.querySelector('#ia-in'); if (i) i.focus(); }, 60);
+    if (texto) enviar(texto); else setTimeout(() => { const i = el.querySelector('#ia-in'); if (i) i.focus(); }, 60);
   }
-  function fechar() { if (PAINEL) PAINEL.classList.remove('aberto'); document.body.classList.remove('ia-aberto'); }
+  function fechar() { if (PAINEL) PAINEL.classList.remove('aberto'); document.body.classList.remove('ia-aberto'); try { pararFala(); if (REC) REC.stop(); } catch (e) { /* nada a parar */ } }
   // ---------- memória da conversa (26/10/2026): o assistente lembra do período, das cidades e do técnico da pergunta anterior ----------
   let CTX = { periodos: null, cidades: [], tecnico: null, fech: false };
   const SEGUIMENTO = /^(e |e o |e a |e os |e as |tambem |agora |mesmo |do mesmo |desse |dessa |nesse |nessa |dele|dela)/;
@@ -11429,17 +11445,20 @@ const IA = (() => {
     if ((seg || refPessoa) && !info.tec.unico && !info.tec.candidatos.length && CTX.tecnico) { info.tec = { unico: CTX.tecnico, candidatos: [CTX.tecnico] }; notas.push(`Mantive o técnico da pergunta anterior: ${CTX.tecnico}.`); }
     return notas;
   }
-  function perguntar(texto, forcar, rotuloExibido) {
+  function perguntar(texto, forcar, rotuloExibido, ia) {
     if (!ehAnalista()) return;
     // resposta digitada à pergunta do assistente ("hoje", "mês passado", "em Santos"): junta com o pedido que ficou esperando
     const ultima = [...MSGS].reverse().find(m => m.papel === 'ia');
-    if (!forcar && ultima && ultima.pergunta && !ultima.respondida) {
+    if (!forcar && !(ia && ia.ok) && ultima && ultima.pergunta && !ultima.respondida) {
       let e2 = null; try { e2 = entender(texto); } catch (er) { e2 = null; }
       if (e2 && (e2.periodos.length || e2.cidades.length) && e2.skills.every(k => k === 'resumo') && !e2.catalogo && !e2.inventario && !e2.navegar && e2.q.t.length <= 6) { ultima.respondida = true; return perguntar(ultima.origem + ' ' + texto, ultima.forcarBase, texto); }
     }
     MSGS.push({ papel: 'user', texto: rotuloExibido || texto });
-    let resp;
+    let resp; const notasIA = [];
     try {
+      if (ia) resp = respostaViaIA(texto, ia, notasIA);
+      if (!resp) {
+      ULTIMO_PLANO = null;
       const info = entender(texto, forcar), notas = herdarContexto(info, forcar), r = executar(info, texto);
       if (r && r.pergunta) resp = { papel: 'ia', pergunta: r.pergunta, origem: texto, forcarBase: forcar };
       else if (r && r.texto) resp = { papel: 'ia', texto: r.texto, abrir: r.abrir };
@@ -11455,10 +11474,13 @@ const IA = (() => {
         if (r.resultados.some(x => !x.vazio)) CTX = { periodos: info.periodos.length ? info.periodos : CTX.periodos, cidades: info.cidades.length ? info.cidades : CTX.cidades, tecnico: info.tec.unico || CTX.tecnico, fech: info.conc.has('fechamento') };
       }
       else resp = respostaNavegacao(texto, info);
+      }
     } catch (e) {
       resp = { papel: 'ia', erro: 'Tive um problema ao calcular isso: ' + String(e && e.message || e) + '. Se continuar, me diga qual tela você quer ver.' };
     }
+    if (notasIA.length && resp.resultados) resp.resultados.forEach(x => { x.contexto = [...(x.contexto || []), ...notasIA]; });
     MSGS.push(resp); desenhar();
+    try { if (vozLigada()) falar(textoDaResposta(resp)); } catch (e) { /* a voz nunca derruba a resposta */ }
   }
   function respostaNavegacao(texto, info) {
     const rotas = Object.keys(PAGES).filter(r => podeAcessar(currentUser.role, r)).map(r => ({ rota: r, titulo: tituloDaRota(r) }));
@@ -11486,7 +11508,7 @@ const IA = (() => {
       } catch (e) { /* a tela abriu; só o filtro não foi aplicado */ }
     }, 350);
   }
-  const SUGESTOES = ['Quantas ordens estão em campo?', 'Quantos técnicos estão ativos hoje?', 'Quantas pendentes hoje?', 'Qual o prazo mais cedo de hoje?', 'Fechamento de produção do ciclo anterior', 'Como está a produção este mês?', 'Prazo de reparo do mês passado', 'Compare o fechamento atual com o anterior', 'Receitas e despesas do ciclo atual', 'IFI e IRR por técnico este mês', 'Situação das ordens hoje', 'Técnicos que não se pagam no ciclo atual', 'Quais relatórios existem sobre prazo?'];
+  const SUGESTOES = ['Quais IFI e IRR estão pendentes hoje?', 'Quais ordens em campo já deram improdutiva?', 'Principais motivos de improdutiva este mês', 'Quantas ordens estão em campo?', 'Quantos técnicos estão ativos hoje?', 'Quantas pendentes hoje?', 'Qual o prazo mais cedo de hoje?', 'Fechamento de produção do ciclo anterior', 'Como está a produção este mês?', 'Prazo de reparo do mês passado', 'Compare o fechamento atual com o anterior', 'Receitas e despesas do ciclo atual', 'IFI e IRR por técnico este mês', 'Situação das ordens hoje', 'Técnicos que não se pagam no ciclo atual', 'Quais relatórios existem sobre prazo?'];
   const celula = c => c && typeof c === 'object' && 'h' in c ? c.h : esc(String(c === null || c === undefined ? '' : c));
   function htmlTabela(t, id) {
     const cab = t.cabHtml ? t.cabHtml.map(c => `<th>${c}</th>`).join('') : t.cab.map(c => `<th>${esc(c)}</th>`).join('');
@@ -11518,8 +11540,8 @@ const IA = (() => {
       else if (m.vazio) h = `<div class="ia-bolha">${esc(m.vazio)}</div>${m.sugestoes ? `<div class="ia-opcoes">${SUGESTOES.slice(0, 4).map(s => `<button type="button" class="ia-chip" data-s="${esc(s)}">${esc(s)}</button>`).join('')}</div>` : ''}`;
       else if (m.resultados) {
         h = m.resultados.map(r => {
-          if (r.vazio) return `<div class="ia-res"><h4 class="ia-cap">${esc(r.titulo)}</h4><div class="ia-resumo">${esc(r.vazio)}</div>${botoesAbrir(r.abrir)}</div>`;
-          const barra = '<div class="ia-acoes fora-da-imagem"><button type="button" class="ia-ac" data-ac="cheia" title="Abrir esta resposta em tela cheia">⛶ Tela cheia</button><button type="button" class="ia-ac" data-ac="img" title="Gerar imagem desta resposta">🖼 Imagem</button><button type="button" class="ia-ac" data-ac="pdf" title="Gerar PDF desta resposta">📄 PDF</button><button type="button" class="ia-ac" data-ac="xls" title="Baixar Excel desta resposta">⤓ Excel</button></div>';
+          if (r.vazio) return `<div class="ia-res"><h4 class="ia-cap">${esc(r.titulo)}</h4>${r.sub ? `<div class="ia-sub">${esc(r.sub)}</div>` : ''}<div class="ia-resumo">${esc(r.vazio)}</div>${(r.contexto || []).map(c => `<div class="ia-ctx">↳ ${esc(c)}</div>`).join('')}${(r.notas || []).filter(n => /^Interpretação da IA/.test(n)).map(n => `<div class="ia-ctx">↳ ${esc(n)}</div>`).join('')}${botoesAbrir(r.abrir)}</div>`;
+          const barra = '<div class="ia-acoes fora-da-imagem"><button type="button" class="ia-ac" data-ac="ouvir" title="Ler o resumo desta resposta em voz alta">🔊 Ouvir</button><button type="button" class="ia-ac" data-ac="cheia" title="Abrir esta resposta em tela cheia">⛶ Tela cheia</button><button type="button" class="ia-ac" data-ac="img" title="Gerar imagem desta resposta">🖼 Imagem</button><button type="button" class="ia-ac" data-ac="pdf" title="Gerar PDF desta resposta">📄 PDF</button><button type="button" class="ia-ac" data-ac="xls" title="Baixar Excel desta resposta">⤓ Excel</button></div>';
           let x = `<div class="ia-res"><h4 class="ia-cap">${esc(r.titulo)}</h4><div class="ia-sub">${esc(r.sub || '')}</div>${r.resumo ? `<div class="ia-resumo">${esc(r.resumo)}</div>` : ''}${(r.contexto || []).map(c => `<div class="ia-ctx">↳ ${esc(c)}</div>`).join('')}`;
           if (r.cartoes && r.cartoes.length) x += `<div class="ia-fatos">${r.cartoes.map(c => `<div class="ia-fato${c.negative ? ' neg' : ''}${c.positive ? ' pos' : ''}"><small>${esc(c.r)}</small><b>${esc(c.v)}</b>${c.sub ? `<i>${esc(c.sub)}</i>` : ''}</div>`).join('')}</div>`;
           (r.avisos || []).forEach(a => { x += `<div class="ia-bolha ia-aviso">${esc(a)}</div>`; });
@@ -11540,7 +11562,369 @@ const IA = (() => {
     try { if (typeof ativarFiltrosDeColuna === 'function') ativarFiltrosDeColuna(box); } catch (e) { /* tabela fica sem funil */ }
     box.scrollTop = box.scrollHeight;
   }
-  return { abrir, fechar, perguntar, entender, itensBusca, rankNav, CATALOGO, _t: { prep, acharPeriodos, lev, casa, metricas, finDoCiclo, procurarCatalogo, executar } };
+  // =====================================================================================================================
+  // PLANEJADOR DE IA (28/10/2026, pedido do cliente: "um assistente de IA conversacional de verdade", só Analista, custo zero)
+  // A IA (servidor: /api/assistente) só ESCOLHE a ferramenta e os parâmetros a partir da conversa; nunca vê dado do sistema.
+  // Quem executa é este código — com o login/RLS do Analista, validando de novo a lista autorizada — e quem escreve a resposta,
+  // as tabelas e os gráficos são as funções do sistema. Sem IA disponível (sem chave, sem cota, fora do ar), tudo cai na busca de antes.
+  // =====================================================================================================================
+  const IA_URL = '/api/assistente';
+  const PLAN = { off: 0 };                       // até quando não insistir (servidor sem chave / função não publicada)
+  let ULTIMO_PLANO = null, HIST_IA = [];
+  let TOK = { n: 0, porChave: {}, mapa: {} };   // códigos TECNICO_n estáveis durante a conversa (o plano anterior continua valendo no pedido seguinte)
+  const aux = {
+    obterToken: async () => { const { data } = await supa.auth.getSession(); return data && data.session ? data.session.access_token : ''; },
+    buscar: (u, i) => fetch(u, i),
+  };
+  const MSG_CODIGO = {
+    sem_provedor: 'o servidor ainda não tem chave de IA configurada', quota_esgotada: 'a cota gratuita das IAs acabou por agora', indisponivel: 'as IAs estão fora do ar agora',
+    limite_minuto: 'limite de perguntas por minuto atingido', limite_dia: 'limite diário de perguntas à IA atingido', sem_permissao: 'a IA é só do Analista',
+    nao_autenticado: 'sessão expirada (entre de novo)', plano_invalido: 'a IA devolveu um plano inválido', tempo: 'a IA demorou demais', rede: 'sem conexão com o servidor do assistente',
+    erro_interno: 'erro no servidor do assistente', auth_indisponivel: 'não consegui validar o login agora', perfil_indisponivel: 'não consegui validar o perfil agora', origem: 'origem não permitida',
+  };
+  const planejadorPossivel = () => ehAnalista() && !!(typeof supa !== 'undefined' && supa) && Date.now() > PLAN.off;
+
+  // Mascara o que não deve sair do navegador: nomes de técnicos viram TECNICO_n (o mapa fica aqui), números longos (contrato, O.S, telefone, CPF) e e-mails somem,
+  // e o nome que vem depois de "cliente"/"assinante" também. O modelo só enxerga a pergunta mascarada.
+  // nomes que não podem sair do navegador: técnicos da Produção + os que só aparecem no CSV da PCR (técnico novo ainda sem produção importada)
+  function nomesParaIA() {
+    const m = new Map(); nomesTecnicos().forEach(nm => m.set(normalizeHeader(nm), nm));
+    try { DB.pcr.forEach(r => { const nm = String(r.recurso || '').trim(); if (nm && !m.has(normalizeHeader(nm)) && (typeof ehRecursoTecnico !== 'function' || ehRecursoTecnico(nm))) m.set(normalizeHeader(nm), nm); }); } catch (e) { /* sem PCR carregada */ }
+    return [...m.values()];
+  }
+  function anonimizar(texto) {
+    let t = String(texto || '').replace(/\s+/g, ' ').trim().slice(0, 300); const mapa = TOK.mapa;
+    t = t.replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, 'EMAIL').replace(/\d{3}\.\d{3}\.\d{3}-\d{2}/g, 'NUMERO').replace(/\d{5,}/g, 'NUMERO')
+      .replace(/\b(cliente|assinante|sr\.?|sra\.?|senhor|senhora)\s+[A-Za-zÀ-ÿ]+(?:\s+(?:de|da|do|dos|das)?\s*[A-Za-zÀ-ÿ]+){0,3}/gi, '$1 CLIENTE_X');
+    const nomes = nomesParaIA().map(nm => ({ nm, partes: normalizeHeader(nm).split(' ').filter(x => x.length >= 2) }));
+    const pedacos = t.split(/(\s+)/);
+    const usavel = w => w.length >= 3 && !STOP.has(w) && !conceitosDaPalavra(w).length && !CIDADES.some(c => c.alvo === w) && !MESES.includes(w) && !/^\d+$/.test(w);
+    for (let i = 0; i < pedacos.length; i++) {
+      const w0 = pedacos[i]; if (!/[A-Za-zÀ-ÿ]/.test(w0) || /^\s+$/.test(w0)) continue;
+      const w = normalizeHeader(w0.replace(/[^A-Za-zÀ-ÿ]/g, '')); if (!usavel(w)) continue;
+      let cand = nomes.filter(n => n.partes[0] === w || (w.length >= 6 && n.partes.includes(w)));
+      if (!cand.length) continue;
+      let fim = i;
+      for (let j = i + 2; j < pedacos.length; j += 2) {   // estende com os sobrenomes que seguem (pulando de/da/do)
+        let jj = j, wn = normalizeHeader((pedacos[jj] || '').replace(/[^A-Za-zÀ-ÿ]/g, ''));
+        if (['de', 'da', 'do', 'dos', 'das'].includes(wn) && pedacos[jj + 2]) { jj += 2; wn = normalizeHeader(pedacos[jj].replace(/[^A-Za-zÀ-ÿ]/g, '')); }
+        const mais = cand.filter(n => n.partes.includes(wn)); if (!wn || !mais.length) break;
+        cand = mais; fim = jj; j = jj;
+      }
+      const chave = cand.map(n => n.nm).sort().join('|'); let tok = TOK.porChave[chave];
+      if (!tok) { tok = 'TECNICO_' + (++TOK.n); TOK.porChave[chave] = tok; mapa[tok] = cand.map(n => n.nm); }
+      pedacos.splice(i, fim - i + 1, tok);
+    }
+    return { texto: pedacos.join(''), mapa };
+  }
+  const voltarNomes = (valor, mapa) => { if (typeof valor !== 'string') return { nomes: null }; const m = valor.match(/TECNICO_\d+/); if (!m) return { nomes: [valor] }; return { nomes: mapa[m[0]] || [] }; };
+
+  async function consultarPlanejador(textoAnon) {
+    try {
+      const token = await aux.obterToken();
+      if (!token) return { ok: false, codigo: 'nao_autenticado' };
+      const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 13000);
+      let resp;
+      try { resp = await aux.buscar(IA_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ mensagens: [...HIST_IA.slice(-6), { papel: 'usuario', texto: textoAnon }], ultimoPlano: ULTIMO_PLANO }), signal: ctl.signal }); }
+      finally { clearTimeout(timer); }
+      if (resp.status === 404) { PLAN.off = Date.now() + 10 * 60000; return { ok: false, codigo: 'sem_provedor', silencioso: true }; }
+      let j = null; try { j = await resp.json(); } catch (e) { /* corpo não-JSON */ }
+      if (resp.ok && j && j.ok && j.plano) return { ok: true, plano: j.plano, provedor: j.provedor, cache: !!j.cache };
+      const codigo = (j && j.codigo) || (resp.status >= 500 ? 'erro_interno' : 'indisponivel');
+      if (codigo === 'sem_provedor') PLAN.off = Date.now() + 10 * 60000;
+      return { ok: false, codigo, tentativas: j && j.tentativas };
+    } catch (e) { return { ok: false, codigo: e && e.name === 'AbortError' ? 'tempo' : 'rede' }; }
+  }
+
+  // ---------- execução das ferramentas (a lista autorizada é a MESMA do servidor: deploy/lib/ia/ferramentas.js) ----------
+  const FERRAMENTAS_IA = {
+    retornos_do_dia: { exec: p => exRetornosDoDia(p), rot: 'Retornos IFI/IRR do dia' },
+    retornos_periodo: { exec: p => exRetornosPeriodo(p), rot: 'Retornos IFI/IRR do período' },
+    improdutivas_em_aberto: { exec: p => exImprodutivasEmAberto(p), rot: 'Improdutivas em aberto' },
+    motivos_improdutividade: { exec: p => exMotivosImprodutividade(p), rot: 'Motivos das improdutivas' },
+    relatorio_existente: { exec: p => exRelatorioExistente(p), rot: 'Relatório existente' },
+  };
+  const ROT_SIT = { pendente: 'pendente', em_rota: 'em rota', iniciado: 'iniciado', concluido: 'concluído', improdutivo: 'improdutivo', cancelado: 'cancelado', suspenso: 'suspenso' };
+  const bucketIA = st => { if (/suspen/i.test(st || '')) return 'suspenso'; const b = classifyStatusGranular(st); return b === 'nao_concluido' ? 'improdutivo' : b; };
+  const dataDoPar = d => d === 'ontem' ? addDias(hojeIso(), -1) : (d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : hojeIso());
+  function resolverPeriodo(per) {
+    const S = SUG(), hoje = hojeIso();
+    if (!per) return null;
+    switch (per.ref) {
+      case 'hoje': return S.hoje; case 'ontem': return S.ontem; case 'semana_atual': return S.semana; case 'semana_passada': return anteriorDe(S.semana);
+      case 'mes_atual': return S.mes; case 'mes_passado': return S.mesPassado; case 'ciclo_atual': return S.ciclo; case 'ciclo_anterior': return S.cicloAnt;
+      case 'ultimos_n_dias': { const n = Math.min(90, Math.max(1, Number(per.n) || 7)); return mk('intervalo', addDias(hoje, -(n - 1)), hoje, `últimos ${n} dias`); }
+      case 'intervalo': return per.inicio && per.fim && per.inicio <= per.fim ? mk('intervalo', per.inicio, per.fim, `${fmtP(per.inicio, per.fim)}`) : null;
+      default: return null;
+    }
+  }
+  const resumoDias = dias => !dias.length ? 'nenhum dia importado' : `${dias.length} dia(s), de ${formatDate(dias[0])} a ${formatDate(dias[dias.length - 1])}`;
+  const filtrosTxt = (par, extra) => [par.tipo && par.tipo !== 'todos' ? par.tipo : '', par.situacao && par.situacao.length ? 'situação ' + par.situacao.map(s => ROT_SIT[s] || s).join(' ou ') : '', par.cidades && par.cidades.length ? par.cidades.map(rotuloCidadeGeral).join(', ') : '', par.tecnico ? 'técnico ' + par.tecnico : '', par.ofensor ? 'ofensor ' + par.ofensor : '', par.motivo ? 'motivo “' + par.motivo + '”' : '', ...(extra || [])].filter(Boolean);
+  const mesmoNome = (a, b) => { const x = normalizeHeader(a || ''), y = normalizeHeader(b || ''); return !!x && !!y && (x === y || (typeof mesmaPessoa === 'function' && mesmaPessoa(a, b))); };
+  const corTipo = t => t === 'IFI' ? '#dc2626' : '#f59e0b';
+  const badgeTipo = t => `<span class="badge ${t === 'IFI' ? 'warn' : 'amber'}">${t}</span>`;
+  const barrasDe = (titulo, itens) => ({ titulo, fn: id => barsChart(id, itens, { semClassificar: true }) });
+  const agrupaContagem = (lista, chave, rotulo) => { const m = new Map(); lista.forEach(x => { const k = chave(x) || '(não informado)'; const o = m.get(k) || { k, n: 0, ifi: 0, irr: 0 }; o.n++; if (x.ifi_irr === 'IFI') o.ifi++; else if (x.ifi_irr === 'IRR') o.irr++; m.set(k, o); }); return [...m.values()].sort((a, b) => b.n - a.n || String(a.k).localeCompare(String(b.k), 'pt-BR')); };
+
+  // ---- retornos do dia (CSV): a mesma conta da PCR (`retornosDoDiaCalc`) ----
+  function exRetornosDoDia(par) {
+    const dia = dataDoPar(par.data), dias = diasComCsv(), titulo = 'Retornos do dia (IFI / IRR)';
+    const abrir = [{ rota: 'pcr', rotulo: 'Abrir tela original: PCR › Retornos do Dia (IFI / IRR)', dia }];
+    if (!dias.includes(dia)) return { resultados: [vazio(titulo, `Não há CSV de atividades importado para ${formatDate(dia)}, então não dá para dizer quantos retornos existem — isso é falta de importação, não ausência de retornos. Dias com CSV: ${resumoDias(dias)}.`, abrir)] };
+    const ok = cidOk({ cidades: par.cidades || [] });
+    const calcular = diaX => {
+      const rowsRep = linhasDoCsvPorDia(diaX).filter(r => ok(r.cidade) && ehServicoReparo(r.tipo_atividade));
+      const porOs = new Map(rowsRep.map(r => [String(r.os), r]));
+      let rets = retornosDoDiaCalc(rowsRep).map(x => ({ ...x, abertura: (porOs.get(String(x.os)) || {}).abertura || null }));
+      const total = rets.length;
+      if (par.tipo && par.tipo !== 'todos') rets = rets.filter(x => x.ifi_irr === par.tipo);
+      if (par.situacao && par.situacao.length) rets = rets.filter(x => par.situacao.includes(bucketIA(x.status)));
+      if (par.tecnico) rets = rets.filter(x => mesmoNome(x.tecnico_atual, par.tecnico));
+      if (par.ofensor) rets = rets.filter(x => mesmoNome(x.ofensor, par.ofensor));
+      return { reparos: rowsRep.length, totalRets: total, rets };
+    };
+    const c = calcular(dia);
+    let rets = c.rets;
+    const ord = par.ordenar || 'prazo_restante';
+    if (ord === 'abertura_mais_antiga') rets = [...rets].sort((a, b) => (a.abertura ? +new Date(a.abertura) : Infinity) - (b.abertura ? +new Date(b.abertura) : Infinity));
+    else if (ord === 'dias_desde_servico_anterior') rets = [...rets].sort((a, b) => (b.dias == null ? -1 : b.dias) - (a.dias == null ? -1 : a.dias));
+    else rets = [...rets].sort((a, b) => (a.restam == null ? Infinity : a.restam) - (b.restam == null ? Infinity : b.restam));
+    const filtros = filtrosTxt(par), ifi = rets.filter(x => x.ifi_irr === 'IFI').length, irr = rets.filter(x => x.ifi_irr === 'IRR').length;
+    const res = { titulo, sub: `${formatDate(dia)}${filtros.length ? ' · ' + filtros.join(' · ') : ''}`, cartoes: [], graficos: [], blocos: [], tabelas: [], abrir, notas: [`Fonte: CSV de atividades de ${formatDate(dia)} (${fmtN(c.reparos)} reparo(s) no dia) — mesma regra da PCR: IFI = retorno de ativação/mudança de endereço em até ${JANELA_IFI} dias; IRR = retorno de reparo em até ${JANELA_IRR} dias. A situação é a ATUAL da ordem de retorno.`] };
+    if (!rets.length) {
+      res.vazio = c.totalRets
+        ? `Consultei os ${fmtN(c.reparos)} reparos de ${formatDate(dia)}: ${fmtN(c.totalRets)} são retorno (IFI/IRR), mas nenhum atende aos filtros pedidos (${filtros.join(', ') || 'sem filtro'}).`
+        : `Consultei os ${fmtN(c.reparos)} reparos do CSV de ${formatDate(dia)}${par.cidades && par.cidades.length ? ' nas cidades escolhidas' : ''}: nenhum é retorno (IFI/IRR) pelo histórico dos contratos disponível no sistema (Produção + CSVs importados).`;
+      return { resultados: [{ ...vazio(titulo, res.vazio, abrir), sub: res.sub }] };
+    }
+    const maisAntigo = [...rets].filter(x => x.abertura).sort((a, b) => +new Date(a.abertura) - +new Date(b.abertura))[0];
+    const prevDia = dias[dias.indexOf(dia) - 1], prev = par.comparar === 'dia_anterior' ? (prevDia ? calcular(prevDia) : null) : null;
+    res.cartoes.push(cartao('Retornos', fmtN(rets.length), { negative: rets.length > 0, sub: par.comparar === 'dia_anterior' && prev ? `${rets.length - prev.rets.length >= 0 ? '▲ +' : '▼ '}${fmtN(rets.length - prev.rets.length)} vs ${formatDate(prevDia)} (${fmtN(prev.rets.length)})` : '' }), cartao('IFI', fmtN(ifi), { negative: ifi > 0 }), cartao('IRR', fmtN(irr), { negative: irr > 0 }), cartao('Reparos do dia', fmtN(c.reparos), { sub: `${formatPct(pctSobre(c.totalRets, c.reparos) || 0, 1)} são retorno` }));
+    res.resumo = `${cap(dataTxt(dia))}${filtros.length ? ' (' + filtros.join(', ') + ')' : ''}: ${fmtN(rets.length)} ${plural(rets.length, 'retorno', 'retornos')} — ${fmtN(ifi)} IFI e ${fmtN(irr)} IRR.${maisAntigo ? ` O de abertura mais antiga é a O.S ${maisAntigo.os} (aberta em ${dtHm(maisAntigo.abertura)}${maisAntigo.tecnico_atual ? ', com ' + maisAntigo.tecnico_atual : ''}).` : ''}${par.comparar === 'dia_anterior' ? (prev ? ` Em ${formatDate(prevDia)} foram ${fmtN(prev.rets.length)}.` : ' Não há CSV do dia anterior para comparar.') : ''}`;
+    if (par.agrupar && par.agrupar !== 'nenhum') {
+      const chave = { tecnico: x => x.tecnico_atual || 'sem técnico', ofensor: x => x.ofensor, cidade: x => rotuloCidadeGeral(x.cidade), tipo: x => x.ifi_irr, situacao: x => ROT_SIT[bucketIA(x.status)] || x.status }[par.agrupar];
+      const g = agrupaContagem(rets, chave);
+      const rotG = { tecnico: 'Técnico com a ordem', ofensor: 'Ofensor (de quem é o retorno)', cidade: 'Cidade', tipo: 'Tipo', situacao: 'Situação' }[par.agrupar];
+      res.tabelas.push({ titulo: `Retornos por ${rotG.toLowerCase()}`, cab: [rotG, 'Retornos', 'IFI', 'IRR'], linhas: g.map(x => [x.k, fmtN(x.n), fmtN(x.ifi), fmtN(x.irr)]), total: ['Total', fmtN(rets.length), fmtN(ifi), fmtN(irr)] });
+      if (par.visual === 'grafico') res.graficos.push(barrasDe(`Retornos por ${rotG.toLowerCase()}`, g.slice(0, 20).map(x => ({ label: x.k, value: x.n }))));
+    } else if (par.visual === 'grafico') {
+      res.graficos.push({ titulo: 'IFI × IRR', fn: id => donutChart(id, [{ label: 'IFI', value: ifi, color: corTipo('IFI') }, { label: 'IRR', value: irr, color: corTipo('IRR') }].filter(x => x.value), { centroLabel: 'retornos' }) });
+      const gs = agrupaContagem(rets, x => ROT_SIT[bucketIA(x.status)] || x.status);
+      res.graficos.push(barrasDe('Retornos por situação', gs.map(x => ({ label: x.k, value: x.n }))));
+    }
+    const lim = par.limite || 100, mostrar = rets.slice(0, lim);
+    res.tabelas.push({ titulo: `Retornos${rets.length > lim ? ` (${lim} primeiros de ${rets.length})` : ''} — ${ord === 'abertura_mais_antiga' ? 'abertura mais antiga primeiro' : ord === 'dias_desde_servico_anterior' ? 'mais dias desde o serviço anterior primeiro' : 'menos prazo restante primeiro'}`,
+      cab: ['O.S', 'Contrato', 'Cliente', 'Tipo', 'Situação agora', 'Técnico com a ordem', 'De quem é o retorno', 'Cidade', 'Abertura', 'Serviço anterior', 'Dias', 'Restam'],
+      linhas: mostrar.map(x => [x.os || '-', x.contrato || '-', x.cliente || '-', { h: badgeTipo(x.ifi_irr) }, ROT_SIT[bucketIA(x.status)] || x.status || '-', x.tecnico_atual || '-', x.ofensor || '-', rotuloCidadeGeral(x.cidade) || '-', x.abertura ? dtHm(x.abertura) : '-', x.tipo_anterior || '-', x.dias == null ? '-' : String(x.dias), x.restam == null ? '-' : `${x.restam} d`]) });
+    return { resultados: [res] };
+  }
+
+  // ---- retornos do período (Produção): a mesma conta do Relatório Geral (`relGeralCalcular`) ----
+  function exRetornosPeriodo(par) {
+    const titulo = 'IFI / IRR do período', per = resolverPeriodo(par.periodo);
+    if (!per) return perguntaPeriodo('os retornos IFI/IRR', SUG());
+    const p = { cidades: par.cidades || [], tecnico: par.tecnico || null }, abrir = [abrirRG(per, 'ofensor', 'Abrir tela original: Ofensor IFI-IRR', 'IFI')];
+    const g = calcRG(per, p), t = g.tot, filtros = filtrosTxt(par);
+    const sub = `${rotCurto(per)} · ${fmtP(per.inicio, per.fim)}${filtros.length ? ' · ' + filtros.join(' · ') : ''}`;
+    if (!g.tecnicos.length && !t.ifi && !t.irr) return { resultados: [{ ...vazio(titulo, `A Produção não tem nenhuma ordem importada em ${fmtP(per.inicio, per.fim)}${filtros.length ? ' com esses filtros' : ''} — confira se o período já foi importado (BASE PRODUÇÃO / CONCLUÍDOS ou CSV da PCR). Isso é falta de dado, não “zero retornos”.`, abrir), sub }] };
+    const pI = pctSobre(t.ifi, t.ativ + t.me), pR = pctSobre(t.irr, t.rep);
+    const res = { titulo, sub, cartoes: [], graficos: [], blocos: [], tabelas: [], abrir, notas: ['Conta só retornos CONCLUÍDOS da Produção (IFI/IRR contam para o OFENSOR, quem fez o serviço anterior). Para os retornos ainda pendentes/em rota do dia, peça “retornos de hoje”.'] };
+    const mostraI = par.tipo !== 'IRR', mostraR = par.tipo !== 'IFI';
+    if (mostraI) res.cartoes.push(cartao('IFI', fmtN(t.ifi), { negative: pI !== null && pI > BONUS_IFI_MAX, sub: `${pI === null ? '-' : formatPct(pI, 2)} das ativações/M.E (meta ≤ ${formatPct(BONUS_IFI_MAX, 2)})` }));
+    if (mostraR) res.cartoes.push(cartao('IRR', fmtN(t.irr), { negative: pR !== null && pR > BONUS_IRR_MAX, sub: `${pR === null ? '-' : formatPct(pR, 2)} dos reparos (meta ≤ ${formatPct(BONUS_IRR_MAX, 2)})` }));
+    const ant = par.comparar === 'periodo_anterior' ? anteriorDe(per) : null, gA = ant ? calcRG(ant, p) : null, tA = gA ? gA.tot : null;
+    const dif = (a, b) => `${a - b >= 0 ? '▲ +' : '▼ '}${fmtN(a - b)}`;
+    if (tA) res.cartoes.push(cartao('Período anterior', fmtN(tA.ifi + tA.irr), { sub: `${fmtP(ant.inicio, ant.fim)} · IFI ${fmtN(tA.ifi)} · IRR ${fmtN(tA.irr)}` }));
+    res.resumo = `${cap(rotCurto(per))} (${fmtP(per.inicio, per.fim)})${filtros.length ? ' — ' + filtros.join(', ') : ''}: ${mostraI ? `${fmtN(t.ifi)} IFI (${pI === null ? '-' : formatPct(pI, 2)} das ativações/M.E, meta ≤ ${formatPct(BONUS_IFI_MAX, 2)})` : ''}${mostraI && mostraR ? ' e ' : ''}${mostraR ? `${fmtN(t.irr)} IRR (${pR === null ? '-' : formatPct(pR, 2)} dos reparos, meta ≤ ${formatPct(BONUS_IRR_MAX, 2)})` : ''}.${tA ? ` No período anterior (${fmtP(ant.inicio, ant.fim)}) foram ${fmtN(tA.ifi)} IFI e ${fmtN(tA.irr)} IRR: ${dif(t.ifi + t.irr, tA.ifi + tA.irr)} retornos no total.` : ''}`;
+    const agr = par.agrupar || 'nenhum', lim = par.limite || 20;
+    if (agr === 'tecnico' || agr === 'cidade') {
+      const itens = (agr === 'tecnico' ? g.tecnicos : g.cidades).filter(x => x.ifi + x.irr > 0).sort((a, b) => (b.ifi + b.irr) - (a.ifi + a.irr) || a.nome.localeCompare(b.nome, 'pt-BR')).slice(0, lim);
+      const itensA = gA ? new Map((agr === 'tecnico' ? gA.tecnicos : gA.cidades).map(x => [x.nome, x])) : null;
+      res.tabelas.push({ titulo: agr === 'tecnico' ? 'Retornos por técnico OFENSOR' : 'Retornos por cidade', cab: [agr === 'tecnico' ? 'Técnico (ofensor)' : 'Cidade', ...(mostraI ? ['IFI'] : []), ...(mostraR ? ['IRR'] : []), 'Total', ...(itensA ? ['Período anterior', 'Variação'] : [])],
+        linhas: itens.map(x => { const a = itensA && itensA.get(x.nome), ta = a ? a.ifi + a.irr : 0; return [x.nome, ...(mostraI ? [fmtN(x.ifi)] : []), ...(mostraR ? [fmtN(x.irr)] : []), fmtN(x.ifi + x.irr), ...(itensA ? [fmtN(ta), dif(x.ifi + x.irr, ta)] : [])]; }) });
+      if (par.visual === 'grafico') res.graficos.push(barrasDe(agr === 'tecnico' ? 'Retornos por técnico ofensor' : 'Retornos por cidade', itens.map(x => ({ label: x.nome, value: x.ifi + x.irr }))));
+    } else if (agr === 'dia') {
+      const okC = cidOk(p), porDia = new Map();
+      retornosConcluidosDaProducao().forEach(x => { if (!inRange(x.data, per.inicio, per.fim) || !okC(x.cidade) || (p.tecnico && !mesmoNome(x.ofensor, p.tecnico))) return; const o = porDia.get(x.data) || { data: x.data, ifi: 0, irr: 0 }; if (String(x.ifi_irr).trim().toUpperCase() === 'IFI') o.ifi++; else o.irr++; porDia.set(x.data, o); });
+      const lista = [...porDia.values()].sort((a, b) => a.data.localeCompare(b.data));
+      res.tabelas.push({ titulo: 'Retornos por dia', cab: ['Dia', ...(mostraI ? ['IFI'] : []), ...(mostraR ? ['IRR'] : []), 'Total'], linhas: lista.map(x => [formatDate(x.data), ...(mostraI ? [fmtN(x.ifi)] : []), ...(mostraR ? [fmtN(x.irr)] : []), fmtN((mostraI ? x.ifi : 0) + (mostraR ? x.irr : 0))]) });
+      if (par.visual === 'grafico' && lista.length) res.graficos.push({ titulo: 'Retornos por dia', fn: id => trendChart(id, [...(mostraI ? [trendDe('IFI', corTipo('IFI'), lista.map(x => ({ label: labelDia(x.data), value: x.ifi })))] : []), ...(mostraR ? [trendDe('IRR', corTipo('IRR'), lista.map(x => ({ label: labelDia(x.data), value: x.irr })))] : [])], {}) });
+    } else if (par.visual === 'grafico') {
+      res.graficos.push({ titulo: 'IFI × IRR', fn: id => donutChart(id, [{ label: 'IFI', value: t.ifi, color: corTipo('IFI') }, { label: 'IRR', value: t.irr, color: corTipo('IRR') }].filter(x => x.value), { centroLabel: 'retornos' }) });
+    }
+    if (!res.tabelas.length) res.tabelas.push({ titulo: 'Resumo', cab: ['Indicador', 'Valor'], linhas: [['IFI', fmtN(t.ifi)], ['IRR', fmtN(t.irr)], ['Ativações + M.E (base do IFI)', fmtN(t.ativ + t.me)], ['Reparos (base do IRR)', fmtN(t.rep)]] });
+    return { resultados: [res] };
+  }
+
+  // ---- improdutivas em aberto (a mesma regra da tela "Improdutivas do Dia") ----
+  function exImprodutivasEmAberto(par) {
+    const dia = dataDoPar(par.data), dias = diasComCsv(), titulo = 'Improdutivas em aberto';
+    const abrir = [{ rota: 'improdutivas', rotulo: 'Abrir tela original: Improdutivas do Dia', dia }];
+    if (!dias.includes(dia)) return { resultados: [vazio(titulo, `Não há CSV de atividades importado para ${formatDate(dia)}, então não dá para dizer quais ordens estão em campo — falta de importação, não ausência de improdutivas. Dias com CSV: ${resumoDias(dias)}.`, abrir)] };
+    const ok = cidOk({ cidades: par.cidades || [] }), todas = improdutivasDoDia(dia, 0);
+    const norm = x => normalizeHeader(x || '');
+    let lista = todas.filter(o => ok(o.r.cidade));
+    const antes = lista.length;
+    if (par.situacao && par.situacao.length) lista = lista.filter(o => par.situacao.includes(o.bucket));
+    if (par.tecnico) lista = lista.filter(o => mesmoNome(o.r.recurso, par.tecnico) || o.visitas.some(v => mesmoNome(v.tecnico, par.tecnico)));
+    if (par.motivo) lista = lista.filter(o => o.visitas.some(v => norm(v.motivo).includes(norm(par.motivo))));
+    if (par.min_visitas) lista = lista.filter(o => o.n >= par.min_visitas);
+    const filtros = filtrosTxt(par, par.min_visitas > 1 ? [`${par.min_visitas}+ visitas`] : []);
+    const res = { titulo, sub: `${formatDate(dia)}${filtros.length ? ' · ' + filtros.join(' · ') : ''}`, cartoes: [], graficos: [], blocos: [], tabelas: [], abrir, notas: [`Ordens que estão em campo no CSV de ${formatDate(dia)} (pendente, em rota ou iniciada) e já tiveram visita “Não Concluído” em algum CSV importado (histórico disponível: ${resumoDias(dias)}). Suspensas e canceladas não entram.`] };
+    if (!lista.length) return { resultados: [{ ...vazio(titulo, antes ? `Há ${fmtN(antes)} ordem(ns) em campo com improdutiva anterior em ${formatDate(dia)}, mas nenhuma atende aos filtros (${filtros.join(', ') || 'sem filtro'}).` : `Nenhuma ordem em campo de ${formatDate(dia)}${par.cidades && par.cidades.length ? ' nas cidades escolhidas' : ''} tem visita improdutiva anterior nos CSVs importados (${resumoDias(dias)}).`, abrir), sub: res.sub }] };
+    const visTotal = lista.reduce((a, o) => a + o.n, 0), multi = lista.filter(o => o.n >= 2).length;
+    res.cartoes.push(cartao('Ordens em aberto com improdutiva', fmtN(lista.length), { negative: true }), cartao('Visitas improdutivas', fmtN(visTotal)), cartao('Com 2+ visitas', fmtN(multi), { negative: multi > 0 }));
+    const cont = new Map(); lista.forEach(o => new Set(o.visitas.map(v => v.motivo || 'Sem motivo informado')).forEach(m => cont.set(m, (cont.get(m) || 0) + 1)));
+    const top = [...cont.entries()].sort((a, b) => b[1] - a[1])[0];
+    res.resumo = `${cap(dataTxt(dia))}${filtros.length ? ' (' + filtros.join(', ') + ')' : ''}: ${fmtN(lista.length)} ${plural(lista.length, 'ordem em campo já teve', 'ordens em campo já tiveram')} visita improdutiva — ${fmtN(visTotal)} ${plural(visTotal, 'visita', 'visitas')} no total, ${fmtN(multi)} com duas ou mais.${top ? ` Motivo mais comum: ${top[0]} (${fmtN(top[1])} ${plural(top[1], 'ordem', 'ordens')}).` : ''}`;
+    const agr = par.agrupar || 'nenhum';
+    if (agr !== 'nenhum') {
+      const m = new Map(), add = (k, o) => { const e = m.get(k) || { k, ordens: new Set(), visitas: 0 }; e.ordens.add(o.r.os); m.set(k, e); return e; };
+      lista.forEach(o => {
+        if (agr === 'cidade') { const e = add(rotuloCidadeGeral(o.r.cidade) || '(não informada)', o); e.visitas += o.n; }
+        else if (agr === 'tecnico') o.visitas.forEach(v => { add(v.tecnico || '(sem técnico)', o).visitas++; });
+        else { const vs = new Map(); o.visitas.forEach(v => { const k = v.motivo || 'Sem motivo informado'; vs.set(k, (vs.get(k) || 0) + 1); }); vs.forEach((n, k) => { add(k, o).visitas += n; }); }
+      });
+      const g = [...m.values()].sort((a, b) => b.ordens.size - a.ordens.size || b.visitas - a.visitas || String(a.k).localeCompare(String(b.k), 'pt-BR'));
+      const rotG = { motivo: 'Motivo', tecnico: 'Técnico que visitou', cidade: 'Cidade' }[agr];
+      res.tabelas.push({ titulo: `Improdutivas em aberto por ${rotG.toLowerCase()}`, cab: [rotG, 'Ordens em aberto', 'Visitas improdutivas'], linhas: g.map(x => [x.k, fmtN(x.ordens.size), fmtN(x.visitas)]) });
+      if (par.visual === 'grafico') res.graficos.push(barrasDe(`Ordens por ${rotG.toLowerCase()}`, g.slice(0, 20).map(x => ({ label: x.k, value: x.ordens.size }))));
+    } else if (par.visual === 'grafico') {
+      const gm = [...cont.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15);
+      res.graficos.push(barrasDe('Ordens em aberto por motivo de improdutiva', gm.map(([k, n]) => ({ label: k, value: n }))));
+    }
+    const ordenada = [...lista].sort((a, b) => b.n - a.n || String(a.r.os).localeCompare(String(b.r.os))), lim = par.limite || 100;
+    res.tabelas.push({ titulo: `Ordens${ordenada.length > lim ? ` (${lim} primeiras de ${ordenada.length})` : ''} — mais visitas primeiro`,
+      cab: ['O.S', 'Contrato', 'Cliente', 'Cidade', 'Tipo de serviço', 'Técnico agora', 'Situação', 'Visitas', 'Motivo de cada visita'],
+      linhas: ordenada.slice(0, lim).map(o => [o.r.os || '-', o.r.contrato || '-', o.r.cliente || '-', rotuloCidadeGeral(o.r.cidade) || '-', rotuloTipoServico(o.r.tipo_atividade) || '-', o.r.recurso || '-', ROT_SIT[o.bucket] || o.r.status, String(o.n), { h: htmlOutrasVisitas(o.visitas) }]) });
+    return { resultados: [res] };
+  }
+
+  // ---- motivos das improdutivas num período (tentativas "Não Concluído" da PCR) ----
+  function exMotivosImprodutividade(par) {
+    const titulo = 'Motivos das visitas improdutivas', per = resolverPeriodo(par.periodo) || SUG().hoje;
+    const abrir = [{ rota: 'reldia', rotulo: 'Abrir tela original: Relatório do Dia › Improdutivas', secao: 'Improdutivas do dia' }];
+    const ok = cidOk({ cidades: par.cidades || [] }), norm = x => normalizeHeader(x || '');
+    const coletar = pe => { const vistos = new Set(), out = []; DB.pcr.forEach(l => { if (!l.os || !inRange(l.data, pe.inicio, pe.fim) || !/nao conclu/.test(norm(l.status)) || !ok(l.cidade)) return; if (par.tecnico && !mesmoNome(l.recurso, par.tecnico)) return; if (par.motivo && !norm(l.motivo).includes(norm(par.motivo))) return; const k = `${l.os}|${l.data}|${norm(l.recurso)}|${l.inicio ? +l.inicio : (l.motivo || '')}`; if (vistos.has(k)) return; vistos.add(k); out.push(l); }); return out; };
+    const diasPer = diasComCsv().filter(d => inRange(d, per.inicio, per.fim)), filtros = filtrosTxt(par), sub = `${rotCurto(per)} · ${fmtP(per.inicio, per.fim)}${filtros.length ? ' · ' + filtros.join(' · ') : ''}`;
+    if (!diasPer.length) return { resultados: [{ ...vazio(titulo, `Não há CSV de atividades importado em ${fmtP(per.inicio, per.fim)} (dias com CSV no sistema: ${resumoDias(diasComCsv())}) — falta de importação, não ausência de improdutivas.`, abrir), sub }] };
+    const vis = coletar(per);
+    if (!vis.length) return { resultados: [{ ...vazio(titulo, `Consultei ${diasPer.length} dia(s) de CSV em ${fmtP(per.inicio, per.fim)}: nenhuma visita improdutiva (“Não Concluído”) atende aos filtros (${filtros.join(', ') || 'sem filtro'}).`, abrir), sub }] };
+    const agr = par.agrupar || 'motivo', chave = { motivo: l => (l.motivo || '').trim() || 'Sem motivo informado', tecnico: l => (l.recurso || '').trim() || '(sem técnico)', cidade: l => rotuloCidadeGeral(l.cidade) || '(não informada)', dia: l => l.data }[agr];
+    const agrupa = lista => { const m = new Map(); lista.forEach(l => { const k = chave(l), e = m.get(k) || { k, n: 0, os: new Set() }; e.n++; e.os.add(l.os); m.set(k, e); }); return [...m.values()].sort((a, b) => agr === 'dia' ? String(a.k).localeCompare(String(b.k)) : b.n - a.n || String(a.k).localeCompare(String(b.k), 'pt-BR')); };
+    const g = agrupa(vis), lim = par.limite || 20, ant = par.comparar === 'periodo_anterior' ? anteriorDe(per) : null, visA = ant ? coletar(ant) : null, mapA = visA ? new Map(agrupa(visA).map(x => [x.k, x])) : null;
+    const osUnicas = new Set(vis.map(l => l.os)).size, rotG = { motivo: 'Motivo', tecnico: 'Técnico', cidade: 'Cidade', dia: 'Dia' }[agr];
+    const res = { titulo, sub, cartoes: [cartao('Visitas improdutivas', fmtN(vis.length), { negative: true }), cartao('Ordens diferentes', fmtN(osUnicas)), cartao(agr === 'motivo' ? 'Motivo mais comum' : `${rotG} com mais`, g.length ? (agr === 'dia' ? formatDate([...g].sort((a, b) => b.n - a.n)[0].k) : String([...g].sort((a, b) => b.n - a.n)[0].k)) : '-', { sub: g.length ? `${fmtN([...g].sort((a, b) => b.n - a.n)[0].n)} visita(s)` : '' })], graficos: [], blocos: [], tabelas: [], abrir,
+      notas: [`Conta TENTATIVAS “Não Concluído” dos CSVs importados (${diasPer.length} dia(s) com CSV no período; a mesma tentativa repetida por remanejamento conta uma vez). Uma ordem com 2 visitas improdutivas entra 2 vezes.`] };
+    const topo = [...g].sort((a, b) => b.n - a.n)[0];
+    res.resumo = `${cap(rotCurto(per))} (${fmtP(per.inicio, per.fim)})${filtros.length ? ' — ' + filtros.join(', ') : ''}: ${fmtN(vis.length)} ${plural(vis.length, 'visita improdutiva', 'visitas improdutivas')} em ${fmtN(osUnicas)} ${plural(osUnicas, 'ordem', 'ordens')}. ${agr === 'motivo' ? 'Motivo mais comum' : agr === 'dia' ? 'Dia com mais' : agr === 'tecnico' ? 'Técnico com mais' : 'Cidade com mais'}: ${agr === 'dia' ? formatDate(topo.k) : topo.k} (${fmtN(topo.n)}).${visA ? ` No período anterior (${fmtP(ant.inicio, ant.fim)}) foram ${fmtN(visA.length)}.` : ''}`;
+    const dados = g.slice(0, agr === 'dia' ? 62 : lim);
+    res.tabelas.push({ titulo: `Visitas improdutivas por ${rotG.toLowerCase()}`, cab: [rotG, 'Visitas', 'Ordens', '%', ...(mapA ? ['Período anterior', 'Variação'] : [])], linhas: dados.map(x => { const a = mapA && mapA.get(x.k); return [agr === 'dia' ? formatDate(x.k) : x.k, fmtN(x.n), fmtN(x.os.size), formatPct(vis.length ? x.n / vis.length * 100 : 0, 1), ...(mapA ? [fmtN(a ? a.n : 0), `${x.n - (a ? a.n : 0) >= 0 ? '▲ +' : '▼ '}${fmtN(x.n - (a ? a.n : 0))}`] : [])]; }), total: ['Total', fmtN(vis.length), fmtN(osUnicas), '100,0%', ...(mapA ? [fmtN(visA.length), ''] : [])] });
+    if (par.visual === 'grafico') res.graficos.push(agr === 'dia' ? { titulo: 'Visitas improdutivas por dia', fn: id => trendChart(id, [trendDe('Improdutivas', '#dc2626', g.map(x => ({ label: labelDia(x.k), value: x.n })))], {}) } : barrasDe(`Visitas improdutivas por ${rotG.toLowerCase()}`, dados.map(x => ({ label: x.k, value: x.n }))));
+    return { resultados: [res] };
+  }
+
+  // ---- qualquer relatório que já existe nas telas (o CATALOGO acima) ----
+  function exRelatorioExistente(par) {
+    const cat = CATALOGO.find(c => c.id === par.id); if (!cat) throw new Error('relatório desconhecido');
+    const S = SUG(); let periodos = [];
+    if (cat.req === 'dia') periodos = [par.data ? mk('dia', dataDoPar(par.data), dataDoPar(par.data), `dia ${formatDate(dataDoPar(par.data))}`) : S.hoje];
+    else { const pe = resolverPeriodo(par.periodo); if (pe) periodos = [pe]; }
+    const info = { q: prep(''), conc: new Set(), periodos, cidades: (par.cidades || []).slice(), tec: { unico: par.tecnico || null, candidatos: [] }, comparar: false, grafico: false, tabela: false, ranking: false, skills: [], catalogo: cat };
+    const base = { bruto: '', cidades: info.cidades, tecnico: par.tecnico || null, ntop: null, conc: info.conc, ranking: null };
+    return execCatalogo(cat, info, base, S);
+  }
+
+  // texto curto do plano (vai nas notas da resposta: dá pra conferir o que a IA decidiu)
+  function descreverPlano(pl) {
+    const par = pl.parametros || {}, partes = Object.keys(par).map(k => { let v = par[k]; if (v && typeof v === 'object' && !Array.isArray(v)) v = v.ref === 'ultimos_n_dias' ? `últimos ${v.n} dias` : v.ref === 'intervalo' ? `${v.inicio} a ${v.fim}` : v.ref; if (Array.isArray(v)) v = v.join(' / '); return `${k}: ${v}`; });
+    return `${(FERRAMENTAS_IA[pl.ferramenta] || {}).rot || pl.ferramenta}${partes.length ? ' · ' + partes.join(' · ') : ''}`;
+  }
+  // valida DE NOVO no navegador (nada que vem do servidor é executado sem passar pela lista autorizada) e roda a ferramenta
+  function executarPlanoIA(pl, mapaNomes) {
+    const f = FERRAMENTAS_IA[pl.ferramenta]; if (!f) throw new Error('ferramenta fora da lista');
+    const par = { ...(pl.parametros || {}) };
+    for (const campo of ['tecnico', 'ofensor']) {
+      if (!par[campo]) continue;
+      const { nomes } = voltarNomes(par[campo], mapaNomes || {});
+      if (!nomes || !nomes.length) { delete par[campo]; continue; }
+      if (nomes.length > 1) return { pergunta: { texto: 'Encontrei mais de um técnico com esse nome. Qual deles?', opcoes: nomes.map(nm => ({ rotulo: nm, forcar: { __texto: nm } })) } };
+      par[campo] = nomes[0];
+    }
+    return f.exec(par);
+  }
+
+  // ---------- fala e voz (recursos do próprio navegador; opcionais) ----------
+  const SR = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
+  const TEM_VOZ_SAIDA = typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
+  let REC = null, FALANDO = false;
+  const vozLigada = () => { try { return localStorage.getItem('jh_ia_voz') === '1'; } catch (e) { return false; } };
+  function pararFala() { try { if (TEM_VOZ_SAIDA) window.speechSynthesis.cancel(); } catch (e) { /* sem fala */ } FALANDO = false; atualizarBotaoVoz(); }
+  function falar(texto) {
+    if (!TEM_VOZ_SAIDA) { toast('Este navegador não consegue ler em voz alta (tente o Chrome ou o Edge).', 'aviso'); return; }
+    const t = String(texto || '').replace(/\s+/g, ' ').trim(); if (!t) return;
+    pararFala();
+    const u = new SpeechSynthesisUtterance(t.slice(0, 900)); u.lang = 'pt-BR'; u.rate = 1.02;
+    try { const v = window.speechSynthesis.getVoices().find(x => /pt-BR/i.test(x.lang)) || window.speechSynthesis.getVoices().find(x => /^pt/i.test(x.lang)); if (v) u.voice = v; } catch (e) { /* voz padrão */ }
+    u.onend = u.onerror = () => { FALANDO = false; atualizarBotaoVoz(); };
+    FALANDO = true; atualizarBotaoVoz(); window.speechSynthesis.speak(u);
+  }
+  function atualizarBotaoVoz() { const b = document.getElementById('ia-voz'); if (b) { b.classList.toggle('ligado', vozLigada()); b.title = vozLigada() ? 'Leitura em voz alta ligada (clique para desligar)' : 'Ler as respostas em voz alta'; } const p = document.getElementById('ia-parar'); if (p) p.hidden = !FALANDO; }
+  function alternarVozLeitura() { if (!TEM_VOZ_SAIDA) { toast('Este navegador não consegue ler em voz alta (tente o Chrome ou o Edge).', 'aviso'); return; } try { localStorage.setItem('jh_ia_voz', vozLigada() ? '0' : '1'); } catch (e) { /* sem memória */ } if (!vozLigada()) pararFala(); atualizarBotaoVoz(); }
+  function alternarMicrofone() {
+    const campo = document.getElementById('ia-in'), mic = document.getElementById('ia-mic');
+    if (!SR) { toast('Este navegador não oferece reconhecimento de voz. Use o Chrome ou o Edge, ou digite a pergunta.', 'aviso', 5000); return; }
+    if (REC) { try { REC.stop(); } catch (e) { /* já parou */ } return; }
+    pararFala();
+    const rec = new SR(); rec.lang = 'pt-BR'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+    const inicial = campo.value ? campo.value.trim() + ' ' : '';
+    rec.onresult = ev => { let t = ''; for (let i = 0; i < ev.results.length; i++) t += ev.results[i][0].transcript; campo.value = (inicial + t).trim(); };
+    rec.onerror = ev => { const m = { 'not-allowed': 'O navegador não deixou usar o microfone. Libere a permissão no cadeado do endereço.', 'no-speech': 'Não ouvi nada. Tente de novo.', 'audio-capture': 'Não encontrei um microfone.', network: 'O reconhecimento de voz precisa de internet.' }[ev.error]; toast(m || 'Não consegui ouvir (' + ev.error + ').', 'aviso', 4500); };
+    rec.onend = () => { REC = null; if (mic) { mic.classList.remove('gravando'); mic.setAttribute('aria-pressed', 'false'); } campo.focus(); };
+    try { rec.start(); REC = rec; mic.classList.add('gravando'); mic.setAttribute('aria-pressed', 'true'); toast('Pode falar… a pergunta aparece no campo para você conferir antes de enviar.', 'ok', 2500); } catch (e) { REC = null; toast('Não consegui iniciar o microfone.', 'aviso'); }
+  }
+  const textoDaResposta = m => { const rs = (m && m.resultados) || []; const r = rs.find(x => x.resumo) || rs[0]; return r ? (r.resumo || r.vazio || r.titulo || '') : (m && m.pergunta ? m.pergunta.texto : (m && m.texto ? (m.texto.titulo + '. ' + (m.texto.msg || '')) : '')); };
+
+  // ---------- ponto de entrada: planeja com a IA e cai na busca local se ela não puder ----------
+  function pensando(on) {
+    const box = document.getElementById('ia-msgs'); if (!box) return;
+    const velho = document.getElementById('ia-pensando'); if (velho) velho.remove();
+    if (!on) return;
+    const d = document.createElement('div'); d.className = 'ia-msg ia-bot'; d.id = 'ia-pensando';
+    d.innerHTML = '<span class="ia-av" aria-hidden="true">✦</span><div class="ia-corpo"><div class="ia-bolha ia-pens"><span></span><span></span><span></span> interpretando…</div></div>';
+    box.appendChild(d); box.scrollTop = box.scrollHeight;
+  }
+  async function enviar(texto) {
+    if (!ehAnalista()) return;
+    texto = String(texto || '').trim(); if (!texto) return;
+    if (!planejadorPossivel()) return perguntar(texto);
+    pararFala();
+    if (!MSGS.length) { document.getElementById('ia-msgs').innerHTML = ''; }
+    pensando(true);
+    const an = anonimizar(texto), r = await consultarPlanejador(an.texto);
+    pensando(false);
+    perguntar(texto, undefined, undefined, { ...r, mapa: an.mapa, anon: an.texto });
+  }
+
+  // resposta montada a partir do plano da IA; devolve null quando a busca comum deve responder (IA indisponível, fora do escopo ou consulta que não deu pra executar)
+  function respostaViaIA(texto, ia, notasIA) {
+    if (!ia.ok) { if (!ia.silencioso) notasIA.push(`Assistente de IA indisponível agora (${MSG_CODIGO[ia.codigo] || ia.codigo}) — respondi com a busca comum.`); return null; }
+    const pl = ia.plano, nota = HIST_IA.push({ papel: 'usuario', texto: ia.anon });
+    if (HIST_IA.length > 12) HIST_IA = HIST_IA.slice(-12);
+    if (pl.acao === 'fora_do_escopo') { HIST_IA.push({ papel: 'assistente', texto: 'Assunto fora das ferramentas de IFI/IRR/improdutivas; respondi com a busca comum.' }); ULTIMO_PLANO = null; return null; }
+    const paraTexto = (rotulo, base) => ({ rotulo, forcar: { __texto: base ? `${texto} — ${rotulo}` : rotulo } });
+    if (pl.acao === 'perguntar') { HIST_IA.push({ papel: 'assistente', texto: 'Perguntei: ' + pl.pergunta }); return { papel: 'ia', pergunta: { texto: pl.pergunta, opcoes: (pl.opcoes || []).map(o => paraTexto(o, false)) }, origem: texto, viaIA: true }; }
+    let r;
+    try { r = executarPlanoIA(pl, TOK.mapa); } catch (e) { notasIA.push(`A IA escolheu uma consulta que não consegui executar (${String(e && e.message || e)}) — respondi com a busca comum.`); ULTIMO_PLANO = null; return null; }
+    if (r && r.pergunta) { ULTIMO_PLANO = pl; HIST_IA.push({ papel: 'assistente', texto: 'Perguntei: ' + r.pergunta.texto }); return { papel: 'ia', pergunta: { texto: r.pergunta.texto, opcoes: r.pergunta.opcoes.map(o => (o.forcar && o.forcar.__texto) ? o : paraTexto(o.rotulo, true)) }, origem: texto, viaIA: true }; }
+    if (!r || !r.resultados) { ULTIMO_PLANO = null; return null; }
+    ULTIMO_PLANO = pl; HIST_IA.push({ papel: 'assistente', texto: 'Executei: ' + descreverPlano(pl) });
+    const linha = `Interpretação da IA (${ia.provedor}${ia.cache ? ', repetida: sem nova chamada' : ''}): ${descreverPlano(pl)}`;
+    r.resultados.forEach(x => { x.notas = [linha, ...(x.notas || [])]; });
+    return { papel: 'ia', resultados: r.resultados, viaIA: true };
+  }
+
+  return { abrir, fechar, perguntar, enviar, entender, itensBusca, rankNav, CATALOGO, _t: { prep, acharPeriodos, lev, casa, metricas, finDoCiclo, procurarCatalogo, executar, anonimizar, executarPlanoIA, resolverPeriodo, descreverPlano, consultarPlanejador, aux, PLAN, falar, pararFala, estado: () => ({ ULTIMO_PLANO, HIST_IA, TOK }), reiniciar: () => { ULTIMO_PLANO = null; HIST_IA = []; TOK = { n: 0, porChave: {}, mapa: {} }; PLAN.off = 0; } } };
 })();
 
 // botão do assistente na barra do topo (só o Analista o vê; atualizarFerramentasAnalista mostra/esconde)
