@@ -10885,8 +10885,8 @@ const IA = (() => {
     if (cedo) partes.push(`O prazo mais cedo ${hojeFlag(isoLocalDe(new Date(cedo.limite))) ? 'é às ' + hhmm(cedo.limite) : 'é ' + dtHm(cedo.limite)} (${tempoAte(cedo.limite, agora)}): O.S ${cedo.os}, ${cedo.cliente || 'cliente não informado'}, ${rotuloCidadeGeral(cedo.cidade) || 'cidade não informada'}, técnico ${cedo.recurso || 'sem técnico'}.`);
     if (!m.vazio) { partes.push(`Dos reparos já encerrados, ${fmtN(m.lista[1].v)} de ${fmtN(m.lista[0].v)} (${formatPct(m.lista[2].v, 1)}) ficaram dentro de 24h — ${m.lista[2].v >= PRAZO_META ? 'acima' : 'abaixo'} da meta de ${PRAZO_META}%.`); cartoes.push(cartao('% no prazo (encerrados)', formatPct(m.lista[2].v, 2), { negative: m.lista[2].v < PRAZO_META, positive: m.lista[2].v >= PRAZO_META, sub: `${fmtN(m.lista[1].v)} de ${fmtN(m.lista[0].v)} · meta ${PRAZO_META}%` })); }
     const res = { titulo, sub: escopo(per, p), resumo: partes.join(' '), cartoes, graficos: [], blocos: [], tabelas: [], abrir, notas: ['Fonte: CSV de atividades do dia (PCR). Em aberto = pendente, em rota ou iniciado; vencido = o horário limite (abertura + 24h) já passou — a mesma regra dos cartões da PCR.'] };
-    const lista = [...ab.comLimite, ...ab.rows.filter(r => !r.limite)].slice(0, 20);
-    if (lista.length) res.tabelas.push({ titulo: `Reparos em aberto — do prazo mais próximo ao mais distante${ab.rows.length > 20 ? ' (20 primeiros)' : ''}`, cab: ['O.S', 'Cliente', 'Cidade', 'Técnico', 'Situação', 'Limite', 'Prazo'], linhas: lista.map(r => [r.os, r.cliente || '-', rotuloCidadeGeral(r.cidade) || '-', r.recurso || '-', ROT_STATUS[classifyStatusGranular(r.status)] || r.status, r.limite ? dtHm(r.limite) : '-', r.limite ? tempoAte(r.limite, agora) : 'sem limite']) });
+    // a tabela "Prazos do Dia — Detalhado" da PCR (a mesma, com as mesmas contas) — pedido do cliente 28/10/2026
+    { const tp = blocoPrazosPCR(per.inicio, { cidades: p.cidades || [], tecnico: p.tecnico || null }, {}); if (tp) (res.blocosFim = res.blocosFim || []).push(tp.bloco); }
     if (!m.vazio) {
       if (p.tecnico) res.graficos.push({ titulo: 'Prazo por cidade (% até 24h)', fn: id => barsChart(id, m.dia.porCid.map(c => ({ label: c.cidade, value: Math.round(pctSobre(c.ate24, c.total) * 10) / 10, display: formatPct(pctSobre(c.ate24, c.total), 1) })), { semClassificar: true }) });
       else comRel(res, 'prazoCartaoDia', p, per);
@@ -10982,6 +10982,8 @@ const IA = (() => {
     return res;
   }
   function skRetornos(p, per) {
+    // retornos de UM dia: a tabela "Retornos do Dia (IFI / IRR)" da PCR (a Produção só tem retornos já concluídos; o dia de hoje vem do CSV)
+    if (ehDia(per)) { const rd = exRetornosDoDia({ data: per.inicio, cidades: p.cidades || [], tecnico: p.tecnico || null }); if (rd && rd.resultados && rd.resultados[0]) return rd.resultados[0]; }
     const m = metricas('retornos', per, p), titulo = 'IFI / IRR (retornos)';
     if (m.vazio) return vazio(titulo, `Não há retornos nem produção importados para ${per.rotulo}.`, [abrirRG(per, 'ofensor', 'Abrir Ofensor IFI-IRR')]);
     const g = m.g, t = g.tot, pI = pctSobre(t.ifi, t.ativ + t.me), pR = pctSobre(t.irr, t.rep);
@@ -11363,6 +11365,7 @@ const IA = (() => {
       const chip = t.closest('.ia-chip[data-m]');
       if (chip) { const msg = MSGS[Number(chip.dataset.m)], op = msg.pergunta.opcoes[Number(chip.dataset.o)]; msg.respondida = true; if (op.forcar && op.forcar.__texto) { enviar(op.forcar.__texto); return; } perguntar(msg.origem, { ...(msg.forcarBase || {}), ...op.forcar }, op.rotulo); return; }
       const sug = t.closest('.ia-chip[data-s]'); if (sug) { enviar(sug.dataset.s); return; }
+      if (t.closest('[data-diag]')) { diagnosticarIA(); return; }
       const mostrar = t.closest('.ia-chip[data-cat]'); if (mostrar) { perguntar(`mostrar ${mostrar.dataset.nome}`, { catalogo: mostrar.dataset.cat }, mostrar.dataset.nome); return; }
       const ab = t.closest('.ia-btn-abrir'); if (ab) { abrirTela(ACOES[Number(ab.dataset.g)][Number(ab.dataset.i)]); return; }
       const xl = t.closest('.ia-xls'); if (xl) { const tab = document.getElementById(xl.dataset.t); if (tab) exportarTabelaVisivel(tab, `assistente-${hojeISOLocal()}`); return; }
@@ -11526,7 +11529,7 @@ const IA = (() => {
     const box = document.getElementById('ia-msgs'); if (!box) return;
     ACOES = [];
     if (!MSGS.length) {
-      box.innerHTML = `<div class="ia-boas"><div class="ia-boas-ic">✦</div><h4>Olá! O que você quer saber?</h4><p>Pergunte ou busque: relatórios, gráficos e comparações, e também O.S, contrato, cliente, técnico ou tela. Eu mostro os mesmos relatórios das telas, calculados com as mesmas contas, e deixo o botão para abrir a tela original.</p><div class="ia-sug">${SUGESTOES.map(s => `<button type="button" class="ia-chip" data-s="${esc(s)}">${esc(s)}</button>`).join('')}</div></div>`;
+      box.innerHTML = `<div class="ia-boas"><div class="ia-boas-ic">✦</div><h4>Olá! O que você quer saber?</h4><p>Pergunte ou busque: relatórios, gráficos e comparações, e também O.S, contrato, cliente, técnico ou tela. Eu mostro os mesmos relatórios das telas, calculados com as mesmas contas, e deixo o botão para abrir a tela original.</p><div class="ia-sug">${SUGESTOES.map(s => `<button type="button" class="ia-chip" data-s="${esc(s)}">${esc(s)}</button>`).join('')}<button type="button" class="ia-chip" data-diag="1" title="Confere no servidor se a IA está conectada (não envia nenhum dado do sistema)">🔌 Testar conexão com a IA</button></div></div>`;
       return;
     }
     box.innerHTML = ''; const pos = [];
@@ -11546,9 +11549,10 @@ const IA = (() => {
           if (r.cartoes && r.cartoes.length) x += `<div class="ia-fatos">${r.cartoes.map(c => `<div class="ia-fato${c.negative ? ' neg' : ''}${c.positive ? ' pos' : ''}"><small>${esc(c.r)}</small><b>${esc(c.v)}</b>${c.sub ? `<i>${esc(c.sub)}</i>` : ''}</div>`).join('')}</div>`;
           (r.avisos || []).forEach(a => { x += `<div class="ia-bolha ia-aviso">${esc(a)}</div>`; });
           const htmlGraficos = () => (r.graficos || []).forEach(g => { const id = `ia-g-${++SEQ}`; x += `<div class="ia-graf"><h5>${esc(g.titulo)}</h5><div id="${id}"></div></div>`; pos.push(() => g.fn(id)); });
-          const htmlBlocos = () => (r.blocos || []).forEach(b => { const id = `ia-b-${++SEQ}`; x += `<div class="ia-bloco"><h5>${esc(b.titulo)}</h5><div id="${id}-w" class="ia-html"></div></div>`; pos.push(() => { const w = document.getElementById(`${id}-w`); if (w) { w.innerHTML = b.fn(id); if (b.depois) b.depois(id); } }); });
+          const htmlBlocos = (lista) => (lista || r.blocos || []).forEach(b => { const id = `ia-b-${++SEQ}`; x += `<div class="ia-bloco"><h5>${esc(b.titulo)}</h5><div id="${id}-w" class="ia-html"></div></div>`; pos.push(() => { const w = document.getElementById(`${id}-w`); if (w) { w.innerHTML = b.fn(id); if (b.depois) b.depois(id); } }); });
           if (r.blocosPrimeiro) { htmlBlocos(); htmlGraficos(); } else { htmlGraficos(); htmlBlocos(); }
           (r.tabelas || []).forEach(t => { x += htmlTabela(t, `ia-t-${++SEQ}`); });
+          if (r.blocosFim && r.blocosFim.length) htmlBlocos(r.blocosFim);   // as tabelas que são cópia exata das telas (PCR) vêm por último
           if (r.mostrar && r.mostrar.length) x += `<div class="ia-opcoes">${r.mostrar.map(o => `<button type="button" class="ia-chip" data-cat="${esc(o.id)}" data-nome="${esc(o.rotulo)}">Mostrar aqui: ${esc(o.rotulo)}</button>`).join('')}</div>`;
           x += botoesAbrir(r.abrir, true) + (r.notas && r.notas.length ? `<details class="ia-fonte fora-da-imagem"><summary>Fonte e observações</summary><div class="ia-nota">${[...new Set(r.notas.filter(Boolean))].map(esc).join('<br>')}</div></details>` : '') + barra;
           return x + '</div>';
@@ -11639,6 +11643,7 @@ const IA = (() => {
   // ---------- execução das ferramentas (a lista autorizada é a MESMA do servidor: deploy/lib/ia/ferramentas.js) ----------
   const FERRAMENTAS_IA = {
     retornos_do_dia: { exec: p => exRetornosDoDia(p), rot: 'Retornos IFI/IRR do dia' },
+    prazos_do_dia: { exec: p => exPrazosDoDia(p), rot: 'Prazos do dia (detalhado)' },
     retornos_periodo: { exec: p => exRetornosPeriodo(p), rot: 'Retornos IFI/IRR do período' },
     improdutivas_em_aberto: { exec: p => exImprodutivasEmAberto(p), rot: 'Improdutivas em aberto' },
     motivos_improdutividade: { exec: p => exMotivosImprodutividade(p), rot: 'Motivos das improdutivas' },
@@ -11712,10 +11717,51 @@ const IA = (() => {
       const gs = agrupaContagem(rets, x => ROT_SIT[bucketIA(x.status)] || x.status);
       res.graficos.push(barrasDe('Retornos por situação', gs.map(x => ({ label: x.k, value: x.n }))));
     }
+    // a tabela "Retornos do Dia (IFI / IRR)" da PCR — a MESMA (htmlTabelaRetornosDoDia), na ordem pedida
     const lim = par.limite || 100, mostrar = rets.slice(0, lim);
-    res.tabelas.push({ titulo: `Retornos${rets.length > lim ? ` (${lim} primeiros de ${rets.length})` : ''} — ${ord === 'abertura_mais_antiga' ? 'abertura mais antiga primeiro' : ord === 'dias_desde_servico_anterior' ? 'mais dias desde o serviço anterior primeiro' : 'menos prazo restante primeiro'}`,
-      cab: ['O.S', 'Contrato', 'Cliente', 'Tipo', 'Situação agora', 'Técnico com a ordem', 'De quem é o retorno', 'Cidade', 'Abertura', 'Serviço anterior', 'Dias', 'Restam'],
-      linhas: mostrar.map(x => [x.os || '-', x.contrato || '-', x.cliente || '-', { h: badgeTipo(x.ifi_irr) }, ROT_SIT[bucketIA(x.status)] || x.status || '-', x.tecnico_atual || '-', x.ofensor || '-', rotuloCidadeGeral(x.cidade) || '-', x.abertura ? dtHm(x.abertura) : '-', x.tipo_anterior || '-', x.dias == null ? '-' : String(x.dias), x.restam == null ? '-' : `${x.restam} d`]) });
+    (res.blocosFim = res.blocosFim || []).push({ titulo: `Retornos do Dia (IFI / IRR)${rets.length > lim ? ` — ${lim} primeiros de ${rets.length}` : ''} · ${ord === 'abertura_mais_antiga' ? 'abertura mais antiga primeiro' : ord === 'dias_desde_servico_anterior' ? 'mais dias desde o serviço anterior primeiro' : 'menos prazo restante primeiro'}`, fn: () => htmlTabelaRetornosDoDia(mostrar, `ia-tab-ret-${++SEQ}`) });
+    return { resultados: [res] };
+  }
+
+  // ---- "Prazos do Dia — Detalhado" da PCR dentro do assistente: as MESMAS contas e a MESMA tabela (fabricaPrazosDoDia + htmlTabelaPrazosDoDia) ----
+  function dadosPrazosDoDia(dia, turno) {
+    const per = turno === 'manha' ? 'MANHÃ' : turno === 'tarde' ? 'TARDE' : '';
+    const rowsReparo = linhasDoCsvPorDia(dia).filter(r => (!per || r.periodo === per) && ehServicoReparo(r.tipo_atividade));
+    const retornos = retornosDoDiaCalc(rowsReparo), F = fabricaPrazosDoDia(new Date(), () => retornos);
+    const lim = r => r.limite ? +new Date(r.limite) : Infinity;
+    const abertas = rowsReparo.filter(F.aberta).sort((a, b) => lim(a) - lim(b));
+    const fechadas = rowsReparo.filter(r => !F.aberta(r)).sort((a, b) => String(a.cidade || '').localeCompare(String(b.cidade || '')) || String(a.os || '').localeCompare(String(b.os || '')));
+    return { rowsReparo, retornos, F, abertas, todas: [...abertas, ...fechadas] };
+  }
+  // devolve { bloco, lista, base, d } — `base` = reparos do dia nas cidades/técnico pedidos; `lista` = o que a tabela mostra (já com situação/foco); null se o dia não tem CSV
+  function blocoPrazosPCR(dia, pCid, par) {
+    if (!diasComCsv().includes(dia)) return null;
+    const d = dadosPrazosDoDia(dia, par.turno), ok = cidOk({ cidades: pCid.cidades || [] }), F = d.F, agora = Date.now();
+    const h = r => r.limite ? (new Date(r.limite) - agora) / 36e5 : null;
+    const base = d.todas.filter(r => ok(r.cidade) && (!pCid.tecnico || mesmoNome(r.recurso, pCid.tecnico)));
+    const foco = par.foco || 'todos';
+    const lista = base.filter(r => (!par.situacao || !par.situacao.length || par.situacao.includes(bucketIA(r.status)))
+      && (foco === 'todos' || (foco === 'em_aberto' && F.aberta(r)) || (foco === 'vencidas' && F.aberta(r) && h(r) !== null && h(r) < 0) || (foco === 'vencem_2h' && F.aberta(r) && h(r) !== null && h(r) >= 0 && h(r) < 2)));
+    const lim = par.limite || 200, mostrar = lista.slice(0, lim);
+    const semLink = html => html.replace(/<a href="#" class="link-tec" data-tec="[^"]*">([\s\S]*?)<\/a>/g, '$1');
+    const bloco = { titulo: `Prazos do Dia — Detalhado${lista.length > lim ? ` — ${lim} primeiros de ${lista.length}` : ''}`, fn: () => semLink(htmlTabelaPrazosDoDia(mostrar, F.linhaPrazoUnificado, `ia-tab-prazos-${++SEQ}`)) };
+    return { bloco, lista, base, d, h };
+  }
+  function exPrazosDoDia(par) {
+    const dia = dataDoPar(par.data), dias = diasComCsv(), titulo = 'Prazos do Dia — Detalhado';
+    const abrir = [{ rota: 'pcr', rotulo: 'Abrir tela original: PCR › Prazos do Dia — Detalhado', dia }];
+    if (!dias.includes(dia)) return { resultados: [vazio(titulo, `Não há CSV de atividades importado para ${formatDate(dia)}, então não dá para mostrar os prazos desse dia — isso é falta de importação, não ausência de prazos. Dias com CSV: ${resumoDias(dias)}.`, abrir)] };
+    const b = blocoPrazosPCR(dia, { cidades: par.cidades || [], tecnico: par.tecnico || null }, par), F = b.d.F;
+    const filtros = filtrosTxt(par, [par.foco && par.foco !== 'todos' ? { vencidas: 'só já vencidos', vencem_2h: 'só os que vencem em até 2h', em_aberto: 'só em aberto' }[par.foco] : '', par.turno ? 'período ' + (par.turno === 'manha' ? 'manhã' : 'tarde') : ''].filter(Boolean));
+    const res = { titulo, sub: `${formatDate(dia)}${filtros.length ? ' · ' + filtros.join(' · ') : ''}`, cartoes: [], graficos: [], blocos: [], tabelas: [], abrir, notas: [`Fonte: CSV de atividades de ${formatDate(dia)} — a mesma tabela e as mesmas contas da PCR (só reparos; as ordens em aberto vêm primeiro, pela que vence antes; a faixa das em aberto é a de agora, não a definitiva).`] };
+    if (!b.lista.length) { res.vazio = b.base.length ? `Há ${fmtN(b.base.length)} reparo(s) em ${formatDate(dia)} nessas cidades/técnico, mas nenhum atende aos filtros pedidos (${filtros.join(', ') || 'sem filtro'}).` : `Não há reparos em ${formatDate(dia)}${par.cidades && par.cidades.length ? ' nas cidades escolhidas' : ''}${par.tecnico ? ' desse técnico' : ''} no CSV.`; return { resultados: [{ ...vazio(titulo, res.vazio, abrir), sub: res.sub }] }; }
+    const abertas = b.base.filter(F.aberta), venc = abertas.filter(r => b.h(r) !== null && b.h(r) < 0), v2 = abertas.filter(r => b.h(r) !== null && b.h(r) >= 0 && b.h(r) < 2);
+    const enc = b.base.filter(r => isConcluido(r.status) && r.faixa), dentro = enc.filter(r => r.faixa === 'ate24' || r.faixa === 'ate36').length;
+    const cedo = abertas.filter(r => r.limite)[0];
+    res.cartoes.push(cartao('Reparos do dia', fmtN(b.base.length)), cartao('Em aberto', fmtN(abertas.length), { sub: 'pendentes, em rota e iniciados' }), cartao('Já vencidos', fmtN(venc.length), { negative: venc.length > 0 }), cartao('Vencem em até 2h', fmtN(v2.length), { negative: v2.length > 0 }));
+    if (enc.length) res.cartoes.push(cartao('Encerrados até 24h', formatPct(pctSobre(dentro, enc.length) || 0, 1), { positive: pctSobre(dentro, enc.length) >= PRAZO_META, negative: pctSobre(dentro, enc.length) < PRAZO_META, sub: `${fmtN(dentro)} de ${fmtN(enc.length)} · meta ${PRAZO_META}%` }));
+    res.resumo = `${cap(dataTxt(dia))}${filtros.length ? ' (' + filtros.join(', ') + ')' : ''}: ${fmtN(b.base.length)} ${plural(b.base.length, 'reparo', 'reparos')}, ${fmtN(abertas.length)} em aberto — ${fmtN(venc.length)} já ${plural(venc.length, 'venceu', 'venceram')} e ${fmtN(v2.length)} ${plural(v2.length, 'vence', 'vencem')} em até 2h.${cedo ? ` O prazo mais cedo em aberto é às ${hhmm(cedo.limite)} (O.S ${cedo.os}${cedo.recurso ? ', ' + cedo.recurso : ''}).` : ''}${enc.length ? ` Dos ${fmtN(enc.length)} já encerrados, ${formatPct(pctSobre(dentro, enc.length) || 0, 1)} ficaram dentro de 24h.` : ''}`;
+    (res.blocosFim = res.blocosFim || []).push(b.bloco);
     return { resultados: [res] };
   }
 
@@ -11894,6 +11940,27 @@ const IA = (() => {
     d.innerHTML = '<span class="ia-av" aria-hidden="true">✦</span><div class="ia-corpo"><div class="ia-bolha ia-pens"><span></span><span></span><span></span> interpretando…</div></div>';
     box.appendChild(d); box.scrollTop = box.scrollHeight;
   }
+  // "🔌 Testar conexão com a IA": pede ao servidor que faça uma chamada MÍNIMA (sem dado nenhum do sistema) em cada provedor configurado e mostra o que respondeu
+  async function diagnosticarIA() {
+    if (!ehAnalista()) return;
+    const msg = (titulo, texto) => { MSGS.push({ papel: 'ia', texto: { titulo, msg: texto } }); desenhar(); };
+    if (!MSGS.length) document.getElementById('ia-msgs').innerHTML = '';
+    pensando(true);
+    let j = null, status = 0;
+    try {
+      const token = await aux.obterToken();
+      if (!token) { pensando(false); return msg('Conexão com a IA', 'Sessão expirada — entre de novo no sistema.'); }
+      const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 40000);
+      try { const resp = await aux.buscar(IA_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ acao: 'diagnostico' }), signal: ctl.signal }); status = resp.status; try { j = await resp.json(); } catch (e) { /* não é JSON */ } }
+      finally { clearTimeout(timer); }
+    } catch (e) { pensando(false); return msg('Conexão com a IA', 'Não consegui falar com o servidor do assistente (' + (e && e.name === 'AbortError' ? 'demorou demais' : 'sem conexão') + ').'); }
+    pensando(false);
+    if (status === 404 || !j) return msg('Conexão com a IA', 'A função /api/assistente não está publicada neste endereço (ou o site foi aberto fora da Vercel).');
+    if (!j.ok) return msg('Conexão com a IA', j.codigo === 'sem_provedor' ? `O servidor está no ar, mas NENHUMA chave de IA está configurada${(j.ausentes || []).length ? ' (' + j.ausentes.map(a => `${a.provedor}: falta ${a.falta.join(' e ')}`).join('; ') + ')' : ''}. Cadastre a variável em Settings › Environment Variables da Vercel e refaça o deploy. A busca comum continua funcionando.` : `O servidor respondeu: ${MSG_CODIGO[j.codigo] || j.codigo}.`);
+    const lin = (j.resultados || []).map(r => `${r.provedor}${r.modelo ? ' (' + r.modelo + ')' : ''}: ${r.ok ? `✔ respondeu em ${r.ms} ms` : `✖ ${{ quota: 'cota/limite atingido', config: 'chave ou modelo recusado (' + r.status + ')', indisponivel: 'fora do ar ou demorou', resposta_invalida: 'respondeu algo que não é JSON' }[r.classe] || r.classe}`}`);
+    const falta = (j.ausentes || []).map(a => `${a.provedor}: falta ${a.falta.join(' e ')}`);
+    msg('Conexão com a IA', `${lin.length ? lin.join(' · ') : 'Nenhum provedor configurado.'}${falta.length ? ' — Não configurados: ' + falta.join('; ') + '.' : ''}${lin.some(x => x.includes('✔')) ? ' A IA está conectada.' : ''}`);
+  }
   async function enviar(texto) {
     if (!ehAnalista()) return;
     texto = String(texto || '').trim(); if (!texto) return;
@@ -11924,7 +11991,7 @@ const IA = (() => {
     return { papel: 'ia', resultados: r.resultados, viaIA: true };
   }
 
-  return { abrir, fechar, perguntar, enviar, entender, itensBusca, rankNav, CATALOGO, _t: { prep, acharPeriodos, lev, casa, metricas, finDoCiclo, procurarCatalogo, executar, anonimizar, executarPlanoIA, resolverPeriodo, descreverPlano, consultarPlanejador, aux, PLAN, falar, pararFala, estado: () => ({ ULTIMO_PLANO, HIST_IA, TOK }), reiniciar: () => { ULTIMO_PLANO = null; HIST_IA = []; TOK = { n: 0, porChave: {}, mapa: {} }; PLAN.off = 0; } } };
+  return { abrir, fechar, perguntar, enviar, diagnosticar: diagnosticarIA, entender, itensBusca, rankNav, CATALOGO, _t: { prep, acharPeriodos, lev, casa, metricas, finDoCiclo, procurarCatalogo, executar, anonimizar, executarPlanoIA, resolverPeriodo, descreverPlano, consultarPlanejador, aux, PLAN, falar, pararFala, estado: () => ({ ULTIMO_PLANO, HIST_IA, TOK }), reiniciar: () => { ULTIMO_PLANO = null; HIST_IA = []; TOK = { n: 0, porChave: {}, mapa: {} }; PLAN.off = 0; } } };
 })();
 
 // botão do assistente na barra do topo (só o Analista o vê; atualizarFerramentasAnalista mostra/esconde)
@@ -17251,6 +17318,119 @@ function abrirOrdensDoCartao(chave) {
 document.addEventListener('click', e => { const c = e.target.closest && e.target.closest('.stat-card[data-lista]'); if (c) abrirOrdensDoCartao(c.dataset.lista); });
 document.addEventListener('keydown', e => { if (e.key !== 'Enter') return; const c = e.target.closest && e.target.closest('.stat-card[data-lista]'); if (c) abrirOrdensDoCartao(c.dataset.lista); });
 const statCard = (cor, icon, label, value, sub, lista) => `<div class="stat-card stat-card--${cor}${ehV2() && !pillCardV2(cor) ? ' stat-card--sempill' : ''}${lista ? ' stat-card--clicavel' : ''}"${lista ? ` data-lista="${esc(lista)}" tabindex="0" role="button" title="Clique para ver as ordens"` : ''}><div class="stat-top"><div class="stat-ic">${icon}</div><div class="stat-text"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div>${pillCardV2(cor)}</div>${sub ? `<div class="stat-sub">${sub}</div>` : ''}</div>`;
+// ===================== PRAZOS DO DIA — helpers e tabela "Prazos do Dia — Detalhado" (28/10/2026) =====================
+// Saíram do load() da PCR pra o assistente mostrar a MESMA tabela (uma fonte só): a PCR e a IA chamam estas funções.
+// `agora` = relógio de referência; `getRetornos()` = lista de retornos do dia (retornosDoDiaCalc) pra marcar IFI/IRR e o "retorno de quem".
+function fabricaPrazosDoDia(agora, getRetornos) {
+  const agoraPCR = agora;
+  // Entram só as três situações que ainda dependem do técnico: PENDENTE (não começou), EM ROTA (a caminho) e INICIADO (em atendimento)
+  const ABERTAS = ['pendente', 'em_rota', 'iniciado'];
+  const aberta = r => ABERTAS.includes(classifyStatusGranular(r.status));
+  const horasAte = r => (r.limite - agoraPCR) / 36e5;
+  // achado 08/09/2026: usava r.horas_prazo (calculado na importação do CSV),
+  // mas essa coluna NÃO existe na tabela "pcr" do Supabase — some depois de
+  // recarregar a página. Sem ela, `horasPrazo === 24` dava falso pra
+  // REPARO também, caía na régua de 36h da Ativação e devolvia faixa
+  // 'ate36', que não existe pro Reparo — virava "undefined" na tela (Status
+  // Prazo) e no PDF. Recalcula do tipo_atividade (esse sim sempre salvo),
+  // igual foi calculado originalmente na importação (ver horasPrazo logo
+  // acima na função de import do CSV).
+  const faixaAtualDaAberta = r => r.abertura ? faixaPorAging((agoraPCR - r.abertura) / 86400000, ehPrazoDeAtivacao(r, true) ? PRAZO_ATIVACAO_HORAS : 24) : null;
+  const faixaEfetiva = r => r.faixa || (aberta(r) ? faixaAtualDaAberta(r) : null);
+  // Extraídos como funções separadas (em vez de só inline na linha da
+  // tabela) pra o PDF poder gerar o MESMO texto que a tela mostra, sem
+  // duplicar a lógica de "quanto falta" / "qual faixa".
+  const horasFalta = r => aberta(r) && r.limite ? horasAte(r) : null;
+  const textoFalta = r => {
+    const h = horasFalta(r);
+    if (h === null) return '-';
+    if (h < 0) return `venceu há ${Math.floor(-h) >= 1 ? Math.floor(-h) + 'h' : Math.round(-h * 60) + 'min'}`;
+    if (h < 1) { const m = Math.round(h * 60); return m === 60 ? '1h00' : `${m}min`; }
+    if (h < 24) {
+      // arredondar os minutos pode "carregar" pra 60 (ex.: 20h59min59s
+      // virava "20h60" em vez de "21h00") — corrige a virada de hora
+      let hh = Math.floor(h), mm = Math.round((h % 1) * 60);
+      if (mm === 60) { hh += 1; mm = 0; }
+      if (hh >= 24) return '1d';
+      return `${hh}h${String(mm).padStart(2,'0')}`;
+    }
+    return `${Math.floor(h / 24)}d`;
+  };
+  // achado 08/09/2026: o "⏳ " aqui na frente do rótulo quebrava o PDF — o
+  // jsPDF usa fonte padrão (Helvetica), que só sabe desenhar Latin-1, e um
+  // emoji fora dessa faixa derruba a largura de TODOS os caracteres depois
+  // dele na mesma célula (virava "#ó O u t l i e r s" na exportação). Texto
+  // puro em vez de emoji resolve nas duas telas (a tabela em tela e o PDF
+  // usam a MESMA função, de propósito — ver comentário logo acima).
+  const textoFaixaEfetiva = r => {
+    const faixa = faixaEfetiva(r);
+    // BUCKET_LABEL_UNIFICADO (não só BUCKET_LABEL): essa tabela mistura
+    // Reparo (24h) e Ativação/M.Endereço (36h) — ver comentário na
+    // declaração da constante.
+    const rotulo = faixa ? BUCKET_LABEL_UNIFICADO[faixa] : '-';
+    return aberta(r) && faixa ? rotulo + ' (em aberto)' : rotulo;
+  };
+  // o prazo é de um retorno? (a ordem do dia está na lista de Retornos IFI/IRR) — pedido 20/10/2026: "nessa tabela do prazo mostre se é IFI ou IRR"
+  const marcaRetornoDaOS = r => { const x = (getRetornos() || []).find(y => String(y.os) === String(r.os)); return x && x.ifi_irr ? `<span style="font-weight:700;color:${x.ifi_irr === 'IFI' ? 'var(--danger)' : '#f59e0b'}">${esc(x.ifi_irr)}</span>` : '-'; };
+  const linhaPrazoUnificado = r => {
+    const abertaAgora = aberta(r);
+    const h = horasFalta(r);
+    const corFalta = h===null ? 'var(--text-muted)' : h < 0 ? 'var(--danger)' : h < 2 ? '#fb923c' : h < 4 ? '#f59e0b' : 'var(--text-secondary)';
+    const faixa = faixaEfetiva(r);
+    // 'ate36' é o "dentro do prazo" de Ativação/M.Endereço — mesmo status de
+    // 'ate24' pro Reparo (mesma mistura Reparo+Ativação de textoFaixaEfetiva
+    // acima). Sem esse caso, ativação/m.endereço dentro do prazo aparecia em
+    // VERMELHO (mesma cor de estourado), porque só 'ate24' caía em verde.
+    const corFaixa = (faixa==='ate24'||faixa==='ate36')?'var(--success)':faixa==='ate48'?'#38bdf8':faixa?'var(--danger)':'var(--text-muted)';
+    const tec = ehRecursoTecnico(r.recurso) ? r.recurso : '';
+    return `<tr data-os="${esc(r.os)}">
+      <td style="color:${corFalta};font-weight:700">${h!==null && h<0 ? '⚠️ ' : ''}${textoFalta(r)}</td>
+      <td>${esc(r.cidade) || '-'}</td>
+      <td>${tec?`<a href="#" class="link-tec" data-tec="${esc(tec)}">${esc(tec)}</a>`:'-'}</td>
+      <td>${formatDate(r.data)}</td><td class="cat-cell">${esc(r.os) || '-'}</td><td>${esc(r.cliente) || '-'}</td><td>${marcaRetornoDaOS(r)}</td><td>${esc(ofensorDoRetorno(retornoDaOsPrazo(getRetornos() || [], r))) || '-'}</td>
+      <td style="${estiloSituacao(classifyStatusGranular(r.status))}">${esc(r.status) || '-'}</td>
+      <td>${fmtDT(r.abertura)}</td><td>${fmtH(r.limite)}</td><td>${fmtDT(r.limite)}</td>
+      <td>${esc(r.periodo) || '-'}</td>
+      <td>${esc(r.periodo_sistema) || '-'}</td>
+      <td style="color:${corFaixa};font-weight:700"${abertaAgora && faixa ? ' title="Ainda em aberto — faixa calculada pelo tempo decorrido até agora, não é definitiva"' : ''}>${textoFaixaEfetiva(r)}</td>
+    </tr>`;
+  };
+  return { aberta, horasAte, faixaAtualDaAberta, faixaEfetiva, horasFalta, textoFalta, textoFaixaEfetiva, marcaRetornoDaOS, linhaPrazoUnificado };
+}
+// a tabela inteira (caixa + cabeçalho + linhas). `lista` já vem na ordem (abertas primeiro); `linha` = linhaPrazoUnificado da fábrica
+function htmlTabelaPrazosDoDia(lista, linha, idTab) {
+  return `<div class="table-wrap" style="margin-bottom:1.5rem;max-height:560px;overflow:auto"><table class="data-table" id="${idTab || 'tab-prazos'}"><thead><tr>
+    <th>Falta</th><th>Cidade</th><th>Técnico</th><th>Data</th><th>O.S</th><th>Nome Cliente</th><th>IFI/IRR</th><th>Retorno de quem</th><th>Status O.S</th>
+    <th>Data de Abertura</th><th>Vencimento</th><th>Limite</th><th>Período</th><th>Período da Ordem</th><th>Status Prazo</th>
+  </tr></thead><tbody>
+    ${lista.map(linha).join('')}
+  </tbody></table></div>`;
+}
+// tabela "Retornos do Dia (IFI / IRR)" (a lista vem de retornosDoDiaCalc)
+function htmlTabelaRetornosDoDia(retornos, idTab) {
+  return `<div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="${idTab || 'tab-retornos'}"><thead><tr>
+    <th>O.S de hoje</th><th>Contrato</th><th>Nome Cliente</th><th>Com quem está hoje</th><th>De quem é o retorno</th><th>Cidade</th><th>Dias</th>
+    <th>Restam</th><th>IFI/IRR</th><th>Status</th><th>Data</th><th>Serviço anterior</th><th>O.S anterior</th><th>Data anterior</th><th>Tipo de Serviço</th>
+  </tr></thead><tbody>
+    ${retornos.map(r=>{
+      // mesmo técnico voltando no próprio erro x retorno que caiu pra outro técnico — só compara quando os DOIS lados são gente de verdade
+      // (ehRecursoTecnico), senão "sem técnico" e "sem técnico" contariam como "mesmo técnico" por engano
+      const temOsDois = ehRecursoTecnico(r.tecnico_atual) && ehRecursoTecnico(r.ofensor);
+      const mesmoTec = temOsDois && normalizeHeader(r.tecnico_atual) === normalizeHeader(r.ofensor);
+      const corTec = !temOsDois ? '' : mesmoTec ? 'color:var(--accent);font-weight:700' : 'color:#f59e0b;font-weight:700';
+      const tituloTec = !temOsDois ? '' : mesmoTec ? ' title="Mesmo técnico do atendimento anterior"' : ' title="Técnico diferente do atendimento anterior"';
+      // ordem pedida pelo cliente (20/10/2026): O.S → Contrato → Cliente → Com quem está hoje → De quem é o retorno → Cidade → Dias; o resto vem depois
+      return `<tr data-os="${esc(r.os)}">
+      <td class="cat-cell">${esc(r.os)}</td><td>${esc(r.contrato)||'-'}</td><td>${esc(r.cliente)||'-'}</td>
+      <td style="${corTec}"${tituloTec}>${ehRecursoTecnico(r.tecnico_atual)?esc(r.tecnico_atual):'-'}</td>
+      <td class="cat-cell" style="${corTec}"${tituloTec}>${esc(r.ofensor)||'-'}</td><td>${esc(r.cidade)||'-'}</td><td>${esc(r.dias)}</td>
+      <td style="font-weight:700;color:${r.restam === null || r.restam === undefined ? 'var(--text-muted)' : r.restam<=3?'var(--danger)':r.restam<=7?'#f59e0b':'var(--text-secondary)'}">${r.restam === null || r.restam === undefined ? '- (sem DIAS na planilha)' : esc(r.restam) + ' dia(s)'}</td>
+      <td style="font-weight:700;color:${r.ifi_irr==='IFI'?'var(--danger)':'#f59e0b'}">${esc(r.ifi_irr)}</td>
+      <td style="${estiloSituacao(classifyStatusGranular(r.status))}">${esc(r.status)||'-'}</td>
+      <td>${formatDate(r.data)}</td><td>${esc(r.tipo_anterior)||'-'}</td><td>${esc(r.os_anterior)||'-'}</td><td>${formatDate(r.data_anterior)}</td><td>${esc(r.tipo)||'-'}</td></tr>`;
+    }).join('')}
+  </tbody></table></div>`;
+}
 // MODOS DA PCR (19/10/2026, Escritório): 'prazos' = só prazos (cartões de prazo + prazo do dia por cidade + "Prazos do Dia — Detalhado"),
 // 'retornos' = só "Retornos do Dia (IFI / IRR)", 'resto' = a PCR do Escritório SEM prazos e retornos (que agora têm aba própria).
 // Sem modo (todos os outros perfis) a PCR continua inteira. O desenho é o mesmo: só se tira da tela o que não é do assunto.
@@ -17438,9 +17618,8 @@ function renderPCR(modoArg) {
     // começou), EM ROTA (a caminho) e INICIADO (em atendimento). "Não concluído",
     // "suspenso" e "cancelado" saíram: a visita já aconteceu ou foi descartada,
     // então não é mais um prazo que dá pra correr atrás hoje.
-    const ABERTAS = ['pendente', 'em_rota', 'iniciado'];
-    const aberta = r => ABERTAS.includes(classifyStatusGranular(r.status));
-    const horasAte = r => (r.limite - agoraPCR) / 36e5;
+    // helpers de prazo = fábrica de módulo (a mesma que o assistente usa); `retornos` é lido na hora de desenhar (já calculado até lá)
+    const { aberta, horasAte, faixaAtualDaAberta, faixaEfetiva, horasFalta, textoFalta, textoFaixaEfetiva, marcaRetornoDaOS, linhaPrazoUnificado } = fabricaPrazosDoDia(agoraPCR, () => retornos);
     // ---- Prazo do dia: UNIFICADO. Antes eram DUAS tabelas quase iguais —
     // "Vencendo Agora" (só as abertas, ordenadas por urgência) e "Prazos do
     // Dia — Detalhado" (todo REPARO, mas Status Prazo só preenchido pra quem
@@ -17464,74 +17643,6 @@ function renderPCR(modoArg) {
     const prazoUnificado = [...abertasOrdenadas, ...fechadasOrdenadas];
     const vencidas = abertasOrdenadas.filter(r => r.limite && horasAte(r) < 0);
     const vence2h  = abertasOrdenadas.filter(r => r.limite && horasAte(r) >= 0 && horasAte(r) < 2);
-    // achado 08/09/2026: usava r.horas_prazo (calculado na importação do CSV),
-    // mas essa coluna NÃO existe na tabela "pcr" do Supabase — some depois de
-    // recarregar a página. Sem ela, `horasPrazo === 24` dava falso pra
-    // REPARO também, caía na régua de 36h da Ativação e devolvia faixa
-    // 'ate36', que não existe pro Reparo — virava "undefined" na tela (Status
-    // Prazo) e no PDF. Recalcula do tipo_atividade (esse sim sempre salvo),
-    // igual foi calculado originalmente na importação (ver horasPrazo logo
-    // acima na função de import do CSV).
-    const faixaAtualDaAberta = r => r.abertura ? faixaPorAging((agoraPCR - r.abertura) / 86400000, ehPrazoDeAtivacao(r, true) ? PRAZO_ATIVACAO_HORAS : 24) : null;
-    const faixaEfetiva = r => r.faixa || (aberta(r) ? faixaAtualDaAberta(r) : null);
-    // Extraídos como funções separadas (em vez de só inline na linha da
-    // tabela) pra o PDF poder gerar o MESMO texto que a tela mostra, sem
-    // duplicar a lógica de "quanto falta" / "qual faixa".
-    const horasFalta = r => aberta(r) && r.limite ? horasAte(r) : null;
-    const textoFalta = r => {
-      const h = horasFalta(r);
-      if (h === null) return '-';
-      if (h < 0) return `venceu há ${Math.floor(-h) >= 1 ? Math.floor(-h) + 'h' : Math.round(-h * 60) + 'min'}`;
-      if (h < 1) { const m = Math.round(h * 60); return m === 60 ? '1h00' : `${m}min`; }
-      if (h < 24) {
-        // arredondar os minutos pode "carregar" pra 60 (ex.: 20h59min59s
-        // virava "20h60" em vez de "21h00") — corrige a virada de hora
-        let hh = Math.floor(h), mm = Math.round((h % 1) * 60);
-        if (mm === 60) { hh += 1; mm = 0; }
-        if (hh >= 24) return '1d';
-        return `${hh}h${String(mm).padStart(2,'0')}`;
-      }
-      return `${Math.floor(h / 24)}d`;
-    };
-    // achado 08/09/2026: o "⏳ " aqui na frente do rótulo quebrava o PDF — o
-    // jsPDF usa fonte padrão (Helvetica), que só sabe desenhar Latin-1, e um
-    // emoji fora dessa faixa derruba a largura de TODOS os caracteres depois
-    // dele na mesma célula (virava "#ó O u t l i e r s" na exportação). Texto
-    // puro em vez de emoji resolve nas duas telas (a tabela em tela e o PDF
-    // usam a MESMA função, de propósito — ver comentário logo acima).
-    const textoFaixaEfetiva = r => {
-      const faixa = faixaEfetiva(r);
-      // BUCKET_LABEL_UNIFICADO (não só BUCKET_LABEL): essa tabela mistura
-      // Reparo (24h) e Ativação/M.Endereço (36h) — ver comentário na
-      // declaração da constante.
-      const rotulo = faixa ? BUCKET_LABEL_UNIFICADO[faixa] : '-';
-      return aberta(r) && faixa ? rotulo + ' (em aberto)' : rotulo;
-    };
-    // o prazo é de um retorno? (a ordem do dia está na lista de Retornos IFI/IRR) — pedido 20/10/2026: "nessa tabela do prazo mostre se é IFI ou IRR"
-    const marcaRetornoDaOS = r => { const x = (retornos || []).find(y => String(y.os) === String(r.os)); return x && x.ifi_irr ? `<span style="font-weight:700;color:${x.ifi_irr === 'IFI' ? 'var(--danger)' : '#f59e0b'}">${esc(x.ifi_irr)}</span>` : '-'; };
-    const linhaPrazoUnificado = r => {
-      const abertaAgora = aberta(r);
-      const h = horasFalta(r);
-      const corFalta = h===null ? 'var(--text-muted)' : h < 0 ? 'var(--danger)' : h < 2 ? '#fb923c' : h < 4 ? '#f59e0b' : 'var(--text-secondary)';
-      const faixa = faixaEfetiva(r);
-      // 'ate36' é o "dentro do prazo" de Ativação/M.Endereço — mesmo status de
-      // 'ate24' pro Reparo (mesma mistura Reparo+Ativação de textoFaixaEfetiva
-      // acima). Sem esse caso, ativação/m.endereço dentro do prazo aparecia em
-      // VERMELHO (mesma cor de estourado), porque só 'ate24' caía em verde.
-      const corFaixa = (faixa==='ate24'||faixa==='ate36')?'var(--success)':faixa==='ate48'?'#38bdf8':faixa?'var(--danger)':'var(--text-muted)';
-      const tec = ehRecursoTecnico(r.recurso) ? r.recurso : '';
-      return `<tr data-os="${esc(r.os)}">
-        <td style="color:${corFalta};font-weight:700">${h!==null && h<0 ? '⚠️ ' : ''}${textoFalta(r)}</td>
-        <td>${esc(r.cidade) || '-'}</td>
-        <td>${tec?`<a href="#" class="link-tec" data-tec="${esc(tec)}">${esc(tec)}</a>`:'-'}</td>
-        <td>${formatDate(r.data)}</td><td class="cat-cell">${esc(r.os) || '-'}</td><td>${esc(r.cliente) || '-'}</td><td>${marcaRetornoDaOS(r)}</td><td>${esc(ofensorDoRetorno(retornoDaOsPrazo(retornos, r))) || '-'}</td>
-        <td style="${estiloSituacao(classifyStatusGranular(r.status))}">${esc(r.status) || '-'}</td>
-        <td>${fmtDT(r.abertura)}</td><td>${fmtH(r.limite)}</td><td>${fmtDT(r.limite)}</td>
-        <td>${esc(r.periodo) || '-'}</td>
-        <td>${esc(r.periodo_sistema) || '-'}</td>
-        <td style="color:${corFaixa};font-weight:700"${abertaAgora && faixa ? ' title="Ainda em aberto — faixa calculada pelo tempo decorrido até agora, não é definitiva"' : ''}>${textoFaixaEfetiva(r)}</td>
-      </tr>`;
-    };
     const porSituacao = b => abertasOrdenadas.filter(r => classifyStatusGranular(r.status) === b).length;
 
     // ---- Mão de obra e produção do dia ----
@@ -17609,75 +17720,8 @@ function renderPCR(modoArg) {
     // contra BASE_CONCLUIDOS-IRR-IFI.xlsx (14/09/2026): TIPO DE ORDEM,
     // DATA ORDEM ANTERIOR/DIAS e a janela batem 100% com essa mesma regra —
     // só a ORIGEM do dado mudava (aqui é recalculado, lá é oficial).
-    const hist = historicoPorContrato();
-    // "Retorno sempre vem como REPARO" (regra do cliente, 09/09/2026): a ordem
-    // de HOJE que pode ser retorno é só a de tipo Reparo. Antes a lista rodava
-    // sobre TODAS as ordens do dia, então uma Ativação ou M.Cômodo de um
-    // contrato que teve reparo há 10 dias aparecia como "IRR" — e o inverso
-    // também confundia a leitura de quem conferia contra a planilha.
-    const retornosBrutos = rowsReparo.map(r => {
-      const idxOficial = r.os ? DB_INDEX.producao.get(r.os) : undefined;
-      const oficialBruto = idxOficial !== undefined ? DB.producao[idxOficial] : null;
-      // A linha da Produção só é "a palavra da planilha oficial" se ela de fato
-      // passou por REPAROS OK: lá TODA linha tem a coluna IFI-IRR preenchida
-      // (IFI / IRR / DESC) OU o "TIPO DE ORDEM" preenchido ("-" quando não
-      // há serviço anterior). Conferido contra BASE_CONCLUIDOS-IRR-IFI.xlsx em
-      // 21/09/2026: 8.465 reparos, 0 divergências da regra abaixo — e as 7.515
-      // linhas sem marca têm todas tipo anterior "-" (= primeira visita).
-      // Uma linha que veio só da BASE PRODUÇÃO (sem essas colunas) NÃO é
-      // decisão oficial: tratá-la como "não é retorno" fazia o serviço SUMIR
-      // da lista (achado do cliente: "teve um dia que não apareceu um
-      // serviço"). Esse caso cai na regra local, que é a mesma.
-      const passouPelaPlanilhaOficial = !!oficialBruto && (
-        ['IFI', 'IRR', 'DESC'].includes(oficialBruto.ifi_irr) ||
-        (oficialBruto.tipo_ordem !== undefined && oficialBruto.tipo_ordem !== null && oficialBruto.tipo_ordem !== ''));
-      const oficial = passouPelaPlanilhaOficial ? oficialBruto : null;
-      if (oficial) {
-        if (oficial.ifi_irr !== 'IFI' && oficial.ifi_irr !== 'IRR') return null;
-        const dias = oficial.dias !== null && oficial.dias !== undefined && oficial.dias !== '' && isFinite(Number(oficial.dias)) ? Number(oficial.dias) : null;
-        // O.S ANTERIOR não vem pronta na planilha (só a DATA) — acha no
-        // histórico do contrato a linha concluída bem naquela data, só pra
-        // completar a coluna "O.S anterior" da tela; não afeta a classificação.
-        const osAnterior = (hist[r.contrato] || []).find(p => p.data === oficial.data_ordem_anterior);
-        return { data:r.data, os:r.os, contrato:r.contrato, cidade:r.cidade, cliente:r.cliente,
-                 tipo:r.tipo_atividade, status:r.status, tecnico_atual:r.recurso,
-                 ofensor:oficial.ofensor || '', tipo_anterior:oficial.tipo_ordem || '',
-                 os_anterior:(osAnterior && osAnterior.os) || '', data_anterior:oficial.data_ordem_anterior || null, dias,
-                 restam: dias !== null ? (oficial.ifi_irr === 'IFI' ? JANELA_IFI : JANELA_IRR) - dias : null,
-                 ifi_irr:oficial.ifi_irr };
-      }
-      if (!r.contrato) return null;
-      const anteriores = (hist[r.contrato] || []).filter(p => p.data && p.data < r.data && p.os !== r.os);
-      if (!anteriores.length) return null;
-      const prev = anteriores[anteriores.length - 1];
-      const dias = diasEntre(r.data, prev.data);
-      const marca = classificaRetorno(prev.tipo_atividade, dias);
-      if (marca !== 'IFI' && marca !== 'IRR') return null;
-      return { data:r.data, os:r.os, contrato:r.contrato, cidade:r.cidade, cliente:r.cliente,
-               tipo:r.tipo_atividade, status:r.status, tecnico_atual:r.recurso,
-               ofensor:prev.recurso || '', tipo_anterior:prev.tipo_atividade || '',
-               os_anterior:prev.os || '', data_anterior:prev.data, dias,
-               restam: (marca === 'IFI' ? JANELA_IFI : JANELA_IRR) - dias,
-               ifi_irr:marca };
-    }).filter(Boolean);
-    // o CSV traz uma linha por TENTATIVA — a mesma O.S pode aparecer como
-    // "cancelado" e depois "não concluído". No retorno interessa a ordem, não
-    // a tentativa: fica só o registro mais avançado de cada O.S.
-    const pesoStatus = st => isConcluido(st) ? 3 : /nao conclu|não conclu/i.test(st) ? 2 : 1;
-    const porOS = new Map();
-    retornosBrutos.forEach(r => {
-      // Sem número de O.S. (o CSV às vezes vem com a célula vazia) TODOS caíam
-      // na mesma chave "" e viravam UM retorno só — o resto sumia da lista.
-      // Mesma chave de fallback que a tabela do dia já usa (atualPorOS).
-      const chave = r.os || ('sem-os|' + (r.contrato || '') + '|' + (r.cliente || '') + '|' + (r.tecnico_atual || ''));
-      const atual = porOS.get(chave);
-      if (!atual || pesoStatus(r.status) > pesoStatus(atual.status)) porOS.set(chave, r);
-    });
-    // restam pode vir null (planilha oficial sem a coluna DIAS preenchida —
-    // achado em auditoria, 14/09/2026): null-3 vira 0 em JS, então a linha
-    // furava pro topo como se fosse a mais urgente. Manda pro fim da lista.
-    const restamOrdenavel = r => r.restam === null || r.restam === undefined ? Infinity : r.restam;
-    const retornos = [...porOS.values()].sort((a,b) => restamOrdenavel(a) - restamOrdenavel(b) || String(a.os).localeCompare(String(b.os)));
+    // Mesma lista que o Relatório do Dia e o assistente usam (`retornosDoDiaCalc`, 28/10/2026): antes este bloco era uma cópia da regra e as telas podiam divergir.
+    const retornos = retornosDoDiaCalc(rowsReparo);
     // clicar nos cartões de retorno abre a lista completa (colunas na MESMA ordem da tabela: O.S → Contrato → Cliente → Com quem está hoje → De quem é → Cidade → Dias → ...)
     const listaRet = (chave, titulo, arr) => cartaoListaCustom(chave, titulo, formatDate(dia), ['O.S de hoje', 'Contrato', 'Nome Cliente', 'Com quem está hoje', 'De quem é o retorno', 'Cidade', 'Dias', 'Restam', 'IFI/IRR', 'Status', 'Data', 'Serviço anterior', 'O.S anterior', 'Data anterior', 'Tipo de Serviço'],
       arr.map(r => ({ tipo: '', ref: r, celulas: [esc(r.os) || '-', esc(r.contrato) || '-', esc(r.cliente) || '-', ehRecursoTecnico(r.tecnico_atual) ? esc(r.tecnico_atual) : '-', esc(r.ofensor) || '-', esc(r.cidade) || '-', esc(r.dias) || '-',
@@ -17830,30 +17874,7 @@ function renderPCR(modoArg) {
           return metricCard(`Retornos ${rot.toLowerCase()} (IFI + IRR)`, doBalde.length, false, { sub: `IFI ${nIfi} · IRR ${nIrr}`, lista: listaRet('pcr|ret|' + b, `Retornos ${rot.toLowerCase()} (IFI + IRR)`, doBalde) });
         }).join('')}
       </div>
-      <div class="table-wrap" style="margin-bottom:1.5rem"><table class="data-table" id="tab-retornos"><thead><tr>
-        <th>O.S de hoje</th><th>Contrato</th><th>Nome Cliente</th><th>Com quem está hoje</th><th>De quem é o retorno</th><th>Cidade</th><th>Dias</th>
-        <th>Restam</th><th>IFI/IRR</th><th>Status</th><th>Data</th><th>Serviço anterior</th><th>O.S anterior</th><th>Data anterior</th><th>Tipo de Serviço</th>
-      </tr></thead><tbody>
-        ${retornos.map(r=>{
-          // mesmo técnico voltando no próprio erro x retorno que caiu pra outro
-          // técnico — só compara quando os DOIS lados são gente de verdade
-          // (ehRecursoTecnico), senão "sem técnico" e "sem técnico" contariam
-          // como "mesmo técnico" por engano
-          const temOsDois = ehRecursoTecnico(r.tecnico_atual) && ehRecursoTecnico(r.ofensor);
-          const mesmoTec = temOsDois && normalizeHeader(r.tecnico_atual) === normalizeHeader(r.ofensor);
-          const corTec = !temOsDois ? '' : mesmoTec ? 'color:var(--accent);font-weight:700' : 'color:#f59e0b;font-weight:700';
-          const tituloTec = !temOsDois ? '' : mesmoTec ? ' title="Mesmo técnico do atendimento anterior"' : ' title="Técnico diferente do atendimento anterior"';
-          // ordem pedida pelo cliente (20/10/2026): O.S → Contrato → Cliente → Com quem está hoje → De quem é o retorno → Cidade → Dias; o resto vem depois
-          return `<tr data-os="${esc(r.os)}">
-          <td class="cat-cell">${esc(r.os)}</td><td>${esc(r.contrato)||'-'}</td><td>${esc(r.cliente)||'-'}</td>
-          <td style="${corTec}"${tituloTec}>${ehRecursoTecnico(r.tecnico_atual)?esc(r.tecnico_atual):'-'}</td>
-          <td class="cat-cell" style="${corTec}"${tituloTec}>${esc(r.ofensor)||'-'}</td><td>${esc(r.cidade)||'-'}</td><td>${esc(r.dias)}</td>
-          <td style="font-weight:700;color:${r.restam === null || r.restam === undefined ? 'var(--text-muted)' : r.restam<=3?'var(--danger)':r.restam<=7?'#f59e0b':'var(--text-secondary)'}">${r.restam === null || r.restam === undefined ? '- (sem DIAS na planilha)' : esc(r.restam) + ' dia(s)'}</td>
-          <td style="font-weight:700;color:${r.ifi_irr==='IFI'?'var(--danger)':'#f59e0b'}">${esc(r.ifi_irr)}</td>
-          <td style="${estiloSituacao(classifyStatusGranular(r.status))}">${esc(r.status)||'-'}</td>
-          <td>${formatDate(r.data)}</td><td>${esc(r.tipo_anterior)||'-'}</td><td>${esc(r.os_anterior)||'-'}</td><td>${formatDate(r.data_anterior)}</td><td>${esc(r.tipo)||'-'}</td></tr>`;
-        }).join('')}
-      </tbody></table></div>`}
+      ${htmlTabelaRetornosDoDia(retornos)}`}
 
       <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <span>Prazos do Dia — Detalhado</span>
@@ -17861,12 +17882,7 @@ function renderPCR(modoArg) {
         <button type="button" class="btn-export-xls" id="pcr-export">⤓ Excel (só o filtrado)</button>
         <button type="button" class="btn-export-img" id="pcr-img">🖼 Gerar imagem</button>
       </div>
-      <div class="table-wrap" style="margin-bottom:1.5rem;max-height:560px;overflow:auto"><table class="data-table" id="tab-prazos"><thead><tr>
-        <th>Falta</th><th>Cidade</th><th>Técnico</th><th>Data</th><th>O.S</th><th>Nome Cliente</th><th>IFI/IRR</th><th>Retorno de quem</th><th>Status O.S</th>
-        <th>Data de Abertura</th><th>Vencimento</th><th>Limite</th><th>Período</th><th>Período da Ordem</th><th>Status Prazo</th>
-      </tr></thead><tbody>
-        ${prazoUnificado.map(linhaPrazoUnificado).join('')}
-      </tbody></table></div>
+      ${htmlTabelaPrazosDoDia(prazoUnificado, linhaPrazoUnificado)}
 
 
       ${htmlMapaOS(mapaOS)}
@@ -23641,7 +23657,7 @@ function renderRelatorioGeral() {
 const RD_BUCKETS = ['pendente', 'em_rota', 'iniciado', 'concluido', 'nao_concluido', 'cancelado'];
 const RD_ROTULO = { pendente: 'Pendente', em_rota: 'Em Rota', iniciado: 'Iniciado', concluido: 'Concluído', nao_concluido: 'Improdutivo', cancelado: 'Cancelado' };
 const RD_TIPOS = [['Ativação', /ativa/], ['Reparo Corretivo', /reparo/], ['Mudança de Endereço', /mudan.*endereco/], ['Mudança de Cômodo', /mudan.*comodo/], ['Upgrade/Downgrade', /upgrade|downgrade/]];
-// retornos IFI/IRR do dia — regra da PCR: só ordem de REPARO pode ser retorno; vale a planilha oficial (REPAROS OK) quando a O.S passou por
+// retornos IFI/IRR do dia — A regra única (a PCR, o Relatório do Dia e o assistente usam esta função): só ordem de REPARO pode ser retorno; vale a planilha oficial (REPAROS OK) quando a O.S passou por
 // ela, senão o histórico do contrato na Produção (IFI ≤ 15 dias, IRR ≤ 30). Uma linha por O.S, fica o registro mais avançado.
 function retornosDoDiaCalc(rowsReparo) {
   const hist = historicoPorContrato();
@@ -23653,14 +23669,16 @@ function retornosDoDiaCalc(rowsReparo) {
     if (passou) {
       if (ob.ifi_irr !== 'IFI' && ob.ifi_irr !== 'IRR') return null;
       const dias = ob.dias !== null && ob.dias !== undefined && ob.dias !== '' && isFinite(Number(ob.dias)) ? Number(ob.dias) : null;
-      return { ...base, ofensor: ob.ofensor || '', tipo_anterior: ob.tipo_ordem || '', dias, restam: dias !== null ? (ob.ifi_irr === 'IFI' ? JANELA_IFI : JANELA_IRR) - dias : null, ifi_irr: ob.ifi_irr };
+      // a O.S anterior não vem pronta na planilha (só a DATA): acha no histórico do contrato a linha concluída naquela data (só completa a coluna; não muda a classificação)
+      const osAnterior = (hist[r.contrato] || []).find(p => p.data === ob.data_ordem_anterior);
+      return { ...base, ofensor: ob.ofensor || '', tipo_anterior: ob.tipo_ordem || '', os_anterior: (osAnterior && osAnterior.os) || '', data_anterior: ob.data_ordem_anterior || null, dias, restam: dias !== null ? (ob.ifi_irr === 'IFI' ? JANELA_IFI : JANELA_IRR) - dias : null, ifi_irr: ob.ifi_irr };
     }
     if (!r.contrato) return null;
     const ant = (hist[r.contrato] || []).filter(p => p.data && p.data < r.data && p.os !== r.os);
     if (!ant.length) return null;
     const prev = ant[ant.length - 1], dias = diasEntre(r.data, prev.data), marca = classificaRetorno(prev.tipo_atividade, dias);
     if (marca !== 'IFI' && marca !== 'IRR') return null;
-    return { ...base, ofensor: prev.recurso || '', tipo_anterior: prev.tipo_atividade || '', dias, restam: (marca === 'IFI' ? JANELA_IFI : JANELA_IRR) - dias, ifi_irr: marca };
+    return { ...base, ofensor: prev.recurso || '', tipo_anterior: prev.tipo_atividade || '', os_anterior: prev.os || '', data_anterior: prev.data, dias, restam: (marca === 'IFI' ? JANELA_IFI : JANELA_IRR) - dias, ifi_irr: marca };
   }).filter(Boolean);
   const peso = st => isConcluido(st) ? 3 : /nao conclu|não conclu/i.test(st) ? 2 : 1;
   const porOS = new Map();
