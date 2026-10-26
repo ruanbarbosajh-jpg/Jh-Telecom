@@ -1811,8 +1811,7 @@
   }
   /* barra de filtro acompanhando a rolagem: a Folha tem 2.300px de altura, e
      o seletor de período ficava lá em cima, fora de alcance */
-  .toolbar.toolbar-fixa { position: sticky; top: var(--altura-topo, 0px); z-index: 9; }   /* 23/10/2026: gruda ABAIXO do topo (antes ficava por cima dele, z-index 20) */
-  @media (max-width: 900px), (max-height: 640px) { .toolbar.toolbar-fixa { position: static; } }   /* tela pequena: não gruda (a barra ocuparia metade da tela) */
+  .toolbar.toolbar-fixa { position: static; }   /* 26/10/2026 (pedido do cliente, prints da Folha): a barra de filtros NÃO gruda mais — grudada ela cobria o começo dos painéis e dos cartões ao rolar ("card em cima de card"); sobe junto com a página */
   /* ---- CADASTRO FINANCEIRO em grade ----
      Antes: 5 tabelas empilhadas de 2 colunas, cada uma ocupando a largura
      toda pra mostrar um rótulo e um número — 1.800px de rolagem pra 17
@@ -2898,7 +2897,7 @@
   /* botões do painel AO LADO do título (não quebram pra linha de baixo); a nota do painel fica embaixo */
   @media (min-width: 701px) {
     :root[data-estilo="novo"] .panel > h3 { flex-wrap: nowrap !important; }
-    :root[data-estilo="novo"] .panel > h3 .ph-acoes { flex-wrap: nowrap; flex-shrink: 0; }
+    :root[data-estilo="novo"] .panel > h3 .ph-acoes { flex-wrap: wrap; flex-shrink: 1; min-width: 0; justify-content: flex-end; }   /* 26/10/2026: se título + botões não cabem, os botões quebram em 2 linhas em vez de vazar do painel (Parcial do Dia / Relatório do Dia a 1024 px) */
   }
   :root[data-estilo="novo"] .panel > h3 .ph-acoes .secao-toggle, :root[data-estilo="novo"] .panel > h3 .ph-acoes .btn-export-xls, :root[data-estilo="novo"] .panel > h3 .ph-acoes .btn-export-img { padding: 6px 11px; font-size: 12.5px; white-space: nowrap; }
   /* detalhe da ONU (Buscar assinante): o painel é estreito, então título e botões podem quebrar linha em vez de vazar do card (21/10/2026) */
@@ -3248,6 +3247,35 @@
   .ia-form input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   .ia-enviar { border: none; background: var(--accent); color: #fff; border-radius: 12px; padding: 0 18px; font-weight: 700; cursor: pointer; }
   @media (max-width: 640px) { .ia-painel { width: 100vw; } .ia-form input { font-size: 16px; } }
+
+  /* ASSISTENTE — respostas como num chat normal (27/10/2026, pedido do cliente: "o design de respostas deve ser igual chat normal") */
+  .ia-msg.ia-bot { flex-direction: row; align-items: flex-start; gap: 8px; }
+  .ia-av { width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg, var(--pz-1), var(--pz-3)); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; margin-top: 2px; }
+  .ia-corpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .ia-corpo > .ia-bolha { align-self: flex-start; max-width: 100%; border-radius: 4px 16px 16px 16px; }
+  .ia-corpo .ia-res { border-radius: 4px 16px 16px 16px; padding: 12px 14px; }
+  .ia-res h4.ia-cap { font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted); margin: 0; }
+  .ia-res .ia-sub { margin: 1px 0 8px; }
+  .ia-res .ia-resumo { background: none; border-left: 0; padding: 0; margin: 0 0 10px; font-size: 14.5px; line-height: 1.6; color: var(--text-primary); }
+  .ia-res .ia-ctx { margin: -4px 0 8px; font-style: italic; }
+  .ia-fatos { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+  .ia-fato { display: flex; flex-direction: column; gap: 1px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-page); min-width: 96px; }
+  .ia-fato small { font-size: 11px; color: var(--text-muted); line-height: 1.2; }
+  .ia-fato b { font-size: 17px; color: var(--text-primary); line-height: 1.25; }
+  .ia-fato i { font-size: 10.5px; color: var(--text-muted); font-style: normal; line-height: 1.2; }
+  .ia-fato.neg b { color: var(--danger); }
+  .ia-fato.pos b { color: var(--success); }
+  .ia-res .ia-acoes { margin-top: 10px; gap: 2px; }
+  .ia-res .ia-acoes button { border-color: transparent; background: transparent; font-weight: 600; }
+  .ia-res .ia-acoes button:hover { background: var(--accent-bg); border-color: transparent; }
+  .ia-fonte { margin-top: 8px; font-size: 11.5px; color: var(--text-muted); }
+  .ia-fonte summary { cursor: pointer; }
+  .ia-fonte .ia-nota { margin-top: 4px; border-top: 0; padding-top: 0; }
+  .ia-res .ia-resumo + .ia-fatos { margin-top: 0; }
+  /* Folha do Escritório — tabela de Vales compacta, como na planilha */
+  .table-wrap:has(> table.fe-vales) { width: fit-content; max-width: 100%; }
+  table.fe-vales { width: auto; min-width: 620px; }
+  table.fe-vales th { text-align: center; }
 </style>
 </head>
 <body>
@@ -3818,7 +3846,9 @@ function comLimite(fn) {
 // login (achado auditando egress do Supabase em 11/09/2026); como já se sabe
 // de antemão, pula direto pro modo sem ordenação em vez de descobrir errando.
 const TABELAS_SEM_COLUNA_ID = new Set([
-  'presenca', 'presenca_tecnicos', 'presenca_escritorio_pessoas', 'presenca_escritorio'
+  'presenca', 'presenca_tecnicos', 'presenca_escritorio_pessoas', 'presenca_escritorio',
+  // tabelas novas sem coluna id (chave própria; todas com menos de 1.000 linhas): antes cada login pedia "order by id", levava 400 e repetia sem ordem (26/10/2026, achado nos logs do Supabase)
+  'gasolina_ciclo', 'folha_historico', 'financeiro_historico', 'folha_escritorio_quadro', 'ordens_sp', 'chamados_giga', 'folha_pagamento_excluidos', 'valores_sp_historico'
 ]);
 // Busca TODAS as linhas de uma tabela. Primeiro pergunta só o TAMANHO da tabela
 // (head: true = traz a contagem sem trazer linha nenhuma); sabendo o total, pede
@@ -3843,7 +3873,7 @@ async function fetchAllRows(table, onPagina) {
   // primeira página sozinha — serve pra validar o "order by id" e já adianta dado
   let primeira = await pedirPagina(0);
   if (primeira.error && /column .*id|does not exist|42703/i.test(primeira.error.message || '')) {
-    ordenar = false;
+    ordenar = false; TABELAS_SEM_COLUNA_ID.add(table);   // aprendeu: não pede "order by id" de novo nesta sessão
     primeira = await pedirPagina(0);
   }
   if (primeira.error) { supabaseStatus = { ok: false, mensagem: primeira.error.message }; throw primeira.error; }
@@ -10360,7 +10390,7 @@ const IA = (() => {
     lucro: ['lucr', 'resultad', 'saldo', 'sobrou', 'margem'],
     rentab: ['se paga', 'se pagam', 'rentab', 'prejuiz', 'compensa', 'vale a pena', 'eficienc', 'dando lucro', 'dao lucro', 'dao prejuizo'],
     producao: ['produc', 'produz', 'produt', 'instalac', 'ativac', 'servico', 'ordens', 'ordem', 'concluid', 'realizad', 'volume'],
-    prazo: ['prazo', 'sla', 'vencid', 'atras', 'estour', 'pontual', 'no prazo', 'fora do prazo', '24h', '36h'],
+    prazo: ['prazo', 'sla', 'vencid', 'atras', 'estour', 'pontual', 'no prazo', 'fora do prazo', '24h', '36h', 'ate 24', 'ate 36', 'ate 48', '24hr', '36hr', '48hr', '24 hora', '36 hora', 'dentro de 24', 'faixa', 'outlier'],
     retorno: ['retorn', 'ifi', 'irr', 'reincid', 'retrabalh', 'ofensor'],
     tecnico: ['tecnic', 'instalador', 'equipe', 'colaborador', 'funcionari'],
     cidade: ['cidade', 'municip', 'regiao', 'regioes'],
@@ -10371,6 +10401,7 @@ const IA = (() => {
     tabela: ['tabela', 'listagem', 'lista de', 'listar', 'detalh'],
     ranking: ['ranking', 'top', 'maiores', 'menores', 'melhores', 'piores', 'lidera', 'quem mais', 'quem menos'],
     campo: ['em campo', 'no campo', 'tecnicos em campo', 'em atendimento', 'em execucao', 'na rua'],
+    equipe: ['quantos tecnicos', 'tecnicos ativ', 'tecnico ativ', 'tecnicos trabalh', 'tecnicos na rua', 'tecnicos escalad', 'quem esta trabalhando', 'quem trabalh', 'tecnicos disponiv', 'equipe de hoje'],
     urgente: ['mais cedo', 'mais urgente', 'primeiro prazo', 'proximo prazo', 'vence primeiro', 'vencendo', 'vence hoje', 'vencem hoje', 'a vencer', 'mais proximo'],
     statusdia: ['pendent', 'improdut', 'em rota', 'iniciad', 'andamento', 'situacao', 'status', 'cancelad', 'suspens', 'em aberto', 'carteira'],
     navegar: ['onde', 'abrir', 'abra', 'abre', 'ir para', 'vai para', 'leva', 'acessar', 'encontr', 'achar', 'localiz', 'qual tela', 'qual aba', 'qual pagina', 'menu'],
@@ -10856,6 +10887,38 @@ const IA = (() => {
     if (lista.length) res.tabelas.push({ titulo: `Técnicos em campo agora${emCampo.length > 60 ? ' (60 primeiros)' : ''}`, cab: ['Técnico', 'Cidade', 'O.S', 'Cliente', 'Serviço', 'Situação', 'Há quanto tempo'], linhas: lista.map(r => { const m = r.inicio ? Math.round((agora - new Date(r.inicio)) / 60000) : null; return [r.recurso, rotuloCidadeGeral(r.cidade) || '-', r.os, r.cliente || '-', r.tipo_atividade || '-', ROT_STATUS[classifyStatusGranular(r.status)], m === null || m < 0 ? '-' : m < 60 ? `${m}min` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`]; }) });
     return res;
   }
+  // "tem quantos técnicos ativos hoje": técnicos com ordens no CSV do dia (ou, em outro período, que produziram)
+  function skEquipe(p, per) {
+    const titulo = 'Técnicos ativos';
+    if (per && !ehDia(per)) {
+      const g = calcRG(per, p), l = g.tecnicos.filter(x => x.producao > 0).sort((a, b) => b.producao - a.producao);
+      if (!l.length) return vazio(titulo, `Não há produção importada para ${per.rotulo}, então não sei quantos técnicos trabalharam.`, [abrirRG(per, 'relgeral', 'Abrir Relatório Geral', 'Produção por técnico')]);
+      const t = g.tot;
+      return { titulo, sub: escopo(per, p), resumo: `${cap(rotCurto(per))} (${fmtP(per.inicio, per.fim)})${cidTxt(p)}: ${fmtN(l.length)} ${plural(l.length, 'técnico concluiu', 'técnicos concluíram')} ordens, ${fmtN(t.producao)} no total${t.tecDias ? ` — média de ${fmtDec(t.producao / t.tecDias, 1)} ordens por técnico por dia` : ''}. Quem mais produziu: ${l[0].nome} (${fmtN(l[0].producao)}).`,
+        cartoes: [cartao('Técnicos que produziram', fmtN(l.length), { positive: true }), cartao('Ordens concluídas', fmtN(t.producao)), cartao('Produtividade', t.tecDias ? fmtDec(t.producao / t.tecDias, 1) : '-', { sub: 'ordens por técnico por dia' })], graficos: [], blocos: [],
+        tabelas: [{ titulo: `Técnicos que produziram${l.length > 30 ? ' (30 primeiros)' : ''}`, cab: ['Técnico', 'Ordens', 'Dias trabalhados', 'Média por dia'], linhas: l.slice(0, 30).map(x => [x.nome, fmtN(x.producao), fmtN(x.dias.size), x.dias.size ? fmtDec(x.producao / x.dias.size, 1) : '-']) }],
+        abrir: [abrirRG(per, 'relgeral', 'Abrir tela original: Relatório Geral', 'Produção por técnico')], notas: ['Fonte: Produção importada + CSV da PCR. “Ativo” = técnico que concluiu ao menos uma ordem no período.'] };
+    }
+    const dias = diasComCsv();
+    if (!dias.length) return vazio(titulo, 'Nenhum CSV de atividades foi importado ainda (botão “Importar CSV de atividades” na barra lateral).', []);
+    let dia = per && ehDia(per) ? per.inicio : dias[dias.length - 1], nota = '';
+    if (!dias.includes(dia)) { nota = `Não há CSV de ${formatDate(dia)}; mostrando o dia mais recente importado (${formatDate(dias[dias.length - 1])}).`; dia = dias[dias.length - 1]; }
+    const rows = linhasDia(dia, p).filter(r => ehRecursoTecnico(r.recurso) && classifyStatusGranular(r.status) !== 'cancelado'), por = new Map();
+    rows.forEach(r => {
+      const k = normalizeHeader(r.recurso), o = por.get(k) || { nome: r.recurso, total: 0, conc: 0, campo: 0, pend: 0, imp: 0, cid: {} }, st = classifyStatusGranular(r.status);
+      o.total++; if (st === 'concluido') o.conc++; else if (st === 'em_rota' || st === 'iniciado') o.campo++; else if (st === 'pendente') o.pend++; else if (st === 'nao_concluido') o.imp++;
+      const c = rotuloCidadeGeral(r.cidade) || '-'; o.cid[c] = (o.cid[c] || 0) + 1; por.set(k, o);
+    });
+    const tecs = [...por.values()].sort((a, b) => b.total - a.total);
+    if (!tecs.length) return vazio(titulo, `Não há técnicos com ordens no CSV de ${formatDate(dia)}${cidTxt(p)}.`, [{ rota: 'pcr', rotulo: 'Abrir PCR' }]);
+    const nCampo = tecs.filter(x => x.campo > 0).length, nConc = tecs.filter(x => x.conc > 0).length, soPend = tecs.filter(x => !x.campo && !x.conc && !x.imp).length, media = rows.length / tecs.length, qd = cap(dataTxt(dia));
+    return { titulo, sub: `${formatDate(dia)}${cidTxt(p).replace(' em ', ' · ')}`,
+      resumo: `${qd} há ${fmtN(tecs.length)} ${plural(tecs.length, 'técnico', 'técnicos')} com ordens no CSV${cidTxt(p)}: ${fmtN(nCampo)} em campo agora, ${fmtN(nConc)} ${plural(nConc, 'já concluiu', 'já concluíram')} pelo menos uma ordem e ${fmtN(soPend)} ainda só ${plural(soPend, 'tem', 'têm')} pendentes. Média de ${fmtDec(media, 1)} ordens por técnico.`,
+      cartoes: [cartao('Técnicos com ordens', fmtN(tecs.length), { positive: true }), cartao('Em campo agora', fmtN(nCampo)), cartao('Já concluíram', fmtN(nConc)), cartao('Só com pendentes', fmtN(soPend)), cartao('Média de ordens', fmtDec(media, 1), { sub: 'por técnico no dia' })], graficos: [], blocos: [],
+      tabelas: [{ titulo: `Técnicos do dia${tecs.length > 60 ? ' (60 primeiros)' : ''}`, cab: ['Técnico', 'Cidade principal', 'Ordens', 'Concluídas', 'Em campo', 'Pendentes', 'Improdutivas'], linhas: tecs.slice(0, 60).map(x => [x.nome, Object.entries(x.cid).sort((a, b) => b[1] - a[1])[0][0], fmtN(x.total), fmtN(x.conc), fmtN(x.campo), fmtN(x.pend), fmtN(x.imp)]) }],
+      abrir: [{ rota: 'pcr', rotulo: 'Abrir tela original: PCR (técnicos agora)' }, { rota: 'reldia', rotulo: 'Abrir Relatório do Dia', dia }],
+      notas: [(nota ? nota + ' ' : '') + '“Ativo” = técnico com pelo menos uma ordem (fora as canceladas) no CSV de atividades do dia. Em campo = ordem em rota ou iniciada.'] };
+  }
   function skProducao(p, per) {
     const m = metricas('producao', per, p), titulo = 'Produção';
     if (m.vazio) return vazio(titulo, `Não há produção importada para ${per.rotulo}. A Produção vem das planilhas (BASE PRODUÇÃO / CONCLUÍDOS) e do CSV da PCR — confira se o período já foi importado.`, [abrirRG(per, 'relgeral', 'Abrir Relatório Geral', 'Produção por técnico')]);
@@ -11016,7 +11079,7 @@ const IA = (() => {
   }
 
   // ---------- entender o pedido ----------
-  const INDICADOR_NOME = { campo: 'Ordens em campo', producao: 'Produção', prazo: 'Prazo de reparo', retornos: 'IFI / IRR', financeiro: 'Receitas e despesas', rentab: 'Resultado por técnico', dia: 'Situação das ordens do dia', resumo: 'Resumo do fechamento' };
+  const INDICADOR_NOME = { equipe: 'Técnicos ativos', campo: 'Ordens em campo', producao: 'Produção', prazo: 'Prazo de reparo', retornos: 'IFI / IRR', financeiro: 'Receitas e despesas', rentab: 'Resultado por técnico', dia: 'Situação das ordens do dia', resumo: 'Resumo do fechamento' };
   function entender(texto, forcar) {
     forcar = forcar || {};
     const q = prep(texto), conc = conceitosDe(q), nomes = nomesTecnicos();
@@ -11032,26 +11095,33 @@ const IA = (() => {
     const ntopM = q.bruto.match(/\b(?:top|os|as|primeiros|melhores|piores|maiores|menores)\s+(\d{1,2})\b/), ntop = ntopM ? Math.min(Number(ntopM[1]), 50) : null;
     const catalogo = forcar.catalogo ? CATALOGO.find(c => c.id === forcar.catalogo) : procurarCatalogo(q);
     // pontos por habilidade
-    const P = { campo: 0, financeiro: 0, producao: 0, prazo: 0, retornos: 0, rentab: 0, dia: 0, resumo: 0 };
+    const P = { campo: 0, equipe: 0, financeiro: 0, producao: 0, prazo: 0, retornos: 0, rentab: 0, dia: 0, resumo: 0 };
     if (conc.has('receita')) P.financeiro += 3; if (conc.has('despesa')) P.financeiro += 3; if (conc.has('lucro')) P.financeiro += 3;
     if (conc.has('producao')) P.producao += 3; if (conc.has('prazo')) P.prazo += 3; if (conc.has('retorno')) P.retornos += 3;
     if (conc.has('rentab')) P.rentab += 4;
     if (conc.has('tecnico') && (conc.has('lucro') || conc.has('despesa')) && !conc.has('producao') && !conc.has('prazo')) { P.rentab += 4; P.financeiro = Math.min(P.financeiro, 2); }
     if (conc.has('statusdia')) P.dia += 3;
     if (conc.has('campo')) P.campo += 4;
+    if (conc.has('equipe')) P.equipe += 5;
     if (conc.has('urgente')) P.prazo += 3;
     if (conc.has('resumo') || (conc.has('fechamento') && !P.financeiro && !P.producao && !P.prazo && !P.retornos && !P.rentab)) P.resumo += 3;
     let skills = Object.keys(P).filter(k => P[k] >= 3).sort((a, b) => P[b] - P[a]);
     if (skills.includes('campo')) skills = skills.filter(k => k !== 'dia' && k !== 'producao');   // "quantas ordens em campo": 'ordens' sozinha não é pedido de produção
+    if (skills.includes('equipe')) skills = conc.has('campo') ? skills.filter(k => k !== 'equipe') : ['equipe'];   // "quantos técnicos ativos": é a equipe do dia, não produção
+    // 27/10/2026: 'ordens' sozinha NÃO é pedido de produção quando o assunto é prazo, retorno, situação do dia, campo ou equipe ("quantas ordens até 24hrs" caía em Produção)
+    if (skills.includes('producao') && !/produ|instal|ativac|servic|concluid|realizad/.test(q.bruto) && skills.some(k => ['prazo', 'retornos', 'dia', 'campo', 'equipe'].includes(k))) skills = skills.filter(k => k !== 'producao');
     if (skills.includes('dia') && skills.includes('producao') && !/produ|instal|ativac|servic/.test(q.bruto)) skills = skills.filter(k => k !== 'producao');   // "situação das ordens hoje": o cartão do dia já diz tudo
     if (skills.includes('resumo')) skills = ['resumo'];
     if (skills.includes('rentab')) skills = ['rentab'];
     // "ranking de técnicos em Guarujá este mês": sem outro indicador citado, ranking de técnicos/cidades é de produção
     if (!skills.length && !forcar.skills && !forcar.catalogo && (conc.has('ranking') || conc.has('tecnico') || conc.has('cidade')) && (periodos.length || cidades.length) && !conc.has('navegar') && !conc.has('inventario')) skills = ['producao'];
     if (forcar.skills) skills = forcar.skills;
+    // "do mês" / "da semana" sem dizer QUAL: o assistente pergunta em vez de escolher um período sozinho (27/10/2026)
+    let generico = null;
+    if (!periodos.length && !forcar.periodos) { if (/\b(mes|meses|mensal)\b/.test(q.bruto)) generico = 'mes'; else if (/\b(semana|semanal)\b/.test(q.bruto)) generico = 'semana'; }
     const inventario = conc.has('inventario') && !forcar.skills && !forcar.catalogo;
     const navegar = !inventario && conc.has('navegar') && !forcar.skills && !forcar.catalogo && (!skills.length || /\b(onde|abrir|abra|abre|ir para|vai para|qual (tela|aba|pagina))\b/.test(q.bruto));
-    const info = { q, conc, periodos, cidades, tec, ntop, catalogo: navegar || inventario ? null : catalogo, skills: navegar || inventario ? [] : skills, navegar, inventario, comparar: conc.has('comparar') || periodos.length >= 2, grafico: conc.has('grafico'), tabela: conc.has('tabela'), ranking: conc.has('ranking') };
+    const info = { q, conc, periodos, generico, cidades, tec, ntop, catalogo: navegar || inventario ? null : catalogo, skills: navegar || inventario ? [] : skills, navegar, inventario, comparar: conc.has('comparar') || periodos.length >= 2, grafico: conc.has('grafico'), tabela: conc.has('tabela'), ranking: conc.has('ranking') };
     if (!navegar && !inventario && !info.catalogo && !skills.length && conc.has('consumo')) info.limite = 'consumo';
     return info;
   }
@@ -11113,8 +11183,17 @@ const IA = (() => {
   };
   const pergunta = (texto, opcoes) => ({ pergunta: { texto, opcoes } });
   const perguntaPeriodo = (rotuloInd, S) => pergunta(`Para qual período você quer ver ${rotuloInd}?`, [
+    ...(CTX && CTX.periodos && CTX.periodos.length && !(CTX.periodos.length === 1 && [S.hoje, S.semana, S.mes, S.mesPassado, S.ciclo, S.cicloAnt].some(x => x.inicio === CTX.periodos[0].inicio && x.fim === CTX.periodos[0].fim)) ? [{ rotulo: 'O mesmo da conversa: ' + CTX.periodos.map(x => rotCurto(x)).join(' × '), forcar: { periodos: CTX.periodos } }] : []),
     { rotulo: 'Hoje', forcar: { periodos: [S.hoje] } }, { rotulo: 'Esta semana', forcar: { periodos: [S.semana] } }, { rotulo: 'Este mês', forcar: { periodos: [S.mes] } },
     { rotulo: 'Mês passado', forcar: { periodos: [S.mesPassado] } }, { rotulo: 'Ciclo atual (21→20)', forcar: { periodos: [S.ciclo] } }, { rotulo: 'Ciclo anterior', forcar: { periodos: [S.cicloAnt] } }]);
+  const MES_PT = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  const perguntaGenerico = (tipo, rotuloInd, S) => {
+    if (tipo === 'semana') { const s1 = anteriorDe(S.semana), s2 = anteriorDe(s1); return pergunta(`Qual semana você quer ver em ${rotuloInd}?`, [{ rotulo: 'Esta semana', forcar: { periodos: [S.semana] } }, { rotulo: 'Semana passada', forcar: { periodos: [s1] } }, { rotulo: 'Semana retrasada', forcar: { periodos: [s2] } }]); }
+    const [ha, hm] = hojeIso().split('-').map(Number), ops = [];
+    for (let k = 0; k < 4; k++) { let a = ha, m = hm - k; while (m < 1) { m += 12; a--; } const r = mesDe(a, m); ops.push({ rotulo: `${cap(MES_PT[m - 1])} de ${a}${k === 0 ? ' (este mês)' : k === 1 ? ' (mês passado)' : ''}`, forcar: { periodos: [mk('mes', r.inicio, r.fim, `${MES_PT[m - 1]} de ${a} (${fmtP(r.inicio, r.fim)})`)] } }); }
+    ops.push({ rotulo: 'Ciclo atual (21→20)', forcar: { periodos: [S.ciclo] } }, { rotulo: 'Ciclo anterior', forcar: { periodos: [S.cicloAnt] } });
+    return pergunta(`Qual mês você quer ver em ${rotuloInd}?`, ops);
+  };
   const perguntaDia = (rotuloInd, S) => pergunta(`${rotuloInd} é por dia (vem do CSV de atividades). Qual dia você quer ver?`, [
     { rotulo: 'Hoje', forcar: { periodos: [S.hoje] } }, { rotulo: 'Ontem', forcar: { periodos: [S.ontem] } }, ...(S.ultimoCsv ? [{ rotulo: `Último CSV importado (${formatDate(S.ultimoCsv.inicio)})`, forcar: { periodos: [S.ultimoCsv] } }] : [])]);
   const perguntaCiclo = (rotuloInd, S) => pergunta(`${rotuloInd} é fechado por ciclo (21→20), não por mês do calendário. Qual ciclo você quer ver?`, [
@@ -11164,6 +11243,11 @@ const IA = (() => {
     // técnicos parecidos: perguntar qual
     if (!info.tec.unico && info.tec.candidatos.length > 1 && (info.skills.length || info.catalogo)) return pergunta('Encontrei mais de um técnico parecido com o que você escreveu. Qual deles?', info.tec.candidatos.map(nm => ({ rotulo: nm, forcar: { tecnico: nm } })));
     if (info.limite === 'consumo') return { texto: { titulo: 'Consumo de internet', msg: 'O sistema não guarda o consumo (tráfego/GB) dos clientes, então não consigo dizer quem aumentou o consumo — e não vou inventar esse número. O que existe de dado real sobre clientes: reincidência de chamados (MAX), sinal e situação da ONU no Monitoramento, e contato/telefone.' }, abrir: [{ rota: 'relgeral', rotulo: 'Clientes que mais abriram chamados (MAX)', secao: 'MAX' }, { rota: 'u2000', rotulo: 'Monitoramento de OLTs e ONUs' }, { rota: 'contatos', rotulo: 'Contatos dos assinantes' }] };
+    // "do mês" sem dizer qual mês (ou "da semana"): pergunta, não escolhe sozinho
+    if (info.generico && !info.periodos.length) {
+      const precisa = info.catalogo ? !['dia', 'ciclos'].includes(info.catalogo.req) : info.skills.some(k => ['producao', 'prazo', 'retornos', 'rentab', 'resumo', 'equipe'].includes(k));
+      if (precisa) return perguntaGenerico(info.generico, (info.catalogo ? info.catalogo.titulo : INDICADOR_NOME[info.skills[0]]).toLowerCase(), S);
+    }
     // comparativo de produção entre CICLOS só serve pra ciclos; mês/semana/dia comparam pelas habilidades
     if (info.catalogo && info.catalogo.id === 'compProdCiclos' && info.periodos.length && !info.periodos.every(x => x.tipo === 'ciclo' || x.tipo === 'ciclos') && info.skills.length) info = { ...info, catalogo: null };
     // "gráfico por cidade": o gráfico da habilidade de produção é melhor que só a tabela do catálogo
@@ -11177,7 +11261,7 @@ const IA = (() => {
       skills = ULTIMO.skills; if (!periodos.length) periodos = ULTIMO.periodos;
     }
     if (!skills.length) return null;   // quem chama cai na busca de telas
-    if (skills.includes('campo') || skills.includes('dia')) info = { ...info, comparar: false };   // "quantas ordens em campo" não é comparação
+    if (skills.includes('campo') || skills.includes('dia') || skills.includes('equipe')) info = { ...info, comparar: false };   // "quantas ordens em campo" não é comparação
     const dadosSkills = skills.filter(s => ['financeiro', 'producao', 'prazo', 'retornos', 'resumo'].includes(s));
     // 1) comparação de períodos
     if (dadosSkills.length && info.comparar) {
@@ -11199,6 +11283,7 @@ const IA = (() => {
       let per = periodos[0];
       if (sk === 'dia') { todos.push(skDia(base, per && ehDia(per) ? per : null)); continue; }
       if (sk === 'campo') { todos.push(skCampo(base, per && ehDia(per) ? per : null)); continue; }
+      if (sk === 'equipe') { todos.push(skEquipe(base, per || null)); continue; }
       if (sk === 'financeiro') {
         let pf = periodos;
         if (!pf.length && (info.grafico || /\bevolu|historic|por ciclo\b/.test(bruto))) { const l = listaCiclos(6); pf = [mk('ciclos', l[0].inicio, l[l.length - 1].fim, 'últimos 6 ciclos', { lista: l })]; }
@@ -11273,7 +11358,7 @@ const IA = (() => {
   }
   function coletarResposta(res) {
     const titulo = txtDe(res.querySelector('h4')) || 'Resposta do assistente', resumo = txtDe(res.querySelector('.ia-resumo')), sub = txtDe(res.querySelector('.ia-sub'));
-    const cartoes = [...res.querySelectorAll('.stat-card')].map(c => [txtDe(c.querySelector('.stat-label')), txtDe(c.querySelector('.stat-value')), txtDe(c.querySelector('.stat-sub'))]);
+    const cartoes = [...res.querySelectorAll('.ia-fato')].map(c => [txtDe(c.querySelector('small')), txtDe(c.querySelector('b')), txtDe(c.querySelector('i'))]);
     const tabelas = [], vistos = new Map();
     const nomeUnico = n => { const k = n || 'Tabela'; const c = (vistos.get(k) || 0) + 1; vistos.set(k, c); return c > 1 ? `${k} ${c}` : k; };
     res.querySelectorAll('[data-grafico]').forEach(g => { if (g._xls && g._xls.linhas && g._xls.linhas.length) tabelas.push({ titulo: nomeUnico('Gráfico: ' + (txtDe(g.closest('.ia-graf, .panel') && g.closest('.ia-graf, .panel').querySelector('h5, h3')) || 'dados')), cab: g._xls.cab, linhas: g._xls.linhas.map(l => l.map(String)), totais: [] }); });
@@ -11318,16 +11403,17 @@ const IA = (() => {
     const notas = [];
     if (forcar && (forcar.periodos || forcar.skills || forcar.catalogo)) return notas;
     if ((!info.skills.length && !info.catalogo) || info.navegar || info.inventario) return notas;
-    const b = info.q.bruto, seg = SEGUIMENTO.test(b) || info.q.t.length <= 3;
-    const doDia = info.skills.some(k => k === 'dia' || k === 'campo') || (info.catalogo && info.catalogo.req === 'dia') || (info.skills.includes('prazo') && /\b(quant|mais cedo|urgente|abert|venc|tela|agora|proxim|hoje)/.test(b));
+    const b = info.q.bruto, seg = SEGUIMENTO.test(b);   // 27/10/2026: só é seguimento quando a frase diz ("e em Santos?", "e o dele?") — antes qualquer pergunta curta herdava o técnico anterior
+    const refPessoa = /\b(dele|dela|desse tecnico|dessa tecnica|nesse tecnico)\b/.test(b), refCidade = /\b(nessa cidade|nesta cidade|dessa cidade)\b/.test(b);
+    const doDia = info.skills.some(k => k === 'dia' || k === 'campo' || k === 'equipe') || (info.catalogo && info.catalogo.req === 'dia') || (info.skills.includes('prazo') && /\b(mais cedo|urgente|abert|venc|tela|agora|proxim|hoje)/.test(b));
     const nomeP = x => `${rotCurto(x)} (${fmtP(x.inicio, x.fim)})`;
     if (seg && CTX.fech && info.skills.includes('producao') && !info.catalogo && !info.grafico && !info.comparar) { info.catalogo = CATALOGO.find(c => c.id === 'valorOrdens'); info.skills = []; notas.push('Como você pediu o fechamento, mostrei o fechamento de produção: os serviços do período e quanto a GIGA paga por eles.'); }
     if (!info.periodos.length) {
       if (doDia) { info.periodos = [SUG().hoje]; notas.push('Você não citou o dia, então considerei hoje.'); }
-      else if (CTX.periodos && CTX.periodos.length) { info.periodos = CTX.periodos; notas.push(`Usei o mesmo período da conversa: ${CTX.periodos.map(nomeP).join(' × ')}.`); }
+      else if (seg && !info.generico && CTX.periodos && CTX.periodos.length) { info.periodos = CTX.periodos; notas.push(`Usei o mesmo período da conversa: ${CTX.periodos.map(nomeP).join(' × ')}.`); }
     }
-    if (seg && !info.cidades.length && CTX.cidades.length) { info.cidades = CTX.cidades; notas.push(`Mantive as cidades da pergunta anterior: ${CTX.cidades.map(rotuloCidadeGeral).join(', ')}.`); }
-    if (seg && !info.tec.unico && !info.tec.candidatos.length && CTX.tecnico) { info.tec = { unico: CTX.tecnico, candidatos: [CTX.tecnico] }; notas.push(`Mantive o técnico da pergunta anterior: ${CTX.tecnico}.`); }
+    if ((seg || refCidade) && !info.cidades.length && CTX.cidades.length) { info.cidades = CTX.cidades; notas.push(`Mantive as cidades da pergunta anterior: ${CTX.cidades.map(rotuloCidadeGeral).join(', ')}.`); }
+    if ((seg || refPessoa) && !info.tec.unico && !info.tec.candidatos.length && CTX.tecnico) { info.tec = { unico: CTX.tecnico, candidatos: [CTX.tecnico] }; notas.push(`Mantive o técnico da pergunta anterior: ${CTX.tecnico}.`); }
     return notas;
   }
   function perguntar(texto, forcar, rotuloExibido) {
@@ -11347,6 +11433,12 @@ const IA = (() => {
       else if (r && r.resultados) {
         resp = { papel: 'ia', resultados: r.resultados };
         r.resultados.forEach(x => { if (!x.vazio && notas.length) x.contexto = notas; });
+        if (r.resultados.every(x => x.vazio) && info.periodos.length) {
+          const S = SUG(), cic = info.skills.includes('financeiro') || (info.catalogo && info.catalogo.req === 'ciclos'), soDia = info.skills.some(k => ['dia', 'campo', 'equipe'].includes(k)) || (info.catalogo && info.catalogo.req === 'dia');
+          const mesmo = x => info.periodos.some(q => q.inicio === x.inicio && q.fim === x.fim);
+          const ops = (cic ? [S.ciclo, S.cicloAnt] : soDia ? [S.hoje, S.ontem, S.ultimoCsv] : [S.hoje, S.ontem, S.semana, S.mes, S.mesPassado, S.ciclo, S.cicloAnt]).filter(x => x && !mesmo(x)).map(x => ({ rotulo: cap(x.rotulo), forcar: { periodos: [x] } }));
+          if (ops.length) resp = { papel: 'ia', pergunta: { texto: `${r.resultados[0].vazio} Quer olhar outro período?`, opcoes: ops }, origem: texto, forcarBase: forcar };
+        }
         if (r.resultados.some(x => !x.vazio)) CTX = { periodos: info.periodos.length ? info.periodos : CTX.periodos, cidades: info.cidades.length ? info.cidades : CTX.cidades, tecnico: info.tec.unico || CTX.tecnico, fech: info.conc.has('fechamento') };
       }
       else resp = respostaNavegacao(texto, info);
@@ -11360,7 +11452,10 @@ const IA = (() => {
     const docs = rankNav(texto, rotas);
     let dados = []; try { dados = (window.buscaGlobalItens ? window.buscaGlobalItens(texto) : []).filter(x => ['O.S', 'Contratos', 'Clientes', 'Técnicos', 'Monitoramento'].includes(x.grupo)); } catch (e) { dados = []; }
     if (dados.length) return { papel: 'ia', texto: { titulo: 'Encontrei no sistema', msg: 'Clique para abrir o detalhe.' }, abrir: [...dados.slice(0, 10).map(x => ({ rotulo: x.titulo, sub: x.sub, acao: x.acao })), ...docs.slice(0, 3).map(d => ({ rota: d.rota, rotulo: d.titulo, sub: d.sub, secao: d.secao }))] };
-    if (!docs.length) return { papel: 'ia', vazio: 'Não encontrei um relatório nem uma tela que corresponda a esse pedido — então não vou montar um gráfico sem base confiável. Tente dizer o indicador e o período, por exemplo: “produção deste mês”, “prazo de ontem”, “compare o ciclo atual com o anterior” ou “onde vejo as multas”. Pergunte “quais relatórios existem?” para ver o que eu sei mostrar.', sugestoes: true };
+    if (!docs.length) return { papel: 'ia', origem: texto, pergunta: { texto: 'Não tenho certeza do que você quer ver — prefiro perguntar a chutar um número errado. Sobre qual assunto é a sua pergunta?', opcoes: [
+      { rotulo: 'Produção (ordens concluídas)', forcar: { skills: ['producao'] } }, { rotulo: 'Prazo de reparo (24h)', forcar: { skills: ['prazo'] } }, { rotulo: 'Retornos IFI / IRR', forcar: { skills: ['retornos'] } },
+      { rotulo: 'Receitas e despesas', forcar: { skills: ['financeiro'] } }, { rotulo: 'Ordens de hoje (pendentes, em rota…)', forcar: { skills: ['dia'] } }, { rotulo: 'Ordens em campo agora', forcar: { skills: ['campo'] } },
+      { rotulo: 'Técnicos ativos', forcar: { skills: ['equipe'] } }, { rotulo: 'Resultado por técnico (quem se paga)', forcar: { skills: ['rentab'] } }] } };
     return { papel: 'ia', texto: { titulo: 'Encontrei estas telas', msg: '' }, abrir: docs.slice(0, 6).map(d => ({ rota: d.rota, rotulo: d.titulo, sub: d.sub, secao: d.secao })) };
   }
   function abrirTela(a) {
@@ -11378,7 +11473,7 @@ const IA = (() => {
       } catch (e) { /* a tela abriu; só o filtro não foi aplicado */ }
     }, 350);
   }
-  const SUGESTOES = ['Quantas ordens estão em campo?', 'Quantas pendentes hoje?', 'Qual o prazo mais cedo de hoje?', 'Fechamento de produção do ciclo anterior', 'Como está a produção este mês?', 'Prazo de reparo do mês passado', 'Compare o fechamento atual com o anterior', 'Receitas e despesas do ciclo atual', 'IFI e IRR por técnico este mês', 'Situação das ordens hoje', 'Técnicos que não se pagam no ciclo atual', 'Quais relatórios existem sobre prazo?'];
+  const SUGESTOES = ['Quantas ordens estão em campo?', 'Quantos técnicos estão ativos hoje?', 'Quantas pendentes hoje?', 'Qual o prazo mais cedo de hoje?', 'Fechamento de produção do ciclo anterior', 'Como está a produção este mês?', 'Prazo de reparo do mês passado', 'Compare o fechamento atual com o anterior', 'Receitas e despesas do ciclo atual', 'IFI e IRR por técnico este mês', 'Situação das ordens hoje', 'Técnicos que não se pagam no ciclo atual', 'Quais relatórios existem sobre prazo?'];
   const celula = c => c && typeof c === 'object' && 'h' in c ? c.h : esc(String(c === null || c === undefined ? '' : c));
   function htmlTabela(t, id) {
     const cab = t.cabHtml ? t.cabHtml.map(c => `<th>${c}</th>`).join('') : t.cab.map(c => `<th>${esc(c)}</th>`).join('');
@@ -11410,21 +11505,21 @@ const IA = (() => {
       else if (m.vazio) h = `<div class="ia-bolha">${esc(m.vazio)}</div>${m.sugestoes ? `<div class="ia-opcoes">${SUGESTOES.slice(0, 4).map(s => `<button type="button" class="ia-chip" data-s="${esc(s)}">${esc(s)}</button>`).join('')}</div>` : ''}`;
       else if (m.resultados) {
         h = m.resultados.map(r => {
-          if (r.vazio) return `<div class="ia-res"><h4>${esc(r.titulo)}</h4><div class="ia-bolha ia-aviso">${esc(r.vazio)}</div>${botoesAbrir(r.abrir)}</div>`;
+          if (r.vazio) return `<div class="ia-res"><h4 class="ia-cap">${esc(r.titulo)}</h4><div class="ia-resumo">${esc(r.vazio)}</div>${botoesAbrir(r.abrir)}</div>`;
           const barra = '<div class="ia-acoes fora-da-imagem"><button type="button" class="ia-ac" data-ac="cheia" title="Abrir esta resposta em tela cheia">⛶ Tela cheia</button><button type="button" class="ia-ac" data-ac="img" title="Gerar imagem desta resposta">🖼 Imagem</button><button type="button" class="ia-ac" data-ac="pdf" title="Gerar PDF desta resposta">📄 PDF</button><button type="button" class="ia-ac" data-ac="xls" title="Baixar Excel desta resposta">⤓ Excel</button></div>';
-          let x = `<div class="ia-res"><div class="ia-res-top"><h4>${esc(r.titulo)}</h4>${barra}</div><div class="ia-sub">${esc(r.sub || '')}</div>${(r.contexto || []).map(c => `<div class="ia-ctx">↳ ${esc(c)}</div>`).join('')}${r.resumo ? `<div class="ia-resumo">${esc(r.resumo)}</div>` : ''}`;
-          if (r.cartoes && r.cartoes.length) x += `<div class="cards-grid ia-cards">${r.cartoes.map(c => metricCard(c.r, c.v, c.negative, { positive: c.positive, sub: c.sub })).join('')}</div>`;
+          let x = `<div class="ia-res"><h4 class="ia-cap">${esc(r.titulo)}</h4><div class="ia-sub">${esc(r.sub || '')}</div>${r.resumo ? `<div class="ia-resumo">${esc(r.resumo)}</div>` : ''}${(r.contexto || []).map(c => `<div class="ia-ctx">↳ ${esc(c)}</div>`).join('')}`;
+          if (r.cartoes && r.cartoes.length) x += `<div class="ia-fatos">${r.cartoes.map(c => `<div class="ia-fato${c.negative ? ' neg' : ''}${c.positive ? ' pos' : ''}"><small>${esc(c.r)}</small><b>${esc(c.v)}</b>${c.sub ? `<i>${esc(c.sub)}</i>` : ''}</div>`).join('')}</div>`;
           (r.avisos || []).forEach(a => { x += `<div class="ia-bolha ia-aviso">${esc(a)}</div>`; });
           const htmlGraficos = () => (r.graficos || []).forEach(g => { const id = `ia-g-${++SEQ}`; x += `<div class="ia-graf"><h5>${esc(g.titulo)}</h5><div id="${id}"></div></div>`; pos.push(() => g.fn(id)); });
           const htmlBlocos = () => (r.blocos || []).forEach(b => { const id = `ia-b-${++SEQ}`; x += `<div class="ia-bloco"><h5>${esc(b.titulo)}</h5><div id="${id}-w" class="ia-html"></div></div>`; pos.push(() => { const w = document.getElementById(`${id}-w`); if (w) { w.innerHTML = b.fn(id); if (b.depois) b.depois(id); } }); });
           if (r.blocosPrimeiro) { htmlBlocos(); htmlGraficos(); } else { htmlGraficos(); htmlBlocos(); }
           (r.tabelas || []).forEach(t => { x += htmlTabela(t, `ia-t-${++SEQ}`); });
           if (r.mostrar && r.mostrar.length) x += `<div class="ia-opcoes">${r.mostrar.map(o => `<button type="button" class="ia-chip" data-cat="${esc(o.id)}" data-nome="${esc(o.rotulo)}">Mostrar aqui: ${esc(o.rotulo)}</button>`).join('')}</div>`;
-          x += botoesAbrir(r.abrir, true) + (r.notas && r.notas.length ? `<div class="ia-nota">${[...new Set(r.notas.filter(Boolean))].map(esc).join('<br>')}</div>` : '');
+          x += botoesAbrir(r.abrir, true) + (r.notas && r.notas.length ? `<details class="ia-fonte fora-da-imagem"><summary>Fonte e observações</summary><div class="ia-nota">${[...new Set(r.notas.filter(Boolean))].map(esc).join('<br>')}</div></details>` : '') + barra;
           return x + '</div>';
         }).join('');
       }
-      d.innerHTML = h; box.appendChild(d);
+      d.innerHTML = '<span class="ia-av" aria-hidden="true">✦</span><div class="ia-corpo">' + h + '</div>'; box.appendChild(d);
     });
     pos.forEach(f => { try { f(); } catch (e) { /* um gráfico que falha não derruba a resposta */ } });
     // dentro da janela de "tela cheia" a resposta sai do painel: os botões dela precisam do próprio ouvinte
@@ -30622,6 +30717,7 @@ async function excluirColaboradorEscritorio(periodo, nome, aoSalvar) {
 
 function renderFolhaEscritorio() {
   const { lista, atual } = periodosFolhaEscritorio();
+  const valesExtra = new Set();   // colaboradores incluídos à mão na tabela de Vales (sem vale lançado ainda)
   document.getElementById('content').innerHTML = `<div class="toolbar toolbar-fixa">
     <div class="field"><label>Período</label><select id="fe-periodo">
       ${lista.map(p => `<option value="${esc(p)}"${p === atual ? ' selected' : ''}>${esc(p)}</option>`).join('')}
@@ -30722,6 +30818,8 @@ function renderFolhaEscritorio() {
         <button class="btn-secundario" id="fe-descartar" disabled>Descartar alterações</button>
         <span id="fe-msg" style="font-size:13px;color:var(--text-muted)"></span>
       </div>` : ''}
+      <div class="section-heading" id="fe-vales-titulo">Vales<span class="sec-nota">valor descontado, parcela e total da dívida de cada colaborador</span></div>
+      <div id="fe-vales" style="margin-bottom:1.5rem"></div>
       <div class="section-heading">Holerite<span class="sec-nota">no formato que vai pra assinatura</span></div>
       <div class="panel" style="margin-bottom:1.5rem">
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
@@ -30755,36 +30853,73 @@ function renderFolhaEscritorio() {
       if (p('.fe-proventos')) p('.fe-proventos').textContent = money(l.proventos);
       if (p('.fe-descontos')) p('.fe-descontos').textContent = money(l.descontos);
       if (p('.fe-receber'))   p('.fe-receber').textContent = money(l.total_receber);
+      if (typeof atualizarTotaisVales === 'function') atualizarTotaisVales();
       const msg = document.getElementById('fe-msg');
       if (msg) msg.innerHTML = '<span style="color:var(--warn-text)">Há alterações não salvas.</span>';
       const bd = document.getElementById('fe-descartar'); if (bd) bd.disabled = false;
       desenharHolerite();
     };
-    document.querySelectorAll('#fe-body input.folha-edit-moeda').forEach(el => {
-      el.addEventListener('input', () => {
-        const cent = parseInt(el.value.replace(/\D/g, '') || '0', 10);
-        el.dataset.centavos = cent;
-        el.value = formatCurrency(cent / 100);
-        el.classList.toggle('tem-valor', cent > 0);
-        const l = acha(el.dataset.pessoa); if (!l) return;
-        l[el.dataset.campo] = cent / 100;
-        refazLinha(l);
-      });
+    // o mesmo campo pode estar em dois lugares (tabela principal e tabela de Vales): digitar num atualiza o outro
+    const sincronizarCampos = (l, origem) => document.querySelectorAll('#fe-body input[data-pessoa]').forEach(i => {
+      if (i === origem || i.dataset.pessoa !== l.pessoa) return;
+      const v = l[i.dataset.campo];
+      if (i.classList.contains('folha-edit-moeda')) { const c = Math.round((Number(v) || 0) * 100); i.dataset.centavos = c; i.value = formatCurrency(c / 100); i.classList.toggle('tem-valor', c > 0); }
+      else if (i.classList.contains('fe-texto')) i.value = v || '';
     });
-    document.querySelectorAll('#fe-body input[type="number"].folha-edit').forEach(el => {
-      el.addEventListener('input', () => {
-        const l = acha(el.dataset.pessoa); if (!l) return;
-        l[el.dataset.campo] = Math.max(0, Number(el.value) || 0);
-        refazLinha(l);
+    const ligarEdicao = raiz => {
+      raiz.querySelectorAll('input.folha-edit-moeda').forEach(el => {
+        el.addEventListener('input', () => {
+          const cent = parseInt(el.value.replace(/\D/g, '') || '0', 10);
+          el.dataset.centavos = cent;
+          el.value = formatCurrency(cent / 100);
+          el.classList.toggle('tem-valor', cent > 0);
+          const l = acha(el.dataset.pessoa); if (!l) return;
+          l[el.dataset.campo] = cent / 100;
+          refazLinha(l); sincronizarCampos(l, el);
+        });
       });
-    });
-    document.querySelectorAll('#fe-body input.fe-texto').forEach(el => {
-      el.addEventListener('input', () => {
-        const l = acha(el.dataset.pessoa); if (!l) return;
-        l[el.dataset.campo] = el.value.trim();
-        refazLinha(l);
+      raiz.querySelectorAll('input[type="number"].folha-edit').forEach(el => {
+        el.addEventListener('input', () => {
+          const l = acha(el.dataset.pessoa); if (!l) return;
+          l[el.dataset.campo] = Math.max(0, Number(el.value) || 0);
+          refazLinha(l);
+        });
       });
-    });
+      raiz.querySelectorAll('input.fe-texto').forEach(el => {
+        el.addEventListener('input', () => {
+          const l = acha(el.dataset.pessoa); if (!l) return;
+          l[el.dataset.campo] = el.value.trim();
+          refazLinha(l); sincronizarCampos(l, el);
+        });
+      });
+    };
+    ligarEdicao(document.getElementById('fe-body'));
+    // ---- tabela de Vales (28/10/2026, pedido do cliente: igual à da planilha — VALE | Valor | Parcela | Valor total da dívida) ----
+    // "Valor" e "Parcela" são os MESMOS campos "Desconto vale" / "Parcelas do vale" da tabela principal; só a dívida total é campo próprio (divida_vale)
+    function desenharVales() {
+      const box = document.getElementById('fe-vales'); if (!box) return;
+      const n = v => Number(v) || 0;
+      const temVale = l => n(l.desconto_vale) > 0 || l.parcela_vale || n(l.divida_vale) > 0 || valesExtra.has(l.pessoa);
+      const doVale = linhas.filter(temVale), fora = linhas.filter(l => !temVale(l));
+      const celM = (l, campo) => pode ? inpDin(l, campo) : money(l[campo]);
+      box.innerHTML = `<div class="table-wrap"><table class="data-table fe-vales">
+          <thead><tr><th>VALE</th><th>Valor</th><th>Parcela</th><th>Valor total da dívida</th></tr></thead>
+          <tbody>${doVale.length ? doVale.map(l => `<tr data-vale="${esc(l.pessoa)}"><td style="font-weight:700">${esc(l.pessoa)}</td><td>${celM(l, 'desconto_vale')}</td><td style="text-align:center">${inpTexto(l, 'parcela_vale', 90)}</td><td>${celM(l, 'divida_vale')}</td></tr>`).join('')
+            : `<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">Nenhum vale lançado neste período.${pode && fora.length ? ' Use “Incluir colaborador” abaixo.' : ''}</td></tr>`}
+            ${doVale.length ? `<tr class="total-row"><td>Total</td><td id="fe-vale-tot-val">${money(doVale.reduce((a, l) => a + n(l.desconto_vale), 0))}</td><td></td><td id="fe-vale-tot-div">${money(doVale.reduce((a, l) => a + n(l.divida_vale), 0))}</td></tr>` : ''}
+          </tbody></table></div>
+        ${pode && fora.length ? `<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:8px"><div class="field" style="margin:0"><label>Incluir colaborador na tabela de vales</label><select id="fe-vale-add"><option value="">Escolha…</option>${fora.map(l => `<option value="${esc(l.pessoa)}">${esc(l.pessoa)}</option>`).join('')}</select></div><button type="button" class="btn-secundario" id="fe-vale-add-btn" style="padding:8px 14px">+ Incluir</button></div>` : ''}`;
+      ligarEdicao(box);
+      const b = document.getElementById('fe-vale-add-btn');
+      if (b) b.addEventListener('click', () => { const v = document.getElementById('fe-vale-add').value; if (!v) return; valesExtra.add(v); desenharVales(); });
+    }
+    const atualizarTotaisVales = () => {
+      const n = v => Number(v) || 0, a = document.getElementById('fe-vale-tot-val'), d = document.getElementById('fe-vale-tot-div');
+      const vis = [...document.querySelectorAll('#fe-vales tr[data-vale]')].map(tr => acha(tr.dataset.vale)).filter(Boolean);
+      if (a) a.textContent = money(vis.reduce((x, l) => x + n(l.desconto_vale), 0));
+      if (d) d.textContent = money(vis.reduce((x, l) => x + n(l.divida_vale), 0));
+    };
+    desenharVales();
     // Descartar: as edições vivem só nas linhas da tela (o banco/DB só muda no Salvar), então refazer a tela volta tudo ao último salvo
     const btnDesc = document.getElementById('fe-descartar');
     if (btnDesc) btnDesc.addEventListener('click', () => {
@@ -31602,6 +31737,7 @@ const SAUDE_CHECAGENS_SQL = [
   { passo: 'PASSO-32', rotulo: 'Histórico de alterações da Folha', tabela: 'folha_historico' },
   { passo: 'PASSO-58', rotulo: 'Histórico de alterações de Receitas e Despesas', tabela: 'financeiro_historico' },
   { passo: 'PASSO-59', rotulo: 'Folha do Escritório: parcelas do vale', tabela: 'folha_escritorio', coluna: 'parcela_vale' },
+  { passo: 'PASSO-64', rotulo: 'Folha do Escritório: valor total da dívida do vale', tabela: 'folha_escritorio', coluna: 'divida_vale' },
   { passo: 'PASSO-60', rotulo: 'Contatos dos assinantes (aba Contatos)', tabela: 'contatos_assinantes' },
   { passo: 'PASSO-61', rotulo: 'PCR: telefone do assinante vindo do CSV', tabela: 'pcr', coluna: 'telefone,celular,email,numero_cliente' },
   { passo: 'PASSO-62', rotulo: 'Contatos: outros telefones do cliente (Oracle)', tabela: 'contatos_assinantes', coluna: 'outros_telefones' },
