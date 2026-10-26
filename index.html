@@ -3184,6 +3184,15 @@
   /* ASSISTENTE DE ANÁLISE (24/10/2026, só Analista): painel lateral com conversa, cartões, gráficos e os mesmos relatórios das telas */
   body.ia-aberto .modal-backdrop, body.ia-aberto .ampliar-fundo { z-index: 960; }   /* janelas abertas a partir do assistente (lista de improdutivas, Excel…) ficam POR CIMA do painel (z 930) */
   body.ia-aberto #toast-area { z-index: 970; bottom: 78px; }
+
+  .ia-painel.ia-cheia { width: 100vw; }
+  .ia-res-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .ia-acoes { display: flex; gap: 5px; flex-wrap: wrap; }
+  .ia-acoes button { border: 1px solid var(--border); background: var(--card-bg); color: var(--text-secondary); border-radius: 8px; padding: 4px 9px; font-size: 11.5px; font-weight: 700; cursor: pointer; }
+  .ia-acoes button:hover { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+  .ia-resumo { background: var(--accent-bg); border-left: 3px solid var(--accent); border-radius: 8px; padding: 10px 12px; font-size: 14px; line-height: 1.55; color: var(--text-primary); margin: 0 0 12px; }
+  .ia-ctx { font-size: 11.5px; color: var(--text-muted); margin: -4px 0 6px; }
+  .ampliado.ia-res { margin: 0; }
   #btn-ia[hidden] { display: none !important; }   /* o visual v2 dá display:flex aos botões do topo e vencia o atributo hidden: o Escritório (que também tem o v2) via o botão */
   @media (max-width: 1280px) { #btn-ia .ia-btn-txt { display: none; } }
   .ia-painel { position: fixed; top: 0; right: 0; bottom: 0; width: min(540px, 100vw); z-index: 930; display: none; flex-direction: column; background: var(--bg-page); color: var(--text-primary); border-left: 1px solid var(--border); box-shadow: -18px 0 50px rgba(2, 8, 30, .28); }
@@ -10361,6 +10370,8 @@ const IA = (() => {
     grafico: ['grafic', 'chart', 'visual', 'pizza', 'barras', 'linhas'],
     tabela: ['tabela', 'listagem', 'lista de', 'listar', 'detalh'],
     ranking: ['ranking', 'top', 'maiores', 'menores', 'melhores', 'piores', 'lidera', 'quem mais', 'quem menos'],
+    campo: ['em campo', 'no campo', 'tecnicos em campo', 'em atendimento', 'em execucao', 'na rua'],
+    urgente: ['mais cedo', 'mais urgente', 'primeiro prazo', 'proximo prazo', 'vence primeiro', 'vencendo', 'vence hoje', 'vencem hoje', 'a vencer', 'mais proximo'],
     statusdia: ['pendent', 'improdut', 'em rota', 'iniciad', 'andamento', 'situacao', 'status', 'cancelad', 'suspens', 'em aberto', 'carteira'],
     navegar: ['onde', 'abrir', 'abra', 'abre', 'ir para', 'vai para', 'leva', 'acessar', 'encontr', 'achar', 'localiz', 'qual tela', 'qual aba', 'qual pagina', 'menu'],
     inventario: ['quais relatorios', 'que relatorios', 'quais tabelas', 'que tabelas', 'quais graficos', 'que graficos', 'o que voce consegue', 'o que voce faz', 'o que posso ver', 'o que existe', 'catalogo', 'ajuda', 'o que tem de'],
@@ -10523,7 +10534,8 @@ const IA = (() => {
     { id: 'pendentes', titulo: 'O.S pendentes do dia', req: 'dia', onde: { rota: 'reldia', secao: 'Pendentes do dia' }, chaves: [['pendent'], ['lista', 'tabela', 'quais', 'detalh', 'ordens', 'os ', 'hoje', 'ontem', 'agora', 'do dia', 'de dia', 'urgente', 'vencer']], desc: 'ordens pendentes, mais urgente primeiro, com tempo para vencer' },
     { id: 'aExecutar', titulo: 'A Executar — por cidade e tipo de serviço', req: 'dia', onde: { rota: 'parcialdia', secao: 'A Executar' }, chaves: [['a executar', 'executar', 'carteira']], desc: 'concluído × a executar (pendente) por cidade e tipo de serviço' },
     { id: 'resumoFin', titulo: 'Resumo financeiro do ciclo', req: 'ciclos', onde: { rota: 'dashboard', secao: 'Resumo financeiro' }, chaves: [['financ', 'receit', 'despes', 'lucro', 'custo', 'gast'], ['tabela', 'resumo financeiro', 'categoria', 'categorias', 'detalh']], desc: 'despesas por categoria, total de despesas, receita das ordens e lucro por ciclo' },
-    { id: 'compProdCiclos', titulo: 'Comparativo de produção entre ciclos', req: 'ciclos', onde: { rota: 'dashboard', secao: 'Comparativo de produção' }, chaves: [['produc', 'ordens', 'servico'], ['compar', 'evolu', 'fechament', 'ciclo']], desc: 'serviços, técnicos, produtividade e IFI/IRR de cada ciclo lado a lado' },
+    { id: 'valorOrdens', titulo: 'Fechamento de produção — serviços e valor pago pela GIGA', req: 'periodo', onde: { rota: 'dashboard', secao: 'Valor das Ordens' }, chaves: [['fechament', 'valor das ordens', 'giga'], ['produc', 'servic', 'ordens', 'pela giga', 'pagou', 'paga', 'pago']], desc: 'cada serviço do período, quanto a GIGA paga à JH, quanto a JH paga ao técnico (normal e 26 dias), quantidade e total' },
+    { id: 'compProdCiclos', titulo: 'Comparativo de produção entre ciclos', req: 'ciclos', onde: { rota: 'dashboard', secao: 'Comparativo de produção' }, chaves: [['produc', 'ordens', 'servico'], ['compar', 'evolu', 'versus']], desc: 'serviços, técnicos, produtividade e IFI/IRR de cada ciclo lado a lado' },
   ];
   function procurarCatalogo(q) {
     const ach = CATALOGO.filter(c => c.chaves.every(g => temGrupo(q, g)));
@@ -10745,6 +10757,13 @@ const IA = (() => {
       const rows = linhasDia(per.inicio, p);
       return { titulo: `A Executar de ${formatDate(per.inicio)}`, fn: id => htmlAExecutar(montarAExecutar(rows), '').replace(/<button[^>]*id="exec-img"[^>]*>[^<]*<\/button>/, '') };
     },
+    valorOrdens(p, per) {
+      const o = ordensEValoresDoPeriodo(per.inicio, per.fim);
+      if (!o.qtd) return vazioR(`Não há ordens concluídas na Produção em ${fmtP(per.inicio, per.fim)} para calcular o valor pago pela GIGA.`);
+      const vig = valoresVigentesEm(per.fim);
+      return { titulo: 'Valor das Ordens — pago pela GIGA', nota: `Contrato vigente em ${formatDate(per.fim)}. Quantidade = ordens concluídas de técnico na Produção; Total GIGA = quantidade × valor que a GIGA paga à JH.${o.semTipo ? ` ${fmtN(o.semTipo)} ordem(ns) de tipo sem valor de contrato ficaram de fora.` : ''}`,
+        fn: id => `<div class="table-wrap"><table class="data-table" id="${id}-t"><thead><tr><th>Serviço</th><th class="num">GIGA paga à JH</th><th class="num">JH paga ao técnico</th><th class="num">Técnico com 26 dias</th><th class="num">Qtd. no período</th><th class="num">Total GIGA</th></tr></thead><tbody>${o.itens.map((i, k) => `<tr><td class="cat-cell">${esc(i.label)}</td><td class="num">${formatCurrency(i.preco)}</td><td class="num">${vig[k] ? formatCurrency(vig[k].normal) : '-'}</td><td class="num">${vig[k] ? formatCurrency(vig[k].d26) : '-'}</td><td class="num">${fmtN(i.qtd)}</td><td class="num">${formatCurrency(i.valor)}</td></tr>`).join('')}<tr class="total-row"><td>Total Geral</td><td></td><td></td><td></td><td class="num">${fmtN(o.qtd)}</td><td class="num">${formatCurrency(o.total)}</td></tr></tbody></table></div>` };
+    },
     resumoFin(p, pers) {
       const piv = pivot(); if (!piv) return vazioR('Ainda não há receitas e despesas cadastradas para montar o resumo financeiro.');
       const rots = pers.map(rotCiclo).filter(r => piv.periodos.includes(r));
@@ -10777,11 +10796,73 @@ const IA = (() => {
     if (c) (res.abrir = res.abrir || []).push({ rota: c.onde.rota, rotulo: `Abrir tela original: ${tituloDaRota(c.onde.rota)}`, secao: c.onde.secao, inicio: per && per.inicio, fim: per && per.fim, dia: per && ehDia(per) ? per.inicio : undefined });
   }
 
+
+  // ---------- textinho + ordens do dia ----------
+  const hojeFlag = iso => iso === hojeIso();
+  const dataTxt = iso => hojeFlag(iso) ? `hoje (${formatDate(iso)})` : formatDate(iso);
+  const cap = x => x ? x[0].toUpperCase() + x.slice(1) : x;
+  const hhmm = d => new Date(d).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const dtHm = d => `${formatDate(isoLocalDe(new Date(d)))} ${hhmm(d)}`;
+  const fmtHM = h => { const t = Math.abs(h), hh = Math.floor(t), mm = Math.round((t - hh) * 60); return mm === 60 ? `${hh + 1}h00` : `${hh}h${String(mm).padStart(2, '0')}`; };
+  const tempoAte = (lim, agora) => { const h = (new Date(lim) - agora) / 36e5; return h < 0 ? `venceu há ${fmtHM(h)}` : `faltam ${fmtHM(h)}`; };
+  const cidTxt = p => p.cidades && p.cidades.length ? ' em ' + p.cidades.map(rotuloCidadeGeral).join(', ') : '';
+  const NOME_TIPO = { rep: 'reparo', ativ: 'ativação', me: 'mudança de endereço', mc: 'mudança de cômodo', upg: 'upgrade/downgrade', outro: 'outro serviço' };
+  const plural = (n, um, varios) => n === 1 ? um : varios;
+  const PLURAL_TIPO = { rep: 'reparos', ativ: 'ativações', me: 'mudanças de endereço', mc: 'mudanças de cômodo', upg: 'upgrades/downgrades', outro: 'outros serviços' };
+  const nomeTipoN = (k, n) => n === 1 ? NOME_TIPO[k] : PLURAL_TIPO[k];
+  const ROT_STATUS = { pendente: 'Pendente', em_rota: 'Em rota', iniciado: 'Iniciado', concluido: 'Concluído', nao_concluido: 'Improdutivo', cancelado: 'Cancelado', suspenso: 'Suspenso' };
+  // reparos AINDA ABERTOS do dia (pendente, em rota, iniciado) com as mesmas regras da PCR: vencido = limite já passou; "vence em até 2h" = faltam menos de 2h
+  function abertasDoDia(dia, p) {
+    const agora = new Date(), ABERTAS = ['pendente', 'em_rota', 'iniciado'];
+    const rows = linhasDia(dia, p).filter(r => ehServicoReparo(r.tipo_atividade) && ABERTAS.includes(classifyStatusGranular(r.status)));
+    const comLimite = rows.filter(r => r.limite).sort((a, b) => new Date(a.limite) - new Date(b.limite));
+    const h = r => (new Date(r.limite) - agora) / 36e5;
+    return { agora, rows, comLimite, semLimite: rows.length - comLimite.length, vencidas: comLimite.filter(r => h(r) < 0), vence2h: comLimite.filter(r => h(r) >= 0 && h(r) < 2) };
+  }
+  function skPrazoDia(p, per) {
+    const titulo = 'Prazo de reparo (24h)', m = metricas('prazo', per, p), ab = abertasDoDia(per.inicio, p), agora = ab.agora;
+    const abrir = [abrirRG(per, 'prazo', 'Abrir Prazo — Reparo'), { rota: 'pcr', rotulo: 'Abrir PCR (prazos do dia)' }];
+    if (m.vazio && !ab.rows.length) return vazio(titulo, `Não há reparos com prazo no CSV de ${formatDate(per.inicio)} — nem encerrados, nem em aberto. O CSV é importado pelo botão “Importar CSV de atividades” da barra lateral.`, abrir);
+    const cedo = ab.comLimite[0], qd = cap(dataTxt(per.inicio)), cid = cidTxt(p);
+    const cartoes = [cartao('Reparos em aberto', fmtN(ab.rows.length), { sub: ab.semLimite ? `${fmtN(ab.semLimite)} sem horário limite` : 'pendentes, em rota e iniciados' }), cartao('Já vencidos', fmtN(ab.vencidas.length), { negative: ab.vencidas.length > 0 }), cartao('Vencem em até 2h', fmtN(ab.vence2h.length), { negative: ab.vence2h.length > 0 }), cartao('Prazo mais cedo', cedo ? hhmm(cedo.limite) : '-', { sub: cedo ? `${tempoAte(cedo.limite, agora)} · O.S ${cedo.os}` : 'nenhum em aberto com horário' })];
+    const partes = [];
+    partes.push(ab.rows.length ? `${qd} há ${fmtN(ab.rows.length)} ${plural(ab.rows.length, 'reparo em aberto', 'reparos em aberto')}${cid}: ${fmtN(ab.vencidas.length)} já ${plural(ab.vencidas.length, 'venceu', 'venceram')} e ${fmtN(ab.vence2h.length)} ${plural(ab.vence2h.length, 'vence', 'vencem')} em até 2h.` : `${qd} não há reparos em aberto${cid}.`);
+    if (cedo) partes.push(`O prazo mais cedo ${hojeFlag(isoLocalDe(new Date(cedo.limite))) ? 'é às ' + hhmm(cedo.limite) : 'é ' + dtHm(cedo.limite)} (${tempoAte(cedo.limite, agora)}): O.S ${cedo.os}, ${cedo.cliente || 'cliente não informado'}, ${rotuloCidadeGeral(cedo.cidade) || 'cidade não informada'}, técnico ${cedo.recurso || 'sem técnico'}.`);
+    if (!m.vazio) { partes.push(`Dos reparos já encerrados, ${fmtN(m.lista[1].v)} de ${fmtN(m.lista[0].v)} (${formatPct(m.lista[2].v, 1)}) ficaram dentro de 24h — ${m.lista[2].v >= PRAZO_META ? 'acima' : 'abaixo'} da meta de ${PRAZO_META}%.`); cartoes.push(cartao('% no prazo (encerrados)', formatPct(m.lista[2].v, 2), { negative: m.lista[2].v < PRAZO_META, positive: m.lista[2].v >= PRAZO_META, sub: `${fmtN(m.lista[1].v)} de ${fmtN(m.lista[0].v)} · meta ${PRAZO_META}%` })); }
+    const res = { titulo, sub: escopo(per, p), resumo: partes.join(' '), cartoes, graficos: [], blocos: [], tabelas: [], abrir, notas: ['Fonte: CSV de atividades do dia (PCR). Em aberto = pendente, em rota ou iniciado; vencido = o horário limite (abertura + 24h) já passou — a mesma regra dos cartões da PCR.'] };
+    const lista = [...ab.comLimite, ...ab.rows.filter(r => !r.limite)].slice(0, 20);
+    if (lista.length) res.tabelas.push({ titulo: `Reparos em aberto — do prazo mais próximo ao mais distante${ab.rows.length > 20 ? ' (20 primeiros)' : ''}`, cab: ['O.S', 'Cliente', 'Cidade', 'Técnico', 'Situação', 'Limite', 'Prazo'], linhas: lista.map(r => [r.os, r.cliente || '-', rotuloCidadeGeral(r.cidade) || '-', r.recurso || '-', ROT_STATUS[classifyStatusGranular(r.status)] || r.status, r.limite ? dtHm(r.limite) : '-', r.limite ? tempoAte(r.limite, agora) : 'sem limite']) });
+    if (!m.vazio) {
+      if (p.tecnico) res.graficos.push({ titulo: 'Prazo por cidade (% até 24h)', fn: id => barsChart(id, m.dia.porCid.map(c => ({ label: c.cidade, value: Math.round(pctSobre(c.ate24, c.total) * 10) / 10, display: formatPct(pctSobre(c.ate24, c.total), 1) })), { semClassificar: true }) });
+      else comRel(res, 'prazoCartaoDia', p, per);
+    }
+    return res;
+  }
+  // "quantas ordens estão em campo": em rota + iniciadas (o técnico já saiu ou já está no cliente); pendentes são as que ainda aguardam
+  function skCampo(p, per) {
+    const titulo = 'Ordens em campo', dias = diasComCsv();
+    if (!dias.length) return vazio(titulo, 'Nenhum CSV de atividades foi importado ainda (botão “Importar CSV de atividades” na barra lateral).', []);
+    let dia = per && ehDia(per) ? per.inicio : dias[dias.length - 1], nota = '';
+    if (!dias.includes(dia)) { nota = `Não há CSV de ${formatDate(dia)}; mostrando o dia mais recente importado (${formatDate(dias[dias.length - 1])}).`; dia = dias[dias.length - 1]; }
+    const rows = linhasDia(dia, p), g = ordensPorStatusCartao(rows), agora = new Date();
+    const emCampo = [...g.em_rota, ...g.iniciado];
+    if (!rows.length) return vazio(titulo, `Não há ordens de ${formatDate(dia)} nas cidades/técnico escolhidos.`, [{ rota: 'pcr', rotulo: 'Abrir PCR' }]);
+    const tecs = new Set(emCampo.filter(r => ehRecursoTecnico(r.recurso)).map(r => normalizeHeader(r.recurso)));
+    const porTipo = {}; emCampo.forEach(r => { const k = tipoGeral(r.tipo_atividade); porTipo[k] = (porTipo[k] || 0) + 1; });
+    const tiposTxt = Object.entries(porTipo).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${fmtN(n)} ${nomeTipoN(k, n)}`).join(', ');
+    const qd = cap(dataTxt(dia)), res = { titulo, sub: `${formatDate(dia)}${cidTxt(p).replace(' em ', ' · ')}${p.tecnico ? ' · ' + p.tecnico : ''}`, cartoes: [cartao('Em campo', fmtN(emCampo.length), { positive: true, sub: 'em rota + iniciadas' }), cartao('Em rota', fmtN(g.em_rota.length)), cartao('Iniciadas', fmtN(g.iniciado.length)), cartao('Técnicos em campo', fmtN(tecs.size)), cartao('Pendentes (aguardando)', fmtN(g.pendente.length))], graficos: [], tabelas: [], abrir: [{ rota: 'pcr', rotulo: 'Abrir tela original: PCR (técnicos agora)' }, { rota: 'reldia', rotulo: 'Abrir Relatório do Dia', dia }], notas: [(nota ? nota + ' ' : '') + 'Em campo = ordens em rota (técnico a caminho) + iniciadas (técnico no cliente). Fonte: CSV de atividades, uma linha por O.S, mesma classificação da PCR.'] };
+    res.resumo = `${qd} há ${fmtN(emCampo.length)} ${plural(emCampo.length, 'ordem em campo', 'ordens em campo')}${cidTxt(p)}: ${fmtN(g.em_rota.length)} em rota e ${fmtN(g.iniciado.length)} ${plural(g.iniciado.length, 'iniciada', 'iniciadas')}, com ${fmtN(tecs.size)} ${plural(tecs.size, 'técnico', 'técnicos')}${tiposTxt ? ` (${tiposTxt})` : ''}. Ainda ${plural(g.pendente.length, 'está', 'estão')} ${fmtN(g.pendente.length)} ${plural(g.pendente.length, 'pendente', 'pendentes')} aguardando.`;
+    const lista = emCampo.filter(r => ehRecursoTecnico(r.recurso)).sort((a, b) => String(a.recurso).localeCompare(String(b.recurso))).slice(0, 60);
+    if (lista.length) res.tabelas.push({ titulo: `Técnicos em campo agora${emCampo.length > 60 ? ' (60 primeiros)' : ''}`, cab: ['Técnico', 'Cidade', 'O.S', 'Cliente', 'Serviço', 'Situação', 'Há quanto tempo'], linhas: lista.map(r => { const m = r.inicio ? Math.round((agora - new Date(r.inicio)) / 60000) : null; return [r.recurso, rotuloCidadeGeral(r.cidade) || '-', r.os, r.cliente || '-', r.tipo_atividade || '-', ROT_STATUS[classifyStatusGranular(r.status)], m === null || m < 0 ? '-' : m < 60 ? `${m}min` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`]; }) });
+    return res;
+  }
   function skProducao(p, per) {
     const m = metricas('producao', per, p), titulo = 'Produção';
     if (m.vazio) return vazio(titulo, `Não há produção importada para ${per.rotulo}. A Produção vem das planilhas (BASE PRODUÇÃO / CONCLUÍDOS) e do CSV da PCR — confira se o período já foi importado.`, [abrirRG(per, 'relgeral', 'Abrir Relatório Geral', 'Produção por técnico')]);
     const g = m.g, t = g.tot, porCidade = p.foco === 'cidade' || (p.cidades && p.cidades.length > 1 && !p.tecnico);
     const res = { titulo, sub: escopo(per, p), cartoes: [cartao('Ordens concluídas', fmtN(t.producao), { positive: true, sub: `${fmtN(t.ativ + t.me)} ativação/M.E · ${fmtN(t.rep)} reparos` }), cartao('Técnicos que produziram', fmtN(m.lista[3].v)), cartao('Produtividade', t.tecDias ? fmtDec(t.producao / t.tecDias, 1) : '-', { sub: 'ordens por técnico por dia' }), cartao('Dias com produção', fmtN(g.dias.length))], graficos: [], blocos: [], abrir: [], notas: ['Fonte: Produção importada (planilhas) + CSV da PCR · mesma conta do Relatório Geral (' + (p.cidades && p.cidades.length ? 'cidades escolhidas' : 'as 6 cidades') + ').', NOTA_GRAFICO] };
+    { const tp = g.tecnicos.filter(x => x.producao > 0)[0], cd = g.cidades.filter(c => c.producao > 0)[0];
+      res.resumo = `${cap(rotCurto(per))} (${fmtP(per.inicio, per.fim)})${cidTxt(p)}: foram concluídas ${fmtN(t.producao)} ${plural(t.producao, 'ordem', 'ordens')} — ${fmtN(t.ativ + t.me)} de ativação/mudança de endereço e ${fmtN(t.rep)} ${plural(t.rep, 'reparo', 'reparos')} — por ${fmtN(m.lista[3].v)} ${plural(m.lista[3].v, 'técnico', 'técnicos')}${t.tecDias ? `, média de ${fmtDec(t.producao / t.tecDias, 1)} ordens por técnico por dia` : ''}.${tp && !p.tecnico ? ` Quem mais produziu: ${tp.nome} (${fmtN(tp.producao)}).` : ''}${cd && !(p.cidades && p.cidades.length) && g.cidades.length > 1 ? ` Cidade com mais ordens: ${cd.nome} (${fmtN(cd.producao)}).` : ''}`; }
     const top = p.ntop || 10;
     if (porCidade) res.graficos.push({ titulo: 'Produção por cidade', fn: id => barsChart(id, g.cidades.filter(c => c.producao > 0).map(c => ({ label: c.nome, value: c.producao })), { semClassificar: true }) });
     else {
@@ -10793,15 +10874,14 @@ const IA = (() => {
     return res;
   }
   function skPrazo(p, per) {
+    if (ehDia(per)) return skPrazoDia(p, per);
     const m = metricas('prazo', per, p), titulo = 'Prazo de reparo (24h)';
-    const rota = ehDia(per) ? 'prazo' : 'prazo';
+    const rota = 'prazo';
     if (m.vazio) return vazio(titulo, ehDia(per) ? `Não há reparos encerrados com prazo no CSV de ${formatDate(per.inicio)}. O CSV é importado na PCR (botão da barra lateral).` : `Não há reparos com prazo na planilha de prazos para ${per.rotulo}. Importe a planilha PRAZOS_ESCRITÓRIO ou peça um dia específico (CSV).`, [abrirRG(per, rota, 'Abrir Prazo — Reparo')]);
     const pPz = m.lista[2].v, ok = pPz >= PRAZO_META, fora = m.lista[0].v - m.lista[1].v;
     const res = { titulo, sub: escopo(per, p), cartoes: [cartao('% no prazo (24h)', formatPct(pPz, 2), { negative: !ok, positive: ok, sub: `meta ${PRAZO_META}%` }), cartao('Reparos avaliados', fmtN(m.lista[0].v)), cartao('Dentro de 24h', fmtN(m.lista[1].v)), cartao('Fora do prazo', fmtN(fora), { negative: fora > 0 })], graficos: [], blocos: [], abrir: [], notas: [ehDia(per) ? 'Fonte: CSV de atividades do dia (PCR) · limite = abertura + 24h · só reparo já encerrado.' : 'Fonte: planilha de prazos (PRAZOS_ESCRITÓRIO) · só reparos concluídos com faixa válida · mesma conta do Relatório Geral.'] };
-    if (ehDia(per)) {
-      if (p.tecnico) res.graficos.push({ titulo: 'Prazo por cidade (% até 24h)', fn: id => barsChart(id, m.dia.porCid.map(c => ({ label: c.cidade, value: Math.round(pctSobre(c.ate24, c.total) * 10) / 10, display: formatPct(pctSobre(c.ate24, c.total), 1) })), { semClassificar: true }) });
-      else comRel(res, 'prazoCartaoDia', p, per);
-    } else {
+    res.resumo = `${cap(rotCurto(per))} (${fmtP(per.inicio, per.fim)})${cidTxt(p)}: ${formatPct(pPz, 1)} dos reparos ficaram dentro de 24h (${fmtN(m.lista[1].v)} de ${fmtN(m.lista[0].v)}), ${ok ? 'acima' : 'abaixo'} da meta de ${PRAZO_META}% — ${fmtN(fora)} ${plural(fora, 'reparo passou', 'reparos passaram')} do prazo.`;
+    {
       comRel(res, 'prazoPorDia', p, per);
       if (p.foco === 'tecnico') {
         const ts = m.g.tecnicos.filter(x => x.prazoTotal >= 3).sort((a, b) => pctSobre(a.prazoDentro, a.prazoTotal) - pctSobre(b.prazoDentro, b.prazoTotal)).slice(0, p.ntop || 10);
@@ -10819,6 +10899,7 @@ const IA = (() => {
     if (m.vazio) return vazio(titulo, `Não há retornos nem produção importados para ${per.rotulo}.`, [abrirRG(per, 'ofensor', 'Abrir Ofensor IFI-IRR')]);
     const g = m.g, t = g.tot, pI = pctSobre(t.ifi, t.ativ + t.me), pR = pctSobre(t.irr, t.rep);
     const res = { titulo, sub: escopo(per, p), cartoes: [cartao('IFI', fmtN(t.ifi), { negative: pI !== null && pI > BONUS_IFI_MAX, sub: `${pI === null ? '-' : formatPct(pI, 2)} das ativações/M.E (meta ≤ ${formatPct(BONUS_IFI_MAX, 2)})` }), cartao('IRR', fmtN(t.irr), { negative: pR !== null && pR > BONUS_IRR_MAX, sub: `${pR === null ? '-' : formatPct(pR, 2)} dos reparos (meta ≤ ${formatPct(BONUS_IRR_MAX, 2)})` }), cartao('Total de retornos', fmtN(t.ifi + t.irr))], graficos: [], blocos: [], abrir: [abrirRG(per, 'ofensor', 'Abrir tela original: Ofensor IFI-IRR', 'IFI')], notas: ['IFI e IRR contam para o OFENSOR (quem fez o serviço anterior), não para quem fez o retorno. IFI: ativação/M.E até 15 dias · IRR: reparo até 30 dias.'] };
+    res.resumo = `${cap(rotCurto(per))} (${fmtP(per.inicio, per.fim)})${cidTxt(p)}: ${fmtN(t.ifi)} IFI (${pI === null ? '-' : formatPct(pI, 2)} das ativações/M.E, meta ≤ ${formatPct(BONUS_IFI_MAX, 2)}) e ${fmtN(t.irr)} IRR (${pR === null ? '-' : formatPct(pR, 2)} dos reparos, meta ≤ ${formatPct(BONUS_IRR_MAX, 2)}) — ${fmtN(t.ifi + t.irr)} ${plural(t.ifi + t.irr, 'retorno', 'retornos')} no total.`;
     comRel(res, 'ofensoresMotivos', p, per);
     if (!ehDia(per)) comRel(res, 'retornosEvol', p, per);
     if (p.foco === 'cidade') { const cs = g.cidades.filter(c => c.ifi + c.irr > 0); res.graficos.push({ titulo: 'Retornos por cidade', fn: id => barsChart(id, cs.map(c => ({ label: c.nome, value: c.ifi + c.irr })), { semClassificar: true }) }); }
@@ -10834,6 +10915,7 @@ const IA = (() => {
       if (fs.every(f => f.semDados)) return vazio(titulo, 'Nenhum desses ciclos tem receita ou despesa registrada.', abrirFin);
       const res = { titulo: titulo + ' — por ciclo', sub: `${cr.length} ciclo(s) · ${fmtP(cr[0].inicio, cr[cr.length - 1].fim)}`, cartoes: [], graficos: [], blocos: [], abrir: abrirFin, notas: ['Fonte: ' + fs[fs.length - 1].fonte + '. Despesa em branco = ciclo ainda sem despesas lançadas.', NOTA_GRAFICO] };
       res.graficos.push({ titulo: 'Receita × despesas × lucro por ciclo', fn: id => trendChart(id, [trendDe('Receita', '#16a34a', cr.map((c, i) => ({ label: lab(c), value: Math.round(fs[i].receita) }))), trendDe('Despesas', '#dc2626', cr.map((c, i) => ({ label: lab(c), value: Math.round(fs[i].despesa || 0) }))), trendDe('Lucro', '#2563eb', cr.map((c, i) => ({ label: lab(c), value: Math.round(fs[i].lucro || 0) })))], { legendaSemTotal: true }) });
+      res.resumo = `${cr.length} ciclos (${fmtP(cr[0].inicio, cr[cr.length - 1].fim)}): no último, receita ${formatCurrency(fs[fs.length - 1].receita)}${fs[fs.length - 1].despesa === null ? '' : `, despesas ${formatCurrency(fs[fs.length - 1].despesa)} e resultado ${formatCurrency(fs[fs.length - 1].lucro)}`}.`;
       comRel(res, 'resumoFin', p, cr);
       return res;
     }
@@ -10842,6 +10924,7 @@ const IA = (() => {
     const vs = (v, a) => { if (!a || v === null || a === null) return ''; const d = (v - a) / Math.abs(a) * 100; return `${d > 0 ? '▲ +' : d < 0 ? '▼ ' : '= '}${fmtDec(d, 1)}% vs. ciclo anterior`; };
     const foco = p.conc, res = { titulo, sub: `Ciclo ${fmtP(per.inicio, per.fim)}`, blocosPrimeiro: tabelaPrimeiro, cartoes: [], graficos: [], blocos: [], abrir: abrirFin, notas: ['Fonte: ' + f.fonte + '. Valores por ciclo (21→20), como no Dashboard.'] };
     const soReceita = foco && foco.has('receita') && !foco.has('despesa') && !foco.has('lucro'), soDesp = foco && foco.has('despesa') && !foco.has('receita') && !foco.has('lucro');
+    res.resumo = `No ciclo ${fmtP(per.inicio, per.fim)}: receita das ordens ${formatCurrency(f.receita)}${f.despesa === null ? '' : `, despesas ${formatCurrency(f.despesa)} e ${f.lucro >= 0 ? 'lucro' : 'prejuízo'} de ${formatCurrency(Math.abs(f.lucro))}`}.${ant && ant.receita && f.receita ? ` A receita ${f.receita >= ant.receita ? 'subiu' : 'caiu'} ${fmtDec(Math.abs((f.receita - ant.receita) / ant.receita * 100), 1)}% em relação ao ciclo anterior.` : ''}`;
     if (!soDesp) res.cartoes.push(cartao('Receita (ordens)', formatCurrency(f.receita), { positive: true, sub: vs(f.receita, ant.receita) }));
     if (!soReceita) res.cartoes.push(cartao('Despesas', f.despesa === null ? '-' : formatCurrency(f.despesa), { sub: vs(f.despesa, ant.despesa) }));
     if (!soReceita && !soDesp && f.lucro !== null) res.cartoes.push(cartao('Lucro', formatCurrency(f.lucro), { negative: f.lucro < 0, positive: f.lucro >= 0, sub: f.receita ? `margem ${formatPct(f.lucro / f.receita * 100, 1)}` : '' }));
@@ -10862,6 +10945,7 @@ const IA = (() => {
   function skRentab(p, per) {
     const res = { titulo: 'Resultado por técnico — quem se paga', sub: escopo(per, p), blocos: [], abrir: [abrirRG(per, 'relgeral', 'Abrir tela original: Relatório Geral', 'Resultado por técnico')], notas: [] };
     comRel(res, 'rentab', p, per);
+    res.resumo = `Resultado por técnico de ${fmtP(per.inicio, per.fim)}: receita da GIGA menos descontos de IFI/IRR contra o custo de cada um (valor pago, aluguel e gasolina). Eficiência de 100% ou mais = o técnico se paga.`;
     if (!res.blocos.length) return vazio(res.titulo, (res.avisos || ['Sem dados.'])[0], res.abrir);
     return res;
   }
@@ -10876,7 +10960,13 @@ const IA = (() => {
     const g = ordensPorStatusCartao(rows), qt = k => g[k].length;
     const itens = [['Pendentes', 'pendente', '#f59e0b'], ['Em rota', 'em_rota', '#2563eb'], ['Iniciadas', 'iniciado', '#06b6d4'], ['Concluídas', 'concluido', '#16a34a'], ['Improdutivas', 'nao_concluido', '#dc2626'], ['Suspensas', 'suspenso', '#8b5cf6'], ['Canceladas', 'cancelado', '#9ca3af']];
     const porCid = new Map(); rows.forEach(r => { const c = rotuloCidadeGeral(r.cidade) || 'Não informado'; if (!porCid.has(c)) porCid.set(c, []); porCid.get(c).push(r); });
-    return { titulo, sub: `${formatDate(dia)} · ${rows.length} ordem(ns)${p.cidades && p.cidades.length ? ' · ' + p.cidades.map(rotuloCidadeGeral).join(', ') : ''}${p.tecnico ? ' · ' + p.tecnico : ''}`, cartoes: itens.filter(i => i[1] !== 'suspenso' || qt(i[1])).map(i => cartao(i[0], fmtN(qt(i[1])), { negative: i[1] === 'nao_concluido' && qt(i[1]) > 0, positive: i[1] === 'concluido' })), graficos: [{ titulo: 'Ordens por situação', fn: id => donutChart(id, itens.filter(i => qt(i[1])).map(i => ({ label: i[0], value: qt(i[1]), color: i[2] })), { centroLabel: 'ordens' }) }], tabelas: [{ titulo: 'Por cidade', cab: ['Cidade', 'Pendentes', 'Em rota', 'Iniciadas', 'Concluídas', 'Improdutivas', 'Canceladas', 'Total'], linhas: [...porCid.entries()].map(([c, rs]) => { const x = ordensPorStatusCartao(rs); return [c, x.pendente.length, x.em_rota.length, x.iniciado.length, x.concluido.length, x.nao_concluido.length, x.cancelado.length, rs.length]; }).sort((a, b) => b[7] - a[7]) }], abrir: [{ rota: 'reldia', rotulo: 'Abrir tela original: Relatório do Dia', dia }, { rota: 'parcialdia', rotulo: 'Abrir Parcial do Dia' }], notas: [(nota ? nota + ' ' : '') + 'Fonte: CSV de atividades (uma linha por O.S) · mesma classificação dos cartões da PCR.', NOTA_GRAFICO] };
+    const resDia = { titulo, sub: `${formatDate(dia)} · ${rows.length} ordem(ns)${p.cidades && p.cidades.length ? ' · ' + p.cidades.map(rotuloCidadeGeral).join(', ') : ''}${p.tecnico ? ' · ' + p.tecnico : ''}`, cartoes: itens.filter(i => i[1] !== 'suspenso' || qt(i[1])).map(i => cartao(i[0], fmtN(qt(i[1])), { negative: i[1] === 'nao_concluido' && qt(i[1]) > 0, positive: i[1] === 'concluido' })), graficos: [{ titulo: 'Ordens por situação', fn: id => donutChart(id, itens.filter(i => qt(i[1])).map(i => ({ label: i[0], value: qt(i[1]), color: i[2] })), { centroLabel: 'ordens' }) }], tabelas: [{ titulo: 'Por cidade', cab: ['Cidade', 'Pendentes', 'Em rota', 'Iniciadas', 'Concluídas', 'Improdutivas', 'Canceladas', 'Total'], linhas: [...porCid.entries()].map(([c, rs]) => { const x = ordensPorStatusCartao(rs); return [c, x.pendente.length, x.em_rota.length, x.iniciado.length, x.concluido.length, x.nao_concluido.length, x.cancelado.length, rs.length]; }).sort((a, b) => b[7] - a[7]) }], abrir: [{ rota: 'reldia', rotulo: 'Abrir tela original: Relatório do Dia', dia }, { rota: 'parcialdia', rotulo: 'Abrir Parcial do Dia' }], notas: [(nota ? nota + ' ' : '') + 'Fonte: CSV de atividades (uma linha por O.S) · mesma classificação dos cartões da PCR.', NOTA_GRAFICO] };
+    const FOCOS = [['pendente', /pendent/, 'pendente', 'pendentes'], ['em_rota', /em rota/, 'em rota', 'em rota'], ['iniciado', /iniciad/, 'iniciada', 'iniciadas'], ['concluido', /concluid|finaliz/, 'concluída', 'concluídas'], ['nao_concluido', /improdut|nao concluid/, 'improdutiva', 'improdutivas'], ['cancelado', /cancelad/, 'cancelada', 'canceladas']];
+    const foco = FOCOS.filter(f => f[1].test(p.bruto || ''));
+    const SING = { Pendentes: 'pendente', 'Em rota': 'em rota', Iniciadas: 'iniciada', Concluídas: 'concluída', Improdutivas: 'improdutiva', Suspensas: 'suspensa', Canceladas: 'cancelada' };
+    const geral = `${fmtN(rows.length)} ${plural(rows.length, 'ordem', 'ordens')}: ${itens.filter(i => qt(i[1])).map(i => `${fmtN(qt(i[1]))} ${qt(i[1]) === 1 ? SING[i[0]] : i[0].toLowerCase()}`).join(', ')}`;
+    resDia.resumo = foco.length ? foco.map(f => `${cap(dataTxt(dia))} há ${fmtN(qt(f[0]))} ${plural(qt(f[0]), 'ordem ' + f[2], 'ordens ' + f[3])}${cidTxt(p)}`).join('; ') + `. No total do dia são ${geral}.` : `${cap(dataTxt(dia))}${cidTxt(p)} são ${geral}.`;
+    return resDia;
   }
   function skResumo(p, pers) {
     const per = pers[0], titulo = 'Resumo do período', temFin = per.tipo === 'ciclo';
@@ -10886,6 +10976,7 @@ const IA = (() => {
     if (!tem.length) return vazio(titulo, `Nada importado para ${per.rotulo}.`, abrir);
     const cartoes = []; tem.forEach(g => g.m.lista.forEach(m => cartoes.push(cartao(m.label, fmtV(m), { negative: (m.k === 'lucro' && m.v < 0) || (m.k === 'pzp' && m.v < PRAZO_META) || (m.k === 'ifip' && m.v > BONUS_IFI_MAX) || (m.k === 'irrp' && m.v > BONUS_IRR_MAX) }))));
     const res = { titulo, sub: escopo(per, p), cartoes, abrir, blocos: [], blocosPrimeiro: temFin, notas: [(!temFin ? 'Os valores financeiros são por ciclo (21→20): peça “ciclo atual” para incluí-los. ' : '') + 'Cada indicador usa a mesma conta da tela correspondente.'] };
+    res.resumo = `Resumo de ${fmtP(per.inicio, per.fim)}${cidTxt(p)}: ${cartoes.slice(0, 5).map(c => `${c.r.toLowerCase()} ${c.v}`).join(', ')}.`;
     if (temFin) { const piv = pivot(); if (piv && piv.periodos.includes(rotCiclo(per))) comRel(res, 'resumoFin', p, [per, ...(piv.periodos.includes(rotCiclo(anteriorDe(per))) ? [anteriorDe(per)] : [])]); }   // "fechamento": a tabela do Resumo financeiro do Dashboard vem junto
     return res;
   }
@@ -10906,6 +10997,7 @@ const IA = (() => {
     res.tabelas.push({ titulo: 'Indicadores lado a lado', cabHtml: cab, linhas: linhas.map(l => [l.label, ...l.vals.map(v => l.vz && (v.v === null || v.v === 0) ? '-' : fmtV(v)), { h: `<b style="color:${l.v.cor || 'inherit'}">${esc(l.v.txt)}</b>` }]) });
     const semDados = [...new Set(linhas.flatMap(l => l.semDado))];
     if (semDados.length) res.notas.push(`Sem dados importados: ${semDados.join('; ')} — esses valores aparecem como “-” e a variação não é calculada.`);
+    { const bons = linhas.filter(l => !l.vz && l.vals[0].v !== null && l.vals[l.vals.length - 1].v !== null).slice(0, 4); res.resumo = bons.length ? `Comparando ${ordenados.map(x => rotCurto(x)).join(' e ')}: ` + bons.map(l => `${l.label.toLowerCase()} foi de ${fmtV(l.vals[0])} para ${fmtV(l.vals[l.vals.length - 1])} (${l.v.txt})`).join('; ') + '.' : `Comparação de ${ordenados.map(x => rotCurto(x)).join(' e ')}: ainda não há dados importados para calcular as variações.`; }
     const lab = x => fmtP(x.inicio, x.fim), cores = ['#94a3b8', '#2563eb', '#16a34a', '#f59e0b', '#8b5cf6', '#06b6d4'];
     const fin = linhas.filter(l => l.ind === 'financeiro' && l.vals.every(v => v.v !== null));
     if (fin.length) res.graficos.push({ titulo: 'Receita × despesas × lucro', fn: id => groupedBarsChart(id, fin.map(l => l.label), ordenados.map((x, i) => ({ name: lab(x), color: cores[i % cores.length], values: fin.map(l => Math.round(l.vals[i].v)) }))) });
@@ -10924,7 +11016,7 @@ const IA = (() => {
   }
 
   // ---------- entender o pedido ----------
-  const INDICADOR_NOME = { producao: 'Produção', prazo: 'Prazo de reparo', retornos: 'IFI / IRR', financeiro: 'Receitas e despesas', rentab: 'Resultado por técnico', dia: 'Situação das ordens do dia', resumo: 'Resumo do fechamento' };
+  const INDICADOR_NOME = { campo: 'Ordens em campo', producao: 'Produção', prazo: 'Prazo de reparo', retornos: 'IFI / IRR', financeiro: 'Receitas e despesas', rentab: 'Resultado por técnico', dia: 'Situação das ordens do dia', resumo: 'Resumo do fechamento' };
   function entender(texto, forcar) {
     forcar = forcar || {};
     const q = prep(texto), conc = conceitosDe(q), nomes = nomesTecnicos();
@@ -10940,14 +11032,17 @@ const IA = (() => {
     const ntopM = q.bruto.match(/\b(?:top|os|as|primeiros|melhores|piores|maiores|menores)\s+(\d{1,2})\b/), ntop = ntopM ? Math.min(Number(ntopM[1]), 50) : null;
     const catalogo = forcar.catalogo ? CATALOGO.find(c => c.id === forcar.catalogo) : procurarCatalogo(q);
     // pontos por habilidade
-    const P = { financeiro: 0, producao: 0, prazo: 0, retornos: 0, rentab: 0, dia: 0, resumo: 0 };
+    const P = { campo: 0, financeiro: 0, producao: 0, prazo: 0, retornos: 0, rentab: 0, dia: 0, resumo: 0 };
     if (conc.has('receita')) P.financeiro += 3; if (conc.has('despesa')) P.financeiro += 3; if (conc.has('lucro')) P.financeiro += 3;
     if (conc.has('producao')) P.producao += 3; if (conc.has('prazo')) P.prazo += 3; if (conc.has('retorno')) P.retornos += 3;
     if (conc.has('rentab')) P.rentab += 4;
     if (conc.has('tecnico') && (conc.has('lucro') || conc.has('despesa')) && !conc.has('producao') && !conc.has('prazo')) { P.rentab += 4; P.financeiro = Math.min(P.financeiro, 2); }
     if (conc.has('statusdia')) P.dia += 3;
+    if (conc.has('campo')) P.campo += 4;
+    if (conc.has('urgente')) P.prazo += 3;
     if (conc.has('resumo') || (conc.has('fechamento') && !P.financeiro && !P.producao && !P.prazo && !P.retornos && !P.rentab)) P.resumo += 3;
     let skills = Object.keys(P).filter(k => P[k] >= 3).sort((a, b) => P[b] - P[a]);
+    if (skills.includes('campo')) skills = skills.filter(k => k !== 'dia' && k !== 'producao');   // "quantas ordens em campo": 'ordens' sozinha não é pedido de produção
     if (skills.includes('dia') && skills.includes('producao') && !/produ|instal|ativac|servic/.test(q.bruto)) skills = skills.filter(k => k !== 'producao');   // "situação das ordens hoje": o cartão do dia já diz tudo
     if (skills.includes('resumo')) skills = ['resumo'];
     if (skills.includes('rentab')) skills = ['rentab'];
@@ -10977,6 +11072,36 @@ const IA = (() => {
     rankNav(termoBruto, rotas, jaTem).forEach(d => out.push({ grupo: d.tipo === 'tela' ? 'Telas' : 'Assuntos', titulo: d.titulo, sub: d.sub, rotulo: d.tipo === 'tela' ? d.rota : '', acao: () => { navigate(d.rota); if (d.secao) irParaSecao(d.secao); } }));
     return out;
   }
+
+
+  // textinho + cartões de cada relatório do catálogo (o relatório em si continua sendo o da tela)
+  const RESUMO_CAT = {
+    pendentes(p, per) {
+      const agora = new Date(), rows = linhasDia(per.inicio, p).filter(r => classifyStatusGranular(r.status) === 'pendente'), porTipo = {};
+      rows.forEach(r => { const k = tipoGeral(r.tipo_atividade); porTipo[k] = (porTipo[k] || 0) + 1; });
+      const lista = Object.entries(porTipo).sort((a, b) => b[1] - a[1]);
+      const venc = rows.filter(r => ehServicoReparo(r.tipo_atividade) && r.limite && new Date(r.limite) < agora).length;
+      const cedo = rows.filter(r => r.limite).sort((a, b) => new Date(a.limite) - new Date(b.limite))[0];
+      return { cartoes: [cartao('Ordens pendentes', fmtN(rows.length), { negative: rows.length > 0 }), ...lista.slice(0, 4).map(([k, n]) => cartao(cap(nomeTipoN(k, 2)), fmtN(n))), cartao('Reparos já vencidos', fmtN(venc), { negative: venc > 0 })], resumo: `${cap(dataTxt(per.inicio))} há ${fmtN(rows.length)} ${plural(rows.length, 'ordem pendente', 'ordens pendentes')}${cidTxt(p)}${lista.length ? ': ' + lista.map(([k, n]) => `${fmtN(n)} ${nomeTipoN(k, n)}`).join(', ') : ''}. ${venc ? `${fmtN(venc)} ${plural(venc, 'reparo já passou', 'reparos já passaram')} do horário limite.` : 'Nenhum reparo pendente passou do limite.'}${cedo ? ` O limite mais cedo é às ${hhmm(cedo.limite)} (O.S ${cedo.os}).` : ''}` };
+    },
+    aExecutar(p, per) { const x = RESUMO_CAT.pendentes(p, per); x.resumo = 'A Executar considera só as ordens pendentes. ' + x.resumo; return x; },
+    reparosSituacao(p, per) {
+      const rows = linhasDia(per.inicio, p).filter(r => ehServicoReparo(r.tipo_atividade)), g = ordensPorStatusCartao(rows), q = k => g[k].length;
+      return { cartoes: [cartao('Pendentes', fmtN(q('pendente'))), cartao('Em rota', fmtN(q('em_rota'))), cartao('Iniciados', fmtN(q('iniciado'))), cartao('Concluídos', fmtN(q('concluido')), { positive: true }), cartao('Improdutivos', fmtN(q('nao_concluido')), { negative: q('nao_concluido') > 0 })], resumo: `${cap(dataTxt(per.inicio))} são ${fmtN(rows.length)} reparos${cidTxt(p)}: ${fmtN(q('pendente'))} pendentes, ${fmtN(q('em_rota'))} em rota, ${fmtN(q('iniciado'))} iniciados, ${fmtN(q('concluido'))} concluídos, ${fmtN(q('nao_concluido'))} improdutivos e ${fmtN(q('cancelado'))} cancelados.` };
+    },
+    prodTecnico(p, per) {
+      const g = calcRG(per, p), l = g.tecnicos.filter(x => x.producao > 0), t = g.tot;
+      return { cartoes: [cartao('Ordens concluídas', fmtN(t.producao), { positive: true }), cartao('Técnicos que produziram', fmtN(l.length)), cartao('Produtividade', t.tecDias ? fmtDec(t.producao / t.tecDias, 1) : '-', { sub: 'ordens por técnico por dia' }), cartao('IFI / IRR', `${fmtN(t.ifi)} / ${fmtN(t.irr)}`)], resumo: `${cap(rotCurto(per))} (${fmtP(per.inicio, per.fim)})${cidTxt(p)}: ${fmtN(l.length)} ${plural(l.length, 'técnico produziu', 'técnicos produziram')} ${fmtN(t.producao)} ordens${l[0] ? `; quem mais produziu foi ${l[0].nome} (${fmtN(l[0].producao)})` : ''}${l.length > 1 ? ` e quem menos, ${l[l.length - 1].nome} (${fmtN(l[l.length - 1].producao)})` : ''}.` };
+    },
+    prodCidade(p, per) {
+      const g = calcRG(per, p), t = g.tot, c = g.cidades.filter(x => x.producao > 0);
+      return { cartoes: [cartao('Ordens concluídas', fmtN(t.producao), { positive: true }), cartao('Cidades com produção', fmtN(c.length)), cartao('IFI / IRR', `${fmtN(t.ifi)} / ${fmtN(t.irr)}`)], resumo: `${cap(rotCurto(per))} (${fmtP(per.inicio, per.fim)}): ${fmtN(t.producao)} ordens em ${fmtN(c.length)} ${plural(c.length, 'cidade', 'cidades')}${c[0] ? `; a que mais produziu foi ${c[0].nome} (${fmtN(c[0].producao)})` : ''}.` };
+    },
+    valorOrdens(p, per) {
+      const o = ordensEValoresDoPeriodo(per.inicio, per.fim), top = [...o.itens].sort((a, b) => b.valor - a.valor)[0];
+      return { cartoes: [cartao('Ordens concluídas', fmtN(o.qtd)), cartao('Total pago pela GIGA', formatCurrency(o.total), { positive: true })], resumo: `No período ${fmtP(per.inicio, per.fim)} foram ${fmtN(o.qtd)} ordens concluídas e a GIGA paga ${formatCurrency(o.total)} por elas${top && top.valor ? `; o serviço que mais rendeu foi ${top.label} (${fmtN(top.qtd)} × ${formatCurrency(top.preco)} = ${formatCurrency(top.valor)})` : ''}.` };
+    },
+  };
 
   // ---------- executar um pedido já entendido ----------
   const SUG = () => {
@@ -11014,6 +11139,8 @@ const IA = (() => {
       const b = req === 'ciclos' ? REL[cat.id](base, pers) : REL[cat.id](base, per);
       const res = { titulo: cat.titulo + (rotuloExtra || ''), sub: req === 'ciclos' ? `${pers.length} ciclo(s)` : escopo(per, base), blocos: [], abrir: [{ rota: cat.onde.rota, rotulo: `Abrir tela original: ${tituloDaRota(cat.onde.rota)}`, secao: cat.onde.secao, inicio: per.inicio, fim: per.fim, dia: ehDia(per) ? per.inicio : undefined }], notas: [`Relatório existente: ${tituloDaRota(cat.onde.rota)} › ${cat.onde.secao}. ${cat.desc}.`] };
       if (b.vazio) return vazio(res.titulo, b.vazio, res.abrir);
+      let ex = null; try { ex = RESUMO_CAT[cat.id] ? RESUMO_CAT[cat.id](base, per) : null; } catch (e) { ex = null; }
+      res.resumo = ex ? ex.resumo : `Aqui está ${cat.titulo[0].toLowerCase() + cat.titulo.slice(1)} de ${fmtP(per.inicio, per.fim)}${cidTxt(base)}.`; if (ex && ex.cartoes) res.cartoes = ex.cartoes;
       res.blocos.push(b); if (b.nota) res.notas.push(b.nota);
       return res;
     };
@@ -11029,7 +11156,7 @@ const IA = (() => {
   function executar(info, texto) {
     CACHE = new Map(); REGISTRO.imp.clear(); REGISTRO.a18.clear();
     const bruto = info.q.bruto;
-    const base = { cidades: info.cidades, tecnico: info.tec.unico, ntop: info.ntop, conc: info.conc, ranking: /\b(menos|menores|piores)\b/.test(bruto) ? 'menos' : (info.ranking ? 'mais' : null) };
+    const base = { bruto, cidades: info.cidades, tecnico: info.tec.unico, ntop: info.ntop, conc: info.conc, ranking: /\b(menos|menores|piores)\b/.test(bruto) ? 'menos' : (info.ranking ? 'mais' : null) };
     if (/\bpor cidade|cidades\b/.test(bruto) && !info.cidades.length) base.foco = 'cidade';
     else if (info.conc.has('tecnico') || (info.conc.has('ranking') && /\bquem\b/.test(bruto))) base.foco = 'tecnico';
     const S = SUG();
@@ -11050,6 +11177,7 @@ const IA = (() => {
       skills = ULTIMO.skills; if (!periodos.length) periodos = ULTIMO.periodos;
     }
     if (!skills.length) return null;   // quem chama cai na busca de telas
+    if (skills.includes('campo') || skills.includes('dia')) info = { ...info, comparar: false };   // "quantas ordens em campo" não é comparação
     const dadosSkills = skills.filter(s => ['financeiro', 'producao', 'prazo', 'retornos', 'resumo'].includes(s));
     // 1) comparação de períodos
     if (dadosSkills.length && info.comparar) {
@@ -11070,6 +11198,7 @@ const IA = (() => {
     for (const sk of skills.slice(0, 3)) {
       let per = periodos[0];
       if (sk === 'dia') { todos.push(skDia(base, per && ehDia(per) ? per : null)); continue; }
+      if (sk === 'campo') { todos.push(skCampo(base, per && ehDia(per) ? per : null)); continue; }
       if (sk === 'financeiro') {
         let pf = periodos;
         if (!pf.length && (info.grafico || /\bevolu|historic|por ciclo\b/.test(bruto))) { const l = listaCiclos(6); pf = [mk('ciclos', l[0].inicio, l[l.length - 1].fim, 'últimos 6 ciclos', { lista: l })]; }
@@ -11098,26 +11227,28 @@ const IA = (() => {
   }
 
   // ---------- interface ----------
-  let MSGS = [], PAINEL = null, SEQ = 0, ACOES = [];
+  let MSGS = [], PAINEL = null, SEQ = 0, ACOES = [], TRATAR = null;
   function garantirPainel() {
     if (PAINEL) return PAINEL;
     const el = document.createElement('aside');
     el.id = 'ia-painel'; el.className = 'ia-painel'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Assistente de análise');
     el.innerHTML = `<header class="ia-head"><div class="ia-tit"><span class="ia-logo" aria-hidden="true">✦</span><div><b>Assistente</b><small>Usa só os dados deste sistema · nada sai do navegador</small></div></div>
-        <div class="ia-head-btns"><button type="button" id="ia-larg" title="Ampliar / reduzir" aria-label="Ampliar">⤢</button><button type="button" id="ia-nova" title="Nova conversa" aria-label="Nova conversa">↺</button><button type="button" id="ia-fechar" title="Fechar (Esc)" aria-label="Fechar">✕</button></div></header>
+        <div class="ia-head-btns"><button type="button" id="ia-larg" title="Ampliar / reduzir" aria-label="Ampliar">⤢</button><button type="button" id="ia-cheia" title="Tela cheia" aria-label="Tela cheia">⛶</button><button type="button" id="ia-nova" title="Nova conversa" aria-label="Nova conversa">↺</button><button type="button" id="ia-fechar" title="Fechar (Esc)" aria-label="Fechar">✕</button></div></header>
       <div class="ia-msgs" id="ia-msgs" aria-live="polite"></div>
       <form class="ia-form" id="ia-form" autocomplete="off"><input id="ia-in" type="text" placeholder="Pergunte ou busque: “prazo de ontem”, O.S, contrato, cliente, técnico, tela…" maxlength="300" aria-label="Pergunta ao assistente"><button type="submit" class="ia-enviar">Enviar</button></form>`;
     document.body.appendChild(el);
     PAINEL = el;
     el.querySelector('#ia-fechar').addEventListener('click', fechar);
-    el.querySelector('#ia-larg').addEventListener('click', () => el.classList.toggle('ia-larga'));
-    el.querySelector('#ia-nova').addEventListener('click', () => { MSGS = []; ULTIMO = null; desenhar(); });
+    el.querySelector('#ia-larg').addEventListener('click', () => { el.classList.toggle('ia-larga'); el.classList.remove('ia-cheia'); });
+    el.querySelector('#ia-nova').addEventListener('click', () => { MSGS = []; ULTIMO = null; CTX = { periodos: null, cidades: [], tecnico: null, fech: false }; desenhar(); });
+    el.querySelector('#ia-cheia').addEventListener('click', () => { el.classList.toggle('ia-cheia'); el.classList.remove('ia-larga'); });
     el.querySelector('#ia-form').addEventListener('submit', ev => { ev.preventDefault(); const i = el.querySelector('#ia-in'); const t = i.value.trim(); if (!t) return; i.value = ''; perguntar(t); });
     // cliques de dentro das mensagens (botões, chips, Excel e nomes clicáveis dos relatórios reaproveitados)
-    el.querySelector('#ia-msgs').addEventListener('click', ev => {
+    const tratarClique = ev => {
       const t = ev.target;
+      const ac = t.closest('.ia-ac'); if (ac) { acaoResultado(ac.dataset.ac, ac.closest('.ia-res')); return; }
       const chip = t.closest('.ia-chip[data-m]');
-      if (chip) { const msg = MSGS[Number(chip.dataset.m)], op = msg.pergunta.opcoes[Number(chip.dataset.o)]; perguntar(msg.origem, { ...(msg.forcarBase || {}), ...op.forcar }, op.rotulo); return; }
+      if (chip) { const msg = MSGS[Number(chip.dataset.m)], op = msg.pergunta.opcoes[Number(chip.dataset.o)]; msg.respondida = true; perguntar(msg.origem, { ...(msg.forcarBase || {}), ...op.forcar }, op.rotulo); return; }
       const sug = t.closest('.ia-chip[data-s]'); if (sug) { perguntar(sug.dataset.s); return; }
       const mostrar = t.closest('.ia-chip[data-cat]'); if (mostrar) { perguntar(`mostrar ${mostrar.dataset.nome}`, { catalogo: mostrar.dataset.cat }, mostrar.dataset.nome); return; }
       const ab = t.closest('.ia-btn-abrir'); if (ab) { abrirTela(ACOES[Number(ab.dataset.g)][Number(ab.dataset.i)]); return; }
@@ -11125,10 +11256,54 @@ const IA = (() => {
       const aImp = t.closest('a[data-imp-tec]'); if (aImp) { ev.preventDefault(); const o = REGISTRO.imp.get(aImp.dataset.impTec); if (o) abrirImprodutivasDoTecnico(o, REGISTRO.per); return; }
       const a18 = t.closest('a[data-a18-tec]'); if (a18) { ev.preventDefault(); const o = REGISTRO.a18.get(a18.dataset.a18Tec); if (o) abrirApos18DoTecnico(o, REGISTRO.per); return; }
       const a = t.closest('a[href="#"]'); if (a) ev.preventDefault();   // links de relatórios reaproveitados que dependem da tela original não fazem nada aqui
-    });
+    };
+    TRATAR = tratarClique;
+    el.querySelector('#ia-msgs').addEventListener('click', tratarClique);
     document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && PAINEL && PAINEL.classList.contains('aberto') && !document.getElementById('cmdk').classList.contains('aberto')) fechar(); });
     return el;
   }
+
+  // ---------- tela cheia / imagem / PDF / Excel de uma resposta ----------
+  const txtDe = el => (el && el.textContent || '').replace(/\s+/g, ' ').trim();
+  function lerTabelaDom(t) {
+    const cab = [...t.querySelectorAll('thead tr:last-child th')].map(th => { const c = th.cloneNode(true); c.querySelectorAll('button').forEach(x => x.remove()); return txtDe(c); });
+    const linhas = [], totais = [];
+    t.querySelectorAll('tbody tr, tfoot tr').forEach(tr => { if (tr.hidden || tr.style.display === 'none') return; const cels = [...tr.children].map(txtDe); (tr.classList.contains('total-row') ? totais : linhas).push(cels); });
+    return { cab, linhas, totais };
+  }
+  function coletarResposta(res) {
+    const titulo = txtDe(res.querySelector('h4')) || 'Resposta do assistente', resumo = txtDe(res.querySelector('.ia-resumo')), sub = txtDe(res.querySelector('.ia-sub'));
+    const cartoes = [...res.querySelectorAll('.stat-card')].map(c => [txtDe(c.querySelector('.stat-label')), txtDe(c.querySelector('.stat-value')), txtDe(c.querySelector('.stat-sub'))]);
+    const tabelas = [], vistos = new Map();
+    const nomeUnico = n => { const k = n || 'Tabela'; const c = (vistos.get(k) || 0) + 1; vistos.set(k, c); return c > 1 ? `${k} ${c}` : k; };
+    res.querySelectorAll('[data-grafico]').forEach(g => { if (g._xls && g._xls.linhas && g._xls.linhas.length) tabelas.push({ titulo: nomeUnico('Gráfico: ' + (txtDe(g.closest('.ia-graf, .panel') && g.closest('.ia-graf, .panel').querySelector('h5, h3')) || 'dados')), cab: g._xls.cab, linhas: g._xls.linhas.map(l => l.map(String)), totais: [] }); });
+    res.querySelectorAll('table').forEach(t => { const d = lerTabelaDom(t); if (!d.cab.length || (!d.linhas.length && !d.totais.length)) return; const cont = t.closest('.ia-tab, .ia-bloco, .panel'); tabelas.push({ titulo: nomeUnico(txtDe(cont && cont.querySelector('h5, h3')) || titulo), ...d }); });
+    return { titulo, resumo, sub, cartoes, tabelas };
+  }
+  const nomeArquivo = titulo => 'assistente-' + semAcento(titulo).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50).replace(/-$/, '') + '-' + hojeISOLocal();
+  function acaoResultado(ac, res) {
+    if (!res) return;
+    const d = coletarResposta(res), nome = nomeArquivo(d.titulo);
+    if (ac === 'cheia') { ampliarElemento(res, d.titulo); return; }
+    if (ac === 'img') { capturarElementoComoImagem(res, nome); return; }
+    if (ac === 'xls') {
+      if (typeof XLSX === 'undefined' || !XLSX.utils) { toast('A biblioteca do Excel não carregou (sem internet?).', 'aviso'); return; }
+      const wb = XLSX.utils.book_new(), usados = new Set();
+      const aba = (n, aoa) => { let nm = String(n).replace(/[\\\/\?\*\[\]:]/g, '').slice(0, 28) || 'Dados', k = 1, base = nm; while (usados.has(nm.toLowerCase())) nm = base.slice(0, 26) + ' ' + (++k); usados.add(nm.toLowerCase()); const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = (aoa[aoa.length > 1 ? 1 : 0] || []).map((_, i) => ({ wch: Math.min(48, Math.max(10, ...aoa.map(l => String(l[i] === undefined ? '' : l[i]).length + 2))) })); XLSX.utils.book_append_sheet(wb, ws, nm); };
+      aba('Resumo', [[d.titulo], [d.sub], [], [d.resumo], [], ['Indicador', 'Valor', 'Observação'], ...d.cartoes]);
+      d.tabelas.forEach(tb => aba(tb.titulo, [tb.cab, ...tb.linhas, ...tb.totais]));
+      XLSX.writeFile(wb, nome + '.xlsx'); return;
+    }
+    if (ac === 'pdf') {
+      if (typeof gerarPDFMultiSecoes !== 'function') return;
+      const secoes = [];
+      if (d.cartoes.length) secoes.push(secaoTabela('Indicadores', d.cartoes, [{ header: 'Indicador', get: r => r[0] }, { header: 'Valor', get: r => r[1] }, { header: 'Observação', get: r => r[2] }], { alignRight: [false, true, false] }));
+      d.tabelas.forEach(tb => { if (!tb.cab.length) return; secoes.push(secaoTabela(tb.titulo, tb.linhas, tb.cab.map((h, i) => ({ header: h, get: r => r[i] })), tb.totais.length ? { totalRows: tb.totais } : {})); });
+      if (!secoes.length) { toast('Esta resposta não tem tabela nem indicador para o PDF.', 'aviso'); return; }
+      try { gerarPDFMultiSecoes(d.titulo, secoes, { subtitulo: d.resumo || d.sub, periodo: d.sub, arquivo: nome }); } catch (e) { toast('Não consegui gerar o PDF: ' + (e && e.message || e), 'erro'); }
+    }
+  }
+
   function abrir(texto) {
     if (!ehAnalista()) return;
     const el = garantirPainel(); el.classList.add('aberto'); document.body.classList.add('ia-aberto');
@@ -11136,15 +11311,44 @@ const IA = (() => {
     if (texto) perguntar(texto); else setTimeout(() => { const i = el.querySelector('#ia-in'); if (i) i.focus(); }, 60);
   }
   function fechar() { if (PAINEL) PAINEL.classList.remove('aberto'); document.body.classList.remove('ia-aberto'); }
+  // ---------- memória da conversa (26/10/2026): o assistente lembra do período, das cidades e do técnico da pergunta anterior ----------
+  let CTX = { periodos: null, cidades: [], tecnico: null, fech: false };
+  const SEGUIMENTO = /^(e |e o |e a |e os |e as |tambem |agora |mesmo |do mesmo |desse |dessa |nesse |nessa |dele|dela)/;
+  function herdarContexto(info, forcar) {
+    const notas = [];
+    if (forcar && (forcar.periodos || forcar.skills || forcar.catalogo)) return notas;
+    if ((!info.skills.length && !info.catalogo) || info.navegar || info.inventario) return notas;
+    const b = info.q.bruto, seg = SEGUIMENTO.test(b) || info.q.t.length <= 3;
+    const doDia = info.skills.some(k => k === 'dia' || k === 'campo') || (info.catalogo && info.catalogo.req === 'dia') || (info.skills.includes('prazo') && /\b(quant|mais cedo|urgente|abert|venc|tela|agora|proxim|hoje)/.test(b));
+    const nomeP = x => `${rotCurto(x)} (${fmtP(x.inicio, x.fim)})`;
+    if (seg && CTX.fech && info.skills.includes('producao') && !info.catalogo && !info.grafico && !info.comparar) { info.catalogo = CATALOGO.find(c => c.id === 'valorOrdens'); info.skills = []; notas.push('Como você pediu o fechamento, mostrei o fechamento de produção: os serviços do período e quanto a GIGA paga por eles.'); }
+    if (!info.periodos.length) {
+      if (doDia) { info.periodos = [SUG().hoje]; notas.push('Você não citou o dia, então considerei hoje.'); }
+      else if (CTX.periodos && CTX.periodos.length) { info.periodos = CTX.periodos; notas.push(`Usei o mesmo período da conversa: ${CTX.periodos.map(nomeP).join(' × ')}.`); }
+    }
+    if (seg && !info.cidades.length && CTX.cidades.length) { info.cidades = CTX.cidades; notas.push(`Mantive as cidades da pergunta anterior: ${CTX.cidades.map(rotuloCidadeGeral).join(', ')}.`); }
+    if (seg && !info.tec.unico && !info.tec.candidatos.length && CTX.tecnico) { info.tec = { unico: CTX.tecnico, candidatos: [CTX.tecnico] }; notas.push(`Mantive o técnico da pergunta anterior: ${CTX.tecnico}.`); }
+    return notas;
+  }
   function perguntar(texto, forcar, rotuloExibido) {
     if (!ehAnalista()) return;
+    // resposta digitada à pergunta do assistente ("hoje", "mês passado", "em Santos"): junta com o pedido que ficou esperando
+    const ultima = [...MSGS].reverse().find(m => m.papel === 'ia');
+    if (!forcar && ultima && ultima.pergunta && !ultima.respondida) {
+      let e2 = null; try { e2 = entender(texto); } catch (er) { e2 = null; }
+      if (e2 && (e2.periodos.length || e2.cidades.length) && e2.skills.every(k => k === 'resumo') && !e2.catalogo && !e2.inventario && !e2.navegar && e2.q.t.length <= 6) { ultima.respondida = true; return perguntar(ultima.origem + ' ' + texto, ultima.forcarBase, texto); }
+    }
     MSGS.push({ papel: 'user', texto: rotuloExibido || texto });
     let resp;
     try {
-      const info = entender(texto, forcar), r = executar(info, texto);
+      const info = entender(texto, forcar), notas = herdarContexto(info, forcar), r = executar(info, texto);
       if (r && r.pergunta) resp = { papel: 'ia', pergunta: r.pergunta, origem: texto, forcarBase: forcar };
       else if (r && r.texto) resp = { papel: 'ia', texto: r.texto, abrir: r.abrir };
-      else if (r && r.resultados) resp = { papel: 'ia', resultados: r.resultados };
+      else if (r && r.resultados) {
+        resp = { papel: 'ia', resultados: r.resultados };
+        r.resultados.forEach(x => { if (!x.vazio && notas.length) x.contexto = notas; });
+        if (r.resultados.some(x => !x.vazio)) CTX = { periodos: info.periodos.length ? info.periodos : CTX.periodos, cidades: info.cidades.length ? info.cidades : CTX.cidades, tecnico: info.tec.unico || CTX.tecnico, fech: info.conc.has('fechamento') };
+      }
       else resp = respostaNavegacao(texto, info);
     } catch (e) {
       resp = { papel: 'ia', erro: 'Tive um problema ao calcular isso: ' + String(e && e.message || e) + '. Se continuar, me diga qual tela você quer ver.' };
@@ -11174,19 +11378,19 @@ const IA = (() => {
       } catch (e) { /* a tela abriu; só o filtro não foi aplicado */ }
     }, 350);
   }
-  const SUGESTOES = ['Como está a produção este mês?', 'Prazo de reparo do mês passado', 'Compare o fechamento atual com o anterior', 'Receitas e despesas do ciclo atual', 'IFI e IRR por técnico este mês', 'Situação das ordens hoje', 'Técnicos que não se pagam no ciclo atual', 'Quais relatórios existem sobre prazo?'];
+  const SUGESTOES = ['Quantas ordens estão em campo?', 'Quantas pendentes hoje?', 'Qual o prazo mais cedo de hoje?', 'Fechamento de produção do ciclo anterior', 'Como está a produção este mês?', 'Prazo de reparo do mês passado', 'Compare o fechamento atual com o anterior', 'Receitas e despesas do ciclo atual', 'IFI e IRR por técnico este mês', 'Situação das ordens hoje', 'Técnicos que não se pagam no ciclo atual', 'Quais relatórios existem sobre prazo?'];
   const celula = c => c && typeof c === 'object' && 'h' in c ? c.h : esc(String(c === null || c === undefined ? '' : c));
   function htmlTabela(t, id) {
     const cab = t.cabHtml ? t.cabHtml.map(c => `<th>${c}</th>`).join('') : t.cab.map(c => `<th>${esc(c)}</th>`).join('');
     const corpo = t.linhas.map(l => `<tr>${l.map((c, i) => `<td${i === 0 ? ' class="cat-cell"' : ''}>${celula(c)}</td>`).join('')}</tr>`).join('');
     const tot = t.total ? `<tr class="total-row">${t.total.map(c => `<td>${celula(c)}</td>`).join('')}</tr>` : '';
-    return `<div class="ia-tab"><div class="ia-tab-top"><h5>${esc(t.titulo)}</h5><button type="button" class="btn-export-xls ia-xls" data-t="${id}">⤓ Excel</button></div><div class="table-wrap"><table class="data-table" id="${id}"><thead><tr>${cab}</tr></thead><tbody>${corpo}${tot}</tbody></table></div></div>`;
+    return `<div class="ia-tab"><div class="ia-tab-top"><h5>${esc(t.titulo)}</h5><button type="button" class="btn-export-xls ia-xls fora-da-imagem" data-t="${id}">⤓ Excel</button></div><div class="table-wrap"><table class="data-table" id="${id}"><thead><tr>${cab}</tr></thead><tbody>${corpo}${tot}</tbody></table></div></div>`;
   }
-  function botoesAbrir(lista) {
+  function botoesAbrir(lista, foraImg) {
     if (!lista || !lista.length) return '';
     const vistos = new Set(); lista = lista.filter(a => { const k = a.rota + '|' + a.rotulo + '|' + (a.dia || ''); if (vistos.has(k)) return false; vistos.add(k); return true; });
     const g = ACOES.push(lista) - 1;
-    return `<div class="ia-abrir">${lista.map((a, i) => `<button type="button" class="ia-btn-abrir" data-g="${g}" data-i="${i}">↗ ${esc(a.rotulo)}${a.sub ? `<small>${esc(a.sub)}</small>` : ''}</button>`).join('')}</div>`;
+    return `<div class="ia-abrir${foraImg ? ' fora-da-imagem' : ''}">${lista.map((a, i) => `<button type="button" class="ia-btn-abrir" data-g="${g}" data-i="${i}">↗ ${esc(a.rotulo)}${a.sub ? `<small>${esc(a.sub)}</small>` : ''}</button>`).join('')}</div>`;
   }
   function desenhar() {
     const box = document.getElementById('ia-msgs'); if (!box) return;
@@ -11207,7 +11411,8 @@ const IA = (() => {
       else if (m.resultados) {
         h = m.resultados.map(r => {
           if (r.vazio) return `<div class="ia-res"><h4>${esc(r.titulo)}</h4><div class="ia-bolha ia-aviso">${esc(r.vazio)}</div>${botoesAbrir(r.abrir)}</div>`;
-          let x = `<div class="ia-res"><h4>${esc(r.titulo)}</h4><div class="ia-sub">${esc(r.sub || '')}</div>`;
+          const barra = '<div class="ia-acoes fora-da-imagem"><button type="button" class="ia-ac" data-ac="cheia" title="Abrir esta resposta em tela cheia">⛶ Tela cheia</button><button type="button" class="ia-ac" data-ac="img" title="Gerar imagem desta resposta">🖼 Imagem</button><button type="button" class="ia-ac" data-ac="pdf" title="Gerar PDF desta resposta">📄 PDF</button><button type="button" class="ia-ac" data-ac="xls" title="Baixar Excel desta resposta">⤓ Excel</button></div>';
+          let x = `<div class="ia-res"><div class="ia-res-top"><h4>${esc(r.titulo)}</h4>${barra}</div><div class="ia-sub">${esc(r.sub || '')}</div>${(r.contexto || []).map(c => `<div class="ia-ctx">↳ ${esc(c)}</div>`).join('')}${r.resumo ? `<div class="ia-resumo">${esc(r.resumo)}</div>` : ''}`;
           if (r.cartoes && r.cartoes.length) x += `<div class="cards-grid ia-cards">${r.cartoes.map(c => metricCard(c.r, c.v, c.negative, { positive: c.positive, sub: c.sub })).join('')}</div>`;
           (r.avisos || []).forEach(a => { x += `<div class="ia-bolha ia-aviso">${esc(a)}</div>`; });
           const htmlGraficos = () => (r.graficos || []).forEach(g => { const id = `ia-g-${++SEQ}`; x += `<div class="ia-graf"><h5>${esc(g.titulo)}</h5><div id="${id}"></div></div>`; pos.push(() => g.fn(id)); });
@@ -11215,13 +11420,15 @@ const IA = (() => {
           if (r.blocosPrimeiro) { htmlBlocos(); htmlGraficos(); } else { htmlGraficos(); htmlBlocos(); }
           (r.tabelas || []).forEach(t => { x += htmlTabela(t, `ia-t-${++SEQ}`); });
           if (r.mostrar && r.mostrar.length) x += `<div class="ia-opcoes">${r.mostrar.map(o => `<button type="button" class="ia-chip" data-cat="${esc(o.id)}" data-nome="${esc(o.rotulo)}">Mostrar aqui: ${esc(o.rotulo)}</button>`).join('')}</div>`;
-          x += botoesAbrir(r.abrir) + (r.notas && r.notas.length ? `<div class="ia-nota">${[...new Set(r.notas.filter(Boolean))].map(esc).join('<br>')}</div>` : '');
+          x += botoesAbrir(r.abrir, true) + (r.notas && r.notas.length ? `<div class="ia-nota">${[...new Set(r.notas.filter(Boolean))].map(esc).join('<br>')}</div>` : '');
           return x + '</div>';
         }).join('');
       }
       d.innerHTML = h; box.appendChild(d);
     });
     pos.forEach(f => { try { f(); } catch (e) { /* um gráfico que falha não derruba a resposta */ } });
+    // dentro da janela de "tela cheia" a resposta sai do painel: os botões dela precisam do próprio ouvinte
+    box.querySelectorAll('.ia-res').forEach(rs => rs.addEventListener('click', ev => { if (rs.closest('#ia-msgs')) return; if (TRATAR && ev.target.closest('.ia-ac, .ia-btn-abrir, .ia-xls, a[data-imp-tec], a[data-a18-tec]')) { TRATAR(ev); ev.stopPropagation(); } }));
     try { if (typeof ativarFiltrosDeColuna === 'function') ativarFiltrosDeColuna(box); } catch (e) { /* tabela fica sem funil */ }
     box.scrollTop = box.scrollHeight;
   }
