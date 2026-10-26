@@ -10983,7 +10983,11 @@ const IA = (() => {
   }
   function skRetornos(p, per) {
     // retornos de UM dia: a tabela "Retornos do Dia (IFI / IRR)" da PCR (a Produção só tem retornos já concluídos; o dia de hoje vem do CSV)
-    if (ehDia(per)) { const rd = exRetornosDoDia({ data: per.inicio, cidades: p.cidades || [], tecnico: p.tecnico || null }); if (rd && rd.resultados && rd.resultados[0]) return rd.resultados[0]; }
+    if (ehDia(per)) {
+      const b = String(p.bruto || ''), sit = [];
+      if (/pendente/.test(b)) sit.push('pendente'); if (/\brota\b/.test(b)) sit.push('em_rota'); if (/iniciad/.test(b)) sit.push('iniciado'); if (/conclu/.test(b)) sit.push('concluido'); if (/improdut|nao conclu|não conclu/.test(b)) sit.push('improdutivo'); if (/cancel/.test(b)) sit.push('cancelado');
+      const tipo = /\bifi\b/.test(b) && !/\birr\b/.test(b) ? 'IFI' : /\birr\b/.test(b) && !/\bifi\b/.test(b) ? 'IRR' : null;
+      const rd = exRetornosDoDia({ data: per.inicio, cidades: p.cidades || [], tecnico: p.tecnico || null, situacao: sit, tipo }); if (rd && rd.resultados && rd.resultados[0]) return rd.resultados[0]; }
     const m = metricas('retornos', per, p), titulo = 'IFI / IRR (retornos)';
     if (m.vazio) return vazio(titulo, `Não há retornos nem produção importados para ${per.rotulo}.`, [abrirRG(per, 'ofensor', 'Abrir Ofensor IFI-IRR')]);
     const g = m.g, t = g.tot, pI = pctSobre(t.ifi, t.ativ + t.me), pR = pctSobre(t.irr, t.rep);
@@ -11136,7 +11140,7 @@ const IA = (() => {
     if (skills.includes('equipe')) skills = conc.has('campo') ? skills.filter(k => k !== 'equipe') : ['equipe'];   // "quantos técnicos ativos": é a equipe do dia, não produção
     // 27/10/2026: 'ordens' sozinha NÃO é pedido de produção quando o assunto é prazo, retorno, situação do dia, campo ou equipe ("quantas ordens até 24hrs" caía em Produção)
     if (skills.includes('producao') && !/produ|instal|ativac|servic|concluid|realizad/.test(q.bruto) && skills.some(k => ['prazo', 'retornos', 'dia', 'campo', 'equipe'].includes(k))) skills = skills.filter(k => k !== 'producao');
-    if (skills.includes('dia') && skills.includes('producao') && !/produ|instal|ativac|servic/.test(q.bruto)) skills = skills.filter(k => k !== 'producao');   // "situação das ordens hoje": o cartão do dia já diz tudo
+    if (skills.includes('dia') && skills.includes('producao') && !/\bprodu|instal|ativac|servic/.test(q.bruto)) skills = skills.filter(k => k !== 'producao');   // "situação das ordens hoje": o cartão do dia já diz tudo
     if (skills.includes('resumo')) skills = ['resumo'];
     if (skills.includes('rentab')) skills = ['rentab'];
     // "ranking de técnicos em Guarujá este mês": sem outro indicador citado, ranking de técnicos/cidades é de produção
@@ -11250,7 +11254,7 @@ const IA = (() => {
       return res;
     };
     if (req === 'ciclos') resultados.push(mk1(pers[pers.length - 1] ? { inicio: pers[0].inicio, fim: pers[pers.length - 1].fim } : pers[0]));
-    else if (pers.length > 1 || (info.comparar && /compar|versus|vs|diferenc|contra o|em relacao/.test(info.q.bruto))) { // comparação: o MESMO relatório pra cada período, um embaixo do outro ("evolução" de um período só NÃO compara com o anterior: o relatório já é a evolução)
+    else if (pers.length > 1 || (info.comparar && /\bcompar|versus|\bvs\b|diferenc|contra o|em relacao/.test(info.q.bruto))) { // comparação: o MESMO relatório pra cada período, um embaixo do outro ("evolução" de um período só NÃO compara com o anterior: o relatório já é a evolução)
       const alvo = pers.length > 1 ? pers : [pers[0], anteriorDe(pers[0])];
       [...alvo].sort((a, b) => a.inicio.localeCompare(b.inicio)).forEach((per, i, arr) => resultados.push(mk1(per, ` — ${i === arr.length - 1 && arr.length === 2 ? 'mais recente' : 'período ' + (i + 1)}`)));
       if (pers.length === 1) resultados[0].notas.push(`Você citou só um período; comparei com o período imediatamente anterior (${alvo[1].rotulo}).`);
@@ -11278,6 +11282,11 @@ const IA = (() => {
     if (info.catalogo && info.catalogo.id === 'compProdCiclos' && info.periodos.length && !info.periodos.every(x => x.tipo === 'ciclo' || x.tipo === 'ciclos') && info.skills.length) info = { ...info, catalogo: null };
     // "gráfico por cidade": o gráfico da habilidade de produção é melhor que só a tabela do catálogo
     if (info.catalogo && info.grafico && ['prodCidade', 'prodTecnico'].includes(info.catalogo.id) && info.skills.includes('producao')) { if (info.catalogo.id === 'prodCidade') base.foco = 'cidade'; info = { ...info, catalogo: null }; }
+    // pedido de RETORNO (retorno, IFI, IRR, voltou…): vence a lista de "pendentes"/"situação do dia" — "retornos pendentes de hoje" mostrava as ordens pendentes
+    // do dia (não os retornos) porque a palavra "pendentes" casava com o relatório de pendentes. A situação dita (pendente, em rota…) vira filtro dos retornos.
+    if (info.skills.includes('retornos') && /\b(retorn|ifi|irr|voltou|voltaram|retrabalho)/.test(bruto)) {
+      info = { ...info, skills: info.skills.filter(sk => sk !== 'dia'), catalogo: info.catalogo && ['pendentes', 'aExecutar', 'reparosSituacao'].includes(info.catalogo.id) ? null : info.catalogo };
+    }
     // relatório existente pedido pelo nome
     if (info.catalogo) return execCatalogo(info.catalogo, info, base, S);
     // seguimento ("e no mês passado?"): sem habilidade nova, reaproveita a anterior
@@ -11627,7 +11636,7 @@ const IA = (() => {
     try {
       const token = await aux.obterToken();
       if (!token) return { ok: false, codigo: 'nao_autenticado' };
-      const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 13000);
+      const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 25000);
       let resp;
       try { resp = await aux.buscar(IA_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ mensagens: [...HIST_IA.slice(-6), { papel: 'usuario', texto: textoAnon }], ultimoPlano: ULTIMO_PLANO }), signal: ctl.signal }); }
       finally { clearTimeout(timer); }
@@ -11760,7 +11769,7 @@ const IA = (() => {
     const cedo = abertas.filter(r => r.limite)[0];
     res.cartoes.push(cartao('Reparos do dia', fmtN(b.base.length)), cartao('Em aberto', fmtN(abertas.length), { sub: 'pendentes, em rota e iniciados' }), cartao('Já vencidos', fmtN(venc.length), { negative: venc.length > 0 }), cartao('Vencem em até 2h', fmtN(v2.length), { negative: v2.length > 0 }));
     if (enc.length) res.cartoes.push(cartao('Encerrados até 24h', formatPct(pctSobre(dentro, enc.length) || 0, 1), { positive: pctSobre(dentro, enc.length) >= PRAZO_META, negative: pctSobre(dentro, enc.length) < PRAZO_META, sub: `${fmtN(dentro)} de ${fmtN(enc.length)} · meta ${PRAZO_META}%` }));
-    res.resumo = `${cap(dataTxt(dia))}${filtros.length ? ' (' + filtros.join(', ') + ')' : ''}: ${fmtN(b.base.length)} ${plural(b.base.length, 'reparo', 'reparos')}, ${fmtN(abertas.length)} em aberto — ${fmtN(venc.length)} já ${plural(venc.length, 'venceu', 'venceram')} e ${fmtN(v2.length)} ${plural(v2.length, 'vence', 'vencem')} em até 2h.${cedo ? ` O prazo mais cedo em aberto é às ${hhmm(cedo.limite)} (O.S ${cedo.os}${cedo.recurso ? ', ' + cedo.recurso : ''}).` : ''}${enc.length ? ` Dos ${fmtN(enc.length)} já encerrados, ${formatPct(pctSobre(dentro, enc.length) || 0, 1)} ficaram dentro de 24h.` : ''}`;
+    res.resumo = `${cap(dataTxt(dia))}${filtros.length ? ' (' + filtros.join(', ') + ')' : ''}: ${fmtN(b.base.length)} ${plural(b.base.length, 'reparo', 'reparos')}, ${fmtN(abertas.length)} em aberto — ${fmtN(venc.length)} já ${plural(venc.length, 'venceu', 'venceram')} e ${fmtN(v2.length)} ${plural(v2.length, 'vence', 'vencem')} em até 2h.${cedo ? ` O prazo mais cedo em aberto é às ${hhmm(cedo.limite)} (O.S ${cedo.os}${cedo.recurso ? ', ' + cedo.recurso : ''}).` : ''}${enc.length ? ` Encerrados: ${fmtN(dentro)} de ${fmtN(enc.length)} (${formatPct(pctSobre(dentro, enc.length) || 0, 1)}) dentro de 24h.` : ''}`;
     (res.blocosFim = res.blocosFim || []).push(b.bloco);
     return { resultados: [res] };
   }
