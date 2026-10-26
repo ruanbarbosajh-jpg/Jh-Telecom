@@ -9047,7 +9047,8 @@ document.addEventListener('click', ev => {
 }, true);
 function atualizarFerramentasAnalista() {
   const lupa = document.getElementById('btn-lupa'); if (lupa) lupa.hidden = !modoNovo();
-  const btnIa = document.getElementById('btn-ia'); if (btnIa) btnIa.hidden = !ehAnalista();   // assistente: só o Analista
+  const btnIa = document.getElementById('btn-ia'); if (btnIa) btnIa.hidden = true;   // assistente JUNTO da busca (26/10/2026): o botão "Buscar" / Ctrl+K é a entrada única; o painel abre quando a pergunta é feita ali
+  const lupaTxt = document.getElementById('btn-lupa'); if (lupaTxt) lupaTxt.title = ehAnalista() ? 'Buscar no sistema inteiro ou perguntar ao assistente (Ctrl+K)' : 'Buscar no sistema inteiro (Ctrl+K)';
   if (!ehAnalista() && typeof IA !== 'undefined') IA.fechar();
   if (!modoNovo()) { atualizarIndiceAba(); return; }
   ativarBotoesAnalista(); atualizarIndiceAba(); marcarChipAtivo();
@@ -10206,9 +10207,11 @@ function skeletonTela(alvo, cards = 4, linhas = 6) {
       if (!podeAcessar(currentUser.role, a.rota)) return;
       assuntos.push({ grupo: 'Assuntos', titulo: `${tituloDaRota(a.rota)} › ${a.secao}`, sub: a.sub || '', acao: () => { navigate(a.rota); irParaSecao(a.secao); } });
     });
+    const telasDoTitulo = out.filter(x => normalizeHeader(x.titulo).includes(termo));   // telas cujo NOME tem o que foi digitado ("frota" → Frota)
     out.unshift(...assuntos);   // assuntos primeiro (ex.: "prazos" leva direto à seção)
     // ANALISTA (24/10/2026): busca inteligente — pergunta ao assistente + telas/relatórios por sinônimo, erro de digitação e intenção (os outros perfis seguem como antes)
-    if (ehAnalista()) { const ia = IA.itensBusca(termoBruto, rotasVisiveis(), new Set(out.map(o => o.titulo))); out.unshift(...ia); }
+    let itemAss = null;
+    if (ehAnalista()) { const ia = IA.itensBusca(termoBruto, rotasVisiveis(), new Set(out.map(o => o.titulo))); itemAss = ia.find(x => x.eAss) || null; out.unshift(...ia.filter(x => !x.eAss)); if (telasDoTitulo.length) { telasDoTitulo.forEach(x => out.splice(out.indexOf(x), 1)); out.unshift(...telasDoTitulo); } if (itemAss && itemAss.entendeu) out.unshift(itemAss); }
     // dados: O.S / contrato / cliente (Produção + PCR + Prazo) e técnicos
     const ehNum = /^\d+$/.test(termoBruto.trim());
     const num = termoBruto.trim();
@@ -10234,8 +10237,10 @@ function skeletonTela(alvo, cards = 4, linhas = 6) {
       MONITOR_OLT.cli.filter(c => (ehNum ? String(c.contrato).includes(num) : (normalizeHeader(c.nome || '').includes(termo) || (c.serial && normalizeHeader(c.serial).includes(termo))))).slice(0, 6)
         .forEach(c => out.push({ grupo: 'Monitoramento', titulo: `${c.nome || c.contrato} — sinal ${c.sinal != null ? c.sinal + ' dBm' : 'sem leitura'}`, sub: `contrato ${c.contrato} · ${c.cidade || ''} · ${c.olt || ''}`, acao: () => navigate('monitorolt') }));
     }
+    if (itemAss && !itemAss.entendeu) out.push(itemAss);   // não é um pedido que o assistente entendeu (nome, número…): Enter abre o resultado da busca; o assistente fica como última opção
     return out;
   }
+  window.buscaGlobalItens = itens;   // o assistente reaproveita a MESMA busca (O.S, contrato, cliente, técnico) quando o pedido não é um relatório
   function pintar() {
     filtradas = itens(busca().value);
     if (sel >= filtradas.length) sel = 0;
@@ -10961,7 +10966,7 @@ const IA = (() => {
         else if (e.skills.length) { sub = `Vou mostrar: ${e.skills.map(s => INDICADOR_NOME[s]).join(' + ')}${e.periodos.length ? ' · ' + e.periodos.map(p => p.rotulo.replace(/\s*\(.*\)/, '')).join(' × ') : ''}`; entendeu = true; }
         else if (e.navegar || e.inventario) sub = e.inventario ? 'Lista os relatórios, tabelas e gráficos que existem' : 'Vou procurar a tela certa';
       } catch (er) { /* só o texto padrão */ }
-      if (q.t.length >= 2 || entendeu) out.push({ grupo: 'Assistente', titulo: `✦ Perguntar ao assistente: “${termoBruto.trim().slice(0, 70)}”`, sub, acao: () => abrir(termoBruto) });
+      if (q.t.length >= 2 || entendeu) out.push({ grupo: 'Assistente', eAss: true, entendeu, titulo: `✦ ${entendeu ? 'Responder' : 'Perguntar ao assistente'}: “${termoBruto.trim().slice(0, 70)}”`, sub, rotulo: entendeu ? 'Enter' : '', acao: () => abrir(termoBruto) });
     }
     rankNav(termoBruto, rotas, jaTem).forEach(d => out.push({ grupo: d.tipo === 'tela' ? 'Telas' : 'Assuntos', titulo: d.titulo, sub: d.sub, rotulo: d.tipo === 'tela' ? d.rota : '', acao: () => { navigate(d.rota); if (d.secao) irParaSecao(d.secao); } }));
     return out;
@@ -11143,10 +11148,13 @@ const IA = (() => {
   function respostaNavegacao(texto, info) {
     const rotas = Object.keys(PAGES).filter(r => podeAcessar(currentUser.role, r)).map(r => ({ rota: r, titulo: tituloDaRota(r) }));
     const docs = rankNav(texto, rotas);
+    let dados = []; try { dados = (window.buscaGlobalItens ? window.buscaGlobalItens(texto) : []).filter(x => ['O.S', 'Contratos', 'Clientes', 'Técnicos', 'Monitoramento'].includes(x.grupo)); } catch (e) { dados = []; }
+    if (dados.length) return { papel: 'ia', texto: { titulo: 'Encontrei no sistema', msg: 'Clique para abrir o detalhe.' }, abrir: [...dados.slice(0, 10).map(x => ({ rotulo: x.titulo, sub: x.sub, acao: x.acao })), ...docs.slice(0, 3).map(d => ({ rota: d.rota, rotulo: d.titulo, sub: d.sub, secao: d.secao }))] };
     if (!docs.length) return { papel: 'ia', vazio: 'Não encontrei um relatório nem uma tela que corresponda a esse pedido — então não vou montar um gráfico sem base confiável. Tente dizer o indicador e o período, por exemplo: “produção deste mês”, “prazo de ontem”, “compare o ciclo atual com o anterior” ou “onde vejo as multas”. Pergunte “quais relatórios existem?” para ver o que eu sei mostrar.', sugestoes: true };
     return { papel: 'ia', texto: { titulo: info && info.navegar ? 'Encontrei estas telas' : 'Não há um cálculo pronto para esse pedido, mas estas telas parecem o que você procura', msg: '' }, abrir: docs.slice(0, 6).map(d => ({ rota: d.rota, rotulo: d.titulo, sub: d.sub, secao: d.secao })) };
   }
   function abrirTela(a) {
+    if (a && a.acao) { try { a.acao(); } catch (e) { /* o detalhe não abriu */ } return; }   // item vindo da busca (O.S, contrato, cliente, técnico)
     if (!a || !a.rota) return;
     navigate(a.rota);
     setTimeout(() => {
