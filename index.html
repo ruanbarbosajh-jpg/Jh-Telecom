@@ -3276,6 +3276,10 @@
   .table-wrap:has(> table.fe-vales) { width: fit-content; max-width: 100%; }
   table.fe-vales { width: auto; min-width: 620px; }
   table.fe-vales th { text-align: center; }
+
+  /* Folha / Folha do Escritório / Relatório do Financeiro: tela cheia (28/10/2026) */
+  body.tela-larga .content { padding: 12px 8px 24px; }
+  body.tela-larga .content .toolbar { margin-left: 0; margin-right: 0; }
 </style>
 </head>
 <body>
@@ -4514,6 +4518,9 @@ function podeEditarPresencaEscritorio() { return !!currentUser && (currentUser.r
 // Comparativo de Prazo — ficou só a lista abaixo. Rota nova nasce FECHADA.
 const ROTAS_SO_PERMITIDAS = {
   gestao: ['inicio', 'reuniaoprazos', 'dashboard', 'fleet', 'toll', 'prazo', 'parcialdia', 'u2000', 'relu2000'],
+  // RH (28/10/2026, pedido do cliente: "para o RH só deixe liberado o Financeiro todo e frota e pedágio"): lista de PERMISSÃO — Financeiro (Folha, Relatório do Financeiro,
+  // Receitas e Despesas, Folha do Escritório) + Frota + Pedágio. Rota nova nasce FECHADA pro RH. (Receitas e Despesas já é liberada pela regra própria em podeAcessar.)
+  rh: ['inicio', 'folha', 'relatoriofin', 'recdesp', 'folhaescritorio', 'fleet', 'toll'],
   escritorio: ['inicio', 'cleanup', 'table', 'prazo', 'prazoativacao', 'parcialdia',
                'pcr', 'chamadosgiga', 'ofensoresprazo', 'certificacoes', 'prazosesc', 'retornosesc', 'contatos', 'improdutivas', 'formcert'],
 };
@@ -5087,7 +5094,8 @@ function montarTopoV2() {
   setTimeout(() => { try { medirAlturaDoTopo(); } catch (e) { /* sem topo */ } }, 80);
   const raiz = document.documentElement, tb = document.querySelector('.topbar'); if (!tb) return;
   // NOVO DESIGN (v2): nasceu só do Analista (23/10/2026); liberado também pro ESCRITÓRIO em 26/10/2026 (pedido do cliente). Os demais perfis seguem com o visual de antes.
-  const ligado = !!currentUser && ['analista', 'escritorio'].includes(perfilValido(currentUser.role));
+  // 28/10/2026 (pedido do cliente: "atualize o design dos logins"): o novo design vale pra TODOS os logins.
+  const ligado = !!currentUser;
   if (!ligado) {   // outro perfil: desmonta tudo que o v2 acrescentou
     delete raiz.dataset.v2;
     tb.querySelectorAll('.tb-marca, .tb-sep, .tb-pagina-ic, .tb-sino, .tb-menu').forEach(e => e.remove());
@@ -5474,6 +5482,8 @@ function mostrarBalaoCsvEscritorio() {
 function rotaDeEntrada(user) {
   let salva = null;
   try { salva = localStorage.getItem('jh_ultima_rota_' + user.role); } catch (e) {}
+  // RH (28/10/2026, pedido do cliente: "quando a RH logar já deixe aberto o financeiro"): a entrada dela é a área Financeiro; só uma tela que ela escolheu depois (F5) é lembrada
+  if (perfilValido(user.role) === 'rh' && (!salva || salva === 'inicio') && PAGES.area_financeiro) return 'area_financeiro';
   if (salva && PAGES[salva] && podeAcessar(user.role, salva)) return salva;
   return getFirstAllowedRoute(user.role);
 }
@@ -9598,6 +9608,7 @@ window.addEventListener('beforeunload', e => {
   if (FOLHA_GUARDA.pend() > 0) { try { if (FOLHA_GUARDA.salvar) FOLHA_GUARDA.salvar(); } catch (x) { /* o rascunho local cobre */ } e.preventDefault(); e.returnValue = ''; return ''; }
 });
 window.addEventListener('pagehide', () => { if (FOLHA_GUARDA.pend() > 0) { try { if (FOLHA_GUARDA.salvar) FOLHA_GUARDA.salvar(); } catch (x) { /* idem */ } } });
+const ROTAS_TELA_LARGA = new Set(['folha', 'folhaescritorio', 'relatoriofin']);
 function navigate(route) {
   if (FOLHA_GUARDA.pend() > 0) { perguntarSalvarOuDescartarFolha(() => navigate(route)); return; }
   if (PCR_LIVE_TIMER) { clearInterval(PCR_LIVE_TIMER); PCR_LIVE_TIMER = null; }
@@ -9611,6 +9622,8 @@ function navigate(route) {
   closeSidebar();
   refreshNameLists();
   ROTA_ATUAL.nome = route;
+  // Folha dos técnicos, do Escritório e Relatório do Financeiro em LARGURA TOTAL (28/10/2026, pedido do cliente: "expanda as laterais, pode deixar tela cheia"): sem as margens laterais e com o menu recolhido
+  const larga = ROTAS_TELA_LARGA.has(route); document.body.classList.toggle('tela-larga', larga); if (larga) document.body.classList.add('sidebar-collapsed');
   // Lembra a última tela pra sobreviver a um F5/sessão salva sem cair sempre
   // no Menu Inicial (pedido do cliente 22/09/2026: "não quero que quando
   // atualizar a tela volte pro início"). Chave por perfil — cada login abre
@@ -28812,7 +28825,6 @@ function renderFolhaPagamento(modo) {
       <div class="panel" style="margin-bottom:1.5rem"><h3>Descontos por tipo (equipe)</h3><div id="c-desc"></div></div>`;
 
     body.innerHTML = soRelatorio ? blocoRelatorio + blocoRelatorioEscritorio : `
-      ${painelValoresPorOrdemFolha(janelaFolha.fim, periodo || (brutas[0] && brutas[0].periodo) || '')}
       <div id="folha-fechamento"></div>
       <div class="section-heading" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">Folha de Pagamento completa
         <button type="button" class="btn-export-xls" id="folha-export-xls">⤓ Excel da folha</button>
@@ -28824,6 +28836,7 @@ function renderFolhaPagamento(modo) {
         <button class="btn-secundario" id="folha-descartar" disabled>Descartar alterações</button>
         <span id="folha-edit-msg" style="font-size:13px;color:var(--text-muted)"></span>
       </div>` : ''}
+      ${painelValoresPorOrdemFolha(janelaFolha.fim, periodo || (brutas[0] && brutas[0].periodo) || '')}
       <div class="section-heading" data-sem-imagem style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">Histórico de alterações
         <span id="folha-hist-qtd" style="font-size:12px;font-weight:500;color:var(--text-muted)"></span>
         <button type="button" class="secao-toggle" id="folha-hist-btn">${histAberto ? '▾ ocultar' : '▸ exibir'}</button>
