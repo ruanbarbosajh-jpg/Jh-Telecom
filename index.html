@@ -9048,7 +9048,12 @@ document.addEventListener('click', ev => {
 function atualizarFerramentasAnalista() {
   const lupa = document.getElementById('btn-lupa'); if (lupa) lupa.hidden = !modoNovo();
   const btnIa = document.getElementById('btn-ia'); if (btnIa) btnIa.hidden = true;   // assistente JUNTO da busca (26/10/2026): o botão "Buscar" / Ctrl+K é a entrada única; o painel abre quando a pergunta é feita ali
-  const lupaTxt = document.getElementById('btn-lupa'); if (lupaTxt) lupaTxt.title = ehAnalista() ? 'Buscar no sistema inteiro ou perguntar ao assistente (Ctrl+K)' : 'Buscar no sistema inteiro (Ctrl+K)';
+  const lupaTxt = document.getElementById('btn-lupa');
+  if (lupaTxt) {
+    if (lupaTxt.dataset.htmlOrig === undefined) lupaTxt.dataset.htmlOrig = lupaTxt.innerHTML;
+    if (ehAnalista()) { lupaTxt.innerHTML = '<span aria-hidden="true">✦</span> Assistente'; lupaTxt.title = 'Assistente: pergunte ou busque no sistema inteiro (Ctrl+K)'; lupaTxt.setAttribute('aria-label', 'Abrir o assistente'); }
+    else { lupaTxt.innerHTML = lupaTxt.dataset.htmlOrig; lupaTxt.title = 'Buscar no sistema inteiro (Ctrl+K)'; lupaTxt.setAttribute('aria-label', 'Buscar no sistema inteiro'); }
+  }
   if (!ehAnalista() && typeof IA !== 'undefined') IA.fechar();
   if (!modoNovo()) { atualizarIndiceAba(); return; }
   ativarBotoesAnalista(); atualizarIndiceAba(); marcarChipAtivo();
@@ -10260,6 +10265,7 @@ function skeletonTela(alvo, cards = 4, linhas = 6) {
   }
   function mostrar() {
     if (!currentUser) return;   // só depois de entrar no sistema
+    if (ehAnalista() && typeof IA !== 'undefined') { IA.abrir(); return; }   // Analista: o Assistente é a busca (26/10/2026)
     caixa().classList.add('aberto');
     busca().placeholder = ehAnalista() ? 'Busque ou pergunte: “quanto gastei este mês”, “prazo de ontem”, O.S, cliente, técnico…' : modoNovo() ? 'Buscar telas, assuntos (ex.: prazos), O.S, contrato, cliente, técnico…' : 'Buscar tela...';
     busca().value = ''; sel = 0; pintar(); busca().focus();
@@ -11100,7 +11106,7 @@ const IA = (() => {
     el.innerHTML = `<header class="ia-head"><div class="ia-tit"><span class="ia-logo" aria-hidden="true">✦</span><div><b>Assistente</b><small>Usa só os dados deste sistema · nada sai do navegador</small></div></div>
         <div class="ia-head-btns"><button type="button" id="ia-larg" title="Ampliar / reduzir" aria-label="Ampliar">⤢</button><button type="button" id="ia-nova" title="Nova conversa" aria-label="Nova conversa">↺</button><button type="button" id="ia-fechar" title="Fechar (Esc)" aria-label="Fechar">✕</button></div></header>
       <div class="ia-msgs" id="ia-msgs" aria-live="polite"></div>
-      <form class="ia-form" id="ia-form" autocomplete="off"><input id="ia-in" type="text" placeholder="Pergunte: “prazo de reparo do mês passado”…" maxlength="300" aria-label="Pergunta ao assistente"><button type="submit" class="ia-enviar">Enviar</button></form>`;
+      <form class="ia-form" id="ia-form" autocomplete="off"><input id="ia-in" type="text" placeholder="Pergunte ou busque: “prazo de ontem”, O.S, contrato, cliente, técnico, tela…" maxlength="300" aria-label="Pergunta ao assistente"><button type="submit" class="ia-enviar">Enviar</button></form>`;
     document.body.appendChild(el);
     PAINEL = el;
     el.querySelector('#ia-fechar').addEventListener('click', fechar);
@@ -11151,7 +11157,7 @@ const IA = (() => {
     let dados = []; try { dados = (window.buscaGlobalItens ? window.buscaGlobalItens(texto) : []).filter(x => ['O.S', 'Contratos', 'Clientes', 'Técnicos', 'Monitoramento'].includes(x.grupo)); } catch (e) { dados = []; }
     if (dados.length) return { papel: 'ia', texto: { titulo: 'Encontrei no sistema', msg: 'Clique para abrir o detalhe.' }, abrir: [...dados.slice(0, 10).map(x => ({ rotulo: x.titulo, sub: x.sub, acao: x.acao })), ...docs.slice(0, 3).map(d => ({ rota: d.rota, rotulo: d.titulo, sub: d.sub, secao: d.secao }))] };
     if (!docs.length) return { papel: 'ia', vazio: 'Não encontrei um relatório nem uma tela que corresponda a esse pedido — então não vou montar um gráfico sem base confiável. Tente dizer o indicador e o período, por exemplo: “produção deste mês”, “prazo de ontem”, “compare o ciclo atual com o anterior” ou “onde vejo as multas”. Pergunte “quais relatórios existem?” para ver o que eu sei mostrar.', sugestoes: true };
-    return { papel: 'ia', texto: { titulo: info && info.navegar ? 'Encontrei estas telas' : 'Não há um cálculo pronto para esse pedido, mas estas telas parecem o que você procura', msg: '' }, abrir: docs.slice(0, 6).map(d => ({ rota: d.rota, rotulo: d.titulo, sub: d.sub, secao: d.secao })) };
+    return { papel: 'ia', texto: { titulo: 'Encontrei estas telas', msg: '' }, abrir: docs.slice(0, 6).map(d => ({ rota: d.rota, rotulo: d.titulo, sub: d.sub, secao: d.secao })) };
   }
   function abrirTela(a) {
     if (a && a.acao) { try { a.acao(); } catch (e) { /* o detalhe não abriu */ } return; }   // item vindo da busca (O.S, contrato, cliente, técnico)
@@ -11186,7 +11192,7 @@ const IA = (() => {
     const box = document.getElementById('ia-msgs'); if (!box) return;
     ACOES = [];
     if (!MSGS.length) {
-      box.innerHTML = `<div class="ia-boas"><div class="ia-boas-ic">✦</div><h4>Olá! O que você quer saber?</h4><p>Peça relatórios, gráficos e comparações dos dados que já estão no sistema. Eu mostro os mesmos relatórios das telas, calculados com as mesmas contas, e deixo o botão para abrir a tela original.</p><div class="ia-sug">${SUGESTOES.map(s => `<button type="button" class="ia-chip" data-s="${esc(s)}">${esc(s)}</button>`).join('')}</div></div>`;
+      box.innerHTML = `<div class="ia-boas"><div class="ia-boas-ic">✦</div><h4>Olá! O que você quer saber?</h4><p>Pergunte ou busque: relatórios, gráficos e comparações, e também O.S, contrato, cliente, técnico ou tela. Eu mostro os mesmos relatórios das telas, calculados com as mesmas contas, e deixo o botão para abrir a tela original.</p><div class="ia-sug">${SUGESTOES.map(s => `<button type="button" class="ia-chip" data-s="${esc(s)}">${esc(s)}</button>`).join('')}</div></div>`;
       return;
     }
     box.innerHTML = ''; const pos = [];
