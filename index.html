@@ -4413,7 +4413,7 @@ function podeEditarPresencaEscritorio() { return !!currentUser && (currentUser.r
 const ROTAS_SO_PERMITIDAS = {
   gestao: ['inicio', 'reuniaoprazos', 'dashboard', 'fleet', 'toll', 'prazo', 'parcialdia', 'u2000', 'relu2000'],
   escritorio: ['inicio', 'cleanup', 'table', 'prazo', 'prazoativacao', 'parcialdia',
-               'pcr', 'chamadosgiga', 'ofensoresprazo', 'certificacoes', 'u2000', 'relu2000', 'prazosesc', 'retornosesc', 'contatos', 'improdutivas'],
+               'pcr', 'chamadosgiga', 'ofensoresprazo', 'certificacoes', 'u2000', 'relu2000', 'prazosesc', 'retornosesc', 'contatos', 'improdutivas', 'formcert'],
 };
 // Pessoas do perfil Escritório que também veem a Frota (24/10/2026, pedido do cliente: "libere para thais ver a frota"). Só leitura: alterar a Frota segue só do Analista.
 const NOMES_ESCRITORIO_COM_FROTA = ['Thaís'];
@@ -4438,8 +4438,8 @@ function podeAcessar(role, route) {
   if (route === 'recdesp') return perfil === 'analista' || perfil === 'rh';
   // Contatos (20/10/2026): telefone de assinante — só Analista, Supervisor/Coordenador e Escritório (quem liga pro cliente)
   if (route === 'contatos') return perfil === 'analista' || perfil === 'admin' || perfil === 'escritorio';
-  // Formulário de Certificação (23/10/2026): só o Analista por enquanto (pedido do cliente); pra liberar pro Escritório, acrescente 'formcert' em ROTAS_SO_PERMITIDAS.escritorio e troque esta linha
-  if (route === 'formcert') return perfil === 'analista';
+  // Formulário de Certificação (23/10/2026): nasceu só do Analista; liberado pro ESCRITÓRIO em 26/10/2026 (pedido do cliente). Supervisor/Coordenador, Gestão, RH e Almox continuam sem.
+  if (route === 'formcert') return perfil === 'analista' || perfil === 'escritorio';
   // Improdutivas do Dia (24/10/2026): nasceu só do Analista e foi liberada pro Escritório no mesmo dia (pedido do cliente); o Escritório também precisa estar em ROTAS_SO_PERMITIDAS
   if (route === 'improdutivas') return perfil === 'analista' || perfil === 'escritorio';
   // MODO NOVO (08/10/2026, pedido do cliente: "a partir de agora as mudanças afetam SÓ o login Analista, pra depois que tudo
@@ -4984,7 +4984,8 @@ const IC_PESSOA = '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4.2"/><pat
 function montarTopoV2() {
   setTimeout(() => { try { medirAlturaDoTopo(); } catch (e) { /* sem topo */ } }, 80);
   const raiz = document.documentElement, tb = document.querySelector('.topbar'); if (!tb) return;
-  const ligado = !!currentUser && perfilValido(currentUser.role) === 'analista';
+  // NOVO DESIGN (v2): nasceu só do Analista (23/10/2026); liberado também pro ESCRITÓRIO em 26/10/2026 (pedido do cliente). Os demais perfis seguem com o visual de antes.
+  const ligado = !!currentUser && ['analista', 'escritorio'].includes(perfilValido(currentUser.role));
   if (!ligado) {   // outro perfil: desmonta tudo que o v2 acrescentou
     delete raiz.dataset.v2;
     tb.querySelectorAll('.tb-marca, .tb-sep, .tb-pagina-ic, .tb-sino, .tb-menu').forEach(e => e.remove());
@@ -19613,9 +19614,11 @@ async function buscarBaseCertificacoes(aoChegarForm) {
 // As respostas caem numa planilha própria (aba "Respostas ao formulário 1"). Aqui a leitura é pelo NOME das colunas (não pela posição), então reordenar/inserir pergunta no formulário não quebra.
 // A planilha precisa estar com o acesso "qualquer pessoa com o link pode ver" (como a Base antiga); enquanto estiver privada o fetch falha e o sistema segue só com a Base antiga, sem erro na tela.
 const FORM_CERT_CSV_URL = 'https://docs.google.com/spreadsheets/d/12PHgaxppbBtkn-l5SFYmQvb-foBhnDUatqo4x6Wb86c/export?format=csv&gid=97656694';
+// quem usa o formulário de certificação do sistema (Analista e Escritório): também decide quem lê as respostas dele na tela Certificações
+function podeUsarFormCert() { return !!currentUser && podeAcessar(currentUser.role, 'formcert'); }
 async function buscarRespostasFormCertificacao() {
   const porOS = await buscarRespostasFormPlanilha();
-  if (!ehAnalista()) return porOS;
+  if (!podeUsarFormCert()) return porOS;
   try {   // respostas do formulário do SISTEMA (aba do Google Sheets): a mais recente de cada O.S vale
     (await certFormCarregar(true)).forEach(r => {
       const os = fcSoDigitos(r.os); if (!os) return;
@@ -19627,7 +19630,7 @@ async function buscarRespostasFormCertificacao() {
 }
 async function buscarRespostasFormPlanilha() {
   const porOS = new Map();
-  if (!ehAnalista()) return porOS;   // 23/10/2026: o formulário novo (e tudo que vem dele) é só do Analista por enquanto — os outros perfis seguem só com a Base antiga
+  if (!podeUsarFormCert()) return porOS;   // 23/10/2026: o formulário novo (e tudo que vem dele) é só do Analista por enquanto — os outros perfis seguem só com a Base antiga
   try {
     const res = await fetch(FORM_CERT_CSV_URL, { credentials: 'omit' });
     if (!res.ok) return porOS;
@@ -19712,7 +19715,7 @@ async function abrirChamarCertificacoes(data, baseCert, botao) {
   abrirChamarClientes(lin, data, fmtLimite, { sitL: null }, {
     titulo: 'Chamar Clientes — Certificações', ns: 'cert:', semSituacao: true, semPrazo: true, modelos: CERT_MODELOS,
     extra: { rot: 'Certificação', opcoes: ['Certificada', 'Não certificada'], valor: l => l.certTxt },
-    extra2: ehAnalista() ? { rot: 'Chamar (formulário)', opcoes: ['Agora', 'Depois', 'Sem resposta'], valor: l => l.chamarTxt } : null,
+    extra2: podeUsarFormCert() ? { rot: 'Chamar (formulário)', opcoes: ['Agora', 'Depois', 'Sem resposta'], valor: l => l.chamarTxt } : null,
     mensagem: (l, nome, end, modelo) => mensagemCertificacao(l, nome, modelo),
     exemplos: (dados, modelo, nomeDe) => {
       const a = dados.find(d => ehBaseDoIfi(d.l.tipoRaw)), r = dados.find(d => ehServicoReparo(d.l.tipoRaw));
@@ -20082,7 +20085,7 @@ function renderCertificacoes() {
       <div class="field"><label>Data</label><input type="date" id="cert-data" value="${dataPadrao}"></div>
       <button class="btn" id="f-apply">Filtrar</button>
       <button class="btn secondary" id="cert-atualizar">🔄 Atualizar Base Certificações</button>
-      ${ehAnalista() ? '<button class="btn secondary" id="cert-abrir-form" title="Preencher a certificação direto no sistema (substitui o Google Forms)">📝 Abrir formulário de certificação</button>' : ''}
+      ${podeUsarFormCert() ? '<button class="btn secondary" id="cert-abrir-form" title="Preencher a certificação direto no sistema (substitui o Google Forms)">📝 Abrir formulário de certificação</button>' : ''}
       <span id="cert-atualizado" class="cert-info" title="Status ao vivo da planilha BASE CERTIFICAÇÕES (Google Sheets); O.S, técnico, cliente e cidade vêm do CSV de atividades da PCR. Não fica salvo no sistema. Tarefa do Escritório: exportar a tabela Detalhe pra Excel todo dia."></span>
     </div>
     <div id="cert-body"><div class="panel"><div class="empty">Carregando…</div></div></div>`;
@@ -20199,16 +20202,16 @@ function renderCertificacoes() {
         ${podeChamarClientes() ? '<button type="button" class="btn-sinalizar fora-da-imagem" id="cert-chamar" title="Só ordens concluídas de ativação, mudança de endereço e reparo: abre o WhatsApp de cada cliente com a mensagem de verificação de qualidade">📞 Chamar Clientes</button>' : ''}
       </div>
       <div class="table-wrap"><table class="data-table" id="tab-certificacoes-detalhe"><thead><tr>
-        <th class="fora-da-imagem">O.S</th><th class="fora-da-imagem">Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th class="fora-da-imagem">Período</th><th>Status</th><th class="fora-da-imagem">Atendente</th><th class="fora-da-imagem">Certificada por</th>${ehAnalista() ? '<th class="fora-da-imagem">Certificada corretamente pelo técnico?</th>' : ''}<th class="fora-da-imagem">Horário Concluída</th><th class="fora-da-imagem">Horário Certificada</th><th class="fora-da-imagem">Tempo</th>
+        <th class="fora-da-imagem">O.S</th><th class="fora-da-imagem">Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th class="fora-da-imagem">Período</th><th>Status</th><th class="fora-da-imagem">Atendente</th><th class="fora-da-imagem">Certificada por</th>${podeUsarFormCert() ? '<th class="fora-da-imagem">Certificada corretamente pelo técnico?</th>' : ''}<th class="fora-da-imagem">Horário Concluída</th><th class="fora-da-imagem">Horário Certificada</th><th class="fora-da-imagem">Tempo</th>
       </tr></thead><tbody>
-        ${linhas.map(l => `<tr><td class="fora-da-imagem">${esc(l.os)||'-'}</td><td class="fora-da-imagem">${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td class="fora-da-imagem">${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td>${ehAnalista() ? `<td class="fora-da-imagem">${l.correta === 'SIM' ? '<span class="badge ok">Sim</span>' : l.correta === 'NÃO' || l.correta === 'NAO' ? '<span class="badge warn">Não</span>' : '-'}</td>` : ''}<td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td></tr>`).join('')}
+        ${linhas.map(l => `<tr><td class="fora-da-imagem">${esc(l.os)||'-'}</td><td class="fora-da-imagem">${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td class="fora-da-imagem">${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td>${podeUsarFormCert() ? `<td class="fora-da-imagem">${l.correta === 'SIM' ? '<span class="badge ok">Sim</span>' : l.correta === 'NÃO' || l.correta === 'NAO' ? '<span class="badge warn">Não</span>' : '-'}</td>` : ''}<td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td></tr>`).join('')}
       </tbody></table></div>
       <div class="panels-grid" id="cert-graficos" style="margin-top:1.25rem">
         <div class="panel"><h3>Certificadas × Não certificadas</h3><div id="cert-g1"></div></div>
-        ${ehAnalista() ? '<div class="panel"><h3>Certificadas corretamente pelo técnico?</h3><div id="cert-g2"></div></div>' : ''}
+        ${podeUsarFormCert() ? '<div class="panel"><h3>Certificadas corretamente pelo técnico?</h3><div id="cert-g2"></div></div>' : ''}
       </div>`;
     donutChart('cert-g1', [{ label: 'Certificadas', value: certificadas.length, color: '#16a34a' }, { label: 'Não certificadas', value: naoCertificadas.length, color: '#dc2626' }].filter(x => x.value), { centroLabel: 'O.S' });
-    if (ehAnalista()) {   // "certificada corretamente pelo técnico?" só existe nas respostas do formulário novo: conta só as certificadas
+    if (podeUsarFormCert()) {   // "certificada corretamente pelo técnico?" só existe nas respostas do formulário novo: conta só as certificadas
       const sim = certificadas.filter(l => l.correta === 'SIM').length, nao = certificadas.filter(l => l.correta === 'NÃO' || l.correta === 'NAO').length, sem = certificadas.length - sim - nao;
       donutChart('cert-g2', [{ label: 'Corretamente (Sim)', value: sim, color: '#16a34a' }, { label: 'Não corretamente (Não)', value: nao, color: '#dc2626' }, { label: 'Sem resposta no formulário', value: sem, color: '#9ca3af' }].filter(x => x.value), { centroLabel: 'certificadas' });
     }
