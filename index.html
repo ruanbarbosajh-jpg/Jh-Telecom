@@ -21619,13 +21619,24 @@ function fcBuscaOs(os) {
   DB.pcr.forEach(r => { if (String(r.os) === String(os) && (!achou || String(r.data) >= String(achou.data))) achou = r; });
   return achou;
 }
+// o campo também aceita o CONTRATO (28/10/2026, pedido do cliente): acha as O.S desse contrato no CSV da PCR e usa a mais recente CONCLUÍDA (senão a mais recente);
+// devolve { escolhida, lista } (lista = uma linha por O.S, da mais nova pra mais antiga) ou null
+function fcBuscaContrato(ctt) {
+  const c = String(ctt || '').replace(/\D/g, '');
+  if (!c) return null;
+  const porOs = new Map();
+  DB.pcr.forEach(r => { if (r.os && String(r.contrato || '').replace(/\D/g, '') === c) { const a = porOs.get(String(r.os)); if (!a || String(r.data) >= String(a.data)) porOs.set(String(r.os), r); } });
+  if (!porOs.size) return null;
+  const lista = [...porOs.values()].sort((a, b) => String(b.data).localeCompare(String(a.data)));
+  return { escolhida: lista.find(r => isConcluido(r.status)) || lista[0], lista };
+}
 // ---- validação (uma função só: a tela e o teste usam a mesma) ----
 function fcValidar(v) {
   const e = {};
   if (!v.certificada_por) e.certificada_por = 'Escolha quem certificou.';
   if (!v.atendente) e.atendente = 'Escolha o atendente.';
-  if (!v.os) e.os = 'Informe o número da ordem de serviço.';
-  else if (!/^\d{6,12}$/.test(v.os)) e.os = 'A ordem tem de 6 a 12 números (só dígitos).';
+  if (!v.os) e.os = 'Informe o número da ordem de serviço (ou o contrato).';
+  else if (!/^\d{6,12}$/.test(v.os)) e.os = 'O número deve ter de 6 a 12 dígitos (só números).';
   if (v.tecnico.length < 3) e.tecnico = 'Informe o nome do técnico (copie do OFS).';
   if (v.baixa.length < 2) e.baixa = 'Informe a baixa realizada.';
   if (v.defeito.length < 2) e.defeito = 'Informe o defeito encontrado.';
@@ -21682,7 +21693,7 @@ function renderFormCertificacao() {
       ${cartao(1, 'Dados do atendimento', 'Informe os dados da ordem de serviço e do técnico responsável.', `<div class="fc-sec1"><div class="fc-grid">
         ${grupo('certificada_por', 'Certificada por', [['TÉCNICO', 'Técnico', 'tool'], ['ATENDENTE', 'Atendente', 'user']])}
         <div class="fc-campo" data-campo="atendente"><label for="fc-atendente">Atendente ${req}</label><div class="fc-entrada">${fcIc('user')}<select class="fc-input fc-select" id="fc-atendente" name="atendente" aria-describedby="fc-erro-atendente" aria-required="true"><option value="">Selecione o atendente…</option>${CERT_ATENDENTES.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('')}</select></div>${erro('atendente')}</div>
-        <div class="fc-campo" data-campo="os"><label for="fc-os">Número da ordem de serviço ${req}</label><div class="fc-os-linha"><div class="fc-entrada">${fcIc('search')}<input class="fc-input" type="text" id="fc-os" name="os" inputmode="numeric" maxlength="12" placeholder="Ex.: 12608902" autocomplete="off" aria-describedby="fc-erro-os" aria-required="true"><button type="button" class="fc-x" id="fc-os-x" aria-label="Limpar o número da O.S" hidden>${fcIc('x')}</button></div>
+        <div class="fc-campo" data-campo="os"><label for="fc-os">Número da ordem de serviço ou contrato ${req}</label><div class="fc-os-linha"><div class="fc-entrada">${fcIc('search')}<input class="fc-input" type="text" id="fc-os" name="os" inputmode="numeric" maxlength="12" placeholder="O.S ou contrato — Ex.: 12608902" autocomplete="off" aria-describedby="fc-erro-os" aria-required="true"><button type="button" class="fc-x" id="fc-os-x" aria-label="Limpar o número da O.S" hidden>${fcIc('x')}</button></div>
           <button type="button" class="fc-btn fc-btn-pri fc-btn-buscar" id="fc-buscar"><span class="fc-spin" aria-hidden="true"></span><span class="fc-txt">Buscar</span></button></div>${erro('os')}</div>
         <div class="fc-campo" data-campo="tecnico"><label for="fc-tecnico">Nome do técnico — copiar do OFS ${req}</label><div class="fc-entrada">${fcIc('user')}<input class="fc-input" type="text" id="fc-tecnico" name="tecnico" list="fc-tecnicos" placeholder="Ex.: Carlos da Silva Souza" autocomplete="off" aria-describedby="fc-erro-tecnico" aria-required="true"></div><datalist id="fc-tecnicos">${tecnicos.map(t => `<option value="${esc(t)}">`).join('')}</datalist>${erro('tecnico')}</div>
         <div class="fc-os-info larga" id="fc-os-info" hidden aria-live="polite"></div>
@@ -21752,34 +21763,39 @@ function renderFormCertificacao() {
   const buscar = async () => {
     const os = fcSoDigitos($('os').value), box = $('os-info'), btn = $('buscar'), meu = ++seqBusca;
     if (!os) { box.hidden = true; aside(null); ultimaOs = ''; return; }
-    if (os.length < 6) { box.className = 'fc-os-info larga fc-os-nao'; box.innerHTML = 'Digite pelo menos 6 números para buscar a O.S.'; box.hidden = false; return; }
+    if (os.length < 6) { box.className = 'fc-os-info larga fc-os-nao'; box.innerHTML = 'Digite pelo menos 6 números para buscar a O.S ou o contrato.'; box.hidden = false; return; }
     ultimaOs = os; btn.classList.add('carregando'); btn.disabled = true;
-    box.className = 'fc-os-info larga fc-os-carregando'; box.innerHTML = `<span class="fc-spin fc-spin-azul" style="display:inline-block"></span> Buscando a O.S ${esc(os)}…`; box.hidden = false;
-    const r = fcBuscaOs(os); let tel = '';
+    box.className = 'fc-os-info larga fc-os-carregando'; box.innerHTML = `<span class="fc-spin fc-spin-azul" style="display:inline-block"></span> Buscando ${esc(os)} (O.S ou contrato)…`; box.hidden = false;
+    let r = fcBuscaOs(os), viaContrato = null, tel = '';
+    if (!r) { const c = fcBuscaContrato(os); if (c) { viaContrato = { contrato: os, ...c }; r = c.escolhida; } }   // não é O.S: tenta como contrato
+    if (viaContrato) { $('os').value = String(r.os); ultimaOs = String(r.os); $('os-x').hidden = false; }   // o campo passa a ter a O.S de verdade (é ela que vai pra planilha)
     if (r) {   // telefone: o do CSV da PCR e, se faltar, o que já está guardado em Contatos (planilhas/GIGA/outros dias)
       try {
-        const l = montarLinhasContatos(r.data, false).find(x => String(x.os) === String(os));
+        const l = montarLinhasContatos(r.data, false).find(x => String(x.os) === String(r.os));
         if (l) { await contatosCarregar([l.contrato]); let c = contatoDaOrdem(l); if (!(c && c.todos && c.todos.length) && l.numcli) { await contatosCarregar([], [l.numcli]); c = contatoDaOrdem(l); } const tels = (c && c.todos) || []; tel = tels.find(waCelularValido) || tels[0] || ''; }
       } catch (e) { /* sem rede: segue sem o telefone */ }
     }
     if (meu !== seqBusca || !document.getElementById('fc-form')) return;   // outra busca começou / saiu da tela
     btn.classList.remove('carregando'); btn.disabled = false;
     if (!r) {
-      box.className = 'fc-os-info larga fc-os-erro'; box.innerHTML = `${fcIc('alert')}<div><b>O.S não encontrada.</b> Ela não está no CSV de atividades importado. Confira o número ou preencha os campos à mão — você pode salvar mesmo assim.</div>`; aside(null); return;
+      box.className = 'fc-os-info larga fc-os-erro'; box.innerHTML = `${fcIc('alert')}<div><b>Nem O.S nem contrato encontrados.</b> O número ${esc(os)} não está no CSV de atividades importado. Confira o número ou preencha os campos à mão — se era um contrato, digite a O.S, porque o que fica salvo é o número do campo.</div>`; aside(null); return;
     }
     const preenchidos = [];
     if (autoPreenche('tecnico', ehRecursoTecnico(r.recurso) ? r.recurso : '')) preenchidos.push('técnico');
     if (autoPreenche('baixa', r.motivo || '')) preenchidos.push('baixa');
     if (tel && autoPreenche('telefone', fcMascaraTel(tel))) preenchidos.push('telefone');
     aside(r, { telefone: tel });
-    const jaFeita = CERTFORM.linhas.find(x => String(x.os) === os);
+    const jaFeita = CERTFORM.linhas.find(x => String(x.os) === String(r.os));
     box.className = 'fc-os-info larga fc-os-ok';
-    box.innerHTML = `<span class="fc-os-ic">${fcIc('check')}</span><div class="fc-os-tx"><b>O.S encontrada</b><div class="fc-os-linha2"><span>Cliente: <b>${esc(r.cliente || '-')}</b></span><span>Cidade: <b>${esc(r.cidade || '-')}</b></span><span>Serviço: <b>${esc(rotuloTipoServico(r.tipo_atividade))}</b></span><span>Data: <b>${esc(formatDate(r.data))}</b></span></div>
+    const outras = viaContrato ? viaContrato.lista.filter(x => String(x.os) !== String(r.os)) : [];
+    const blocoContrato = viaContrato ? `<div class="fc-os-pre"><b>Contrato ${esc(viaContrato.contrato)}</b> → usei a O.S <b>${esc(r.os)}</b> (${esc(rotuloTipoServico(r.tipo_atividade))}, ${esc(formatDate(r.data))}, ${esc(r.status || '-')}) e ela já foi colocada no campo.${outras.length ? ` Outras O.S deste contrato: ${outras.slice(0, 6).map(x => `<button type="button" class="fc-btn fc-btn-sec" style="padding:2px 9px;font-size:12px;min-height:0" data-troca-os="${esc(x.os)}">${esc(x.os)} · ${esc(rotuloTipoServico(x.tipo_atividade))} · ${esc(formatDate(x.data))}</button>`).join(' ')}` : ''}</div>` : '';
+    box.innerHTML = `<span class="fc-os-ic">${fcIc('check')}</span><div class="fc-os-tx"><b>${viaContrato ? 'Contrato encontrado' : 'O.S encontrada'}</b>${blocoContrato}<div class="fc-os-linha2"><span>Cliente: <b>${esc(r.cliente || '-')}</b></span><span>Cidade: <b>${esc(r.cidade || '-')}</b></span><span>Serviço: <b>${esc(rotuloTipoServico(r.tipo_atividade))}</b></span><span>Data: <b>${esc(formatDate(r.data))}</b></span></div>
       ${preenchidos.length ? `<div class="fc-os-pre">Preenchido automaticamente: ${preenchidos.join(', ')}.${tel ? '' : ' (telefone não encontrado — digite o número do cliente)'}</div>` : (tel ? '' : '<div class="fc-os-pre">Telefone não encontrado — digite o número do cliente.</div>')}
       ${jaFeita ? `<div class="fc-os-dup">⚠ Esta O.S já foi certificada em ${esc(formatDate(String(jaFeita.criado_em || '').slice(0, 10)))}${jaFeita.atendente ? ' por ' + esc(jaFeita.atendente) : ''}. Você pode salvar de novo se for outra certificação.</div>` : ''}</div>`;
     box.hidden = false; limpaErro({ target: $('os') }); limpaErro({ target: $('tecnico') }); limpaErro({ target: $('telefone') }); limpaErro({ target: $('baixa') });
     progresso(); agendaRascunho();
   };
+  $('os-info').addEventListener('click', ev => { const b = ev.target.closest('[data-troca-os]'); if (!b) return; $('os').value = b.dataset.trocaOs; $('os-x').hidden = false; ultimaOs = ''; buscar(); });   // trocar pra outra O.S do mesmo contrato
   let tBusca = null;
   $('os').addEventListener('input', () => {
     $('os').value = fcSoDigitos($('os').value).slice(0, 12); $('os-x').hidden = !$('os').value;
