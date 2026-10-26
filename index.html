@@ -15680,9 +15680,12 @@ function prepararMapaOS(rows, data) {
     const anteriores = (porOSBruto[r.os] || [])
       .filter(l => l !== r && ehNaoConcluidaEspecifico(l.status))
       .sort((a, b) => (a.data || '').localeCompare(b.data || '') || ((a.inicio ? a.inicio.getTime() : 0) - (b.inicio ? b.inicio.getTime() : 0)));
+    const vistosV = new Set();
+    const visitas = anteriores.filter(l => { const k = `${l.data}|${normalizeHeader(l.recurso || '')}|${l.inicio ? l.inicio.getTime() : (l.motivo || '')}`; if (vistosV.has(k)) return false; vistosV.add(k); return true; })
+      .map(l => ({ data: l.data, tecnico: (l.recurso || '').trim(), motivo: (l.motivo || '').trim() }));
     return {
       ...r, bairro: extrairBairro(r.endereco) || 'Não informado', revisita: anteriores.length > 0,
-      motivoImprodutiva: anteriores.length ? (anteriores[0].motivo || '') : '',
+      motivoImprodutiva: anteriores.length ? (anteriores[0].motivo || '') : '', visitasImprodutivas: visitas,
     };
   });
   const semEnderecoAbertos = ordensAbertas.filter(r => !r.endereco).length;
@@ -15735,7 +15738,13 @@ function htmlMapaOS(m) {
               ${esc(m.motivo)} <span class="mapa-motivo-qtd">${m.qtd}</span></label>`).join('')}
           </div>
         </div>` : ''}
-      </div>`}`;
+      </div>
+      ${!motivosImprodutiva.length ? '' : `
+      <div class="section-heading" id="pd-mapa-tab-titulo" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">Improdutivas do mapa — motivo de cada visita
+        <span id="pd-mapa-tab-qtd" style="font-weight:500;font-size:12.5px;color:var(--text-muted)"></span>
+        <button type="button" class="btn-export-xls fora-da-imagem" id="pd-mapa-tab-xls">⤓ Excel</button></div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">Mesma lista do mapa: as ordens que já tiveram visita improdutiva e voltaram pro campo, com os filtros de bairro, status e motivo de cima.</p>
+      <div id="pd-mapa-tabela" style="margin-bottom:1.5rem"></div>`}`}`;
 }
 function ligarMapaOS(m) {
   const { ordensAbertasComBairro, MOTIVO_SEM } = m;
@@ -15780,7 +15789,22 @@ function ligarMapaOS(m) {
         if (rot) rot.style.opacity = n ? '' : '0.45';
       });
       renderMapaOrdensAbertas('pd-mapa', filtradas);
+      desenhaTabelaImprodutivas(filtradas.filter(o => o.revisita));
     };
+    // tabela das improdutivas do mapa (28/10/2026, pedido do cliente: "naquele mapa que mostra as improdutivas e motivo faça uma tabela dela")
+    const desenhaTabelaImprodutivas = lista => {
+      const box = document.getElementById('pd-mapa-tabela'); if (!box) return;
+      const qtd = document.getElementById('pd-mapa-tab-qtd'); if (qtd) qtd.textContent = `${lista.length} O.S`;
+      const ordenada = [...lista].sort((a, b) => b.visitasImprodutivas.length - a.visitasImprodutivas.length || String(a.bairro).localeCompare(String(b.bairro), 'pt-BR') || String(a.os).localeCompare(String(b.os)));
+      const mostrar = ordenada.slice(0, 600);
+      box.innerHTML = !lista.length ? '<div class="empty">Nenhuma O.S já visitada com os filtros escolhidos.</div>' : `<div class="table-wrap"><table class="data-table" id="pd-mapa-tab"><thead><tr>
+        <th>O.S</th><th>Cliente</th><th>Cidade</th><th>Bairro</th><th>Tipo de serviço</th><th>Técnico agora</th><th>Status agora</th><th>Visitas improdutivas</th><th>Motivo de cada visita</th></tr></thead><tbody>
+        ${mostrar.map(o => `<tr><td>${esc(o.os) || '-'}</td><td>${esc(o.cliente) || '-'}</td><td>${esc(rotuloCidadeGeral(o.cidade)) || '-'}</td><td>${esc(o.bairro) || '-'}</td><td>${esc(rotuloTipoServico(o.tipo_atividade) || '') || '-'}</td><td>${esc(o.recurso) || '-'}</td><td>${esc(o.status) || '-'}</td><td style="text-align:center;font-weight:700">${o.visitasImprodutivas.length}</td><td>${htmlOutrasVisitas(o.visitasImprodutivas).replace('nenhuma outra visita improdutiva', 'sem detalhe')}</td></tr>`).join('')}
+      </tbody></table></div>${ordenada.length > mostrar.length ? `<p style="font-size:12px;color:var(--text-muted)">Mostrando ${mostrar.length} de ${ordenada.length} (filtre por bairro ou motivo para ver as outras; o Excel leva só o que está na tela).</p>` : ''}`;
+      try { ativarFiltrosDeColuna(box); } catch (e) { /* tabela fica sem funil */ }
+    };
+    const btnXls = document.getElementById('pd-mapa-tab-xls');
+    if (btnXls) btnXls.addEventListener('click', () => { const tb = document.getElementById('pd-mapa-tab'); if (tb) exportarTabelaVisivel(tb, 'improdutivas-do-mapa-' + hojeISOLocal()); else toast('Não há linhas pra exportar.', 'aviso'); });
     selBairroMapa.addEventListener('change', desenhaMapaAbertos);
     checksStatus().forEach(c => c.addEventListener('change', desenhaMapaAbertos));
     checksMotivo().forEach(c => c.addEventListener('change', desenhaMapaAbertos));
@@ -16753,6 +16777,19 @@ function ordensPorStatusCartao(linhas) {
   (linhas || []).forEach(r => { let b = classifyStatusGranular(r.status); if (/suspen/i.test(r.status || '')) b = 'suspenso'; if (o[b]) o[b].push(r); });
   return o;
 }
+// visitas improdutivas ("Não Concluído") de uma O.S em TODOS os dias da PCR, da mais antiga pra mais nova, sem a própria linha e sem repetir a mesma tentativa
+// (remanejamento repete a linha no CSV). Usado na janela do cartão "Improdutivas" pra mostrar o motivo das outras visitas (28/10/2026).
+function visitasImprodutivasDaOS(os, excluir) {
+  if (!os) return [];
+  const hora = x => x ? +new Date(x) : 0, vistos = new Set();
+  const mesma = l => excluir && (l === excluir || (l.data === excluir.data && hora(l.inicio) === hora(excluir.inicio) && normalizeHeader(l.recurso || '') === normalizeHeader(excluir.recurso || '')));
+  return DB.pcr.filter(l => l.os === os && /nao conclu/.test(normalizeHeader(l.status)) && !mesma(l))
+    .sort((a, b) => String(a.data).localeCompare(String(b.data)) || hora(a.inicio) - hora(b.inicio))
+    .filter(l => { const k = `${l.data}|${normalizeHeader(l.recurso || '')}|${l.inicio ? hora(l.inicio) : (l.motivo || '')}`; if (vistos.has(k)) return false; vistos.add(k); return true; })
+    .map(l => ({ data: l.data, tecnico: (l.recurso || '').trim(), motivo: (l.motivo || '').trim() }));
+}
+const htmlOutrasVisitas = vs => !vs.length ? '<span style="color:var(--text-muted)">nenhuma outra visita improdutiva</span>'
+  : vs.map((v, i) => `<div><b>${i + 1}ª</b> · ${esc(v.motivo) || '<span style="color:var(--text-muted)">sem motivo informado</span>'} <span style="color:var(--text-muted)">— ${esc(v.tecnico || 'sem técnico')}, ${formatDate(v.data)}</span></div>`).join('');
 function abrirOrdensDoCartao(chave) {
   const it = CARTOES_LISTA[chave]; if (!it) return;
   if (it.custom) { abrirModalLista(it.titulo, it.sub, it.custom.colunas, it.custom.linhas, { nome: slugTitulo(it.titulo), ...it.custom.opts }); return; }
@@ -16785,13 +16822,13 @@ function abrirOrdensDoCartao(chave) {
   }
   const improd = tipoCartao === 'improd';
   // improdutivas (pedido 20/10/2026): O.S → Contrato → Motivo → Cliente → Técnico → Cidade → o resto
-  const colunas = improd ? ['O.S', 'Contrato', 'Motivo', 'Cliente', 'Técnico', 'Cidade', 'Bairro', 'Tipo de serviço', 'Status', 'Período da ordem', 'Abertura', 'Limite'] : ['O.S', 'Contrato', 'Cliente', 'Cidade', 'Bairro', 'Tipo de serviço', 'Técnico', 'Status', 'Período da ordem', 'Abertura', 'Limite'];
+  const colunas = improd ? ['O.S', 'Contrato', 'Motivo', 'Outras visitas improdutivas (motivos)', 'Cliente', 'Técnico', 'Cidade', 'Bairro', 'Tipo de serviço', 'Status', 'Período da ordem', 'Abertura', 'Limite'] : ['O.S', 'Contrato', 'Cliente', 'Cidade', 'Bairro', 'Tipo de serviço', 'Técnico', 'Status', 'Período da ordem', 'Abertura', 'Limite'];
   const linhas = ordenadas.map(r => {
     const c = comum(r), tipo = esc(rotuloTipoServico(r.tipo_atividade) || '') || '-', tec = esc(r.recurso) || '-', st = esc(r.status) || '-', per = esc(r.periodo_sistema || r.periodo || '') || '-';
     const motivo = esc((r.motivo || '').trim()) || '<span style="color:var(--text-muted)">sem motivo informado</span>';
-    return { tipo: rotuloTipoServico(r.tipo_atividade) || '-', ref: r, celulas: improd ? [c[0], c[1], motivo, c[2], tec, c[3], c[4], tipo, st, per, t(r.abertura), t(r.limite)] : [c[0], c[1], c[2], c[3], c[4], tipo, tec, st, per, t(r.abertura), t(r.limite)] };
+    return { tipo: rotuloTipoServico(r.tipo_atividade) || '-', ref: r, celulas: improd ? [c[0], c[1], motivo, htmlOutrasVisitas(visitasImprodutivasDaOS(r.os, r)), c[2], tec, c[3], c[4], tipo, st, per, t(r.abertura), t(r.limite)] : [c[0], c[1], c[2], c[3], c[4], tipo, tec, st, per, t(r.abertura), t(r.limite)] };
   });
-  abrirModalLista(it.titulo, it.sub, colunas, linhas, { colTipo: improd ? 7 : 5, nome: slugTitulo(it.titulo), sinalizar: sinOpt });
+  abrirModalLista(it.titulo, it.sub, colunas, linhas, { colTipo: improd ? 8 : 5, nome: slugTitulo(it.titulo), sinalizar: sinOpt });
 }
 document.addEventListener('click', e => { const c = e.target.closest && e.target.closest('.stat-card[data-lista]'); if (c) abrirOrdensDoCartao(c.dataset.lista); });
 document.addEventListener('keydown', e => { if (e.key !== 'Enter') return; const c = e.target.closest && e.target.closest('.stat-card[data-lista]'); if (c) abrirOrdensDoCartao(c.dataset.lista); });
@@ -21509,9 +21546,12 @@ function renderCertificacoes() {
     // lista de cada cartão: todas as colunas da tabela Detalhe (clicar no cartão abre)
     const listaCert = (chave, titulo, arr) => cartaoListaCustom(chave, titulo, formatDate(data), ['O.S', 'Contrato', 'Cliente', 'Técnico', 'Cidade', 'Período', 'Status', 'Atendente', 'Certificada por', 'Horário concluída', 'Horário certificada', 'Tempo'],
       arr.map(l => ({ tipo: '', celulas: [esc(l.os) || '-', esc(l.contrato) || '-', esc(l.cliente) || '-', esc(l.tecnico) || '-', esc(l.cidade) || '-', esc(l.periodo) || '-', l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>', esc(l.atendente) || '-', esc(l.certificadaPor) || '-', esc(l.horarioConcluida), esc(l.horarioCertificada), esc(l.tempo)] })));
+    // 28/10/2026 (pedido do cliente): cartão "Certificadas incorretamente" = certificadas em que a resposta do formulário diz que o técnico NÃO certificou corretamente
+    const incorretas = podeUsarFormCert() ? certificadas.filter(l => l.correta === 'NÃO' || l.correta === 'NAO') : [];
     body.innerHTML = `
       <div class="stat-cards">
         ${statCard('green', icCert, 'Certificadas', certificadas.length, '', listaCert('cert|ok', 'Certificadas', certificadas))}
+        ${podeUsarFormCert() ? statCard('orange', icAlerta, 'Certificadas incorretamente', incorretas.length, 'o técnico não certificou corretamente (resposta do formulário)', listaCert('cert|inc', 'Certificadas incorretamente', incorretas)) : ''}
         ${statCard('red', icAlerta, 'Não certificadas', naoCertificadas.length, naoCertificadas.length ? '<button type="button" class="stat-link" id="cert-ver-lista">Ver lista de revisão →</button>' : '', listaCert('cert|nao', 'Não certificadas', naoCertificadas))}
         ${statCard('blue', icPct, '% de Certificação', formatPct(pct, 1), `<div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.min(100, Math.max(0, pct))}%"></div></div>`, listaCert('cert|todas', '% de Certificação — todas as O.S', linhas))}
         ${statCard('neutral', icPasta, 'Total de O.S', linhas.length, `Cálculo: Certificadas (${certificadas.length}) + Não certificadas (${naoCertificadas.length})`, listaCert('cert|total', 'Total de O.S', linhas))}
