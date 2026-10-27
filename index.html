@@ -21998,6 +21998,78 @@ function renderFormCertificacao() {
   $('rec-corpo').addEventListener('click', ev => { const b = ev.target.closest('[data-fc-edit]'); if (!b) return; const reg = CERTFORM.linhas.find(r => String(r.id) === b.dataset.fcEdit); if (reg) editar(reg); });
   pintaRecentes();
 }
+// ---- EDITAR DIRETO NA TABELA DETALHE de Certificações (28/10/2026, pedido do cliente: "quero editar diretamente aqui também") ----
+// Janela com os MESMOS campos do formulário (mesma validação, fcValidar). Se a O.S já tem registro do formulário do sistema, edita ESSE registro (mesmo id = o script atualiza a linha, sem duplicar);
+// se não tem (não certificada, ou certificada só pelo Google Forms / Base antiga), cria o registro do sistema já com o que se sabe da O.S — que passa a valer por cima.
+function abrirEditorCertificacao(o) {
+  let m = document.getElementById('modal-cert-edit');
+  if (!m) { m = document.createElement('div'); m.id = 'modal-cert-edit'; m.className = 'modal-backdrop'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); document.body.appendChild(m); }
+  const reg = o.reg || null, b = o.base || {};
+  const cp = String(reg ? reg.certificada_por : (b.certificadaPor || '')).toUpperCase();
+  const corr = String(reg ? reg.certificada_corretamente : (b.correta || '')).toUpperCase();
+  const v0 = {
+    certificada_por: cp === 'TÉCNICO' || cp === 'ATENDENTE' ? cp : '', atendente: reg ? reg.atendente || '' : (b.atendente || ''), os: String(o.os || ''), tecnico: reg ? reg.tecnico || '' : (o.tecnico || ''),
+    baixa: reg ? reg.baixa || '' : '', defeito: reg ? reg.defeito || '' : '', explicou_rede: reg ? reg.explicou_rede || '' : '', senha_wifi: reg ? reg.senha_wifi || '' : '', roteador: reg ? reg.roteador || '' : '', cabo: reg ? reg.cabo || '' : '',
+    certificada_corretamente: corr === 'NAO' ? 'NÃO' : corr, telefone: reg ? reg.telefone || '' : (CERT_FONE_FORM.get(String(o.os)) || ''), quem_atendeu: reg ? reg.quem_atendeu || '' : '', nota: reg && reg.nota != null ? String(reg.nota) : '',
+    observacao: reg ? reg.observacao || '' : '', chamar: reg ? reg.chamar || '' : '' };
+  const req = '<span class="fc-req" aria-hidden="true">*</span>';
+  const erro = id => `<div class="fc-erro" id="ce-erro-${id}" role="alert"></div>`;
+  const txt = (id, rot, ic, o2 = {}) => `<div class="fc-campo${o2.larga ? ' larga' : ''}" data-campo="${id}"><label for="ce-${id}">${rot} ${o2.opc ? '<span class="fc-opc">(opcional)</span>' : req}</label><div class="fc-entrada">${fcIc(ic)}<input class="fc-input" type="text" id="ce-${id}" value="${esc(id === 'telefone' && v0.telefone ? fcMascaraTel(v0.telefone) : v0[id])}" ${o2.max ? `maxlength="${o2.max}"` : ''} autocomplete="off"></div>${erro(id)}</div>`;
+  const seg = (id, rot, ops, larga) => `<fieldset class="fc-campo${larga ? ' larga' : ''}" data-campo="${id}"><legend class="fc-rot">${rot} ${req}</legend><div class="fc-seg">${ops.map(op => `<label><input type="radio" name="ce_${id}" value="${esc(op[0])}"${v0[id] === op[0] ? ' checked' : ''}><span>${esc(op[1])}</span></label>`).join('')}</div>${erro(id)}</fieldset>`;
+  const sn = [['SIM', 'Sim'], ['NÃO', 'Não']];
+  const cabos = CERT_CABO.map(c => [c, c.replace('SIM, REUTILIZADO ', 'Sim, ').replace('NÃO FOI REUTILIZADO CABO', 'Não foi reutilizado').replace('CABO PRETO', 'cabo preto').replace('CABO MARROM', 'cabo marrom')]);
+  const atend = [...CERT_ATENDENTES]; if (v0.atendente && !atend.includes(v0.atendente)) atend.push(v0.atendente);
+  m.innerHTML = `<div class="modal-card modal-largo" style="max-width:min(900px,96vw);width:96vw;padding:20px 22px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h3 style="margin:0">${reg ? '✎ Editar certificação' : '✎ Certificar'} — O.S ${esc(o.os)}</h3><button type="button" class="btn-secundario" id="ce-fechar">Fechar</button></div>
+    <p style="font-size:12.5px;color:var(--text-muted);margin:6px 0 12px">${esc([o.cliente, o.cidade].filter(Boolean).join(' · '))}${reg ? ' · registrada em ' + esc(new Date(reg.criado_em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })) + '. Ao salvar, o registro na planilha é atualizado.' : ' · ainda não há registro do formulário do sistema: ao salvar, a O.S passa a constar como certificada.'}</p>
+    <div class="fc-banner fc-banner-erro" id="ce-aviso" hidden role="alert"></div>
+    <div class="fc-grid" style="padding:0">
+      ${seg('certificada_por', 'Certificada por', [['TÉCNICO', 'Técnico'], ['ATENDENTE', 'Atendente']])}
+      <div class="fc-campo" data-campo="atendente"><label for="ce-atendente">Atendente ${req}</label><div class="fc-entrada">${fcIc('user')}<select class="fc-input fc-select" id="ce-atendente"><option value="">Selecione o atendente…</option>${atend.map(a => `<option value="${esc(a)}"${a === v0.atendente ? ' selected' : ''}>${esc(a)}</option>`).join('')}</select></div>${erro('atendente')}</div>
+      ${txt('tecnico', 'Nome do técnico', 'user', { max: 80 })}
+      ${txt('baixa', 'Qual a baixa realizada?', 'tool', { max: 200 })}
+      ${txt('defeito', 'Qual defeito encontrado?', 'alert', { max: 200 })}
+      ${seg('explicou_rede', 'Técnico explicou a diferença entre rede 2.4G e 5.8G?', sn)}
+      ${seg('senha_wifi', 'Está satisfeito(a) com a senha do Wi-Fi?', sn)}
+      ${seg('roteador', 'O roteador está instalado no local desejado?', sn)}
+      ${seg('certificada_corretamente', 'A ordem foi certificada corretamente pelo técnico?', sn)}
+      ${seg('cabo', 'Foi reutilizado cabo?', cabos, true)}
+      ${txt('telefone', 'Telefone para contato (WhatsApp)', 'phone', { max: 16 })}
+      ${txt('quem_atendeu', 'Quem atendeu o técnico?', 'user', { max: 80 })}
+      <fieldset class="fc-campo larga" data-campo="nota"><legend class="fc-rot">Nota para o atendimento do técnico <span class="fc-opc">(opcional, 1 a 10)</span></legend><div class="fc-nota">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<label><input type="radio" name="ce_nota" value="${n}"${v0.nota === String(n) ? ' checked' : ''}><span>${n}</span></label>`).join('')}</div>${erro('nota')}</fieldset>
+      <div class="fc-campo larga" data-campo="observacao"><label for="ce-observacao">Observação <span class="fc-opc">(opcional)</span></label><textarea class="fc-input fc-area" id="ce-observacao" rows="2" maxlength="500">${esc(v0.observacao)}</textarea>${erro('observacao')}</div>
+      ${seg('chamar', 'Chamar o cliente', [['AGORA', 'Agora'], ['DEPOIS', 'Depois']], true)}
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px;flex-wrap:wrap"><button type="button" class="fc-btn fc-btn-sec" id="ce-cancelar">Cancelar</button><button type="button" class="fc-btn fc-btn-pri" id="ce-salvar"><span class="fc-txt">Salvar alterações</span></button></div></div>`;
+  m.classList.add('active');
+  const $ = id => m.querySelector('#ce-' + id), radio = n => { const r = m.querySelector(`input[name="ce_${n}"]:checked`); return r ? r.value : ''; };
+  const ler = () => ({ certificada_por: radio('certificada_por'), atendente: $('atendente').value, os: fcSoDigitos(o.os), tecnico: $('tecnico').value.trim().replace(/\s+/g, ' '), baixa: $('baixa').value.trim(), defeito: $('defeito').value.trim(),
+    explicou_rede: radio('explicou_rede'), senha_wifi: radio('senha_wifi'), roteador: radio('roteador'), cabo: radio('cabo'), certificada_corretamente: radio('certificada_corretamente'), telefone: $('telefone').value.trim(),
+    quem_atendeu: $('quem_atendeu').value.trim(), nota: radio('nota'), observacao: $('observacao').value.trim(), chamar: radio('chamar') });
+  const fechar = () => m.classList.remove('active');
+  $('telefone').addEventListener('input', () => { $('telefone').value = fcMascaraTel($('telefone').value); });
+  m.addEventListener('input', ev => { const c = ev.target.closest('.fc-campo'); if (c) { c.classList.remove('erro'); const e = $('erro-' + c.dataset.campo); if (e) e.textContent = ''; } });
+  m.addEventListener('change', ev => { const c = ev.target.closest('.fc-campo'); if (c) { c.classList.remove('erro'); const e = $('erro-' + c.dataset.campo); if (e) e.textContent = ''; } });
+  $('fechar').addEventListener('click', fechar); $('cancelar').addEventListener('click', fechar);
+  let salvando = false;
+  $('salvar').addEventListener('click', async () => {
+    if (salvando) return;
+    const v = ler(), erros = fcValidar(v), campos = Object.keys(erros), aviso = $('aviso');
+    m.querySelectorAll('.fc-campo').forEach(c => { const msg = erros[c.dataset.campo] || '', e = $('erro-' + c.dataset.campo); c.classList.toggle('erro', !!msg); if (e) e.textContent = msg; });
+    if (campos.length) { aviso.textContent = `Corrija ${campos.length} campo${campos.length > 1 ? 's' : ''} destacado${campos.length > 1 ? 's' : ''} — o que você preencheu foi mantido.`; aviso.hidden = false; const c = m.querySelector(`[data-campo="${campos[0]}"]`); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+    aviso.hidden = true; salvando = true; const bt = $('salvar'), tx = bt.querySelector('.fc-txt'); bt.disabled = true; tx.textContent = 'Salvando…';
+    const novo = { id: reg ? reg.id : fcNovoId(), criado_em: reg ? reg.criado_em : new Date().toISOString(), criado_por: reg ? reg.criado_por : waQuemChama(), certificada_por: v.certificada_por, atendente: v.atendente, tecnico: v.tecnico, os: v.os,
+      baixa: v.baixa, defeito: v.defeito, explicou_rede: v.explicou_rede, senha_wifi: v.senha_wifi, roteador: v.roteador, cabo: v.cabo, certificada_corretamente: v.certificada_corretamente, telefone: fcSoDigitos(v.telefone),
+      quem_atendeu: v.quem_atendeu, nota: v.nota ? +v.nota : null, observacao: v.observacao || null, chamar: v.chamar,
+      cliente: o.cliente || (reg && reg.cliente) || null, contrato: o.contrato || (reg && reg.contrato) || null, cidade: o.cidade || (reg && reg.cidade) || null };
+    let r; try { r = await certFormSalvar(novo); } catch (e) { r = { ok: false, erro: String(e && e.message || e) }; }
+    salvando = false; bt.disabled = false; tx.textContent = 'Salvar alterações';
+    if (!r.ok) { aviso.textContent = `Não consegui salvar (${r.erro}). Seus dados continuam na janela — confira a conexão e tente de novo.`; aviso.hidden = false; return; }
+    CERT_FONE_FORM.set(novo.os, novo.telefone);
+    fechar(); toast(r.local ? 'Guardada só neste navegador (a planilha do Google não está ligada).' : `Certificação da O.S ${novo.os} salva.`, r.local ? 'aviso' : 'ok');
+    if (o.aoSalvar) o.aoSalvar(novo);
+  });
+}
 function renderCertificacoes() {
   const diasComPcr = [...new Set(DB.pcr.map(r => r.data))].sort().reverse();
   const dataPadrao = diasComPcr[0] || hojeISOLocal();
@@ -22055,6 +22127,8 @@ function renderCertificacoes() {
       body.innerHTML = `<div class="panel"><div class="empty">Nenhuma O.S concluída em ${formatDate(data)} no CSV da PCR. Importe o CSV de atividades desse dia na tela PCR pra essa tela ter o que cruzar com a Base Certificações.</div></div>`;
       return;
     }
+    const regForm = os => { const n = fcSoDigitos(os); return n ? CERTFORM.linhas.find(x => fcSoDigitos(x.os) === n) : null; };   // registro mais recente do formulário do sistema (a lista já vem do mais novo pro mais antigo)
+    const temRegForm = os => !!regForm(os);
     const agora = new Date();
     const tempoEntre = (de, ate) => {
       if (!de || !ate) return '-';
@@ -22128,9 +22202,9 @@ function renderCertificacoes() {
         ${podeChamarClientes() ? '<button type="button" class="btn-sinalizar fora-da-imagem" id="cert-chamar" title="Só ordens concluídas de ativação, mudança de endereço e reparo: abre o WhatsApp de cada cliente com a mensagem de verificação de qualidade">📞 Chamar Clientes</button>' : ''}
       </div>
       <div class="table-wrap rolagem-inteira-na-imagem"><table class="data-table" id="tab-certificacoes-detalhe"><thead><tr>
-        <th class="fora-da-imagem">O.S</th><th class="fora-da-imagem">Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th class="fora-da-imagem">Período</th><th>Status</th><th class="fora-da-imagem">Atendente</th><th class="fora-da-imagem">Certificada por</th>${podeVerRespostasCert() ? '<th class="fora-da-imagem">Certificada corretamente pelo técnico?</th>' : ''}<th class="fora-da-imagem">Horário Concluída</th><th class="fora-da-imagem">Horário Certificada</th><th class="fora-da-imagem">Tempo</th>
+        <th class="fora-da-imagem">O.S</th><th class="fora-da-imagem">Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th class="fora-da-imagem">Período</th><th>Status</th><th class="fora-da-imagem">Atendente</th><th class="fora-da-imagem">Certificada por</th>${podeVerRespostasCert() ? '<th class="fora-da-imagem">Certificada corretamente pelo técnico?</th>' : ''}<th class="fora-da-imagem">Horário Concluída</th><th class="fora-da-imagem">Horário Certificada</th><th class="fora-da-imagem">Tempo</th>${podeUsarFormCert() ? '<th class="fora-da-imagem">Ações</th>' : ''}
       </tr></thead><tbody>
-        ${linhas.map(l => `<tr><td class="fora-da-imagem">${esc(l.os)||'-'}</td><td class="fora-da-imagem">${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td class="fora-da-imagem">${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td>${podeVerRespostasCert() ? `<td class="fora-da-imagem">${l.correta === 'SIM' ? '<span class="badge ok">Sim</span>' : l.correta === 'NÃO' || l.correta === 'NAO' ? '<span class="badge warn">Não</span>' : '-'}</td>` : ''}<td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td></tr>`).join('')}
+        ${linhas.map(l => `<tr><td class="fora-da-imagem">${esc(l.os)||'-'}</td><td class="fora-da-imagem">${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td class="fora-da-imagem">${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td>${podeVerRespostasCert() ? `<td class="fora-da-imagem">${l.correta === 'SIM' ? '<span class="badge ok">Sim</span>' : l.correta === 'NÃO' || l.correta === 'NAO' ? '<span class="badge warn">Não</span>' : '-'}</td>` : ''}<td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td>${podeUsarFormCert() ? `<td class="fora-da-imagem"><button type="button" class="fc-btn fc-btn-sec" data-cert-edit="${esc(l.os)}" style="padding:3px 10px;font-size:12.5px;min-height:0;white-space:nowrap" title="${temRegForm(l.os) ? 'Corrigir a certificação feita pelo formulário do sistema' : 'Registrar/corrigir a certificação desta O.S'}">${temRegForm(l.os) || l.certificada ? '✎ Editar' : '✎ Certificar'}</button></td>` : ''}</tr>`).join('')}
       </tbody></table></div>
       <div class="panels-grid fora-da-imagem" id="cert-graficos" style="margin-top:1.25rem">
         <div class="panel"><h3>Certificadas × Não certificadas</h3><div id="cert-g1"></div></div>
@@ -22150,9 +22224,17 @@ function renderCertificacoes() {
     if (xlsCid) xlsCid.addEventListener('click', () => { const r = exportarTabelaVisivel(document.getElementById('tab-cert-cidade'), 'certificacoes-por-cidade-' + data); if (r) avisoBotao(xlsCid, `⤓ ${r.linhas} linha(s)`, '⤓ Exportar Excel'); });
     const btnChamar = document.getElementById('cert-chamar');
     if (btnChamar) btnChamar.addEventListener('click', () => abrirChamarCertificacoes(data, baseCert, btnChamar));
+    const tabDet = document.getElementById('tab-certificacoes-detalhe');
+    if (tabDet && podeUsarFormCert()) tabDet.addEventListener('click', ev => {
+      const bt = ev.target.closest('[data-cert-edit]'); if (!bt) return;
+      const l = linhas.find(x => String(x.os) === bt.dataset.certEdit); if (!l) return;
+      abrirEditorCertificacao({ os: l.os, tecnico: l.tecnico, cliente: l.cliente, contrato: l.contrato, cidade: l.cidade === 'Não informado' ? '' : l.cidade, reg: regForm(l.os), base: baseCert.get(l.os),
+        aoSalvar: novo => { baseCert.set(String(novo.os), { ...(baseCert.get(String(novo.os)) || {}), ...certFormComoResposta(novo) }); render(); } });
+    });
     const btnExport = document.getElementById('cert-export');
     if (btnExport) btnExport.addEventListener('click', () => {
-      const r = exportarTabelaVisivel(document.getElementById('tab-certificacoes-detalhe'), 'certificacoes-' + data);
+      const colsExcel = [...tabDet.querySelectorAll('thead th')].map(th => th.textContent.replace('▾', '').trim()).filter(t => t !== 'Ações');
+      const r = exportarTabelaVisivel(tabDet, 'certificacoes-' + data, colsExcel);
       if (r) avisoBotao(btnExport, `⤓ ${r.linhas} linha(s)`, '⤓ Excel');
     });
     ativarBotoesImagem(body);
