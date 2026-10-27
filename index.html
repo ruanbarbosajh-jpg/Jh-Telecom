@@ -3469,9 +3469,9 @@
   .nca-toolbar .field { display: inline-flex !important; flex-direction: row !important; align-items: center; gap: 8px !important; padding: 4px 8px 4px 14px !important; min-height: 46px; border: 1px solid var(--border); border-radius: 14px; background: var(--card-bg); }
   .nca-toolbar .field > label { display: inline-flex; align-items: center; gap: 7px; margin: 0 !important; font-size: 13px !important; font-weight: 700 !important; color: var(--accent) !important; white-space: nowrap; text-transform: none !important; }
   .nca-toolbar .field > label .nca-ic { width: 16px; height: 16px; margin: 0; }
-  .nca-toolbar .field select, .nca-toolbar .field input { border: 0 !important; background-color: transparent !important; box-shadow: none !important; min-width: 0 !important; width: auto !important; height: auto !important; padding: 6px 26px 6px 4px !important; font-size: 13px !important; font-weight: 600; color: var(--text-primary); }
-  .nca-toolbar .field input[type=date] { padding-right: 4px !important; }
-  .nca-toolbar .field input[type=search] { width: 150px !important; padding-right: 4px !important; }
+  .nca-toolbar .field > select, .nca-toolbar .field > input { border: 0 !important; background-color: transparent !important; box-shadow: none !important; min-width: 0 !important; width: auto !important; height: auto !important; padding: 6px 26px 6px 4px !important; font-size: 13px !important; font-weight: 600; color: var(--text-primary); }
+  .nca-toolbar .field > input[type=date] { padding-right: 4px !important; }
+  .nca-toolbar .field > input[type=search] { width: 150px !important; padding-right: 4px !important; }
   .nca-toolbar .multiselect-toggle { border: 0 !important; background: transparent !important; min-width: 0 !important; padding: 6px 4px !important; color: var(--text-primary) !important; }
 </style>
 </head>
@@ -16607,6 +16607,7 @@ function htmlMapaOS(m) {
       ${!motivosImprodutiva.length ? '' : `
       <div class="section-heading" id="pd-mapa-tab-titulo" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">Improdutivas do mapa — motivo de cada visita
         <span id="pd-mapa-tab-qtd" style="font-weight:500;font-size:12.5px;color:var(--text-muted)"></span>
+        <button type="button" class="btn-sinalizar fora-da-imagem" id="pd-mapa-tab-sinalizar" title="Copia as O.S da tabela com o motivo de cada visita improdutiva, pra colar no WhatsApp">📲 SINALIZAR</button>
         <button type="button" class="btn-export-xls fora-da-imagem" id="pd-mapa-tab-xls">⤓ Excel</button></div>
       <p style="font-size:12px;color:var(--text-muted);margin:-0.5rem 0 10px">Mesma lista do mapa: as ordens que já tiveram visita improdutiva e voltaram pro campo, com os filtros de bairro, status e motivo de cima.</p>
       <div id="pd-mapa-tabela" style="margin-bottom:1.5rem"></div>`}`}`;
@@ -16657,17 +16658,25 @@ function ligarMapaOS(m) {
       desenhaTabelaImprodutivas(filtradas.filter(o => o.revisita));
     };
     // tabela das improdutivas do mapa (28/10/2026, pedido do cliente: "naquele mapa que mostra as improdutivas e motivo faça uma tabela dela")
+    let listaMapaSin = [];
     const desenhaTabelaImprodutivas = lista => {
       const box = document.getElementById('pd-mapa-tabela'); if (!box) return;
       const qtd = document.getElementById('pd-mapa-tab-qtd'); if (qtd) qtd.textContent = `${lista.length} O.S`;
       const ordenada = [...lista].sort((a, b) => b.visitasImprodutivas.length - a.visitasImprodutivas.length || String(a.bairro).localeCompare(String(b.bairro), 'pt-BR') || String(a.os).localeCompare(String(b.os)));
       const mostrar = ordenada.slice(0, 600);
+      listaMapaSin = mostrar;
       box.innerHTML = !lista.length ? '<div class="empty">Nenhuma O.S já visitada com os filtros escolhidos.</div>' : `<div class="table-wrap"><table class="data-table" id="pd-mapa-tab"><thead><tr>
         <th>O.S</th><th>Cliente</th><th>Cidade</th><th>Bairro</th><th>Tipo de serviço</th><th>Técnico agora</th><th>Status agora</th><th>Visitas improdutivas</th><th>Motivo de cada visita</th></tr></thead><tbody>
         ${mostrar.map(o => `<tr><td>${esc(o.os) || '-'}</td><td>${esc(o.cliente) || '-'}</td><td>${esc(rotuloCidadeGeral(o.cidade)) || '-'}</td><td>${esc(o.bairro) || '-'}</td><td>${esc(rotuloTipoServico(o.tipo_atividade) || '') || '-'}</td><td>${esc(o.recurso) || '-'}</td><td>${esc(o.status) || '-'}</td><td style="text-align:center;font-weight:700">${o.visitasImprodutivas.length}</td><td>${htmlOutrasVisitas(o.visitasImprodutivas).replace('nenhuma outra visita improdutiva', 'sem detalhe')}</td></tr>`).join('')}
       </tbody></table></div>${ordenada.length > mostrar.length ? `<p style="font-size:12px;color:var(--text-muted)">Mostrando ${mostrar.length} de ${ordenada.length} (filtre por bairro ou motivo para ver as outras; o Excel leva só o que está na tela).</p>` : ''}`;
       try { ativarFiltrosDeColuna(box); } catch (e) { /* tabela fica sem funil */ }
     };
+    const btnSin = document.getElementById('pd-mapa-tab-sinalizar');
+    if (btnSin) btnSin.addEventListener('click', () => {
+      if (!listaMapaSin.length) { toast('Nenhuma O.S na tabela pra sinalizar (confira os filtros).', 'aviso'); return; }
+      const texto = 'IMPRODUTIVAS - ordens que voltaram pro campo\n\n' + listaMapaSin.map(o => `${String(o.cliente || 'SEM NOME').trim().toUpperCase()}\nO.S ${o.os || '-'} · ${[o.bairro, rotuloCidadeGeral(o.cidade)].filter(Boolean).join(', ')} · ${rotuloTipoServico(o.tipo_atividade) || ''}\n${(o.recurso || '').trim() ? '@' + doisNomesTec(o.recurso) : 'sem técnico'} - ${o.status || ''}\nImprodutivas: ${o.visitasImprodutivas.length}\n${textoVisitasSinalizar(o.visitasImprodutivas)}`).join('\n\n');
+      copiarParaWhatsApp(texto, btnSin, '📲 SINALIZAR', `${listaMapaSin.length} O.S`);
+    });
     const btnXls = document.getElementById('pd-mapa-tab-xls');
     if (btnXls) btnXls.addEventListener('click', () => { const tb = document.getElementById('pd-mapa-tab'); if (tb) exportarTabelaVisivel(tb, 'improdutivas-do-mapa-' + hojeISOLocal()); else toast('Não há linhas pra exportar.', 'aviso'); });
     selBairroMapa.addEventListener('change', desenhaMapaAbertos);
@@ -24285,6 +24294,20 @@ function ncaSituacaoDa(r, agora, dia) {
   return { cod: ms <= 0 ? 'nca' : 'risco', turno, bucket, ms };
 }
 let NCA_RELOGIO = null;
+const NCA_TURNOS = ['Manhã', 'Tarde'];
+const NCA_SITUACOES = ['NCA aplicável', 'Em risco', 'Menos de 1h para iniciar', 'Já iniciadas'];
+// visitas improdutivas em linhas: "1ª motivo - técnico (dd/mm)"
+function textoVisitasSinalizar(vs) {
+  const dm = d => { const m = String(d || '').match(/^\d{4}-(\d{2})-(\d{2})/); return m ? `${m[2]}/${m[1]}` : ''; };
+  return vs.map((v, i) => `${i + 1}ª ${v.motivo || 'sem motivo informado'} - ${v.tecnico || 'sem técnico'} (${dm(v.data)}${v.outra ? `, O.S ${v.os}` : ''})`).join('\n');
+}
+// 📲 SINALIZAR de UMA ordem do NCA (janela que abre ao clicar na linha): situação diante do NCA + se já teve improdutiva e o motivo de cada uma
+function textoSinalizarOrdemNCA(o, vs) {
+  const r = o.r, nome = String(r.cliente || r.nome || 'SEM NOME').trim().toUpperCase();
+  const tec = ehRecursoTecnico(r.recurso) ? '@' + doisNomesTec(r.recurso) : 'sem técnico';
+  const sit = o.s.cod === 'nca' ? `NCA: passou há ${ncaTempoTxt(o.s.ms)}` : o.s.cod === 'risco' ? `${o.s.ms < 3600000 ? 'ATENÇÃO ' : ''}faltam ${ncaTempoTxt(o.s.ms)} pra iniciar` : o.s.cod === 'iniciada' ? 'já iniciada' : String(r.status || '');
+  return `${nome}\nO.S ${r.os} · Contrato ${r.contrato || '-'} · ${rotuloTipoServico(r.tipo_atividade)}\n${tec} - ${o.s.turno ? NCA_FIM[o.s.turno].rot : 'sem turno'} - ${sit}\n` + (vs.length ? `Improdutivas antes: ${vs.length}\n${textoVisitasSinalizar(vs)}` : 'Improdutivas antes: nenhuma');
+}
 // quanto falta / passou, em texto curto (usado na tela e no 📲 SINALIZAR)
 function ncaTempoTxt(ms) { if (Math.abs(ms) < 60000) return 'menos de 1min'; const t = Math.floor(Math.abs(ms) / 60000), hh = Math.floor(t / 60), mm = t % 60; return hh ? `${hh}h${String(mm).padStart(2, '0')}` : `${mm}min`; }
 // 📲 SINALIZAR do NCA (28/10/2026): só entra ordem em risco ou já com NCA (iniciada não precisa de aviso). Agrupa por turno; do que vence primeiro pro último.
@@ -24306,7 +24329,7 @@ function renderNCA() {
   if (NCA_RELOGIO) { clearInterval(NCA_RELOGIO); NCA_RELOGIO = null; }
   const datas = [...new Set(DB.pcr.map(r => r.data).filter(Boolean))].sort().reverse();
   const hoje = hojeISOLocal();
-  const fil = { sit: '', tec: '', cli: '' };   // filtros de dentro da tabela (não são memória de tela: não têm id)
+  const fil = { cli: '' };   // filtros de dentro da tabela (não são memória de tela: não têm id)
   let visiveisAtual = [];
   // tudo (cartões, filtros e tabela) fica numa tela só: os filtros moram DENTRO do cartão da tabela (pedido do cliente, 28/10/2026)
   document.getElementById('content').innerHTML = `
@@ -24319,9 +24342,9 @@ function renderNCA() {
         <div class="field"><label>Data</label><input type="date" id="nca-data" value="${datas.includes(hoje) ? hoje : (datas[0] || hoje)}"></div>
         ${multiCityField('nca-cidades', 'Cidades')}
         ${multiSelectField('nca-tipos', 'Tipo de serviço', NCA_TIPOS, { allLabel: 'Todos os tipos', noneLabel: 'Nenhum' })}
-        <div class="field"><label>Turno</label><select id="nca-turno"><option value="">Manhã e tarde</option><option value="MANHA">Só manhã</option><option value="TARDE">Só tarde</option></select></div>
-        <div class="field"><label>Situação NCA</label><select class="nca-f-sit"><option value="">Todas</option>${[['atencao', 'NCA ou em risco'], ['nca', 'NCA aplicável'], ['risco', 'Em risco'], ['urgente', 'Menos de 1h para iniciar'], ['iniciada', 'Já iniciadas']].map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select></div>
-        <div class="field"><label>Técnico</label><select class="nca-f-tec"><option value="">Todos</option></select></div>
+        ${multiSelectField('nca-turno', 'Turno', NCA_TURNOS, { allLabel: 'Manhã e tarde', noneLabel: 'Nenhum' })}
+        ${multiSelectField('nca-sit', 'Situação NCA', NCA_SITUACOES, { allLabel: 'Todas', noneLabel: 'Nenhuma' })}
+        ${multiSelectField('nca-tecs', 'Técnico', [], { allLabel: 'Todos', noneLabel: 'Nenhum', emptyMsg: 'Sem técnicos neste dia.' })}
         <div class="field"><label>Cliente / O.S</label><input type="search" class="nca-f-cli" placeholder="Buscar"></div>
         <button class="btn" id="f-apply">Filtrar</button>
         <span class="nca-f-total"></span>
@@ -24333,8 +24356,10 @@ function renderNCA() {
   const ICONES_FILTRO = { 'Data': 'cal', 'Cidades': 'pin', 'Tipo de serviço': 'wrench', 'Turno': 'sun', 'Situação NCA': 'clock', 'Técnico': 'user', 'Cliente / O.S': 'doc' };
   raiz.querySelectorAll('.nca-toolbar .field > label').forEach(l => { const k = ICONES_FILTRO[l.textContent.trim()]; if (k) l.insertAdjacentHTML('afterbegin', NCA_IC[k]); });
   document.getElementById('f-apply').addEventListener('click', load);
-  raiz.querySelector('.nca-f-sit').addEventListener('change', e => { fil.sit = e.target.value; load(); });
-  raiz.querySelector('.nca-f-tec').addEventListener('change', e => { fil.tec = e.target.value; load(); });
+  // Turno, Situação e Técnico aceitam várias opções e aplicam na hora (Data, Cidades e Tipo ficam no Filtrar)
+  wireMultiSelectField('nca-turno', { noun: 'turno(s)', allLabel: 'Manhã e tarde' }, () => load());
+  wireMultiSelectField('nca-sit', { noun: 'situação(ões)', allLabel: 'Todas' }, () => load());
+  wireMultiSelectField('nca-tecs', { noun: 'técnico(s)', allLabel: 'Todos' }, () => load('tec'));
   raiz.querySelector('.nca-f-cli').addEventListener('change', e => { fil.cli = e.target.value.trim(); load(); });
   document.getElementById('nca-sinalizar').addEventListener('click', e => {
     const texto = textoSinalizarNCA(visiveisAtual);
@@ -24342,26 +24367,26 @@ function renderNCA() {
     copiarParaWhatsApp(texto, e.currentTarget, '📲 SINALIZAR', `${visiveisAtual.filter(o => o.s.cod === 'risco' || o.s.cod === 'nca').length} ordem(ns)`);
   });
   load();
-  function load() {
+  function load(origem) {
     if (NCA_RELOGIO) { clearInterval(NCA_RELOGIO); NCA_RELOGIO = null; }
     const dia = document.getElementById('nca-data').value;
     const doCsv = linhasDoCsvPorDia(dia);
     refreshCityField('nca-cidades', doCsv, { label: 'Cidades' });
     const cids = new Set(getSelectedCities('nca-cidades').map(normalizeCidade));
     const tiposSel = new Set(document.getElementById('nca-tipos-panel') ? getMultiSelectValues('nca-tipos') : NCA_TIPOS);
-    const turnoSel = document.getElementById('nca-turno').value;
+    const turnosSel = new Set(getMultiSelectValues('nca-turno')), turnoTodos = turnosSel.size === NCA_TURNOS.length;
     const body = document.getElementById('nca-body'), cardsBox = document.getElementById('nca-cards'), linhaTopo = document.getElementById('nca-linha'), totalBox = raiz.querySelector('.nca-f-total');
     if (!doCsv.length) { visiveisAtual = []; cardsBox.innerHTML = ''; linhaTopo.textContent = ''; totalBox.textContent = ''; body.innerHTML = '<div class="empty" style="padding:22px">Sem atividades do CSV nesse dia. Importe o CSV de atividades na aba PCR (ou pelo botão da barra lateral).</div>'; return; }
     const retornos = retornosDoDiaCalc(doCsv.filter(r => ehServicoReparo(r.tipo_atividade)));
     const ifiPorOs = new Map(retornos.map(x => [String(x.os), x.ifi_irr]));
     // o turno do filtro vale pra tudo (cartões e tabela)
     const itens = doCsv.filter(r => r.os && cids.has(normalizeCidade(r.cidade)) && tiposSel.has(rotuloTipoServico(r.tipo_atividade))).map(r => ({ r, s: null }))
-      .filter(o => !turnoSel || ncaTurnoDa(o.r) === turnoSel);
+      .filter(o => turnoTodos || turnosSel.has(ncaTurnoDa(o.r) === 'MANHA' ? 'Manhã' : ncaTurnoDa(o.r) === 'TARDE' ? 'Tarde' : '-'));
     const agoraDe = () => dia < hojeISOLocal() ? new Date(dia + 'T23:59:59') : new Date();
     let F = null;
     const calcular = () => { const ag = agoraDe(); F = fabricaPrazosDoDia(new Date(), () => retornos); itens.forEach(o => { o.s = ncaSituacaoDa(o.r, ag, dia); }); };
     calcular();
-    const sub = formatDate(dia), turnoRotulo = turnoSel === 'MANHA' ? 'só manhã' : turnoSel === 'TARDE' ? 'só tarde' : 'manhã e tarde';
+    const sub = formatDate(dia), turnoRotulo = turnoTodos ? 'manhã e tarde' : !turnosSel.size ? 'nenhum turno' : turnosSel.has('Manhã') ? 'só manhã' : 'só tarde';
     const tempo = ncaTempoTxt;
     const HORA = 3600000;
     // mudança de cômodo e upgrade/downgrade não têm prazo contratado (só reparo, ativação e mudança de endereço têm)
@@ -24409,17 +24434,21 @@ function renderNCA() {
     };
     // técnicos do dia no seletor da tabela (mantém a escolha se ela ainda existe)
     const tecs = [...new Set(itens.map(o => (o.r.recurso || '').trim()).filter(t => ehRecursoTecnico(t)))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-    if (fil.tec && !tecs.includes(fil.tec)) fil.tec = '';
-    raiz.querySelector('.nca-f-tec').innerHTML = '<option value="">Todos</option>' + tecs.map(t => `<option value="${esc(t)}"${fil.tec === t ? ' selected' : ''}>${esc(t)}</option>`).join('');
+    if (origem !== 'tec') {
+      const opts = [...(itens.some(o => !ehRecursoTecnico(o.r.recurso)) ? ['(sem técnico)'] : []), ...tecs];
+      const caixas = [...document.querySelectorAll('#nca-tecs-panel input[type=checkbox]')], marcados = new Set(caixas.filter(c => c.checked).map(c => c.value));
+      let preset = !caixas.length || caixas.every(c => c.checked) ? opts : opts.filter(t => marcados.has(t));
+      if (!preset.length && marcados.size) preset = opts;   // os técnicos marcados não existem nesse dia: volta a mostrar todos
+      document.getElementById('nca-tecs').outerHTML = multiSelectInner('nca-tecs', opts, { preset, allLabel: 'Todos', noneLabel: 'Nenhum', emptyMsg: 'Sem técnicos neste dia.' });
+      wireMultiSelectField('nca-tecs', { noun: 'técnico(s)', allLabel: 'Todos' }, () => load('tec'));
+    }
+    const tecSel = new Set(getMultiSelectValues('nca-tecs')), tecTodos = tecSel.size === document.querySelectorAll('#nca-tecs-panel input[type=checkbox]').length;
+    const sitSel = new Set(getMultiSelectValues('nca-sit')), sitTodas = sitSel.size === NCA_SITUACOES.length;
     const nCli = normalizeHeader(fil.cli);
     const passa = o => {
       const { cod, ms } = o.s;
-      if (fil.sit === 'atencao' && cod !== 'nca' && cod !== 'risco') return false;
-      if (fil.sit === 'nca' && cod !== 'nca') return false;
-      if (fil.sit === 'risco' && cod !== 'risco') return false;
-      if (fil.sit === 'urgente' && !(cod === 'risco' && ms < HORA)) return false;
-      if (fil.sit === 'iniciada' && cod !== 'iniciada') return false;
-      if (fil.tec && (o.r.recurso || '').trim() !== fil.tec) return false;
+      if (!sitTodas && !((sitSel.has('NCA aplicável') && cod === 'nca') || (sitSel.has('Em risco') && cod === 'risco') || (sitSel.has('Menos de 1h para iniciar') && cod === 'risco' && ms < HORA) || (sitSel.has('Já iniciadas') && cod === 'iniciada'))) return false;
+      if (!tecTodos && !tecSel.has(ehRecursoTecnico(o.r.recurso) ? (o.r.recurso || '').trim() : '(sem técnico)')) return false;
       if (nCli && !normalizeHeader((o.r.cliente || o.r.nome || '') + ' ' + o.r.os).includes(nCli)) return false;
       return true;
     };
@@ -24443,7 +24472,7 @@ function renderNCA() {
     body.querySelector('#nca-tab tbody').addEventListener('click', ev => {
       const tr = ev.target.closest('tr[data-i]'); if (!tr || ev.target.closest('a,button,input,select')) return;
       const o = visiveis[Number(tr.dataset.i)]; if (!o) return;
-      const r = o.r, c = (k, v) => ({ tipo: '', celulas: [`<b>${k}</b>`, v || '-'] });
+      const r = o.r, c = (k, v) => ({ tipo: '', ref: o, celulas: [`<b>${k}</b>`, v || '-'] });
       const vs = visitasImprodutivasDaOS(r.os, null, r.contrato);
       const antes = vs.length ? `<b style="color:var(--danger)">Sim — ${vs.length} visita(s) improdutiva(s)</b>` : '<b style="color:var(--success)">Não — nenhuma visita improdutiva antes</b>';
       abrirModalLista(`O.S ${r.os} — ${r.cliente || r.nome || ''}`, `${rotuloTipoServico(r.tipo_atividade)} · ${rotuloCidadeGeral(r.cidade)}`, ['Campo', 'Valor'], [
@@ -24451,7 +24480,7 @@ function renderNCA() {
         c('Turno', o.s.turno ? NCA_FIM[o.s.turno].rot : ''), c('Tempo para baixar', tempoHtml(o)), c('Status da O.S', esc(r.status)), c('Técnico', ehRecursoTecnico(r.recurso) ? esc(r.recurso) : ''),
         c('Contrato', esc(r.contrato)), c('Endereço', esc(r.endereco)), c('IFI/IRR', retornoHtml(o) === '-' ? '' : esc(ifiPorOs.get(String(r.os)))),
         c('Data de abertura', fmtDT(r.abertura)), c('Limite para baixar', temPrazo(r) ? fmtDT(r.limite) : ''), c('Faixa do prazo', faixaHtml(o)), c('Prazo x Período', prazoPerHtml(o)),
-      ], { nome: `nca-os-${slugTitulo(String(r.os))}` });
+      ], { nome: `nca-os-${slugTitulo(String(r.os))}`, sinalizar: { texto: () => textoSinalizarOrdemNCA(o, vs), rotulo: 'ordem', vazio: 'Nada pra sinalizar.' } });
     });
     // relógio: troca a cada 30 segundos o que muda com a hora (tempo pra baixar, faixa e cartões) sem refazer a tabela (não perde filtro de coluna nem ordenação)
     if (dia === hojeISOLocal()) {
@@ -24585,12 +24614,16 @@ function renderImprodutivasDoDia() {
       const tr = ev.target.closest('tr[data-i]'); if (!tr || ev.target.closest('a,button,input,select')) return;
       const o = todas[Number(tr.dataset.i)]; if (!o) return;
       const r = o.r, rot = n => n + 'ª improdutiva';
-      const cel = o.visitas.map((v, i) => ({ tipo: '', celulas: [`<b>${rot(i + 1)}</b>`, esc(v.tecnico || 'sem técnico'), esc(quando(v)), esc(v.motivo) || '<span style="color:var(--text-muted)">sem motivo informado</span>'] }));
-      visitasImprodutivasDaOS(r.os, null, r.contrato).filter(v => v.outra).forEach(v => cel.push({ tipo: '', celulas: [`<b>Outra O.S ${esc(v.os)}</b>`, esc(v.tecnico || 'sem técnico'), esc(formatDate(v.data)), esc(v.motivo) || '<span style="color:var(--text-muted)">sem motivo informado</span>'] }));
-      cel.push({ tipo: '', celulas: ['<b>Agora</b>', esc((r.recurso || '').trim() || 'sem técnico'), esc(r.inicio ? quando({ inicio: r.inicio, data: r.data }) : formatDate(r.data)), `<b>${SIT[o.bucket]}</b> — ordem ainda em campo`] });
+      const cel = o.visitas.map((v, i) => ({ tipo: '', ref: o, celulas: [`<b>${rot(i + 1)}</b>`, esc(v.tecnico || 'sem técnico'), esc(quando(v)), esc(v.motivo) || '<span style="color:var(--text-muted)">sem motivo informado</span>'] }));
+      visitasImprodutivasDaOS(r.os, null, r.contrato).filter(v => v.outra).forEach(v => cel.push({ tipo: '', ref: o, celulas: [`<b>Outra O.S ${esc(v.os)}</b>`, esc(v.tecnico || 'sem técnico'), esc(formatDate(v.data)), esc(v.motivo) || '<span style="color:var(--text-muted)">sem motivo informado</span>'] }));
+      cel.push({ tipo: '', ref: o, celulas: ['<b>Agora</b>', esc((r.recurso || '').trim() || 'sem técnico'), esc(r.inicio ? quando({ inicio: r.inicio, data: r.data }) : formatDate(r.data)), `<b>${SIT[o.bucket]}</b> — ordem ainda em campo`] });
       abrirModalLista(`O.S ${r.os} — ${r.cliente || r.nome || ''}`,
         `${o.n} visita(s) improdutiva(s) · ${rotuloTipoServico(r.tipo_atividade)} · ${rotuloCidadeGeral(r.cidade)}${r.contrato ? ' · contrato ' + r.contrato : ''}`,
-        ['Visita', 'Técnico que visitou', 'Data e hora', 'Motivo'], cel, { nome: `improdutivas-os-${slugTitulo(String(r.os))}` });
+        ['Visita', 'Técnico que visitou', 'Data e hora', 'Motivo'], cel, { nome: `improdutivas-os-${slugTitulo(String(r.os))}`, sinalizar: { rotulo: 'ordem', vazio: 'Nada pra sinalizar.', texto: () => {
+          const tec = (r.recurso || '').trim() ? '@' + doisNomesTec(r.recurso) : 'sem técnico';
+          return `${String(r.cliente || r.nome || 'SEM NOME').trim().toUpperCase()}\nO.S ${r.os} · Contrato ${r.contrato || '-'} · ${rotuloTipoServico(r.tipo_atividade)}\nImprodutivas: ${o.n} visita(s)\n` +
+            o.visitas.map((v, i) => `${i + 1}ª ${v.motivo || 'sem motivo informado'} - ${v.tecnico || 'sem técnico'} (${quando(v)})`).join('\n') + `\nAgora: ${tec} - ${SIT[o.bucket]}`;
+        } } });
     });
     // clicar num número da tabela de motivos: as ordens daquele motivo (e cidade) com total de visitas, técnicos que visitaram e o prazo
     body.querySelector('#imp-tab-mot tbody').addEventListener('click', ev => {
