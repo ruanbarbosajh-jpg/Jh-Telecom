@@ -708,6 +708,8 @@
   .fc-ok-av { color: var(--danger) !important; font-weight: 600; }
   .fc-ok-acoes { display: flex; gap: 10px; flex-wrap: wrap; padding: 12px 24px 22px; }
   .fc-rec-corpo { padding: 0 16px 16px; }
+  .fc-rec-busca { padding: 0 16px 10px; }
+  .fc-rec-busca .fc-input { width: 100%; max-width: 460px; }
   @media (max-width: 980px) {
     .fc-sec1 { grid-template-columns: 1fr; } .fc-aside { margin: 0 22px 20px; }
     .fc-qgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -21594,7 +21596,7 @@ async function abrirChamarCertificacoes(data, baseCert, botao) {
 // A tela Certificações lê estas respostas junto com as da planilha (buscarRespostasFormCertificacao) e o botão "Chamar o cliente agora" reaproveita a janela Chamar Clientes.
 const CERT_ATENDENTES = ['REBECA', 'VITÓRIA', 'MÁRCIA', 'DANIELA', 'Sândila', 'LUMA'];
 const CERT_CABO = ['SIM, REUTILIZADO CABO PRETO', 'SIM, REUTILIZADO CABO MARROM', 'NÃO FOI REUTILIZADO CABO'];
-const CERTFORM = { linhas: [], semPlanilha: false, carregou: false, salvando: false, id: null };
+const CERTFORM = { linhas: [], semPlanilha: false, carregou: false, salvando: false, id: null, editando: null };   // editando = registro (já salvo) que está sendo corrigido; mesmo id = o script atualiza a linha, nunca duplica
 const CERTFORM_LOCAL = 'jh_certform_pendentes';
 const CERT_FONE_FORM = new Map();   // O.S -> telefone digitado no formulário (entra na lista de telefones do Chamar Clientes)
 // ONDE FICAM AS RESPOSTAS (pedido do cliente: "deixe as respostas salvas no Google Sheets pra não ocupar espaço no Supabase"): NÃO vão pro banco. Um Apps Script (web app preso à planilha
@@ -21732,7 +21734,7 @@ const CERTFORM_RASCUNHO = 'jh_certform_rascunho';
 // campos de cada seção (pra contar quantas seções já estão completas no cabeçalho)
 const FC_SECOES = [['certificada_por', 'atendente', 'os', 'tecnico', 'baixa', 'defeito'], ['explicou_rede', 'senha_wifi', 'roteador', 'cabo', 'certificada_corretamente'], ['telefone', 'quem_atendeu', 'chamar']];
 function renderFormCertificacao() {
-  CERTFORM.id = fcNovoId();
+  CERTFORM.id = fcNovoId(); CERTFORM.editando = null;
   const tecnicos = [...new Set(DB.pcr.map(r => r.recurso).filter(r => r && ehRecursoTecnico(r)))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   const req = '<span class="fc-req" title="Obrigatório" aria-hidden="true">*</span>';
   const erro = id => `<div class="fc-erro" id="fc-erro-${id}" role="alert"></div>`;
@@ -21751,6 +21753,7 @@ function renderFormCertificacao() {
     <header class="fc-card fc-hero"><span class="fc-hero-ic" aria-hidden="true">${fcIc('clip')}</span><div class="fc-hero-txt"><h1>Formulário de Certificação</h1><p>Validação da qualidade do atendimento técnico e encerramento da ordem de serviço.</p></div>
       <div class="fc-prog" id="fc-prog" role="progressbar" aria-valuemin="0" aria-valuemax="3" aria-valuenow="0" aria-label="Seções concluídas"><span id="fc-prog-t">0 de 3</span><div class="fc-prog-trilho"><div id="fc-prog-barra"></div></div></div></header>
     <div id="fc-aviso" class="fc-banner" hidden role="status"></div>
+    <div id="fc-edicao" class="fc-banner fc-banner-info" hidden role="status"></div>
     <div id="fc-sucesso" hidden></div>
     <form id="fc-form" class="fc-form" novalidate autocomplete="off">
       ${cartao(1, 'Dados do atendimento', 'Informe os dados da ordem de serviço e do técnico responsável.', `<div class="fc-sec1"><div class="fc-grid">
@@ -21780,7 +21783,7 @@ function renderFormCertificacao() {
         <span class="fc-auto" id="fc-auto" aria-live="polite"><span class="fc-auto-ic">${fcIc('check')}</span><span id="fc-auto-t">Rascunho salvo automaticamente<br><small>neste navegador, enquanto você preenche</small></span></span>
         <button type="submit" class="fc-btn fc-btn-pri" id="fc-salvar"><span class="fc-spin" aria-hidden="true"></span><span class="fc-ic-s">${fcIc('save')}</span><span class="fc-txt">Salvar certificação</span></button></footer>
     </form>
-    <section class="fc-card fc-recentes" aria-labelledby="fc-rec-t"><header class="fc-card-h"><span class="fc-num fc-num-s" aria-hidden="true">${fcIc('note')}</span><div><h2 id="fc-rec-t">Últimas certificações registradas</h2><p id="fc-rec-sub">Carregando…</p></div></header><div id="fc-rec-corpo" class="fc-rec-corpo"></div></section>
+    <section class="fc-card fc-recentes" aria-labelledby="fc-rec-t"><header class="fc-card-h"><span class="fc-num fc-num-s" aria-hidden="true">${fcIc('note')}</span><div><h2 id="fc-rec-t">Últimas certificações registradas</h2><p id="fc-rec-sub">Carregando…</p></div></header><div class="fc-rec-busca"><input class="fc-input" type="search" id="fc-rec-q" placeholder="Buscar certificação por O.S, técnico, cliente ou contrato…" autocomplete="off" aria-label="Buscar certificação já enviada"></div><div id="fc-rec-corpo" class="fc-rec-corpo"></div></section>
     </div>`;
   const form = document.getElementById('fc-form'), $ = id => document.getElementById('fc-' + id);
   const radio = nome => { const r = form.querySelector(`input[name="${nome}"]:checked`); return r ? r.value : ''; };
@@ -21807,6 +21810,7 @@ function renderFormCertificacao() {
   let tRasc = null;
   const gravaRascunho = () => {
     try {
+      if (CERTFORM.editando) return;   // editando uma já enviada: não mexe no rascunho
       if (sujo()) { localStorage.setItem(CERTFORM_RASCUNHO, JSON.stringify({ v: ler(), t: Date.now(), id: CERTFORM.id })); const d = new Date(); $('auto-t').innerHTML = `Rascunho salvo às ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}<br><small>neste navegador, enquanto você preenche</small>`; }
       else localStorage.removeItem(CERTFORM_RASCUNHO);
     } catch (e) { /* sem armazenamento: só não guarda o rascunho */ }
@@ -21848,7 +21852,7 @@ function renderFormCertificacao() {
     if (autoPreenche('baixa', r.motivo || '')) preenchidos.push('baixa');
     if (tel && autoPreenche('telefone', fcMascaraTel(tel))) preenchidos.push('telefone');
     aside(r, { telefone: tel });
-    const jaFeita = CERTFORM.linhas.find(x => String(x.os) === String(r.os));
+    const jaFeita = CERTFORM.linhas.find(x => String(x.os) === String(r.os) && x.id !== CERTFORM.id);
     box.className = 'fc-os-info larga fc-os-ok';
     const outras = viaContrato ? viaContrato.lista.filter(x => String(x.os) !== String(r.os)) : [];
     const blocoContrato = viaContrato ? `<div class="fc-os-pre"><b>Contrato ${esc(viaContrato.contrato)}</b> → usei a O.S <b>${esc(r.os)}</b> (${esc(rotuloTipoServico(r.tipo_atividade))}, ${esc(formatDate(r.data))}, ${esc(r.status || '-')}) e ela já foi colocada no campo.${outras.length ? ` Outras O.S deste contrato: ${outras.slice(0, 6).map(x => `<button type="button" class="fc-btn fc-btn-sec" style="padding:2px 9px;font-size:12px;min-height:0" data-troca-os="${esc(x.os)}">${esc(x.os)} · ${esc(rotuloTipoServico(x.tipo_atividade))} · ${esc(formatDate(x.data))}</button>`).join(' ')}` : ''}</div>` : '';
@@ -21887,28 +21891,29 @@ function renderFormCertificacao() {
     }
     aviso('');
     CERTFORM.salvando = true; btn.disabled = true; btn.classList.add('carregando'); txtBtn.textContent = 'Salvando…';
-    const achada = fcBuscaOs(v.os);
-    const reg = { id: CERTFORM.id, criado_em: new Date().toISOString(), criado_por: waQuemChama(), certificada_por: v.certificada_por, atendente: v.atendente, tecnico: v.tecnico, os: v.os, baixa: v.baixa, defeito: v.defeito,
+    const achada = fcBuscaOs(v.os), ed = CERTFORM.editando;   // em edição vale o criado_em/criado_por original (a linha da planilha é atualizada no lugar)
+    const reg = { id: CERTFORM.id, criado_em: ed && ed.criado_em ? ed.criado_em : new Date().toISOString(), criado_por: ed && ed.criado_por ? ed.criado_por : waQuemChama(), certificada_por: v.certificada_por, atendente: v.atendente, tecnico: v.tecnico, os: v.os, baixa: v.baixa, defeito: v.defeito,
       explicou_rede: v.explicou_rede, senha_wifi: v.senha_wifi, roteador: v.roteador, cabo: v.cabo, certificada_corretamente: v.certificada_corretamente, telefone: fcSoDigitos(v.telefone),
       quem_atendeu: v.quem_atendeu, nota: v.nota ? +v.nota : null, observacao: v.observacao || null, chamar: v.chamar,
-      cliente: achada ? achada.cliente || null : null, contrato: achada ? achada.contrato || null : null, cidade: achada ? achada.cidade || null : null };
+      cliente: achada ? achada.cliente || null : (ed ? ed.cliente || null : null), contrato: achada ? achada.contrato || null : (ed ? ed.contrato || null : null), cidade: achada ? achada.cidade || null : (ed ? ed.cidade || null : null) };
     let r; try { r = await certFormSalvar(reg); } catch (e) { r = { ok: false, erro: String(e && e.message || e) }; }
-    CERTFORM.salvando = false; btn.disabled = false; btn.classList.remove('carregando'); txtBtn.textContent = 'Salvar certificação';
+    CERTFORM.salvando = false; btn.disabled = false; btn.classList.remove('carregando'); txtBtn.textContent = ed ? 'Salvar alterações' : 'Salvar certificação';
     if (!document.getElementById('fc-form')) return;   // saiu da tela enquanto salvava
     if (!r.ok) { aviso(`Não consegui salvar (${r.erro}). Seus dados continuam no formulário — confira a conexão e tente de novo.`, 'erro'); return; }
     CERT_FONE_FORM.set(reg.os, reg.telefone);
-    apagaRascunho(); sucesso(reg, r.local);
+    apagaRascunho(); sucesso(reg, r.local, !!ed);
   });
-  const sucesso = (reg, local) => {
+  const sucesso = (reg, local, editou) => {
     const box = $('sucesso'), agora = reg.chamar === 'AGORA';
-    box.innerHTML = `<section class="fc-card fc-ok${local ? ' fc-ok-local' : ''}" role="status"><div class="fc-ok-corpo"><span class="fc-ok-ic">${fcIc(local ? 'alert' : 'check')}</span><div><h2>${local ? 'Guardada só neste navegador' : 'Certificação registrada!'}</h2>
+    box.innerHTML = `<section class="fc-card fc-ok${local ? ' fc-ok-local' : ''}" role="status"><div class="fc-ok-corpo"><span class="fc-ok-ic">${fcIc(local ? 'alert' : 'check')}</span><div><h2>${local ? 'Guardada só neste navegador' : (editou ? 'Alterações salvas!' : 'Certificação registrada!')}</h2>
       <p>O.S <b>${esc(reg.os)}</b>${reg.cliente ? ' · ' + esc(reg.cliente) : ''} · técnico <b>${esc(reg.tecnico)}</b> · atendente ${esc(reg.atendente)}.</p>
       ${local ? '<p class="fc-ok-av">⚠ Ainda NÃO foi para a planilha do Google (ela não está ligada ao sistema — falta configurar o Apps Script). Não conte como registrada para a equipe.</p>' : ''}
       <p>${agora ? `Você escolheu chamar o cliente <b>agora</b>: o botão abaixo abre o WhatsApp direto em <b>${esc(fcMascaraTel(reg.telefone))}</b> com a mensagem pronta.` : 'Você escolheu chamar o cliente <b>depois</b>: ele aparece em Certificações › Chamar Clientes, no filtro "Chamar (formulário)".'}</p></div></div>
-      <div class="fc-ok-acoes">${agora ? '<button type="button" class="fc-btn fc-btn-pri" id="fc-chamar-ja">📞 Chamar no WhatsApp agora</button>' : ''}<button type="button" class="fc-btn fc-btn-sec" id="fc-nova">Nova certificação</button></div></section>`;
+      <div class="fc-ok-acoes">${agora ? '<button type="button" class="fc-btn fc-btn-pri" id="fc-chamar-ja">📞 Chamar no WhatsApp agora</button>' : ''}<button type="button" class="fc-btn fc-btn-sec" id="fc-editar-reg" title="Corrigir algo que foi enviado errado">✎ Editar esta certificação</button><button type="button" class="fc-btn fc-btn-sec" id="fc-nova">Nova certificação</button></div></section>`;
     box.hidden = false; form.hidden = true; box.scrollIntoView({ behavior: 'smooth', block: 'start' });
     const ja = $('chamar-ja');
     if (ja) ja.addEventListener('click', () => chamarAgora(reg));
+    $('editar-reg').addEventListener('click', () => editar(reg));
     $('nova').addEventListener('click', () => { box.hidden = true; box.innerHTML = ''; zerar(); form.hidden = false; $('os').focus(); });
     pintaRecentes();
   };
@@ -21923,13 +21928,43 @@ function renderFormCertificacao() {
     if (r) waSetStatus(`cert:${r.data}|${contatoSoDigitos(r.contrato)}|${reg.os}`, 'chamado');
     toast(`WhatsApp aberto em ${fcMascaraTel(reg.telefone)} — confira a mensagem e aperte Enviar.`, 'ok', 4500);
   };
+  // ---- EDITAR UMA CERTIFICAÇÃO JÁ ENVIADA (28/10/2026, pedido do cliente: "depois que enviarem o forms coloque uma opção para que possam editar mesmo depois enviada") ----
+  // O id da certificação é o mesmo, então o Apps Script atualiza a MESMA linha da planilha (não duplica); criado_em/criado_por originais ficam. O botão "Editar" está na tela de sucesso e em cada linha de "Últimas certificações".
+  const modoEdicao = reg => {
+    const b = $('edicao'), c = $('limpar').querySelector('span');
+    txtBtn.textContent = reg ? 'Salvar alterações' : 'Salvar certificação';
+    if (c) c.textContent = reg ? 'Cancelar edição' : 'Cancelar';
+    if (!reg) { b.hidden = true; b.textContent = ''; return; }
+    const q = reg.criado_em ? new Date(reg.criado_em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+    b.innerHTML = `✎ Editando a certificação da O.S <b>${esc(reg.os)}</b>${q ? ' registrada em ' + esc(q) : ''}. Ao salvar, o registro na planilha é atualizado — não é criado outro.`;
+    b.hidden = false;
+  };
+  const editar = reg => {
+    if (!form.hidden && sujo() && !confirm('Há uma certificação em preenchimento neste formulário. Descartar o que foi digitado para editar a O.S ' + reg.os + '?')) return;
+    zerar();
+    CERTFORM.id = reg.id; CERTFORM.editando = { ...reg };
+    const set = (id, x) => { if (x != null && x !== '') $(id).value = x; };
+    const at = $('atendente'); if (reg.atendente && ![...at.options].some(o => o.value === reg.atendente)) at.add(new Option(reg.atendente, reg.atendente));   // atendente antigo que saiu da lista continua selecionável
+    set('atendente', reg.atendente); set('os', reg.os); set('tecnico', reg.tecnico); set('baixa', reg.baixa); set('defeito', reg.defeito);
+    set('telefone', reg.telefone ? fcMascaraTel(reg.telefone) : ''); set('quem_atendeu', reg.quem_atendeu); set('observacao', reg.observacao);
+    ['certificada_por', 'explicou_rede', 'senha_wifi', 'roteador', 'cabo', 'certificada_corretamente', 'nota', 'chamar'].forEach(n => {
+      const v = reg[n]; if (v == null || v === '') return;
+      const i = [...form.querySelectorAll('input[name="' + n + '"]')].find(x => x.value === String(v)); if (i) i.checked = true;
+    });
+    $('cont-obs').textContent = `${$('observacao').value.length} / 500`; $('os-x').hidden = !$('os').value;
+    const r0 = fcBuscaOs($('os').value); ultimaOs = $('os').value; if (r0) aside(r0, { telefone: fcSoDigitos($('telefone').value) });
+    const box = $('sucesso'); box.hidden = true; box.innerHTML = ''; form.hidden = false;
+    modoEdicao(CERTFORM.editando); mostrarErros({}); aviso(''); progresso();
+    $('edicao').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
   const zerar = () => {
+    CERTFORM.editando = null; modoEdicao(null);
     form.reset(); form.querySelectorAll('[data-auto]').forEach(el => { delete el.dataset.auto; el.classList.remove('fc-auto-ok'); });
     mostrarErros({}); aviso(''); $('os-info').hidden = true; $('os-x').hidden = true; aside(null); ultimaOs = ''; seqBusca++; $('cont-obs').textContent = '0 / 500'; CERTFORM.id = fcNovoId(); apagaRascunho(); progresso();
     $('auto-t').innerHTML = 'Rascunho salvo automaticamente<br><small>neste navegador, enquanto você preenche</small>';
   };
   $('limpar').addEventListener('click', () => {
-    if (sujo() && !confirm('Cancelar o preenchimento? O que você digitou será descartado.')) return;
+    if (sujo() && !confirm(CERTFORM.editando ? 'Cancelar a edição? As alterações que você fez e não salvou serão descartadas.' : 'Cancelar o preenchimento? O que você digitou será descartado.')) return;
     zerar(); $('os').focus();
   });
   // volta o rascunho (se a tela foi fechada sem salvar)
@@ -21945,15 +21980,22 @@ function renderFormCertificacao() {
     }
   } catch (e) { /* rascunho ilegível: ignora */ }
   progresso();
-  // últimas certificações (quem está vendo confere que gravou)
-  const pintaRecentes = async () => {
-    const linhas = await certFormCarregar(true); if (!document.getElementById('fc-rec-corpo')) return;
-    const sub = $('rec-sub'), corpo = $('rec-corpo');
-    sub.textContent = linhas.length ? `${linhas.length} registro(s) — mostrando os ${Math.min(10, linhas.length)} mais recentes${CERTFORM.semPlanilha ? ' · ⚠ planilha do Google não ligada: só neste navegador' : ''}.` : (CERTFORM.semPlanilha ? 'Nenhuma ainda. ⚠ A planilha do Google não está ligada: o que for salvo fica só neste navegador.' : 'Nenhuma certificação registrada ainda.');
-    corpo.innerHTML = linhas.length ? `<div class="table-wrap"><table class="data-table" id="tab-certform-recentes"><thead><tr><th>Quando</th><th>O.S</th><th>Técnico</th><th>Cliente</th><th>Certificada por</th><th>Atendente</th><th>Certificada corretamente?</th><th>Chamar</th></tr></thead><tbody>
-      ${linhas.slice(0, 10).map(r => `<tr><td>${esc(new Date(r.criado_em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}${r._local ? ' <span class="badge warn">neste navegador</span>' : ''}</td><td>${esc(r.os)}</td><td>${esc(r.tecnico)}</td><td>${esc(r.cliente || '-')}</td><td>${esc(r.certificada_por)}</td><td>${esc(r.atendente)}</td><td>${r.certificada_corretamente === 'SIM' ? '<span class="badge ok">Sim</span>' : '<span class="badge warn">Não</span>'}</td><td>${esc(r.chamar === 'AGORA' ? 'Agora' : 'Depois')}</td></tr>`).join('')}
-      </tbody></table></div>` : '';
+  // últimas certificações (quem está vendo confere que gravou); cada linha tem ✎ Editar e a busca acha as mais antigas
+  const desenhaRecentes = () => {
+    const linhas = CERTFORM.linhas, q = ($('rec-q').value || '').trim().toLowerCase();
+    const achadas = q ? linhas.filter(r => [r.os, r.tecnico, r.cliente, r.contrato].some(x => String(x || '').toLowerCase().includes(q))) : linhas;
+    const mostra = achadas.slice(0, q ? 30 : 10), sub = $('rec-sub'), corpo = $('rec-corpo'), semPl = CERTFORM.semPlanilha ? ' · ⚠ planilha do Google não ligada: só neste navegador' : '';
+    if (!linhas.length) sub.textContent = CERTFORM.semPlanilha ? 'Nenhuma ainda. ⚠ A planilha do Google não está ligada: o que for salvo fica só neste navegador.' : 'Nenhuma certificação registrada ainda.';
+    else if (q) sub.textContent = `${achadas.length} encontrada(s) para "${q}" — mostrando ${mostra.length}${semPl}.`;
+    else sub.textContent = `${linhas.length} registro(s) — mostrando os ${mostra.length} mais recentes${semPl}. Use ✎ Editar para corrigir uma já enviada.`;
+    if (!mostra.length) { corpo.innerHTML = q ? '<div class="empty">Nenhuma certificação encontrada.</div>' : ''; return; }
+    corpo.innerHTML = `<div class="table-wrap"><table class="data-table" id="tab-certform-recentes"><thead><tr><th>Quando</th><th>O.S</th><th>Técnico</th><th>Cliente</th><th>Certificada por</th><th>Atendente</th><th>Certificada corretamente?</th><th>Chamar</th><th>Ações</th></tr></thead><tbody>
+      ${mostra.map(r => `<tr><td>${esc(new Date(r.criado_em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}${r._local ? ' <span class="badge warn">neste navegador</span>' : ''}</td><td>${esc(r.os)}</td><td>${esc(r.tecnico)}</td><td>${esc(r.cliente || '-')}</td><td>${esc(r.certificada_por)}</td><td>${esc(r.atendente)}</td><td>${r.certificada_corretamente === 'SIM' ? '<span class="badge ok">Sim</span>' : '<span class="badge warn">Não</span>'}</td><td>${esc(r.chamar === 'AGORA' ? 'Agora' : 'Depois')}</td><td><button type="button" class="fc-btn fc-btn-sec" data-fc-edit="${esc(r.id)}" style="padding:3px 10px;font-size:12.5px;min-height:0" title="Corrigir esta certificação">✎ Editar</button></td></tr>`).join('')}
+      </tbody></table></div>`;
   };
+  const pintaRecentes = async () => { await certFormCarregar(true); if (!document.getElementById('fc-rec-corpo')) return; desenhaRecentes(); };
+  $('rec-q').addEventListener('input', desenhaRecentes);
+  $('rec-corpo').addEventListener('click', ev => { const b = ev.target.closest('[data-fc-edit]'); if (!b) return; const reg = CERTFORM.linhas.find(r => String(r.id) === b.dataset.fcEdit); if (reg) editar(reg); });
   pintaRecentes();
 }
 function renderCertificacoes() {
