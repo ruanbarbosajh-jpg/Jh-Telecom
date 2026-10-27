@@ -3393,6 +3393,27 @@
   @media (max-width: 1200px) { .ic-pag { grid-template-columns: 1fr; } .ic-dir { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); } .ic-promo { min-height: 200px; } }
   @media (max-width: 900px) { .ic-atalhos { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ic-hero-tx { max-width: 100%; } .ic-hero h1 { font-size: 30px; } .ic-torre { opacity: .35; } }
   @media (max-width: 560px) { .ic-atalhos { grid-template-columns: 1fr; } .ic-hero { padding: 26px 22px; } .ic-data { display: none; } }
+  /* ===== ajustes de 28/10/2026 (tarde): NCA sem barra de rolagem lateral, sem o botão de recolher a barra, Início preenchendo a tela ===== */
+  /* NCA: filtros dentro do cartão e tabela que se encolhe pra caber (cabeçalho e células quebram linha; sem rolagem lateral) */
+  .nca-toolbar { border: 0 !important; border-radius: 0 !important; box-shadow: none !important; background: transparent !important; margin: 0 !important; padding: 14px 20px !important; }
+  .nca-toolbar .nca-f-total { margin-left: auto; font-size: 12.5px; color: var(--text-muted); }
+  .nca-panel .table-wrap { overflow-x: visible !important; margin: 0 10px 14px; }
+  table.nca-tab { width: 100%; font-size: 12.5px; }
+  table.nca-tab thead th { white-space: normal !important; padding: 9px 6px !important; line-height: 1.2; vertical-align: middle; font-size: 12px; }
+  table.nca-tab tbody td { padding: 8px 6px !important; white-space: normal; word-break: normal; overflow-wrap: break-word; line-height: 1.3; }
+  table.nca-tab .nca-ic { width: 13px; height: 13px; margin-right: 4px; }
+  .nca-pill { white-space: normal !important; border-radius: 10px !important; font-size: 11.5px !important; padding: 3px 8px !important; line-height: 1.25; }
+  .nca-t { white-space: normal !important; }
+  .nca-t--alerta { border-radius: 10px !important; padding: 3px 8px !important; font-size: 11.5px; line-height: 1.25; }
+  .nca-turno { padding: 4px 9px !important; font-size: 12.5px !important; }
+  .nca-turno .nca-ic { width: 14px !important; height: 14px !important; margin-right: 4px !important; }
+  /* sem o botão « que recolhia a barra lateral (no computador; no celular a barra é uma gaveta e continua com o botão de fechar) */
+  @media (min-width: 901px) { :root[data-v2="1"] .sb-fechar, .sb-fechar { display: none !important; } }
+  /* Início do colaborador e Menu de áreas ocupam a tela toda (com zoom afastado ganham mais colunas em vez de sobrar espaço dos lados) */
+  .ic-pag { max-width: none !important; grid-template-columns: minmax(0, 1fr) clamp(300px, 22vw, 460px); }
+  .ic-atalhos { grid-template-columns: repeat(auto-fill, minmax(clamp(260px, 20vw, 340px), 1fr)); }
+  .ini-areas { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+  @media (max-width: 1200px) { .ic-pag { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -17601,6 +17622,17 @@ function abrirOrdensDoCartao(chave) {
     abrirModalLista(it.titulo, it.sub, colunas, linhas, { nome: slugTitulo(it.titulo), sinalizar: sinOpt });
     return;
   }
+  // cartões da tela NCA (28/10/2026): lista com a coluna "Improdutiva antes?" e o 📲 SINALIZAR (só ordens em risco ou com NCA)
+  if (String(chave).startsWith('nca|')) {
+    const sinNca = it.sinalizar ? { texto: it.sinalizar, rotulo: 'ordem(ns)', vazio: 'Nenhuma ordem em risco ou com NCA na lista (confira o filtro).' } : null;
+    const linhasN = ordenadas.map(r => {
+      const vs = visitasImprodutivasDaOS(r.os, null, r.contrato), c = comum(r);
+      const antes = vs.length ? `<span class="badge warn">Sim — ${vs.length}</span> ${htmlOutrasVisitas(vs)}` : 'Não';
+      return { tipo: rotuloTipoServico(r.tipo_atividade) || '-', ref: r, celulas: [c[0], c[1], c[2], c[3], esc(rotuloTipoServico(r.tipo_atividade) || '') || '-', esc(r.recurso) || '-', esc(r.status) || '-', antes, esc(r.periodo_sistema || r.periodo || '') || '-', t(r.abertura), t(r.limite)] };
+    });
+    abrirModalLista(it.titulo, it.sub, ['O.S', 'Contrato', 'Cliente', 'Cidade', 'Tipo de serviço', 'Técnico', 'Status', 'Improdutiva antes?', 'Período da ordem', 'Abertura', 'Limite'], linhasN, { colTipo: 4, nome: slugTitulo(it.titulo), sinalizar: sinNca });
+    return;
+  }
   const improd = tipoCartao === 'improd', improdEmCampo = String(chave).startsWith('imp|');
   // improdutivas (pedido 20/10/2026): O.S → Contrato → Motivo → Cliente → Técnico → Cidade → o resto. 28/10/2026: + "Improdutivas no contrato" (todas as O.S do contrato)
   // e as outras visitas também olham o contrato. Cartões da tela "Improdutivas do Dia" (`imp|…`): a ordem está em campo, então não tem motivo próprio — só o histórico.
@@ -24163,25 +24195,60 @@ function ncaSituacaoDa(r, agora, dia) {
   return { cod: ms <= 0 ? 'nca' : 'risco', turno, bucket, ms };
 }
 let NCA_RELOGIO = null;
+// quanto falta / passou, em texto curto (usado na tela e no 📲 SINALIZAR)
+function ncaTempoTxt(ms) { if (Math.abs(ms) < 60000) return 'menos de 1min'; const t = Math.floor(Math.abs(ms) / 60000), hh = Math.floor(t / 60), mm = t % 60; return hh ? `${hh}h${String(mm).padStart(2, '0')}` : `${mm}min`; }
+// 📲 SINALIZAR do NCA (28/10/2026): só entra ordem em risco ou já com NCA (iniciada não precisa de aviso). Agrupa por turno; do que vence primeiro pro último.
+// Linha: CLIENTE - @Técnico (2 nomes) - Tipo - faltam X (menos de 1h = ATENÇÃO) | NCA: passou há X
+function textoSinalizarNCA(itens) {
+  const lista = itens.filter(o => o.s.cod === 'risco' || o.s.cod === 'nca');
+  if (!lista.length) return '';
+  const blocos = ['MANHA', 'TARDE'].map(t => {
+    const rs = lista.filter(o => o.s.turno === t).sort((a, b) => a.s.ms - b.s.ms); if (!rs.length) return '';
+    return `${NCA_FIM[t].rot.toUpperCase()} - iniciar até ${NCA_FIM[t].ate}\n` + rs.map(o => {
+      const tec = ehRecursoTecnico(o.r.recurso) ? '@' + doisNomesTec(o.r.recurso) : 'sem técnico';
+      const tempo = o.s.cod === 'nca' ? `NCA: passou há ${ncaTempoTxt(o.s.ms)}` : `${o.s.ms < 3600000 ? 'ATENÇÃO ' : ''}faltam ${ncaTempoTxt(o.s.ms)}`;
+      return `${String(o.r.cliente || o.r.nome || 'SEM NOME').trim().toUpperCase()} - ${tec} - ${rotuloTipoServico(o.r.tipo_atividade)} - ${tempo}`;
+    }).join('\n');
+  }).filter(Boolean);
+  return 'NCA - ordens sem iniciar\n\n' + blocos.join('\n\n');
+}
 function renderNCA() {
   if (NCA_RELOGIO) { clearInterval(NCA_RELOGIO); NCA_RELOGIO = null; }
   const datas = [...new Set(DB.pcr.map(r => r.data).filter(Boolean))].sort().reverse();
   const hoje = hojeISOLocal();
   const fil = { sit: '', tec: '', cli: '' };   // filtros de dentro da tabela (não são memória de tela: não têm id)
+  let visiveisAtual = [];
+  // tudo (cartões, filtros e tabela) fica numa tela só: os filtros moram DENTRO do cartão da tabela (pedido do cliente, 28/10/2026)
   document.getElementById('content').innerHTML = `
-    <div class="toolbar">
-      <div class="field"><label>Data</label><input type="date" id="nca-data" value="${datas.includes(hoje) ? hoje : (datas[0] || hoje)}"></div>
-      ${multiCityField('nca-cidades', 'Cidades')}
-      ${multiSelectField('nca-tipos', 'Tipo de serviço', NCA_TIPOS, { allLabel: 'Todos os tipos', noneLabel: 'Nenhum' })}
-      <div class="field"><label>Turno</label><select id="nca-turno"><option value="">Manhã e tarde</option><option value="MANHA">Só manhã</option><option value="TARDE">Só tarde</option></select></div>
-      <button class="btn" id="f-apply">Filtrar</button>
-    </div>
     <div class="panel" style="margin-bottom:1rem"><h3>Regra da GIGA+ Fibra — NCA (Não Cumprimento de Agenda)</h3>
       <p style="font-size:13px;color:var(--text-secondary);margin:0;line-height:1.6">Toda nota de <b>reparo, mudança, upgrade e ativação</b> tem turno definido e o atendimento precisa estar <b>iniciado até o fim do turno</b>: <b>11h59 na manhã</b> (e <b>17h59 na tarde</b>, mesmo critério). Passou do horário sem iniciar, a nota sofre <b>NCA</b>, precisa ser reagendada e devolvida à caixa. Aqui, <b>iniciado</b> é o técnico ter começado o atendimento (iniciado, concluído ou improdutivo) — <b>pendente</b> e <b>em rota</b> ainda não contam. O turno é o gravado na ordem (<i>Período da Ordem</i>). Vem do CSV de atividades importado na PCR.</p></div>
-    <div id="nca-body"></div>`;
+    <p id="nca-linha" style="font-size:12.5px;color:var(--text-muted);margin:0 0 .6rem"></p>
+    <div id="nca-cards"></div>
+    <div class="panel nca-panel"><h3>Ordens do dia — acompanhamento de NCA<button type="button" class="btn-sinalizar" id="nca-sinalizar" title="Copia as ordens em risco ou com NCA que estão na tabela, pra colar no WhatsApp">📲 SINALIZAR</button><span class="nca-sub">Primeiro o que já levou NCA e o que está em risco, depois as já iniciadas. <b>Tempo para baixar</b> = quanto falta pra iniciar a ordem antes do fim do turno (menos de 1h vira atenção). <b>Limite para baixar</b> é o prazo de conclusão (abertura + 24h no reparo, 36h na ativação e mudança de endereço). Clique numa linha pra ver os dados da O.S e se ela já teve improdutiva.</span></h3>
+      <div class="toolbar nca-toolbar">
+        <div class="field"><label>Data</label><input type="date" id="nca-data" value="${datas.includes(hoje) ? hoje : (datas[0] || hoje)}"></div>
+        ${multiCityField('nca-cidades', 'Cidades')}
+        ${multiSelectField('nca-tipos', 'Tipo de serviço', NCA_TIPOS, { allLabel: 'Todos os tipos', noneLabel: 'Nenhum' })}
+        <div class="field"><label>Turno</label><select id="nca-turno"><option value="">Manhã e tarde</option><option value="MANHA">Só manhã</option><option value="TARDE">Só tarde</option></select></div>
+        <div class="field"><label>Situação NCA</label><select class="nca-f-sit"><option value="">Todas</option>${[['atencao', 'NCA ou em risco'], ['nca', 'NCA aplicável'], ['risco', 'Em risco'], ['urgente', 'Menos de 1h para iniciar'], ['iniciada', 'Já iniciadas']].map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select></div>
+        <div class="field"><label>Técnico</label><select class="nca-f-tec"><option value="">Todos</option></select></div>
+        <div class="field"><label>Cliente / O.S</label><input type="search" class="nca-f-cli" placeholder="Buscar"></div>
+        <button class="btn" id="f-apply">Filtrar</button>
+        <span class="nca-f-total"></span>
+      </div>
+      <div id="nca-body"></div></div>`;
   wireMultiCityField('nca-cidades');
   ligarCampoTipos('nca-tipos');
+  const raiz = document.getElementById('content');
   document.getElementById('f-apply').addEventListener('click', load);
+  raiz.querySelector('.nca-f-sit').addEventListener('change', e => { fil.sit = e.target.value; load(); });
+  raiz.querySelector('.nca-f-tec').addEventListener('change', e => { fil.tec = e.target.value; load(); });
+  raiz.querySelector('.nca-f-cli').addEventListener('change', e => { fil.cli = e.target.value.trim(); load(); });
+  document.getElementById('nca-sinalizar').addEventListener('click', e => {
+    const texto = textoSinalizarNCA(visiveisAtual);
+    if (!texto) { toast('Nenhuma ordem em risco ou com NCA na tabela (confira o filtro).', 'aviso'); return; }
+    copiarParaWhatsApp(texto, e.currentTarget, '📲 SINALIZAR', `${visiveisAtual.filter(o => o.s.cod === 'risco' || o.s.cod === 'nca').length} ordem(ns)`);
+  });
   load();
   function load() {
     if (NCA_RELOGIO) { clearInterval(NCA_RELOGIO); NCA_RELOGIO = null; }
@@ -24191,11 +24258,11 @@ function renderNCA() {
     const cids = new Set(getSelectedCities('nca-cidades').map(normalizeCidade));
     const tiposSel = new Set(document.getElementById('nca-tipos-panel') ? getMultiSelectValues('nca-tipos') : NCA_TIPOS);
     const turnoSel = document.getElementById('nca-turno').value;
-    const body = document.getElementById('nca-body');
-    if (!doCsv.length) { body.innerHTML = '<div class="panel"><div class="empty">Sem atividades do CSV nesse dia. Importe o CSV de atividades na aba PCR (ou pelo botão da barra lateral).</div></div>'; return; }
+    const body = document.getElementById('nca-body'), cardsBox = document.getElementById('nca-cards'), linhaTopo = document.getElementById('nca-linha'), totalBox = raiz.querySelector('.nca-f-total');
+    if (!doCsv.length) { visiveisAtual = []; cardsBox.innerHTML = ''; linhaTopo.textContent = ''; totalBox.textContent = ''; body.innerHTML = '<div class="empty" style="padding:22px">Sem atividades do CSV nesse dia. Importe o CSV de atividades na aba PCR (ou pelo botão da barra lateral).</div>'; return; }
     const retornos = retornosDoDiaCalc(doCsv.filter(r => ehServicoReparo(r.tipo_atividade)));
     const ifiPorOs = new Map(retornos.map(x => [String(x.os), x.ifi_irr]));
-    // o turno do filtro de cima vale pra tudo (cartões e tabela)
+    // o turno do filtro vale pra tudo (cartões e tabela)
     const itens = doCsv.filter(r => r.os && cids.has(normalizeCidade(r.cidade)) && tiposSel.has(rotuloTipoServico(r.tipo_atividade))).map(r => ({ r, s: null }))
       .filter(o => !turnoSel || ncaTurnoDa(o.r) === turnoSel);
     const agoraDe = () => dia < hojeISOLocal() ? new Date(dia + 'T23:59:59') : new Date();
@@ -24203,7 +24270,7 @@ function renderNCA() {
     const calcular = () => { const ag = agoraDe(); F = fabricaPrazosDoDia(new Date(), () => retornos); itens.forEach(o => { o.s = ncaSituacaoDa(o.r, ag, dia); }); };
     calcular();
     const sub = formatDate(dia), turnoRotulo = turnoSel === 'MANHA' ? 'só manhã' : turnoSel === 'TARDE' ? 'só tarde' : 'manhã e tarde';
-    const tempo = ms => { if (Math.abs(ms) < 60000) return 'menos de 1min'; const t = Math.floor(Math.abs(ms) / 60000), hh = Math.floor(t / 60), mm = t % 60; return hh ? `${hh}h${String(mm).padStart(2, '0')}` : `${mm}min`; };
+    const tempo = ncaTempoTxt;
     const HORA = 3600000;
     // mudança de cômodo e upgrade/downgrade não têm prazo contratado (só reparo, ativação e mudança de endereço têm)
     const temPrazo = r => ehPrazoDeReparo(r) || ehPrazoDeAtivacao(r, true);
@@ -24218,8 +24285,8 @@ function renderNCA() {
       return cod === 'cancelada' ? '<span class="nca-t nca-t--mudo">Cancelada</span>' : '<span class="nca-t nca-t--mudo">-</span>';
     };
     const PILULA = { pendente: ['#fef3c7', '#92400e'], em_rota: ['#ffedd5', '#9a3412'], iniciado: ['#dbeafe', '#1d4ed8'], concluido: ['#dcfce7', '#166534'], nao_concluido: ['#fee2e2', '#b91c1c'], cancelado: ['#fee2e2', '#b91c1c'] };
-    const statusHtml = o => { const [bg, fg] = PILULA[o.s.bucket] || ['#e5e7eb', '#374151']; return `<span class="nca-pill" style="background:${bg};color:${fg}">${esc(o.r.status) || '-'}</span>`; };
-    const retornoHtml = o => { const m = ifiPorOs.get(String(o.r.os)); return m ? `<span class="nca-pill" style="background:${m === 'IFI' ? '#fee2e2' : '#dbeafe'};color:${m === 'IFI' ? '#b91c1c' : '#1d4ed8'}">${esc(m)}</span>` : '-'; };
+    const statusHtml = o => { const [bg, fg] = PILULA[o.s.bucket] || ['#e5e7eb', '#374151']; return `<span class="nca-pill" style="background:${bg};color:${fg};white-space:nowrap">${esc(o.r.status) || '-'}</span>`; };
+    const retornoHtml = o => { const m = ifiPorOs.get(String(o.r.os)); return m ? `<span class="nca-pill" style="background:${m === 'IFI' ? '#fee2e2' : '#dbeafe'};color:${m === 'IFI' ? '#b91c1c' : '#1d4ed8'};white-space:nowrap">${esc(m)}</span>` : '-'; };
     const faixaHtml = o => {
       if (!temPrazo(o.r)) return '-';
       const f = F.faixaEfetiva(o.r); if (!f) return '-';
@@ -24232,22 +24299,26 @@ function renderNCA() {
       return conflito(o) ? `<span class="nca-pill nca-pill--atencao">⚠ ATENÇÃO — ${txt}</span>` : `<span class="nca-t nca-t--mudo">${txt}</span>`;
     };
     const turnoHtml = o => o.s.turno ? `<span class="nca-turno nca-turno--${o.s.turno === 'MANHA' ? 'manha' : 'tarde'}">${NCA_IC.sun}${NCA_FIM[o.s.turno].rot}</span>` : '-';
+    // SINALIZAR dos cartões: as ordens da lista que estão em risco ou com NCA (a situação é calculada na hora do clique)
+    const sinCartao = rs => textoSinalizarNCA(rs.map(r => ({ r, s: ncaSituacaoDa(r, agoraDe(), dia) })));
     const cardsHtml = () => {
       const vivos = itens.filter(o => o.s.cod !== 'cancelada' && o.s.cod !== 'semturno');
       const ini = vivos.filter(o => o.s.cod === 'iniciada'), rota = vivos.filter(o => o.s.bucket === 'em_rota'), pend = vivos.filter(o => o.s.bucket === 'pendente');
       const risco = vivos.filter(o => o.s.cod === 'risco' || o.s.cod === 'nca'), jaNca = risco.some(o => o.s.cod === 'nca'), conf = vivos.filter(conflito);
       const rr = l => l.map(o => o.r);
       return `<div class="stat-cards">
-        ${statCard(risco.length ? 'red' : 'green', risco.length ? icAviso : icOk, jaNca ? 'NCA aplicável' : 'Em risco de NCA', risco.length, jaNca ? 'passou do horário sem iniciar' : `iniciar até o fim do turno · ${turnoRotulo}`, cartaoLista('nca|risco', jaNca ? 'NCA aplicável' : 'Em risco de NCA', rr(risco), sub))}
-        ${statCard('orange', icRelogio, 'Pendentes', pend.length, 'ainda não saíram', cartaoLista('nca|pend', 'Pendentes', rr(pend), sub))}
-        ${statCard('orange', icChave, 'Em rota', rota.length, 'a caminho, falta iniciar', cartaoLista('nca|rota', 'Em rota', rr(rota), sub))}
+        ${statCard(risco.length ? 'red' : 'green', risco.length ? icAviso : icOk, jaNca ? 'NCA aplicável' : 'Em risco de NCA', risco.length, jaNca ? 'passou do horário sem iniciar' : `iniciar até o fim do turno · ${turnoRotulo}`, cartaoLista('nca|risco', jaNca ? 'NCA aplicável' : 'Em risco de NCA', rr(risco), sub, sinCartao))}
+        ${statCard('orange', icRelogio, 'Pendentes', pend.length, 'ainda não saíram', cartaoLista('nca|pend', 'Pendentes', rr(pend), sub, sinCartao))}
+        ${statCard('orange', icChave, 'Em rota', rota.length, 'a caminho, falta iniciar', cartaoLista('nca|rota', 'Em rota', rr(rota), sub, sinCartao))}
         ${statCard('green', icOk, 'Já iniciadas', ini.length, 'iniciado, concluído ou improdutivo', cartaoLista('nca|ini', 'Atendimento iniciado', rr(ini), sub))}
-        ${statCard('blue', icServicos, 'Ordens com turno', vivos.length, `no dia ${sub} · ${turnoRotulo}`, cartaoLista('nca|todas', 'Ordens com turno', rr(vivos), sub))}
-        ${statCard(conf.length ? 'red' : 'green', conf.length ? icAviso : icOk, 'Prazo x Período', conf.length, 'prazo vence de manhã, ordem no turno da tarde', cartaoLista('nca|conf', 'Prazo x Período — prazo da manhã em ordem da tarde', rr(conf), sub))}
+        ${statCard('blue', icServicos, 'Ordens com turno', vivos.length, `no dia ${sub} · ${turnoRotulo}`, cartaoLista('nca|todas', 'Ordens com turno', rr(vivos), sub, sinCartao))}
+        ${statCard(conf.length ? 'red' : 'green', conf.length ? icAviso : icOk, 'Prazo x Período', conf.length, 'prazo vence de manhã, ordem no turno da tarde', cartaoLista('nca|conf', 'Prazo x Período — prazo da manhã em ordem da tarde', rr(conf), sub, sinCartao))}
       </div>`;
     };
-    // tabela
+    // técnicos do dia no seletor da tabela (mantém a escolha se ela ainda existe)
     const tecs = [...new Set(itens.map(o => (o.r.recurso || '').trim()).filter(t => ehRecursoTecnico(t)))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    if (fil.tec && !tecs.includes(fil.tec)) fil.tec = '';
+    raiz.querySelector('.nca-f-tec').innerHTML = '<option value="">Todos</option>' + tecs.map(t => `<option value="${esc(t)}"${fil.tec === t ? ' selected' : ''}>${esc(t)}</option>`).join('');
     const nCli = normalizeHeader(fil.cli);
     const passa = o => {
       const { cod, ms } = o.s;
@@ -24263,34 +24334,28 @@ function renderNCA() {
     const ordem = { nca: 0, risco: 1, iniciada: 2, semturno: 3, cancelada: 4 };
     const lim = r => r.limite ? +new Date(r.limite) : Infinity;
     const visiveis = itens.filter(passa).sort((a, b) => ordem[a.s.cod] - ordem[b.s.cod] || (a.s.ms === null ? 0 : a.s.ms - b.s.ms) || lim(a.r) - lim(b.r));
-    const linha = (o, i) => { const r = o.r; return `<tr data-i="${i}" style="cursor:pointer" title="Clique pra ver os dados da O.S">
+    visiveisAtual = visiveis;
+    const linha = (o, i) => { const r = o.r; return `<tr data-i="${i}" style="cursor:pointer" title="Clique pra ver os dados da O.S e se ela já teve improdutiva">
       <td>${turnoHtml(o)}</td><td class="nca-tempo">${tempoHtml(o)}</td><td>${statusHtml(o)}</td>
       <td>${ehRecursoTecnico(r.recurso) ? esc(r.recurso) : '-'}</td><td>${esc(rotuloCidadeGeral(r.cidade))}</td><td class="cat-cell">${esc(r.os)}</td><td>${esc(r.cliente || r.nome || '')}</td>
       <td>${esc(rotuloTipoServico(r.tipo_atividade))}</td><td>${retornoHtml(o)}</td>
       <td>${fmtDT(r.abertura)}</td><td>${temPrazo(r) ? fmtDT(r.limite) : '-'}</td><td class="nca-faixa">${faixaHtml(o)}</td><td>${prazoPerHtml(o)}</td></tr>`; };
     const th = (ic, t) => `<th>${NCA_IC[ic]}${t}</th>`;
-    body.innerHTML = `
-      <p style="font-size:12.5px;color:var(--text-muted);margin:0 0 .6rem">Dia ${sub} · agora <b id="nca-hora">${fmtH(new Date())}</b> · a tela se atualiza sozinha a cada 30 segundos (quando o dia é hoje).</p>
-      <div id="nca-cards">${cardsHtml()}</div>
-      <div class="panel nca-panel"><h3>Ordens do dia — acompanhamento de NCA<span class="nca-sub">Primeiro o que já levou NCA e o que está em risco, depois as já iniciadas. <b>Tempo para baixar</b> = quanto falta pra iniciar a ordem antes do fim do turno (menos de 1h vira atenção). <b>Limite para baixar</b> é o prazo de conclusão (abertura + 24h no reparo, 36h na ativação e mudança de endereço).</span></h3>
-        <div class="nca-filtros">
-          <label class="nca-f">${NCA_IC.clock}Situação NCA <select class="nca-f-sit"><option value="">Todas</option>${[['atencao', 'NCA ou em risco'], ['nca', 'NCA aplicável'], ['risco', 'Em risco'], ['urgente', 'Menos de 1h para iniciar'], ['iniciada', 'Já iniciadas']].map(([v, t]) => `<option value="${v}"${fil.sit === v ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
-          <label class="nca-f">${NCA_IC.user}Técnico <select class="nca-f-tec"><option value="">Todos</option>${tecs.map(t => `<option value="${esc(t)}"${fil.tec === t ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
-          <label class="nca-f">${NCA_IC.doc}Cliente / O.S <input type="search" class="nca-f-cli" placeholder="Buscar" value="${esc(fil.cli)}"></label>
-          <span class="nca-f-total">${visiveis.length} de ${itens.length} ordem(ns)</span>
-        </div>
-        <div class="table-wrap"><table class="data-table nca-tab" id="nca-tab"><thead><tr>${th('sun', 'Turno')}${th('clock', 'Tempo para baixar')}${th('box', 'Status da O.S')}${th('user', 'Técnico')}${th('pin', 'Cidade')}${th('doc', 'O.S')}${th('user', 'Cliente')}${th('wrench', 'Tipo de serviço')}${th('tag', 'IFI/IRR')}${th('cal', 'Data de abertura')}${th('cal', 'Limite para baixar')}${th('clock', 'Faixa do prazo')}${th('hour', 'Prazo x Período')}</tr></thead><tbody>
+    linhaTopo.innerHTML = `Dia ${sub} · agora <b id="nca-hora">${fmtH(new Date())}</b> · a tela se atualiza sozinha a cada 30 segundos (quando o dia é hoje).`;
+    cardsBox.innerHTML = cardsHtml();
+    totalBox.textContent = `${visiveis.length} de ${itens.length} ordem(ns)`;
+    body.innerHTML = `<div class="table-wrap"><table class="data-table nca-tab" id="nca-tab"><thead><tr>${th('sun', 'Turno')}${th('clock', 'Tempo para baixar')}${th('box', 'Status da O.S')}${th('user', 'Técnico')}${th('pin', 'Cidade')}${th('doc', 'O.S')}${th('user', 'Cliente')}${th('wrench', 'Tipo de serviço')}${th('tag', 'IFI/IRR')}${th('cal', 'Data de abertura')}${th('cal', 'Limite para baixar')}${th('clock', 'Faixa do prazo')}${th('hour', 'Prazo x Período')}</tr></thead><tbody>
         ${visiveis.length ? visiveis.map(linha).join('') : '<tr><td colspan="13" style="text-align:center;color:var(--text-muted);padding:18px">Nenhuma ordem com esses filtros. 👍</td></tr>'}
-        </tbody></table></div></div>`;
-    body.querySelector('.nca-f-sit').addEventListener('change', e => { fil.sit = e.target.value; load(); });
-    body.querySelector('.nca-f-tec').addEventListener('change', e => { fil.tec = e.target.value; load(); });
-    body.querySelector('.nca-f-cli').addEventListener('change', e => { fil.cli = e.target.value.trim(); load(); });
-    // clicar na linha: dados completos da O.S
+        </tbody></table></div>`;
+    // clicar na linha: dados completos da O.S e se ela já teve visita improdutiva (da própria O.S e de outras O.S do mesmo contrato)
     body.querySelector('#nca-tab tbody').addEventListener('click', ev => {
       const tr = ev.target.closest('tr[data-i]'); if (!tr || ev.target.closest('a,button,input,select')) return;
       const o = visiveis[Number(tr.dataset.i)]; if (!o) return;
       const r = o.r, c = (k, v) => ({ tipo: '', celulas: [`<b>${k}</b>`, v || '-'] });
+      const vs = visitasImprodutivasDaOS(r.os, null, r.contrato);
+      const antes = vs.length ? `<b style="color:var(--danger)">Sim — ${vs.length} visita(s) improdutiva(s)</b>` : '<b style="color:var(--success)">Não — nenhuma visita improdutiva antes</b>';
       abrirModalLista(`O.S ${r.os} — ${r.cliente || r.nome || ''}`, `${rotuloTipoServico(r.tipo_atividade)} · ${rotuloCidadeGeral(r.cidade)}`, ['Campo', 'Valor'], [
+        c('Teve improdutiva antes?', antes), ...(vs.length ? [c('Visitas improdutivas', htmlOutrasVisitas(vs))] : []),
         c('Turno', o.s.turno ? NCA_FIM[o.s.turno].rot : ''), c('Tempo para baixar', tempoHtml(o)), c('Status da O.S', esc(r.status)), c('Técnico', ehRecursoTecnico(r.recurso) ? esc(r.recurso) : ''),
         c('Contrato', esc(r.contrato)), c('Endereço', esc(r.endereco)), c('IFI/IRR', retornoHtml(o) === '-' ? '' : esc(ifiPorOs.get(String(r.os)))),
         c('Data de abertura', fmtDT(r.abertura)), c('Limite para baixar', temPrazo(r) ? fmtDT(r.limite) : ''), c('Faixa do prazo', faixaHtml(o)), c('Prazo x Período', prazoPerHtml(o)),
