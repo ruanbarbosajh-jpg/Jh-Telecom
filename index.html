@@ -22692,9 +22692,15 @@ function renderCertificacoes() {
       arr.map(l => ({ tipo: '', celulas: [esc(l.os) || '-', esc(l.contrato) || '-', esc(l.cliente) || '-', esc(l.tecnico) || '-', esc(l.cidade) || '-', esc(l.periodo) || '-', l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>', esc(l.atendente) || '-', esc(l.certificadaPor) || '-', esc(l.horarioConcluida), esc(l.horarioCertificada), esc(l.tempo)] })));
     // 28/10/2026 (pedido do cliente): cartão "Certificadas incorretamente" = certificadas em que a resposta do formulário diz que o técnico NÃO certificou corretamente
     const incorretas = podeVerRespostasCert() ? certificadas.filter(l => l.correta === 'NÃO' || l.correta === 'NAO') : [];
+    // 29/10/2026 (pedido do cliente): quantas certificações cada atendente (Sândila e Daniela) fez no dia — conta as O.S certificadas cujo atendente é ela (casa sem acento/maiúscula: "Sândila", "SANDILA")
+    const icPessoa = '<svg viewBox="0 0 18 18"><circle cx="9" cy="5.8" r="3"/><path d="M3 15.5c.5-3 3-4.6 6-4.6s5.5 1.6 6 4.6"/></svg>';
+    const certDaAtendente = nome => certificadas.filter(l => normalizeHeader(l.atendente || '').startsWith(normalizeHeader(nome)));
+    const certSandila = certDaAtendente('Sandila'), certDaniela = certDaAtendente('Daniela');
     body.innerHTML = `
       <div class="stat-cards">
         ${statCard('green', icCert, 'Certificadas', certificadas.length, '', listaCert('cert|ok', 'Certificadas', certificadas))}
+        ${statCard('purple', icPessoa, 'Certificações da Sândila', certSandila.length, 'O.S certificadas por ela no dia', listaCert('cert|sandila', 'Certificações da Sândila', certSandila))}
+        ${statCard('purple', icPessoa, 'Certificações da Daniela', certDaniela.length, 'O.S certificadas por ela no dia', listaCert('cert|daniela', 'Certificações da Daniela', certDaniela))}
         ${podeVerRespostasCert() ? statCard('orange', icAlerta, 'Certificadas incorretamente', incorretas.length, 'o técnico não certificou corretamente (resposta do formulário)', listaCert('cert|inc', 'Certificadas incorretamente', incorretas)) : ''}
         ${statCard('red', icAlerta, 'Não certificadas', naoCertificadas.length, naoCertificadas.length ? '<button type="button" class="stat-link" id="cert-ver-lista">Ver lista de revisão →</button>' : '', listaCert('cert|nao', 'Não certificadas', naoCertificadas))}
         ${statCard('blue', icPct, '% de Certificação', formatPct(pct, 1), `<div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.min(100, Math.max(0, pct))}%"></div></div>`, listaCert('cert|todas', '% de Certificação — todas as O.S', linhas))}
