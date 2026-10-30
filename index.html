@@ -3318,7 +3318,8 @@
   .nca-resumo-caixa { min-width: 0; }
   .nca-resumo-caixa .table-wrap { margin: 0 !important; max-height: 340px; overflow: auto; }
   .nca-h4 { margin: 0 0 6px; font-size: 14px; color: var(--text-primary); }
-  .nca-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(560px, 1fr)); gap: 14px; margin: 0 0 .5rem; align-items: start; }
+  .nca-tabs { display: grid; grid-template-columns: 1fr; gap: 14px; margin: 0 0 .5rem; align-items: start; }   /* uma tabela embaixo da outra, na largura toda (pedido do cliente 30/10/2026) */
+  .nca-tabs .nca-h4 { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
   .nca-tabs .nca-resumo-caixa { background: var(--card-bg); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; min-width: 0; }
   /* NCA por cidade / por tipo de serviço (30/10/2026): cabeçalho azul-marinho, linhas alternadas, total em azul-claro, nenhum título cortado (cabeçalho quebra linha; se faltar espaço a tabela rola dentro da caixa) */
   .nca-tabs .nca-resumo-caixa .table-wrap { overflow-x: auto; max-height: none; background: var(--card-bg) !important; border: 1px solid color-mix(in srgb, var(--text-muted) 25%, transparent) !important; border-radius: 12px; }
@@ -3333,7 +3334,8 @@
   table.nca-mini tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--text-muted) 8%, var(--card-bg)); }
   table.nca-mini tbody tr:hover td { background: color-mix(in srgb, var(--accent) 13%, var(--card-bg)); transition: background .15s; }
   table.nca-mini tbody tr.total-row td { background: color-mix(in srgb, var(--accent) 20%, var(--card-bg)) !important; font-weight: 800; border-top: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); border-bottom: 0; }
-  .nca-pct-destaque { display: inline-flex; align-items: baseline; gap: 6px; margin-left: 12px; padding: 3px 12px; border-radius: 999px; background: color-mix(in srgb, #dc2626 13%, var(--card-bg)); color: #b91c1c; font-size: 12.5px; font-weight: 600; vertical-align: middle; }
+  .nca-pct-destaque { display: inline-flex; align-items: baseline; gap: 6px; order: 99; margin-left: auto;   /* canto direito do título; os botões Excel/Ampliar entram depois no DOM, o order os mantém à esquerda */
+     padding: 3px 12px; border-radius: 999px; background: color-mix(in srgb, #dc2626 13%, var(--card-bg)); color: #b91c1c; font-size: 12.5px; font-weight: 600; vertical-align: middle; }
   .nca-pct-destaque b { font-size: 17px; font-weight: 800; }
   .nca-resumo-acoes { display: inline-block; margin: 0 6px 6px 0; }
   .nca-legenda-tabs { margin: 0 0 1rem; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
@@ -25286,6 +25288,7 @@ function ncaTextoAtencao(rows, escopo, ctx) {
   else blocos = [cab(ctx.cidades) + '\n' + linhasTec(rows)];
   return blocos.join('\n\n') + '\n\n@THAIS @SEBA @todos';
 }
+const NCA_VALE_DESDE = '2026-10-28';   // dia em que a regra de NCA por turno começou a valer (a evolução e os relatórios contam a partir daqui)
 const NCA_ABAS = [['antes', 'Antes do horário'], ['depois', 'A partir do horário (NCA)'], ['reag', 'Após o reagendamento'], ['evol', 'Evolução e relatórios']];
 const NCA_FILTROS_MEM = { aba: '' };
 function renderNCA() {
@@ -25553,6 +25556,8 @@ function renderNCA() {
       if (periodoEvol === 'mes') de = isoLocalDe(ini0);
       else if (periodoEvol === 'mesant') { de = isoLocalDe(new Date(hj.getFullYear(), hj.getMonth() - 1, 1)); ate = isoLocalDe(new Date(hj.getFullYear(), hj.getMonth(), 0)); }
       else de = isoLocalDe(new Date(Date.now() - (Number(periodoEvol) - 1) * 86400000));
+      // a regra do turno (11h59 / 17h59) só passou a valer em 28/10/2026: nada antes disso entra na evolução, mesmo que haja CSV importado
+      if (de < NCA_VALE_DESDE) de = NCA_VALE_DESDE;
       ncaRegCarregar(de, ate).then(() => {
         if (document.getElementById('nca-evol-corpo') !== box) return;
         const diasCsv = [...new Set(DB.pcr.map(r => r.data).filter(Boolean))].filter(d => d >= de && d <= ate).sort();
@@ -25571,7 +25576,7 @@ function renderNCA() {
           <div class="panels-grid"><div><h4 class="nca-h4">Dia a dia</h4><div class="table-wrap" style="max-height:420px;overflow:auto"><table class="data-table"><thead><tr><th>Dia</th><th class="num">NCA (regra do turno)</th><th class="num">Não iniciadas</th><th class="num">Iniciadas depois</th><th class="num">Reagend. tarde</th><th class="num">Na caixa</th><th class="num">Sem novo direc.</th><th class="num">% das ordens com turno</th><th class="num">Com baixa GIGA</th><th class="num">Baixas GIGA fora da regra</th></tr></thead><tbody>${linhasDia || '<tr><td colspan="10" style="color:var(--text-muted)">Sem dias de CSV no período.</td></tr>'}</tbody></table></div></div>
           <div><h4 class="nca-h4">Mês a mês</h4><div class="table-wrap"><table class="data-table"><thead><tr><th>Mês</th><th class="num">Dias</th><th class="num">NCA (regra do turno)</th><th class="num">Não iniciadas</th><th class="num">Iniciadas depois</th><th class="num">Reagend. tarde</th><th class="num">% das ordens com turno</th><th class="num">Baixas GIGA fora da regra</th></tr></thead><tbody>${linhasMes || '<tr><td colspan="8" style="color:var(--text-muted)">-</td></tr>'}</tbody></table></div></div></div>
           <h4 class="nca-h4" style="margin-top:14px">No período, por técnico, cidade e tipo</h4>${resumos(todas)}
-          <p class="nca-aviso-aba" style="background:transparent;border:0;padding:8px 0 0">“NCA (regra do turno)” é o NCA pela regra de iniciar até 11h59 (manhã) ou 17h59 (tarde). “Baixas GIGA fora da regra” são ordens encerradas na GIGA com o motivo “Não cumprimento de agenda” que NÃO se enquadram nela (outros motivos) — ficam separadas pra análise correta dos ofensores. Os dias vêm do CSV importado e do registro de ocorrências.</p>`;
+          <p class="nca-aviso-aba" style="background:transparent;border:0;padding:8px 0 0">Conta a partir de 28/10/2026, quando a regra começou a valer. “NCA (regra do turno)” é o NCA pela regra de iniciar até 11h59 (manhã) ou 17h59 (tarde). “Baixas GIGA fora da regra” são ordens encerradas na GIGA com o motivo “Não cumprimento de agenda” que NÃO se enquadram nela (outros motivos) — ficam separadas pra análise correta dos ofensores. Os dias vêm do CSV importado e do registro de ocorrências.</p>`;
         trendChart('nca-evol-graf', [
           { name: 'NCA (regra do turno)', color: '#dc2626', points: porDia.map(x => ({ label: formatDate(x.d).slice(0, 5), value: x.rows.length })) },
           { name: 'Não iniciadas', color: '#f59e0b', points: porDia.map(x => ({ label: formatDate(x.d).slice(0, 5), value: x.nunca })) },
