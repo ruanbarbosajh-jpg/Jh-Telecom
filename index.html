@@ -3941,6 +3941,18 @@ html[data-perfil="gestao"] a.ger-bairro { color: #1d4ed8; font-weight: 600; text
 .igp-r .igp-circ { width: 38px; height: 38px; font-size: 19px; box-shadow: none; }
 .igp-r span { font-size: 12px; color: var(--text-muted); } .igp-r em { font-style: normal; font-weight: 800; font-size: 14px; color: var(--text-primary); }
 .igp-r.on { opacity: 1; border: 2px solid var(--igp-cor); box-shadow: 0 4px 14px rgba(0,0,0,.14); transform: translateY(-2px); }
+.igp-origem.igp-o-ok { background: rgba(34,197,94,.28); } .igp-origem.igp-o-auto { background: rgba(255,255,255,.16); }
+.igp-f-e { background: rgba(217,119,6,.16); color: #b45309 !important; }
+.igp-seg2 { margin-top: -6px; }
+.igp-subs { margin-top: 3px; } .igp-sub { font-size: 12.5px; color: var(--text-muted); line-height: 1.4; font-weight: 500; }
+.igp-gmin { font-size: 12.5px; color: var(--text-muted); white-space: normal !important; min-width: 190px; }
+.igp-minok { color: #15803d; font-weight: 800; } .igp-minno { color: #b91c1c; font-weight: 800; }
+.igp-semlinha td { background: transparent !important; padding-top: 0 !important; padding-bottom: 8px !important; color: var(--text-muted); white-space: normal !important; }
+.igp-conf { margin: 14px 0 0; border: 1px dashed var(--border); border-radius: 12px; padding: 10px 14px; }
+.igp-conf summary { cursor: pointer; font-weight: 700; color: var(--text-secondary, var(--text-primary)); }
+.igp-evol { min-height: 120px; } .igp-peq { font-weight: 500; color: var(--text-muted); font-size: 12.5px; margin-left: 6px; }
+.igp-notas { margin: 6px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.5; }
+.igp-notas .igp-fonte { margin-left: 4px; }
 @media (max-width: 700px) { .igp-kv { font-size: 32px; } .igp-hero { grid-template-columns: 1fr 1fr; } .igp-id { grid-column: 1 / -1; } .igp-seg button { flex: 1; } }
 </style>
 </head>
@@ -23278,15 +23290,15 @@ function renderFiscalizacao() {
   fiscCarregar().then(avisoBanco);
 }
 
-// ===================== IGP (30/10/2026) — só o Analista =====================
-// Pedido do cliente: aba IGP que replica os cálculos da planilha "Performance Review" da GIGA (JH (35).xlsx, aba IGP + abas ALTAS, REPAROS, IRR, IFI,
-// CUMPRIMENTO_AGENDA, EFICIENCIA_VENDAS, EFICIENCIA_ME), com pontuação, letra e bonificação. As fórmulas foram lidas célula a célula:
-//  • NOVO IGP: 10 indicadores por cluster. Realizado = ROUND(numerador ÷ denominador, 3). Pontos = peso (meta 100%) | 80% do peso (entre as metas) | 0 (pior que a mínima).
+// ===================== IGP (31/10/2026) — só o Analista =====================
+// Pedido do cliente: "não quero importar nada, quero que o sistema faça os cálculos automaticamente e me apresente todo dia os números atualizados".
+// Três modelos, escolhidos pelo mês (dá pra alternar na tela pra comparar):
+//  • KPI mensal ANTIGO (até 30/09/2026): 8 indicadores com pontos (pesos 10/15/15/15/10/20/5/10), metas 100% e 80%;
+//  • IGP de OUTUBRO/2026 ("Performance Review" da GIGA): 10 indicadores por cluster. Realizado = ROUND(num ÷ den, 3). Pontos = peso (meta 100%) | 80% do peso (entre as metas) | 0.
 //    O PESO depende do GRUPO do cluster = share de reparos no mix (Altas + Reparos + ME): < 10% Grupo 1, < 20% Grupo 2, < 30% Grupo 3, senão Grupo 4.
-//    Faixa: A ≥ 90, B ≥ 85, C ≥ 80, D ≥ 78, E ≥ 76, F ≥ 74, G ≥ 72, senão Z; bonificação +10%, +5%, 0%, −1%, −2%, −3%, −4%, −5%.
-//  • KPI ANTIGO (vigente até 31/10/2026): 8 indicadores com pontos (pesos 10/15/15/15/10/20/5/10), metas 100% e 80% da própria planilha; faixa com bonificação A +10%, B +5%, C +1%, D 0%…
-// As abas ALTAS/REPAROS/CUMPRIMENTO_AGENDA/EFICIENCIA_* vêm da GIGA (agenda confirmada, vendas e fila de ME NÃO existem no sistema): por isso a tela IMPORTA a planilha e guarda só os
-// totais de cada cluster no navegador. Sem a planilha, o sistema mede sozinho o que consegue (IFI, IFIME, IRR e, no KPI antigo, prazo, outlier e ME 2D) e o resto fica "sem dado".
+//    Faixa: A ≥ 90, B ≥ 85, C ≥ 80, D ≥ 78, E ≥ 76, F ≥ 74, G ≥ 72, senão Z; bonificação +10%, +5%, 0%, −1%, −2%, −3%, −4%, −5%;
+//  • IGP ACESSO (a partir de 01/11/2026): grupos Redes / Eficiência / Capex / Opex / Qualidade Capex / IRR / IRT / Agendamento (+ acelerador Churn), com mínimos garantidos.
+// Os números saem sozinhos do CSV de atividades (DB.pcr) e da Produção. A planilha da GIGA virou conferência opcional (dentro de um <details>).
 const IGP_ANTIGO = [   // metas de Litoral Sul (C.10); São Paulo (C.8) tem IRR 5,5% / 6,5%. v = fração; sis = chave do cálculo próprio do sistema (igpCalcular)
   { k: 'efvendas', rot: 'Eficiência de vendas', peso: 10, m100: 0.83, mmin: 0.80, maior: true },
   { k: 'aging', rot: 'Aging altas', peso: 15, m100: 0.85, mmin: 0.80, maior: true, sis: 'aging48', sis36: 'aging36' },
@@ -23325,9 +23337,67 @@ function igpPts(it, v, peso) {
   return it.maior ? (v >= it.m100 ? peso : v < it.mmin ? 0 : peso * 0.8) : (v <= it.m100 ? peso : v > it.mmin ? 0 : peso * 0.8);
 }
 const igpFaixa = (it, v) => v == null ? null : (it.maior ? v >= it.m100 : v <= it.m100) ? 'Meta 100%' : (it.maior ? v >= it.mmin : v <= it.mmin) ? 'Meta mínima' : 'Fora da meta';
+// ---------- cálculo AUTOMÁTICO por dia (sem planilha, sem importar nada) ----------
+// Pedido do cliente (31/10/2026): "não quero importar nada, quero que o sistema faça os cálculos automaticamente e me apresente todo dia os números atualizados".
+// Tudo sai do CSV de atividades (DB.pcr: uma linha por O.S. por dia, com turno, hora real de início, status e faixa de prazo) e da Produção (retornos).
+// Regras entendidas comparando as planilhas da GIGA de 27/10 e 28/10 (JH (5) e JH (4)) com os CSVs do sistema, O.S. por O.S. (Litoral Sul):
+//  • "AGENDA_SC" é só o novo nome do antigo "SLA" (552 de 552 altas e 1.166 de 1.166 reparos trocaram de nome sem mudar). A classe de cada O.S. NÃO muda de um dia pro outro, mas o CSV não
+//    traz o dado que a define (acerto de 70% tentando adivinhar pela abertura), por isso o sistema NÃO separa AGENDA × AGENDA_SC: mede todas pelo mesmo critério (abaixo);
+//  • menor agenda confirmada = a menor (dia, turno) marcada nas linhas da O.S. no CSV — bate com a da GIGA em 95% das O.S.; o turno vem do campo "Período da Ordem" gravado na linha;
+//  • turno REAL da visita = pela hora de início (antes de 12h = manhã), não pelo turno marcado — é assim que a coluna "Visita" da GIGA se comporta (13/10 14:34 marcada "manhã" = visita da tarde);
+//  • Cumprimento / resolutividade = a O.S. foi CONCLUÍDA na menor agenda ou ANTES dela (visita adiantada vale; concluir depois do turno marcado não vale) — acerto de 98,3% por O.S. contra a coluna
+//    "Cumprimento" da GIGA; no indicador (todas as O.S. pelo Cumprimento) fica a 1–3 p.p. do que a GIGA obtém com a regra antiga (SLA pelo prazo): altas 77,4% × 78,5%, ME 58,9% × 59,2%, reparo 81,5% × 83,9%;
+//  • visita na menor agenda = houve visita (concluída ou improdutiva) no dia e no turno real da menor agenda — acerto de 96,8% por O.S. contra a coluna "flag_visita_menor_agenda";
+//  • outlier de reparo = reparo concluído com mais de 48h e sem cumprir a agenda; prazo, aging e ME 2D usam a faixa que o sistema já calcula (conferida O.S. por O.S.: outliers 90 de 90 iguais);
+//  • IFI, IFIME e IRR vêm da Produção (retornos do sistema), como na Folha;
+//  • eficiência de ME e de altas NÃO existe no sistema (a GIGA usa vendas brutas e a fila dela): é ESTIMADA como concluídas ÷ (concluídas + canceladas + ½ das ainda abertas) — calibrada nos dias 27 e 28/10:
+//    ME 79,3% × 79,4% e 80,3% × 80,5%; altas 75,6% × 76,4% e 76,2% × 77,2%.
+function igpAutoBase(mes) {
+  const dia = d => String(d instanceof Date ? isoLocalDe(d) : (d || '')).slice(0, 10);
+  const tn = r => { const n = normalizeHeader(r.periodo_sistema); return n.startsWith('manha') ? 'manha' : n.startsWith('tarde') ? 'tarde' : ''; };
+  const ord = t => t === 'manha' ? 0 : 1;
+  const real = r => { const i = r.inicio instanceof Date ? r.inicio : (r.inicio ? new Date(r.inicio) : null); return i && !isNaN(i) ? (i.getHours() < 12 ? 'manha' : 'tarde') : tn(r); };
+  const gr = classifyStatusGranular, porOs = new Map(), mesAnt = (() => { const [a, m] = mes.split('-').map(Number); const d = new Date(a, m - 2, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); })();
+  (DB.pcr || []).forEach(r => {
+    if (!r.os) return; const dd = dia(r.data); if (dd.slice(0, 7) < mesAnt) return;   // só o mês e o anterior: a O.S. que começou no mês passado e fechou neste também conta
+    const t = tipoGeral(r.tipo_atividade); if (t !== 'ativ' && t !== 'me' && t !== 'rep') return;
+    let o = porOs.get(r.os); if (!o) porOs.set(r.os, o = { os: r.os, t, rows: [] }); o.rows.push(r);
+  });
+  const lista = [], diasPcr = new Set();
+  porOs.forEach(o => {
+    o.rows.sort((a, b) => dia(a.data).localeCompare(dia(b.data)));   // ordenação estável: no mesmo dia vale a ordem em que o CSV entrou
+    const dias = [...new Set(o.rows.map(r => dia(r.data)))];
+    if (!dias.some(d => d.slice(0, 7) === mes)) return;
+    dias.forEach(d => { if (d.slice(0, 7) === mes) diasPcr.add(d); });
+    const conc = o.rows.filter(r => isConcluido(r.status)), uc = conc[conc.length - 1], cd = uc ? dia(uc.data) : '';
+    const vis = o.rows.filter(r => { const g = gr(r.status); return g === 'concluido' || g === 'nao_concluido'; });
+    // menor agenda = menor (dia, turno marcado) entre as linhas da O.S.
+    let gm = '', tm = ''; o.rows.forEach(r => { const t = tn(r), d = dia(r.data); if (!t) return; if (!gm || d < gm || (d === gm && ord(t) < ord(tm))) { gm = d; tm = t; } });
+    const cumpr = !!gm && conc.some(r => { const d = dia(r.data); return d < gm || (d === gm && ord(real(r)) <= ord(tm)); });
+    const visita = !!gm && vis.some(r => dia(r.data) === gm && real(r) === tm);
+    const pv = vis.length ? dia(vis[0].data) : '';
+    lista.push({ t: o.t, dias, cd, pv, faixa: uc ? uc.faixa : '', aging: uc && uc.aging != null ? Number(uc.aging) : null, cumpr, visita, temAgenda: !!gm,
+      cancelada: !conc.length && gr(o.rows[o.rows.length - 1].status) === 'cancelado' });
+  });
+  return { lista, dias: [...diasPcr].sort() };
+}
+function igpAutoCorte(base, mes, ate) {
+  const dentro = d => !!d && d.slice(0, 7) === mes && (!ate || d <= ate), f = (n, d) => ({ n, d });
+  const conc = base.lista.filter(o => dentro(o.cd)), por = t => conc.filter(o => o.t === t);
+  const A = por('ativ'), M = por('me'), Rp = por('rep'), U = base.lista.filter(o => o.dias.some(dentro));
+  const efic = t => { const l = U.filter(o => o.t === t), c = l.filter(o => dentro(o.cd)).length, ca = l.filter(o => !dentro(o.cd) && o.cancelada).length, ab = l.length - c - ca; const den = c + ca + ab / 2; return den > 0 ? { v: c / den, fila: l.length, real: c } : null; };
+  const V = U.filter(o => o.pv && dentro(o.pv));   // O.S. com visita (concluída ou improdutiva) no período
+  return { auto: true, nome: 'Litoral Sul', mix: { altas: A.length, reparos: Rp.length, me: M.length },
+    visita: f(V.filter(o => o.visita).length, V.length), efic_altas: efic('ativ'), efic_me: efic('me'),
+    altas_ag: f(A.filter(o => o.cumpr).length, A.length), me_ag: f(M.filter(o => o.cumpr).length, M.length), rep_ag: f(Rp.filter(o => o.cumpr).length, Rp.length),
+    out_rep: f(Rp.filter(o => (o.faixa === 'maior48' || o.faixa === 'outlier') && !o.cumpr).length, Rp.length),
+    aging: f(A.filter(o => o.faixa === 'ate36' || o.faixa === 'ate48').length, A.length), outlier7: f(A.filter(o => o.aging != null && o.aging > 7).length, A.length),
+    prazo24: f(Rp.filter(o => o.faixa === 'ate24').length, Rp.length), out48: f(Rp.filter(o => o.faixa === 'maior48' || o.faixa === 'outlier').length, Rp.length),
+    me2d: f(M.filter(o => o.faixa === 'ate36' || o.faixa === 'ate48').length, M.length) };
+}
 // resultado de cada indicador do mês (AAAA-MM): { pct, num, den, fonte } ou null quando não há dado
-function igpCalcular(mes) {
-  const noMes = d => String(d instanceof Date ? isoLocalDe(d) : (d || '')).slice(0, 7) === mes;
+function igpCalcular(mes, ate) {   // ate = AAAA-MM-DD: acumulado do mês até esse dia (vazio = mês inteiro)
+  const noMes = d => { const s = String(d instanceof Date ? isoLocalDe(d) : (d || '')).slice(0, 10); return s.slice(0, 7) === mes && (!ate || s <= ate); };
   const todos = (DB.producao || []).filter(r => noMes(r.data)), prod = todos.filter(r => isConcluido(r.status));
   const ativ = prod.filter(r => tipoGeral(r.tipo_atividade) === 'ativ'), me = prod.filter(r => tipoGeral(r.tipo_atividade) === 'me'), rep = prod.filter(r => tipoGeral(r.tipo_atividade) === 'rep');
   const marca = (r, m) => String(r.ifi_irr || '').toUpperCase() === m;
@@ -23370,19 +23440,19 @@ const IGP_STORE = 'jh_igp_planilhas_v1';   // só no navegador: guarda os TOTAIS
 function igpImportes() { try { return JSON.parse(localStorage.getItem(IGP_STORE) || '{}') || {}; } catch (e) { return {}; } }
 function igpGuardarImporte(o) { try { const t = igpImportes(); t[o.mes] = o; localStorage.setItem(IGP_STORE, JSON.stringify(t)); return true; } catch (e) { return false; } }
 function igpLerPlanilha(buf, arquivo) {
-  const wb = XLSX.read(buf, { type: 'array', dense: true, cellHTML: false, cellFormula: false, cellStyles: false, cellNF: false, sheets: ['ALTAS', 'REPAROS', 'IRR', 'IFI', 'CUMPRIMENTO_AGENDA', 'EFICIENCIA_VENDAS', 'EFICIENCIA_ME'] });   // só as abas usadas: a planilha traz outras com milhares de linhas
+  const wb = XLSX.read(buf, { type: 'array', dense: true, cellHTML: false, cellFormula: false, cellStyles: false, cellNF: false, sheets: ['ALTAS', 'REPAROS', 'IRR', 'IFI', 'CUMPRIMENTO_AGENDA', 'VISITA NA AGENDA', 'EFICIENCIA_VENDAS', 'EFICIENCIA_ME'] });   // só as abas usadas: a planilha traz outras com milhares de linhas
   const aba = nome => {
     const s = wb.SheetNames.find(x => normalizeHeader(x) === normalizeHeader(nome)); if (!s) return null;
     return XLSX.utils.sheet_to_json(wb.Sheets[s], { defval: null, raw: true }).map(r => { const o = {}; Object.keys(r).forEach(k => { o[normalizeHeader(k)] = r[k]; }); return o; });
   };
   const AL = aba('ALTAS'), RE = aba('REPAROS');
   if (!AL || !RE) throw new Error('não achei as abas ALTAS e REPAROS — essa não parece ser a planilha "Performance Review" da GIGA');
-  const IR = aba('IRR') || [], IFr = aba('IFI') || [], CA = aba('CUMPRIMENTO_AGENDA') || [], EV = aba('EFICIENCIA_VENDAS') || [], EM = aba('EFICIENCIA_ME') || [];
+  const IR = aba('IRR') || [], IFr = aba('IFI') || [], CA = aba('CUMPRIMENTO_AGENDA') || aba('VISITA NA AGENDA') || [], EV = aba('EFICIENCIA_VENDAS') || [], EM = aba('EFICIENCIA_ME') || [];
   const T = v => v === true || /^(true|verdadeiro|sim|1)$/i.test(String(v == null ? '' : v).trim());
   const SIM = v => normalizeHeader(v) === 'sim', NAO = v => normalizeHeader(v) === 'nao';
   const tipo = r => normalizeHeader(r['tipo']), cl = r => String(r['cluster campo'] || r['cluster'] || '').trim();
   const dia = v => v instanceof Date ? isoLocalDe(v) : typeof v === 'number' ? excelDateToISO(v) : String(v || '').slice(0, 10);
-  const ag = r => normalizeHeader(r['agenda confirmada']), f = (n, d) => ({ n, d });
+  const ag = r => { const a = normalizeHeader(r['agenda confirmada']); return /^agenda.?sc$/.test(a) ? 'sla' : a; }, f = (n, d) => ({ n, d });   // AGENDA_SC é só o novo nome do antigo SLA
   const catsAting = ['dentro de 18 hrs', 'dentro de 24 hrs', 'dentro de 36 hrs', 'dentro de 48 hrs'];
   const clusters = [...new Set([...AL, ...RE].map(cl).filter(x => /^c\.\d+/i.test(x)))];
   const nomes = { 'C.10': 'Litoral Sul', 'C.8': 'São Paulo' };
@@ -23417,22 +23487,26 @@ function igpLerPlanilha(buf, arquivo) {
 }
 // ---------- valores e pontos ----------
 const igpSisDe = (it, R, mes) => { const k = it.sis === 'aging48' && mes < '2026-10' ? it.sis36 : it.sis; const r = k ? R[k] : null; return r ? { n: r.num, d: r.den, v: r.pct / 100 } : null; };
-function igpValoresNovo(c, R) {
-  const V = {}, tl = (k, x, fonte) => { V[k] = x && x.d > 0 ? { n: x.n, d: x.d, v: igpArred3(x.n / x.d), fonte } : null; };
-  if (c) {
-    ['visita', 'altas_ag', 'me_ag', 'rep_ag', 'out_rep', 'ifi', 'ifime', 'irr'].forEach(k => tl(k, c[k], 'Planilha'));
-    V.efic_altas = c.efic_altas != null && !isNaN(c.efic_altas) ? { v: c.efic_altas, fonte: 'Planilha' } : null;
-    V.efic_me = c.efic_me && !isNaN(c.efic_me.v) ? { v: c.efic_me.v, n: c.efic_me.real, d: c.efic_me.fila, fonte: 'Planilha' } : null;
-  } else ['ifi', 'ifime', 'irr'].forEach(k => { const r = R[k]; V[k] = r ? { n: r.num, d: r.den, v: igpArred3(r.num / r.den), fonte: 'Sistema' } : null; });
+const igpV = (x, fonte) => x && x.d > 0 ? { n: x.n, d: x.d, v: igpArred3(x.n / x.d), fonte } : null;
+const igpEf = (x, fonte) => x == null ? null : typeof x === 'number' ? (isNaN(x) ? null : { v: x, fonte }) : (x.v != null && !isNaN(x.v) ? { v: x.v, n: x.real, d: x.fila, fonte } : null);
+// IGP de OUTUBRO/2026 ("Performance Review": 10 indicadores, pesos pelo grupo do cluster). c = totais (automático ou planilha); R = igpCalcular (Produção/Prazos/PCR)
+function igpValoresOut(c, R) {
+  const V = {}, auto = !c || c.auto, fx = auto ? 'Estimado' : 'Planilha', fromR = k => { const r = R[k]; return r ? { n: r.num, d: r.den, v: igpArred3(r.num / r.den), fonte: 'Sistema' } : null; };
+  ['altas_ag', 'me_ag', 'rep_ag', 'out_rep', 'visita'].forEach(k => { V[k] = c ? igpV(c[k], auto ? 'Sistema' : fx) : null; });
+  V.efic_altas = c ? igpEf(c.efic_altas, fx) : null; V.efic_me = c ? igpEf(c.efic_me, fx) : null;
+  ['ifi', 'ifime', 'irr'].forEach(k => { V[k] = auto ? fromR(k) : igpV(c[k], 'Planilha'); });   // IFI/IFIME/IRR: a Produção do sistema (exata) no automático
   return V;
 }
+// KPI mensal ANTIGO (até setembro/2026)
 function igpValoresAntigo(c, R, mes) {
-  const V = {}, tl = (k, x, fonte) => { V[k] = x && x.d > 0 ? { n: x.n, d: x.d, v: igpArred3(x.n / x.d), fonte } : null; };
-  if (c) {
-    ['aging', 'outlier7', 'ifi', 'prazo24', 'out48', 'irr', 'me2d', 'ifime'].forEach(k => tl(k, c[k], 'Planilha'));
-    V.efvendas = c.efic_altas != null && !isNaN(c.efic_altas) ? { v: c.efic_altas, fonte: 'Planilha' } : null;
-    V.botao = null;   // a planilha de outubro não traz a coluna do botão vermelho (a fórmula dela olha uma coluna que não existe mais)
-  } else IGP_ANTIGO.forEach(it => { const s = it.sis ? igpSisDe(it, R, mes) : null; V[it.k] = s ? { n: s.n, d: s.d, v: igpArred3(s.v), fonte: 'Sistema' } : null; });
+  const V = {}, planilha = c && !c.auto;
+  if (planilha) {
+    ['aging', 'outlier7', 'ifi', 'prazo24', 'out48', 'irr', 'me2d', 'ifime'].forEach(k => { V[k] = igpV(c[k], 'Planilha'); });
+    V.efvendas = igpEf(c.efic_altas, 'Planilha'); V.botao = null;
+  } else {
+    IGP_ANTIGO.forEach(it => { const s = it.sis ? igpSisDe(it, R, mes) : null; V[it.k] = s ? { n: s.n, d: s.d, v: igpArred3(s.v), fonte: 'Sistema' } : null; });
+    V.efvendas = c ? igpEf(c.efic_altas, 'Estimado') : null;
+  }
   return V;
 }
 function igpPontuar(itens, V, pesoDe, modelo) {
@@ -23440,103 +23514,205 @@ function igpPontuar(itens, V, pesoDe, modelo) {
   const med = linhas.filter(l => l.pts != null), total = Math.round(med.reduce((s, l) => s + l.pts, 0) * 100) / 100;
   return { linhas, total, possivel: med.reduce((s, l) => s + l.peso, 0), medidos: med.length, pontuam: linhas.filter(l => l.peso != null).length, naMeta: med.filter(l => l.peso > 0 && l.pts === l.peso).length, ...igpLetra(total, modelo) };
 }
+// ---------- IGP ACESSO (a partir de 01/11/2026) — aba "IGP ACESSO" das planilhas da GIGA, lida célula a célula ----------
+// Grupos: Redes 30 (mínimo garantido 75% dos 30) · Eficiência 10/8 (altas e ME, cada uma ≥ 75% e vale a média) · Capex 10/8 (resolutividade de altas e ME, cada uma ≥ 70%, vale o conjunto)
+// · Opex 15/12 (resolutividade do reparo; só pontua com outlier de reparo < 6%) · Qualidade Capex 5/4 (IFI e IFIME, cada um ≤ 5%, vale o conjunto) · IRR 15/12 · IRT 10/8 · Visita na agenda 5/4
+// · acelerador Churn 10/5. Pontos de cada grupo: peso cheio na meta 100%, peso mínimo entre as metas, zero pior que a mínima ou com o mínimo garantido não atingido.
+// Na planilha a célula do resultado da Eficiência (I34) está em branco, então ela dá sempre 0; aqui vale o que a nota da própria planilha diz ("a média das duas será o resultado final").
+function igpAcessoCalcular(c, R) {
+  const x = (n, d) => d > 0 ? { n, d, v: igpArred3(n / d) } : null, fr = k => R[k] ? x(R[k].num, R[k].den) : null, ct = k => c && c[k] ? x(c[k].n, c[k].d) : null;
+  const ef = k => { const e = c ? igpEf(c[k], 'Estimado') : null; return e ? { v: e.v, n: e.n, d: e.d } : null; };
+  const I = { efA: ef('efic_altas'), efM: ef('efic_me'), resA: ct('altas_ag'), resM: ct('me_ag'), resR: ct('rep_ag'), outR: ct('out_rep'), ifi: fr('ifi'), ifime: fr('ifime'), irr: fr('irr'), visita: ct('visita') };
+  const junta = (a, b) => a && b ? x(a.n + b.n, a.d + b.d) : null;
+  const pts = (res, maior, m100, mmin, pmax, pmin) => res == null ? null : maior ? (res >= m100 ? pmax : res < mmin ? 0 : pmin) : (res <= m100 ? pmax : res > mmin ? 0 : pmin);
+  const it = (rot, v, m100, mmin, maior, extra) => ({ rot, x: v, m100, mmin, maior, ...(extra || {}) });
+  const G = [];
+  G.push({ g: 'Redes', pmax: 30, pmin: 24, itens: [it('Outlier (Redes)', null, 0.049, 0.052, false, { peso: 5 }), it('Prazo (Redes)', null, 0.89, 0.85, true, { peso: 10 }), it('MTTR (Redes)', null, 5, 6, false, { peso: 15, un: 'h' })], res: null, minTxt: 'atingir 75% dos 30 pontos de Redes', minOk: null, pontos: null, sem: 'As ordens de Rede (Acesso/Backbone) não existem no sistema.' });
+  const efRes = I.efA && I.efM ? { v: igpArred3((I.efA.v + I.efM.v) / 2) } : null;
+  G.push({ g: 'Eficiência', pmax: 10, pmin: 8, itens: [it('Eficiência — Altas', I.efA, 0.85, 0.81, true, { minGar: 0.75 }), it('Eficiência — ME', I.efM, 0.85, 0.81, true, { minGar: 0.75 })], res: efRes, minTxt: 'cada eficiência ≥ 75% (vale a média das duas)', minOk: I.efA && I.efM ? I.efA.v >= 0.75 && I.efM.v >= 0.75 : null, m100: 0.85, mmin: 0.81, maior: true });
+  const cap = junta(I.resA, I.resM);
+  G.push({ g: 'Capex', pmax: 10, pmin: 8, itens: [it('Altas — resolutividade na menor agenda', I.resA, 0.85, 0.80, true, { minGar: 0.70 }), it('ME — resolutividade na menor agenda', I.resM, 0.85, 0.80, true, { minGar: 0.70 })], res: cap, minTxt: 'cada resolutividade ≥ 70% (vale o conjunto altas + ME)', minOk: I.resA && I.resM ? I.resA.v >= 0.70 && I.resM.v >= 0.70 : null, m100: 0.85, mmin: 0.80, maior: true });
+  G.push({ g: 'Opex', pmax: 15, pmin: 12, itens: [it('Reparo — resolutividade na menor agenda', I.resR, 0.85, 0.80, true), it('Outlier de reparo (condição do grupo)', I.outR, null, null, false, { semMeta: true })], res: I.resR, minTxt: 'outlier de reparo abaixo de 6,00%', minOk: I.outR ? I.outR.v < 0.06 : null, m100: 0.85, mmin: 0.80, maior: true });
+  const qc = junta(I.ifi, I.ifime);
+  G.push({ g: 'Qualidade Capex', pmax: 5, pmin: 4, itens: [it('IFI', I.ifi, 0.03, 0.035, false, { minGar: 0.05 }), it('IFIME', I.ifime, 0.03, 0.035, false, { minGar: 0.05 })], res: qc, minTxt: 'IFI e IFIME cada um ≤ 5% (vale o conjunto)', minOk: I.ifi && I.ifime ? I.ifi.v <= 0.05 && I.ifime.v <= 0.05 : null, m100: 0.03, mmin: 0.035, maior: false });
+  G.push({ g: 'Qualidade Opex — IRR', pmax: 15, pmin: 12, itens: [it('IRR', I.irr, 0.067, 0.075, false)], res: I.irr, minTxt: 'sem mínimo garantido', minOk: true, m100: 0.067, mmin: 0.075, maior: false });
+  G.push({ g: 'Qualidade Opex — IRT', pmax: 10, pmin: 8, itens: [it('IRT', null, 0.0397, 0.045, false)], res: null, minTxt: 'sem mínimo garantido', minOk: true, sem: 'A planta de clientes e o volume de reparos por bairro (IRT) não existem no sistema.' });
+  G.push({ g: 'Agendamento', pmax: 5, pmin: 4, itens: [it('Visita na agenda do cliente (produtiva/improdutiva)', I.visita, 0.95, 0.90, true)], res: I.visita, minTxt: 'sem mínimo garantido', minOk: true, m100: 0.95, mmin: 0.90, maior: true });
+  G.push({ g: 'Acelerador — Churn', pmax: 10, pmin: 5, itens: [it('Churn (cancelamentos voluntários ÷ planta)', null, 0.0077, 0.009, false)], res: null, minTxt: 'bônus por cima dos 100 pontos', minOk: true, sem: 'Os cancelamentos voluntários e a planta de clientes não existem no sistema.', acelerador: true });
+  G.forEach(g => {
+    if (g.m100 == null && g.itens.length === 1 && g.itens[0].m100 != null) { g.m100 = g.itens[0].m100; g.mmin = g.itens[0].mmin; g.maior = g.itens[0].maior; }   // grupo de um indicador só mostra a meta dele
+    if (g.res == null || g.minOk == null) { g.pontos = null; return; }
+    g.pontos = g.minOk ? pts(g.res.v, g.maior, g.m100, g.mmin, g.pmax, g.pmin) : 0;
+    g.faixa = g.minOk ? (g.maior ? (g.res.v >= g.m100 ? 'Meta 100%' : g.res.v >= g.mmin ? 'Meta mínima' : 'Fora da meta') : (g.res.v <= g.m100 ? 'Meta 100%' : g.res.v <= g.mmin ? 'Meta mínima' : 'Fora da meta')) : 'Mínimo garantido não atingido';
+  });
+  const med = G.filter(g => g.pontos != null), base = G.filter(g => !g.acelerador);
+  const total = Math.round(med.reduce((s, g) => s + g.pontos, 0) * 100) / 100, possivel = med.filter(g => !g.acelerador).reduce((s, g) => s + g.pmax, 0);
+  const proporcional = possivel > 0 ? Math.round(total / possivel * 1000) / 10 : 0;   // aproveitamento dos grupos medidos, em escala de 100
+  return { grupos: G, total, possivel, totalBase: base.reduce((s, g) => s + g.pmax, 0), medidos: med.length, naMeta: med.filter(g => g.pontos === g.pmax).length, proporcional, ...igpLetra(total, 'novo') };
+}
+const IGP_MODELOS = { antigo: 'KPI mensal (até set/2026)', out: 'IGP de outubro/2026', acesso: 'IGP ACESSO (a partir de 01/11/2026)' };
+const igpModeloDoMes = mes => mes < '2026-10' ? 'antigo' : mes === '2026-10' ? 'out' : 'acesso';
 // ---------- tela ----------
 function renderIGP() {
   if (!ehAnalista()) { document.getElementById('content').innerHTML = '<div class="panel"><div class="empty">O IGP é exclusivo do Analista.</div></div>'; return; }
   const $ = id => document.getElementById(id), nf = n => Number(n).toLocaleString('pt-BR');
   const fPct = (v, c = 1) => v == null ? '—' : (v * 100).toFixed(c).replace('.', ',') + '%', fPts = x => x == null ? '—' : String(Math.round(x * 100) / 100).replace('.', ',');
+  const dm = d => d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '', dmy = d => d ? dm(d) + '/' + d.slice(0, 4) : '';
   const nomeMes = m => { const [a, n] = m.split('-'); return ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'][Number(n) - 1] + ' de ' + a; };
-  const listaMeses = () => [...new Set([...(DB.producao || []).map(r => String(r.data || '').slice(0, 7)), ...Object.keys(igpImportes())].filter(m => /^\d{4}-\d{2}$/.test(m)))].sort().reverse().slice(0, 12);
+  const listaMeses = () => [...new Set([...(DB.producao || []).map(r => String(r.data || '').slice(0, 7)), ...(DB.pcr || []).map(r => String(r.data || '').slice(0, 7)), ...Object.keys(igpImportes())].filter(m => /^\d{4}-\d{2}$/.test(m)))].sort().reverse().slice(0, 12);
   const hoje = hojeISOLocal(), meses0 = listaMeses(), padrao = meses0.includes(hoje.slice(0, 7)) ? hoje.slice(0, 7) : (meses0[0] || hoje.slice(0, 7));
   document.getElementById('content').innerHTML = `
     <div class="toolbar"><div class="field"><label>Mês</label><select id="igp-mes">${meses0.map(m => `<option value="${m}"${m === padrao ? ' selected' : ''}>${nomeMes(m)}</option>`).join('')}</select></div>
-      <div class="field" id="igp-cl-box" hidden><label>Cluster</label><select id="igp-cl"></select></div>
-      ${campoArquivo('igp-file', 'Importar planilha da GIGA', '.xlsx,.xlsm,.xls')}
+      <div class="field"><label>Acumulado até o dia</label><select id="igp-dia"></select></div>
+      <div class="field" id="igp-cl-box" style="display:none"><label>Cluster (planilha)</label><select id="igp-cl"></select></div>
       <button type="button" class="btn" id="igp-xls">⤓ Excel</button></div>
-    <div id="igp-corpo"></div>`;
-  let modelo = 'novo', ultimo = null;
-  const selo = f => f === 'Meta 100%' ? fiscSelo(f, 'verde') : f === 'Meta mínima' ? fiscSelo(f, 'laranja') : f === 'Fora da meta' ? fiscSelo(f, 'vermelho') : '<span class="igp-sem">sem dado</span>';
-  const metaTxt = (it, v) => it.m100 == null ? '—' : (it.maior ? '≥ ' : '≤ ') + fPct(v, v * 100 % 1 ? 1 : 0).replace(/(\d),0%/, '$1%');
-  function linhaHtml(l, cl, R, mes, comSis) {
-    const it = l.it, x = l.x, sis = cl === 'C.10' && comSis ? igpSisDe(it, R, mes) : null;
-    const dif = sis && x && x.fonte === 'Planilha' ? (sis.v - x.v) * 100 : null;
-    const sisTxt = sis ? `${fPct(sis.v, 2)} <small>(${nf(sis.n)}/${nf(sis.d)})</small>` : '<span class="igp-sem">—</span>';
-    const difTxt = dif == null ? '<span class="igp-sem">—</span>' : `<span class="${Math.abs(dif) < 0.5 ? 'igp-dok' : 'igp-dno'}">${dif > 0 ? '+' : dif < 0 ? '−' : ''}${Math.abs(dif).toFixed(2).replace('.', ',')} p.p.</span>`;
+    <div id="igp-corpo"></div>
+    <details class="igp-conf"><summary>Conferir com a planilha da GIGA (opcional — o sistema não depende dela)</summary>
+      <div class="toolbar">${campoArquivo('igp-file', 'Planilha Performance Review', '.xlsx,.xlsm,.xls')}</div>
+      <p class="sec-nota">Só serve pra comparar. O IGP acima é calculado sozinho, todo dia, pelo CSV de atividades e pela Produção.</p></details>`;
+  let modelo = null, fonte = 'auto', ultimo = null, baseAuto = null, baseKey = '', mesModelo = '';
+  const getBase = mes => { const k = mes + '|' + (DB.pcr || []).length; if (baseKey !== k) { baseAuto = igpAutoBase(mes); baseKey = k; } return baseAuto; };
+  const selo = f => f === 'Meta 100%' ? fiscSelo(f, 'verde') : f === 'Meta mínima' ? fiscSelo(f, 'laranja') : f === 'Fora da meta' || f === 'Mínimo garantido não atingido' ? fiscSelo(f, 'vermelho') : '<span class="igp-sem">sem dado</span>';
+  const metaTxt = (it, v, un) => it.m100 == null ? '—' : (it.maior ? '≥ ' : '≤ ') + (un ? String(v).replace('.', ',') + un : fPct(v, v * 100 % 1 ? 1 : 0).replace(/(\d),0%/, '$1%'));
+  const tagFonte = f => f ? `<small class="igp-fonte igp-f-${f === 'Planilha' ? 'p' : f === 'Estimado' ? 'e' : 's'}" title="${f === 'Estimado' ? 'A GIGA usa um dado que o sistema não tem; este valor é uma estimativa calibrada' : f === 'Planilha' ? 'Vem da planilha importada' : 'Calculado pelo sistema'}">${f === 'Planilha' ? 'planilha' : f === 'Estimado' ? 'estimado' : 'sistema'}</small>` : '';
+  function linhaHtml(l, Vo, cmp) {
+    const it = l.it, x = l.x, o = Vo ? Vo[it.k] : null, dif = o && x ? (x.v - o.v) * 100 : null;
+    const outroTxt = o ? `${fPct(o.v, 1)}${o.d != null ? ` <small>(${nf(o.n)}/${nf(o.d)})</small>` : ''}` : '<span class="igp-sem">—</span>';
+    const difTxt = dif == null ? '<span class="igp-sem">—</span>' : `<span class="${Math.abs(dif) < 2.5 ? 'igp-dok' : 'igp-dno'}">${dif > 0 ? '+' : dif < 0 ? '−' : ''}${Math.abs(dif).toFixed(1).replace('.', ',')} p.p.</span>`;
     const sentido = it.m100 == null ? '' : it.maior ? '<span class="igp-sent" title="quanto maior, melhor">▲</span>' : '<span class="igp-sent" title="quanto menor, melhor">▼</span>';
     const frac = x && x.d != null ? `${nf(x.n)} <small>de</small> ${nf(x.d)}` : '<span class="igp-sem">—</span>';
     const pts = l.pts == null ? (l.peso == null ? '<span class="igp-sem">não pontua</span>' : '<span class="igp-sem">—</span>') : `<b class="${l.pts === l.peso ? 'igp-pok' : l.pts === 0 ? 'igp-pno' : 'igp-pmid'}">${fPts(l.pts)}</b> <small>/ ${fPts(l.peso)}</small>`;
-    return `<tr><td title="${esc(it.como || '')}"><b>${esc(it.rot)}</b>${x ? `<small class="igp-fonte igp-f-${x.fonte === 'Planilha' ? 'p' : 's'}">${x.fonte === 'Planilha' ? 'planilha' : 'sistema'}</small>` : ''}</td>
+    return `<tr><td title="${esc(it.como || '')}"><b>${esc(it.rot)}</b>${tagFonte(x && x.fonte)}</td>
       <td class="num">${l.peso == null ? '—' : fPts(l.peso)}</td><td class="num">${metaTxt(it, it.m100)} ${sentido}</td><td class="num">${it.mmin == null ? '—' : metaTxt(it, it.mmin)}</td>
-      <td class="num">${frac}</td><td class="num igp-real">${x ? fPct(x.v, 1) : '—'}</td><td>${it.m100 == null ? '<span class="igp-sem">—</span>' : selo(l.faixa)}</td><td class="num">${pts}</td>${comSis ? `<td class="num">${sisTxt}</td><td class="num">${difTxt}</td>` : ''}</tr>`;
+      <td class="num">${frac}</td><td class="num igp-real">${x ? fPct(x.v, 1) : '—'}</td><td>${it.m100 == null ? '<span class="igp-sem">—</span>' : selo(l.faixa)}</td><td class="num">${pts}</td>${cmp ? `<td class="num">${outroTxt}</td><td class="num">${difTxt}</td>` : ''}</tr>`;
   }
-  const cabTab = comSis => '<thead><tr><th>Indicador</th><th class="num">Peso</th><th class="num">Meta 100%</th><th class="num">Meta mínima</th><th class="num">Numerador / denominador</th><th class="num">Realizado</th><th>Situação</th><th class="num">Pontos</th>' + (comSis ? '<th class="num">Sistema</th><th class="num">Diferença</th>' : '') + '</tr></thead>';
+  const cabTab = cmp => '<thead><tr><th>Indicador</th><th class="num">Peso</th><th class="num">Meta 100%</th><th class="num">Meta mínima</th><th class="num">Numerador / denominador</th><th class="num">Realizado</th><th>Situação</th><th class="num">Pontos</th>' + (cmp ? `<th class="num">${esc(cmp)}</th><th class="num">Diferença</th>` : '') + '</tr></thead>';
+  function tabelaAcesso(A) {
+    const linhas = A.grupos.map(g => {
+      const resTxt = g.res ? `${fPct(g.res.v, 1)}${g.res.d != null ? ` <small>(${nf(g.res.n)}/${nf(g.res.d)})</small>` : ''}` : '<span class="igp-sem">sem dado</span>';
+      const pt = g.pontos == null ? '<span class="igp-sem">—</span>' : `<b class="${g.pontos === g.pmax ? 'igp-pok' : g.pontos === 0 ? 'igp-pno' : 'igp-pmid'}">${fPts(g.pontos)}</b> <small>/ ${fPts(g.pmax)}${g.pmin !== g.pmax ? ' (mín. ' + fPts(g.pmin) + ')' : ''}</small>`;
+      const minTag = g.minOk == null ? '' : g.minOk ? '<span class="igp-minok" title="mínimo garantido atingido">✔</span>' : '<span class="igp-minno" title="mínimo garantido NÃO atingido: o grupo não pontua">✖</span>';
+      const sub = g.itens.map(i => `<div class="igp-sub"><span>${esc(i.rot)}${i.x && g.itens.length > 1 ? ` — <b>${fPct(i.x.v, 1)}</b> <small>(${nf(i.x.n)}/${nf(i.x.d)})</small>` : ''}${i.minGar != null ? ` <small>mín. ${i.maior ? '≥' : '≤'} ${fPct(i.minGar, 0)}</small>` : ''}</span></div>`).join('');
+      return `<tr><td><b>${esc(g.g)}</b>${g.res && g.res.fonte ? tagFonte(g.res.fonte) : ''}<div class="igp-subs">${sub}</div></td><td class="num">${g.m100 != null ? metaTxt(g, g.m100) : g.itens[0] && g.itens[0].m100 != null && !g.res && !g.m100 ? 'ver itens' : '—'} ${g.m100 != null ? (g.maior ? '<span class="igp-sent">▲</span>' : '<span class="igp-sent">▼</span>') : ''}</td><td class="num">${g.mmin != null ? metaTxt(g, g.mmin) : '—'}</td><td class="igp-gmin">${esc(g.minTxt)} ${minTag}</td><td class="num igp-real">${resTxt}</td><td>${g.sem ? '<span class="igp-sem">sem dado</span>' : g.faixa ? selo(g.faixa) : '<span class="igp-sem">sem dado</span>'}</td><td class="num">${pt}</td></tr>${g.sem ? `<tr class="igp-semlinha"><td colspan="7"><small>${esc(g.sem)}</small></td></tr>` : ''}`;
+    }).join('');
+    return `<thead><tr><th>Grupo / indicador</th><th class="num">Meta 100%</th><th class="num">Meta mínima</th><th>Mínimo garantido</th><th class="num">Resultado do grupo</th><th>Situação</th><th class="num">Pontos</th></tr></thead><tbody>${linhas}
+      <tr class="total-row"><td><b>TOTAL</b></td><td colspan="5"></td><td class="num"><b>${fPts(A.total)}</b> <small>/ ${fPts(A.possivel)} medidos (de ${fPts(A.totalBase)} + 10 de acelerador)</small></td></tr></tbody>`;
+  }
+  function opcoesDia(mes, base) {
+    const dias = new Set(base.dias); (DB.producao || []).forEach(r => { const d = String(r.data || '').slice(0, 10); if (d.slice(0, 7) === mes) dias.add(d); });
+    const l = [...dias].sort().reverse(), sd = $('igp-dia'), sem = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+    sd.innerHTML = l.length ? l.map(d => `<option value="${d}">${dmy(d)} (${sem[new Date(d + 'T12:00:00').getDay()]})</option>`).join('') : '<option value="">sem dados</option>'; sd.dataset.mes = mes;
+  }
+  const grupoDe = (c, R) => { const mix = c ? c.mix : { altas: R.base.ativ, reparos: R.base.rep, me: R.base.me }, tot = mix.altas + mix.reparos + mix.me, share = tot ? mix.reparos / tot : 0; return { mix, tot, share, g: igpGrupo(share) }; };
+  // pontuação de qualquer um dos 3 modelos (o gráfico de evolução usa a mesma conta)
+  const pontuarModelo = (m, c, R, mes, cl) => {
+    if (m === 'acesso') return { acesso: igpAcessoCalcular(c, R) };
+    if (m === 'out') { const gi = grupoDe(c, R); return { out: igpPontuar(IGP_NOVO, igpValoresOut(c, R), it => it.w[gi.g][0], 'novo'), gi }; }
+    const itens = IGP_ANTIGO.map(it => cl === 'C.8' && it.k === 'irr' ? { ...it, m100: 0.055, mmin: 0.065 } : it);
+    return { antigo: igpPontuar(itens, igpValoresAntigo(c, R, mes), it => it.peso, 'antigo') };
+  };
   function desenhar() {
-    const mes = $('igp-mes').value, imp = igpImportes()[mes] || null, R = igpCalcular(mes);
+    const mes = $('igp-mes').value, imp = igpImportes()[mes] || null, base = getBase(mes);
+    if (mesModelo !== mes) { modelo = igpModeloDoMes(mes); mesModelo = mes; }
+    if ($('igp-dia').dataset.mes !== mes) opcoesDia(mes, base);
+    const ate = $('igp-dia').value || '';
+    if (!imp) fonte = 'auto';
     const cls = imp ? Object.keys(imp.clusters).sort((a, b) => (a === 'C.10' ? -1 : b === 'C.10' ? 1 : a.localeCompare(b))) : ['C.10'];
-    const selCl = $('igp-cl'), antigo = selCl.value;
-    selCl.innerHTML = cls.map(c => `<option value="${c}">${c} — ${esc(imp ? imp.clusters[c].nome : 'Litoral Sul')}</option>`).join(''); selCl.value = cls.includes(antigo) ? antigo : cls[0];
-    $('igp-cl-box').hidden = cls.length < 2;
-    const cl = selCl.value, c = imp ? imp.clusters[cl] : null;
-    // mix e grupo (share de reparos)
-    const mix = c ? c.mix : { altas: R.base.ativ, reparos: R.base.rep, me: R.base.me }, totMix = mix.altas + mix.reparos + mix.me, share = totMix ? mix.reparos / totMix : 0, g = igpGrupo(share);
-    const novo = igpPontuar(IGP_NOVO, igpValoresNovo(c, R), it => it.w[g][0], 'novo');
-    const itensAnt = IGP_ANTIGO.map(it => cl === 'C.8' && it.k === 'irr' ? { ...it, m100: 0.055, mmin: 0.065 } : it);   // São Paulo tem IRR 5,5% / 6,5%
-    const ant = igpPontuar(itensAnt, igpValoresAntigo(c, R, mes), it => it.peso, 'antigo');
-    const M = modelo === 'novo' ? novo : ant, parcial = M.medidos < M.pontuam, tabLetras = modelo === 'novo' ? IGP_LETRAS_NOVO : IGP_LETRAS_ANT;
+    const selCl = $('igp-cl'), antigoCl = selCl.value;
+    selCl.innerHTML = cls.map(c => `<option value="${c}">${c} — ${esc(imp ? imp.clusters[c].nome : 'Litoral Sul')}</option>`).join(''); selCl.value = cls.includes(antigoCl) ? antigoCl : cls[0];
+    $('igp-cl-box').style.display = imp && fonte === 'planilha' && cls.length > 1 ? '' : 'none';
+    const cl = selCl.value, planilha = fonte === 'planilha' && imp, semPcr = !base.lista.length;
+    const R = igpCalcular(mes, ate), cAuto = semPcr ? null : igpAutoCorte(base, mes, ate), cPlan = imp ? imp.clusters[cl] || null : null, c = planilha ? cPlan : cAuto;
+    let cOutro = null, ROutro = null, rotOutro = '';
+    if (planilha && cl === 'C.10') { ROutro = igpCalcular(mes, imp.ate); cOutro = semPcr ? null : igpAutoCorte(base, mes, imp.ate); rotOutro = 'Automático' + (imp.ate ? ' até ' + dm(imp.ate) : ''); }
+    else if (!planilha && imp && imp.clusters['C.10']) { cOutro = imp.clusters['C.10']; ROutro = R; rotOutro = 'Planilha' + (imp.ate ? ' até ' + dm(imp.ate) : ''); }
+    const P = pontuarModelo(modelo, c, R, mes, planilha ? cl : 'C.10');
+    const M = P.acesso || P.out || P.antigo, gi = P.gi || grupoDe(c, R), mix = gi.mix, totMix = gi.tot, share = gi.share, g = gi.g;
+    const medidos = modelo === 'acesso' ? M.medidos : M.medidos, totalItens = modelo === 'acesso' ? M.grupos.filter(x => !x.acelerador).length : M.pontuam, parcial = medidos < totalItens + (modelo === 'acesso' ? M.grupos.filter(x => x.acelerador).length : 0) && modelo !== 'acesso' ? medidos < totalItens : (modelo === 'acesso' ? M.possivel < M.totalBase : false);
+    const tabLetras = modelo === 'antigo' ? IGP_LETRAS_ANT : IGP_LETRAS_NOVO;
     const idx = M.letra === 'Z' ? tabLetras.length : tabLetras.findIndex(x => x[0] === M.letra), prox = idx > 0 ? tabLetras[idx - 1] : null, falta = prox ? Math.max(0, prox[1] - M.total) : 0;
     const bonTxt = (M.bonus > 0 ? '+' : M.bonus < 0 ? '−' : '') + Math.abs(M.bonus) + '%';
-    const fonteTxt = imp ? `Planilha da GIGA${imp.arquivo ? ' (' + esc(imp.arquivo) + ')' : ''} — importada em ${new Date(imp.importadoEm).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}${imp.por ? ' por ' + esc(imp.por) : ''}${imp.ate ? ' · dados até ' + formatDate(imp.ate) : ''}` : 'Cálculo do próprio sistema (parcial)';
-    const comSis = cl === 'C.10' && !!imp && M.linhas.some(l => l.it.sis && igpSisDe(l.it, R, mes));   // coluna de conferência só quando há planilha E o sistema calcula alguma linha
-    ultimo = { mes, cl, novo, ant, g, share, mix, imp };
+    const cmp = !!cOutro && modelo !== 'acesso', Vo = cOutro && cmp ? (modelo === 'out' ? igpValoresOut(cOutro, ROutro) : igpValoresAntigo(cOutro, ROutro, mes)) : null;
+    const dTxt = ate ? dmy(ate) : '';
+    const fonteTxt = planilha
+      ? `Planilha da GIGA${imp.arquivo ? ' (' + esc(imp.arquivo) + ')' : ''} — importada em ${new Date(imp.importadoEm).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}${imp.por ? ' por ' + esc(imp.por) : ''}${imp.ate ? ' · dados até ' + dmy(imp.ate) : ''}`
+      : (semPcr ? 'Cálculo do sistema pela Produção — sem CSV da PCR neste mês, só IFI, IFIME e IRR' : `Calculado sozinho pelo sistema — CSV da PCR de ${base.dias.length} dia(s) (${dm(base.dias[0])} a ${dm(base.dias[base.dias.length - 1])}) e Produção, acumulado até ${dTxt}`);
+    // cobertura do CSV da PCR: ele só tem os dias já importados; se cobre pouco do que a Produção diz ter sido concluído, agenda e eficiência saem incompletas
+    const concProd = (DB.producao || []).filter(r => { const d = String(r.data || '').slice(0, 10); return d.slice(0, 7) === mes && (!ate || d <= ate) && isConcluido(r.status) && ['ativ', 'me', 'rep'].includes(tipoGeral(r.tipo_atividade)); }).length;
+    const concPcr = cAuto ? cAuto.mix.altas + cAuto.mix.reparos + cAuto.mix.me : 0, cobPcr = concProd ? concPcr / concProd : null;
+    ultimo = { mes, cl, M, modelo, g, share, mix, imp, planilha, ate, P };
+    const vigente = igpModeloDoMes(mes);
+    const nIndMeta = modelo === 'acesso' ? M.naMeta : M.naMeta, nIndTot = modelo === 'acesso' ? M.grupos.filter(x => !x.acelerador).length : (modelo === 'out' ? M.linhas.filter(l => l.peso > 0).length : M.pontuam);
     $('igp-corpo').innerHTML = `
       <section class="igp-hero">
-        <div class="igp-id"><span class="igp-chip">JH — ${esc(cl)}</span><h2>${esc(c ? c.nome : 'Litoral Sul')}</h2><p>${esc(nomeMes(mes))}</p><span class="igp-origem ${imp ? 'igp-o-ok' : 'igp-o-par'}">${fonteTxt}</span></div>
-        <div class="igp-kpi"><span class="igp-kt">Pontuação IGP</span><b class="igp-kv">${fPts(M.total)}</b><span class="igp-ks">de ${fPts(M.possivel)} pontos${parcial ? ' (só ' + M.medidos + ' de ' + M.pontuam + ' indicadores com dado)' : ''}</span><div class="igp-bar"><i style="width:${Math.min(100, M.possivel ? M.total / M.possivel * 100 : 0)}%"></i></div></div>
-        <div class="igp-kpi igp-l-${M.letra}"><span class="igp-kt">Faixa</span><b class="igp-circ">${M.letra}</b><span class="igp-ks">${prox && !parcial ? `faltam ${fPts(falta)} pts para a faixa ${prox[0]}` : prox ? 'letra de referência (faltam dados)' : 'faixa máxima'}</span></div>
+        <div class="igp-id"><span class="igp-chip">JH — ${esc(planilha ? cl : 'C.10')}</span><h2>${esc(planilha && c ? c.nome : 'Litoral Sul')}</h2><p>${esc(nomeMes(mes))}${dTxt && !planilha ? ' · até ' + esc(dm(ate)) : ''}</p><span class="igp-origem ${planilha ? 'igp-o-ok' : semPcr ? 'igp-o-par' : 'igp-o-auto'}">${fonteTxt}</span></div>
+        <div class="igp-kpi"><span class="igp-kt">Pontuação IGP</span><b class="igp-kv">${fPts(M.total)}</b><span class="igp-ks">de ${fPts(M.possivel)} pontos medidos${modelo === 'acesso' && parcial ? ' (≈ ' + String(M.proporcional).replace('.', ',') + '% de aproveitamento)' : ''}</span><div class="igp-bar"><i style="width:${Math.min(100, M.possivel ? M.total / M.possivel * 100 : 0)}%"></i></div></div>
+        <div class="igp-kpi igp-l-${M.letra}"><span class="igp-kt">Faixa</span><b class="igp-circ">${M.letra}</b><span class="igp-ks">${parcial ? 'faixa de referência — faltam dados' : prox ? `faltam ${fPts(falta)} pts para a faixa ${prox[0]}` : 'faixa máxima'}</span></div>
         <div class="igp-kpi"><span class="igp-kt">Bonificação</span><b class="igp-kv ${M.bonus > 0 ? 'igp-pos' : M.bonus < 0 ? 'igp-neg' : ''}">${bonTxt}</b><span class="igp-ks">sobre o faturamento da faixa ${M.letra}</span></div>
-        <div class="igp-kpi"><span class="igp-kt">Indicadores na meta 100%</span><b class="igp-kv">${M.naMeta}<small> de ${modelo === 'novo' ? novo.linhas.filter(l => l.peso > 0).length : M.pontuam}</small></b><span class="igp-ks">que pontuam</span></div>
-        ${modelo === 'novo' ? `<div class="igp-kpi"><span class="igp-kt">Grupo</span><b class="igp-kv">Grupo ${g + 1}</b><span class="igp-ks">reparos = ${fPct(share, 1)} do mix</span></div>` : ''}
+        <div class="igp-kpi"><span class="igp-kt">${modelo === 'acesso' ? 'Grupos na meta 100%' : 'Indicadores na meta 100%'}</span><b class="igp-kv">${nIndMeta}<small> de ${nIndTot}</small></b><span class="igp-ks">que pontuam</span></div>
+        ${modelo === 'out' ? `<div class="igp-kpi"><span class="igp-kt">Grupo</span><b class="igp-kv">Grupo ${g + 1}</b><span class="igp-ks">reparos = ${fPct(share, 1)} do mix</span></div>` : ''}
       </section>
-      ${imp ? '' : `<div class="igp-aviso">Sem a planilha da GIGA deste mês o sistema só mede ${modelo === 'novo' ? 'IFI, IFIME e IRR' : 'IFI, IFIME, IRR, prazo de reparo, outliers, aging e ME 2D (e só até onde o CSV da PCR e a planilha de Prazos cobrem)'}. Eficiência de vendas, visita na agenda e cumprimento de agenda existem só na planilha <b>Performance Review</b> da GIGA — use <b>Importar planilha da GIGA</b> e a pontuação sai completa, pelas mesmas fórmulas.</div>`}
-      <div class="igp-seg" role="tablist"><button type="button" data-m="novo" class="${modelo === 'novo' ? 'on' : ''}">Novo IGP <small>(oficial a partir de 01/11/2026)</small></button><button type="button" data-m="antigo" class="${modelo === 'antigo' ? 'on' : ''}">KPI mensal antigo <small>(vigente até 31/10/2026)</small></button></div>
-      <section class="panel"><h3>Cálculo e pontuação — ${modelo === 'novo' ? 'Novo IGP' : 'KPI mensal antigo'}</h3>
-        <div class="table-wrap"><table class="data-table igp-tab" id="igp-tab">${cabTab(comSis)}<tbody>${M.linhas.map(l => linhaHtml(l, cl, R, mes, comSis)).join('')}
-          <tr class="total-row"><td><b>TOTAL</b></td><td class="num">${fPts(M.linhas.reduce((s, l) => s + (l.peso || 0), 0))}</td><td colspan="5"></td><td class="num"><b>${fPts(M.total)}</b> <small>/ ${fPts(M.possivel)}</small></td>${comSis ? '<td colspan="2"></td>' : ''}</tr></tbody></table></div>
-        <p class="sec-nota">${modelo === 'novo'
-          ? 'Pontos = peso inteiro na meta 100%, 80% do peso entre as metas, zero abaixo da mínima. O peso muda com o grupo do cluster (abaixo). Realizado = numerador ÷ denominador arredondado em 3 casas, como na planilha.'
-          : 'Pontos = peso inteiro na meta 100%, 80% do peso na meta de 80%, zero abaixo. Outlier de altas e IFIME aparecem mas não pontuam. Botão vermelho: a planilha de outubro não traz a coluna dele, então fica sem dado.'} ${imp ? 'Coluna <b>Sistema</b> = o que o próprio sistema calcula do que já tem (Produção, planilha de Prazos e CSV da PCR) — serve de conferência; só existe para o Litoral Sul.' : ''}</p></section>
-      ${modelo === 'novo' ? `
+      <div class="igp-seg" role="tablist">${Object.keys(IGP_MODELOS).map(k => `<button type="button" data-m="${k}" class="${modelo === k ? 'on' : ''}">${IGP_MODELOS[k]}${k === vigente ? ' <small>· vale neste mês</small>' : ''}</button>`).join('')}</div>
+      ${imp ? `<div class="igp-seg igp-seg2" role="tablist"><button type="button" data-f="auto" class="${!planilha ? 'on' : ''}">Cálculo do sistema</button><button type="button" data-f="planilha" class="${planilha ? 'on' : ''}">Planilha importada (${esc(nomeMes(mes))})</button></div>` : ''}
+      ${semPcr ? `<div class="igp-aviso">Este mês não tem CSV da PCR importado, então o sistema só consegue medir IFI, IFIME, IRR${modelo === 'antigo' ? ', prazo de reparo e outliers' : ''}. Agenda e eficiência dependem do CSV de atividades do dia.</div>` : ''}
+      ${!planilha && !semPcr && cobPcr != null && cobPcr < 0.9 ? `<div class="igp-aviso">O CSV da PCR importado cobre só <b>${fPct(cobPcr, 0)}</b> das ordens concluídas que a Produção tem neste período (${nf(concPcr)} de ${nf(concProd)}). Os indicadores de agenda, visita e eficiência saem incompletos até importar os CSVs dos dias que faltam.</div>` : ''}
+      ${modelo !== vigente ? `<div class="igp-aviso">Você está vendo o modelo <b>${esc(IGP_MODELOS[modelo])}</b>; ${nomeMes(mes)} vale pelo <b>${esc(IGP_MODELOS[vigente])}</b>. Serve pra comparar.</div>` : ''}
+      <section class="panel"><h3>Cálculo e pontuação — ${esc(IGP_MODELOS[modelo])}</h3>
+        <div class="table-wrap"><table class="data-table igp-tab" id="igp-tab">${modelo === 'acesso' ? tabelaAcesso(M) : `${cabTab(cmp ? rotOutro : '')}<tbody>${M.linhas.map(l => linhaHtml(l, Vo, cmp)).join('')}
+          <tr class="total-row"><td><b>TOTAL</b></td><td class="num">${fPts(M.linhas.reduce((s, l) => s + (l.peso || 0), 0))}</td><td colspan="5"></td><td class="num"><b>${fPts(M.total)}</b> <small>/ ${fPts(M.possivel)}</small></td>${cmp ? '<td colspan="2"></td>' : ''}</tr></tbody>`}</table></div>
+        <p class="sec-nota">${modelo === 'acesso'
+          ? 'Cada grupo pontua inteiro na meta 100%, pelo peso mínimo entre as metas e zero pior que a mínima — e só pontua se o mínimo garantido do grupo for atingido. Redes, IRT e Churn não existem no sistema, então ficam sem dado (o IGP ACESSO completo precisa deles).'
+          : modelo === 'out' ? 'Pontos = peso inteiro na meta 100%, 80% do peso entre as metas, zero abaixo da mínima. O peso muda com o grupo do cluster (abaixo). Realizado = numerador ÷ denominador arredondado em 3 casas, como na planilha.'
+          : 'Pontos = peso inteiro na meta 100%, 80% do peso na meta de 80%, zero abaixo. Outlier de altas e IFIME aparecem mas não pontuam. Botão vermelho não existe no sistema: fica sem dado.'}${cmp ? ` A coluna <b>${esc(rotOutro)}</b> mostra o outro cálculo lado a lado; diferença em verde = menos de 2,5 p.p.` : ''}</p></section>
+      ${!planilha && !semPcr ? `<section class="panel"><h3>Evolução da pontuação no mês <small class="igp-peq">acumulado até cada dia</small></h3><div id="igp-evol-g" class="igp-evol"></div><p class="sec-nota">Cada ponto é a pontuação (${esc(IGP_MODELOS[modelo])}) acumulada do dia 1 até aquele dia, recalculada com os dados que o sistema tinha.</p></section>` : ''}
+      ${modelo === 'out' ? `
       <div class="panels-grid"><section class="panel"><h3>Mix de atividades e grupo</h3>
         <div class="igp-mix">${[['Altas', mix.altas, 'a'], ['Reparos', mix.reparos, 'r'], ['ME', mix.me, 'm']].map(m => `<div class="igp-mix-i igp-m-${m[2]}" style="flex:${Math.max(m[1], 1)}"><b>${fPct(totMix ? m[1] / totMix : 0, 1)}</b><span>${m[0]} · ${nf(m[1])}</span></div>`).join('')}</div>
-        <p class="sec-nota">Share de reparos ${fPct(share, 1)} → <b>Grupo ${g + 1}</b>. Grupo 1: menos de 10% · Grupo 2: 10% a 20% · Grupo 3: 20% a 30% · Grupo 4: 30% ou mais. ${imp ? '' : 'Estimado pela Produção do mês.'}</p>
+        <p class="sec-nota">Share de reparos ${fPct(share, 1)} → <b>Grupo ${g + 1}</b>. Grupo 1: menos de 10% · Grupo 2: 10% a 20% · Grupo 3: 20% a 30% · Grupo 4: 30% ou mais.</p>
         <div class="table-wrap"><table class="data-table igp-pesos"><thead><tr><th>Indicador</th>${[1, 2, 3, 4].map(n => `<th class="num${n === g + 1 ? ' igp-gat' : ''}">Grupo ${n}</th>`).join('')}</tr></thead><tbody>${IGP_NOVO.map(it => `<tr><td>${esc(it.rot)}</td>${it.w.map((w, i) => `<td class="num${i === g ? ' igp-gat' : ''}">${fPts(w[0])}</td>`).join('')}</tr>`).join('')}<tr class="total-row"><td><b>Total</b></td>${[0, 1, 2, 3].map(i => `<td class="num${i === g ? ' igp-gat' : ''}"><b>${fPts(IGP_NOVO.reduce((s, it) => s + it.w[i][0], 0))}</b></td>`).join('')}</tr></tbody></table></div></section>
       <section class="panel"><h3>Régua de pontuação</h3>
         <div class="igp-regua">${[...IGP_LETRAS_NOVO.map(x => ({ l: x[0], p: x[1], b: x[2] })), { l: 'Z', p: 0, b: -5 }].map(x => `<div class="igp-r igp-l-${x.l}${x.l === M.letra ? ' on' : ''}"><b class="igp-circ">${x.l}</b><span>${x.p ? '≥ ' + x.p + ' pts' : 'abaixo de 72'}</span><em>${x.b > 0 ? '+' : x.b < 0 ? '−' : ''}${Math.abs(x.b)}%</em></div>`).join('')}</div>
         <p class="sec-nota">A bonificação é aplicada sobre o faturamento do cluster na faixa conquistada (A +10% … Z −5%).</p></section></div>` : `
-      <section class="panel"><h3>Régua de pontuação — KPI antigo</h3>
-        <div class="igp-regua">${[...IGP_LETRAS_ANT.map(x => ({ l: x[0], p: x[1], b: x[2] })), { l: 'Z', p: 0, b: -5 }].map(x => `<div class="igp-r igp-l-${x.l}${x.l === M.letra ? ' on' : ''}"><b class="igp-circ">${x.l}</b><span>${x.p ? '≥ ' + x.p + ' pts' : 'abaixo de 70'}</span><em>${x.b > 0 ? '+' : x.b < 0 ? '−' : ''}${Math.abs(x.b)}%</em></div>`).join('')}</div></section>`}
-      <p class="sec-nota">${esc(nomeMes(mes))}: base do mês na Produção do sistema — ${nf(R.base.ativ)} ativações, ${nf(R.base.me)} mudanças de endereço e ${nf(R.base.rep)} reparos concluídos. A planilha da GIGA é a fonte oficial; o sistema não consegue medir sozinho eficiência de vendas, agenda, IRT, Redes nem churn.</p>`;
+      <section class="panel"><h3>Régua de pontuação — ${esc(IGP_MODELOS[modelo])}</h3>
+        <div class="igp-regua">${[...tabLetras.map(x => ({ l: x[0], p: x[1], b: x[2] })), { l: 'Z', p: 0, b: -5 }].map(x => `<div class="igp-r igp-l-${x.l}${x.l === M.letra ? ' on' : ''}"><b class="igp-circ">${x.l}</b><span>${x.p ? '≥ ' + x.p + ' pts' : 'abaixo de ' + tabLetras[tabLetras.length - 1][1]}</span><em>${x.b > 0 ? '+' : x.b < 0 ? '−' : ''}${Math.abs(x.b)}%</em></div>`).join('')}</div></section>`}
+      <section class="panel"><h3>Como o sistema calcula, sozinho</h3><ul class="igp-notas">
+        <li><b>IFI, IFIME e IRR</b> <span class="igp-fonte igp-f-s">sistema</span>: retornos da Produção do mês ÷ ativações, mudanças de endereço e reparos concluídos — igual à Folha.</li>
+        <li><b>Resolutividade / cumprimento de agenda</b> <span class="igp-fonte igp-f-s">sistema</span>: a O.S. conta se foi <i>concluída na menor agenda marcada ou antes dela</i> (turno pela hora real de início). A GIGA separa as O.S. em "agenda" e "agenda SC" (antigo SLA), mas o CSV não traz esse dado; medindo todas pelo cumprimento a diferença fica entre 1 e 3 p.p.</li>
+        <li><b>Visita na agenda</b> <span class="igp-fonte igp-f-s">sistema</span>: O.S. com visita (concluída ou improdutiva) no dia e turno da menor agenda ÷ O.S. com visita no período. <b>Atenção:</b> a planilha da GIGA divide pelas ordens "agenda" só (sem as "SC"), por isso lá passa de 100%; aqui o resultado é menor.</li>
+        <li><b>Prazo, aging, ME 2D e outliers</b> <span class="igp-fonte igp-f-s">sistema</span>: faixa de prazo que o sistema já calcula do CSV (conferida O.S. por O.S. com a GIGA).</li>
+        <li><b>Eficiência de altas e de ME</b> <span class="igp-fonte igp-f-e">estimado</span>: a GIGA usa vendas brutas e a fila dela, que o sistema não tem. Estimativa = concluídas ÷ (concluídas + canceladas + ½ das abertas), calibrada com os dias 27 e 28/10 (erro ≤ 1 p.p.).</li>
+        <li><b>Sem dado no sistema</b>: Botão vermelho, Redes, IRT e Churn. A faixa final só fecha de verdade quando esses dados existirem.</li></ul></section>`;
     ativarFiltrosDeColuna($('igp-corpo'));
-    $('igp-corpo').querySelectorAll('.igp-seg button').forEach(b => b.addEventListener('click', () => { modelo = b.dataset.m; desenhar(); }));
+    $('igp-corpo').querySelectorAll('.igp-seg button[data-m]').forEach(b => b.addEventListener('click', () => { modelo = b.dataset.m; desenhar(); }));
+    $('igp-corpo').querySelectorAll('.igp-seg button[data-f]').forEach(b => b.addEventListener('click', () => { fonte = b.dataset.f; desenhar(); }));
+    if (!planilha && !semPcr && $('igp-evol-g')) setTimeout(() => {   // evolução: recalcula o acumulado de cada dia do mês (depois da tela pintar)
+      if (!$('igp-evol-g')) return;
+      const dias = [...new Set([...base.dias, ...(DB.producao || []).map(r => String(r.data || '').slice(0, 10)).filter(d => d.slice(0, 7) === mes)])].sort().filter(d => !ate || d <= ate);
+      const pontos = dias.map(d => { const Rd = igpCalcular(mes, d), cd = igpAutoCorte(base, mes, d), PP = pontuarModelo(modelo, cd, Rd, mes, 'C.10'), MM = PP.acesso || PP.out || PP.antigo;
+        return { label: dm(d), value: MM.total, display: `${fPts(MM.total)} pts — faixa ${MM.letra}` }; });
+      if (pontos.length < 2) { $('igp-evol-g').innerHTML = '<div class="empty">São precisos pelo menos 2 dias com dados para mostrar a evolução.</div>'; return; }
+      trendChart('igp-evol-g', [{ name: 'Pontuação', color: '#2563eb', points: pontos }, { name: 'Faixa C (80 pts)', color: '#16a34a', tracejado: true, semArea: true, points: pontos.map(p => ({ label: p.label, value: 80 })) }], { expandir: true, yMin: 0, yMax: Math.max(100, ...pontos.map(p => p.value)), legendaSemTotal: true, maxLabels: 12 });
+    }, 40);
   }
-  $('igp-mes').addEventListener('change', desenhar); $('igp-cl').addEventListener('change', desenhar);
+  $('igp-mes').addEventListener('change', () => { $('igp-dia').dataset.mes = ''; desenhar(); }); $('igp-dia').addEventListener('change', desenhar); $('igp-cl').addEventListener('change', desenhar);
   $('igp-file').addEventListener('change', async ev => {
     const f = ev.target.files[0]; if (!f) return;
     try {
-      toast('Lendo a planilha da GIGA… pode levar alguns segundos.'); await new Promise(r => setTimeout(r, 60));   // deixa o aviso aparecer antes da leitura pesada
+      toast('Lendo a planilha da GIGA… pode levar alguns segundos.'); await new Promise(r => setTimeout(r, 60));
       const o = igpLerPlanilha(await f.arrayBuffer(), f.name), salvou = igpGuardarImporte(o);
-      $('igp-mes').innerHTML = listaMeses().map(m => `<option value="${m}">${nomeMes(m)}</option>`).join(''); $('igp-mes').value = o.mes; $('igp-cl').value = 'C.10';
+      $('igp-mes').innerHTML = listaMeses().map(m => `<option value="${m}">${nomeMes(m)}</option>`).join(''); $('igp-mes').value = o.mes; $('igp-dia').dataset.mes = ''; $('igp-cl').value = 'C.10'; fonte = 'planilha';
       desenhar();
-      toast(`Planilha lida: ${nomeMes(o.mes)}, ${Object.keys(o.clusters).length} cluster(s)${salvou ? '' : ' — não deu para guardar neste navegador, vale só até sair da tela'}.`, 'ok');
+      toast(`Planilha lida: ${nomeMes(o.mes)}, ${Object.keys(o.clusters).length} cluster(s)${salvou ? '' : ' — não deu para guardar neste navegador'}.`, 'ok');
     } catch (e) { toast('Não consegui ler a planilha: ' + (e && e.message ? e.message : e), 'erro'); }
     ev.target.value = '';
   });
   $('igp-xls').addEventListener('click', () => {
-    if (!ultimo) return; const txt = h => String(h).replace(/<[^>]*>/g, '');
-    const linhas = (nome, P) => P.linhas.map(l => [nome, l.it.rot, l.peso == null ? '' : l.peso, l.it.m100 == null ? '' : (l.it.maior ? '≥ ' : '≤ ') + fPct(l.it.m100, 1), l.it.mmin == null ? '' : (l.it.maior ? '≥ ' : '≤ ') + fPct(l.it.mmin, 1), l.x && l.x.d != null ? l.x.n + ' de ' + l.x.d : '', l.x ? fPct(l.x.v, 1) : 'sem dado', l.faixa || '', l.pts == null ? '' : l.pts, l.x ? l.x.fonte : '']);
-    exportarQuadroPresenca('igp-' + ultimo.mes + '-' + ultimo.cl, ['Modelo', 'Indicador', 'Peso', 'Meta 100%', 'Meta mínima', 'Numerador / denominador', 'Realizado', 'Situação', 'Pontos', 'Fonte'],
-      [...linhas('Novo IGP', ultimo.novo), ['Novo IGP', 'TOTAL — faixa ' + ultimo.novo.letra + ' (' + (ultimo.novo.bonus > 0 ? '+' : '') + ultimo.novo.bonus + '%), grupo ' + (ultimo.g + 1), '', '', '', '', '', '', ultimo.novo.total, ''],
-       ...linhas('KPI antigo', ultimo.ant), ['KPI antigo', 'TOTAL — faixa ' + ultimo.ant.letra + ' (' + (ultimo.ant.bonus > 0 ? '+' : '') + ultimo.ant.bonus + '%)', '', '', '', '', '', '', ultimo.ant.total, '']], 'IGP');
+    if (!ultimo) return; const U = ultimo, M = U.M;
+    const cab = ['Modelo', 'Indicador / grupo', 'Peso', 'Meta 100%', 'Meta mínima', 'Numerador / denominador', 'Realizado', 'Situação', 'Pontos', 'Fonte'];
+    let linhas;
+    if (U.modelo === 'acesso') linhas = [...M.grupos.map(g => [IGP_MODELOS.acesso, g.g, g.pmax, g.m100 != null ? (g.maior ? '≥ ' : '≤ ') + fPct(g.m100, 1) : '', g.mmin != null ? (g.maior ? '≥ ' : '≤ ') + fPct(g.mmin, 1) : '', g.res && g.res.d != null ? g.res.n + ' de ' + g.res.d : '', g.res ? fPct(g.res.v, 1) : 'sem dado', g.faixa || '', g.pontos == null ? '' : g.pontos, g.res ? 'Sistema' : '']), [IGP_MODELOS.acesso, 'TOTAL — faixa ' + M.letra + ' (' + (M.bonus > 0 ? '+' : '') + M.bonus + '%)', '', '', '', '', '', '', M.total, '']];
+    else linhas = [...M.linhas.map(l => [IGP_MODELOS[U.modelo], l.it.rot, l.peso == null ? '' : l.peso, l.it.m100 == null ? '' : (l.it.maior ? '≥ ' : '≤ ') + fPct(l.it.m100, 1), l.it.mmin == null ? '' : (l.it.maior ? '≥ ' : '≤ ') + fPct(l.it.mmin, 1), l.x && l.x.d != null ? l.x.n + ' de ' + l.x.d : '', l.x ? fPct(l.x.v, 1) : 'sem dado', l.faixa || '', l.pts == null ? '' : l.pts, l.x ? l.x.fonte : '']), [IGP_MODELOS[U.modelo], 'TOTAL — faixa ' + M.letra + ' (' + (M.bonus > 0 ? '+' : '') + M.bonus + '%)', '', '', '', '', '', '', M.total, '']];
+    exportarQuadroPresenca('igp-' + U.modelo + '-' + U.mes + (U.ate ? '-ate-' + U.ate.slice(8, 10) : '') + '-' + U.cl, cab, linhas, 'IGP');
   });
   desenhar();
 }
