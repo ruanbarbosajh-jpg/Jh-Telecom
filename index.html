@@ -4079,6 +4079,7 @@ table.fisc-clicavel tbody tr:hover td, table.ml-clicavel tbody tr:hover td { bac
 @media (max-width: 1100px) { .igpa-resumo { grid-template-columns: 1fr 1fr 1fr 1fr; } .igpa-pt { grid-column: 1 / -1; } }
 @media (max-width: 820px) { .igpa-resumo { grid-template-columns: 1fr 1fr; } .igpa-grid { grid-template-columns: 1fr; } .igpa-tg { grid-template-columns: 1fr 1fr; } .igpa-pt b { font-size: 36px; } }
 @media (max-width: 480px) { .igpa-dest, .igpa-crit { grid-template-columns: 1fr; } .igpa-pop { width: 240px; } .igpa-g { padding: 14px; } }
+.igpo-nota { margin: 0; padding: 8px 14px; background: #f1f5f9; border-radius: 12px; font-size: 13px; color: #475569; line-height: 1.5; }
 @media (max-width: 700px) { .igp-kv { font-size: 32px; } .igp-hero { grid-template-columns: 1fr 1fr; } .igp-id { grid-column: 1 / -1; } .igp-seg button { flex: 1; } }
 </style>
 </head>
@@ -23671,14 +23672,17 @@ function igpValoresAntigo(c, R, mes) {
     V.efvendas = igpEf(c.efic_altas, 'Planilha'); V.botao = igpBotaoAssumido();
   } else {
     IGP_ANTIGO.forEach(it => { const s = it.sis ? igpSisDe(it, R, mes) : null; V[it.k] = s ? { n: s.n, d: s.d, v: igpArred3(s.v), fonte: 'Sistema' } : null; });
-    V.efvendas = c ? igpEf(c.efic_altas, 'Estimado') : null; V.botao = igpBotaoAssumido();
+    V.efvendas = igpEficAssumida(); V.botao = igpBotaoAssumido();
   }
   return V;
 }
 // Botão vermelho não existe no sistema: a planilha oficial mostra 0,00% (nenhum entrante) e dá os 5 pontos cheios, então assume-se o mesmo, marcado como "assumido"
-const igpBotaoAssumido = () => ({ n: 0, d: null, v: 0, fonte: 'Assumido', assumido: true });
+const igpBotaoAssumido = () => ({ n: 0, d: null, v: 0, fonte: 'Assumido', assumido: true, nota: 'O sistema não tem este dado: considera nenhum entrante (0,00%) e pontuação cheia, como na planilha oficial.' });
+// Eficiência de vendas = vendas realizadas ÷ vendas brutas da GIGA, que o sistema não tem (a estimativa pelo CSV errava muito no mês fechado: 63% contra 84,2% oficial em setembro).
+// 31/10/2026 (cliente): fica "sem dado" e pontua pela META MÍNIMA (80% do peso) pra não puxar a faixa nem pra cima nem pra baixo.
+const igpEficAssumida = () => ({ n: null, d: null, v: null, fonte: 'Assumido', assumido: true, fracao: 0.8, faixaFixa: 'Meta mínima', nota: 'Sem dado no sistema (vendas brutas da GIGA). Pontuado pela meta mínima (80% do peso) para não distorcer a faixa.' });
 function igpPontuar(itens, V, pesoDe, modelo) {
-  const linhas = itens.map(it => { const peso = pesoDe(it), x = V[it.k] || null, pts = x && peso != null ? (x.assumido ? peso : igpPts(it, x.v, peso)) : null; return { it, peso, x, pts, faixa: x && it.m100 != null ? (x.assumido ? 'Meta 100%' : igpFaixa(it, x.v)) : null }; });
+  const linhas = itens.map(it => { const peso = pesoDe(it), x = V[it.k] || null, pts = x && peso != null ? (x.assumido ? peso * (x.fracao == null ? 1 : x.fracao) : igpPts(it, x.v, peso)) : null; return { it, peso, x, pts, faixa: x && it.m100 != null ? (x.assumido ? (x.faixaFixa || 'Meta 100%') : igpFaixa(it, x.v)) : null }; });
   const med = linhas.filter(l => l.pts != null), total = Math.round(med.reduce((s, l) => s + l.pts, 0) * 100) / 100;
   return { linhas, total, possivel: med.reduce((s, l) => s + l.peso, 0), medidos: med.length, pontuam: linhas.filter(l => l.peso != null).length, naMeta: med.filter(l => l.peso > 0 && l.pts === l.peso).length, ...igpLetra(total, modelo) };
 }
@@ -23743,15 +23747,15 @@ function renderIGP() {
   const getBase = mes => { const k = mes + '|' + (DB.pcr || []).length; if (baseKey !== k) { baseAuto = igpAutoBase(mes); baseKey = k; } return baseAuto; };
   const selo = f => f === 'Meta 100%' ? fiscSelo(f, 'verde') : f === 'Meta mínima' ? fiscSelo(f, 'laranja') : f === 'Fora da meta' || f === 'Mínimo garantido não atingido' ? fiscSelo(f, 'vermelho') : '<span class="igp-sem">sem dado</span>';
   const metaTxt = (it, v, un) => it.m100 == null ? '—' : (it.maior ? '≥ ' : '≤ ') + (un ? String(v).replace('.', ',') + un : fPct(v, v * 100 % 1 ? 1 : 0).replace(/(\d),0%/, '$1%'));
-  const tagFonte = f => f ? `<small class="igp-fonte igp-f-${f === 'Planilha' ? 'p' : f === 'Estimado' || f === 'Assumido' ? 'e' : 's'}" title="${f === 'Estimado' ? 'A GIGA usa um dado que o sistema não tem; este valor é uma estimativa calibrada' : f === 'Assumido' ? 'O sistema não tem este dado: considera nenhum entrante (0,00%) e pontuação cheia, como na planilha oficial' : f === 'Planilha' ? 'Vem da planilha importada' : 'Calculado pelo sistema'}">${f === 'Planilha' ? 'planilha' : f === 'Estimado' ? 'estimado' : f === 'Assumido' ? 'assumido' : 'sistema'}</small>` : '';
+  const tagFonte = (f, nota) => f ? `<small class="igp-fonte igp-f-${f === 'Planilha' ? 'p' : f === 'Estimado' || f === 'Assumido' ? 'e' : 's'}" title="${nota ? esc(nota) : f === 'Estimado' ? 'A GIGA usa um dado que o sistema não tem; este valor é uma estimativa calibrada' : f === 'Assumido' ? 'O sistema não tem este dado: considera nenhum entrante (0,00%) e pontuação cheia, como na planilha oficial' : f === 'Planilha' ? 'Vem da planilha importada' : 'Calculado pelo sistema'}">${f === 'Planilha' ? 'planilha' : f === 'Estimado' ? 'estimado' : f === 'Assumido' ? 'assumido' : 'sistema'}</small>` : '';
   function linhaHtml(l, Vo, cmp) {
-    const it = l.it, x = l.x, o = Vo ? Vo[it.k] : null, dif = o && x ? (x.v - o.v) * 100 : null;
+    const it = l.it, x = l.x, o = Vo ? Vo[it.k] : null, dif = o && x && x.v != null && o.v != null ? (x.v - o.v) * 100 : null;
     const outroTxt = o ? `${fPct(o.v, 1)}${o.d != null ? ` <small>(${nf(o.n)}/${nf(o.d)})</small>` : ''}` : '<span class="igp-sem">—</span>';
     const difTxt = dif == null ? '<span class="igp-sem">—</span>' : `<span class="${Math.abs(dif) < 2.5 ? 'igp-dok' : 'igp-dno'}">${dif > 0 ? '+' : dif < 0 ? '−' : ''}${Math.abs(dif).toFixed(1).replace('.', ',')} p.p.</span>`;
     const sentido = it.m100 == null ? '' : it.maior ? '<span class="igp-sent" title="quanto maior, melhor">▲</span>' : '<span class="igp-sent" title="quanto menor, melhor">▼</span>';
     const frac = x && x.d != null ? `${nf(x.n)} <small>de</small> ${nf(x.d)}` : '<span class="igp-sem">—</span>';
     const pts = l.pts == null ? (l.peso == null ? '<span class="igp-sem">não pontua</span>' : '<span class="igp-sem">—</span>') : `<b class="${l.pts === l.peso ? 'igp-pok' : l.pts === 0 ? 'igp-pno' : 'igp-pmid'}">${fPts(l.pts)}</b> <small>/ ${fPts(l.peso)}</small>`;
-    return `<tr><td title="${esc(it.como || '')}"><b>${esc(it.rot)}</b>${tagFonte(x && x.fonte)}</td>
+    return `<tr><td title="${esc(it.como || '')}"><b>${esc(it.rot)}</b>${tagFonte(x && x.fonte, x && x.nota)}</td>
       <td class="num">${l.peso == null ? '—' : fPts(l.peso)}</td><td class="num">${metaTxt(it, it.m100)} ${sentido}</td><td class="num">${it.mmin == null ? '—' : metaTxt(it, it.mmin)}</td>
       <td class="num">${frac}</td><td class="num igp-real">${x ? fPct(x.v, 1) : '—'}</td><td>${it.m100 == null ? '<span class="igp-sem">—</span>' : selo(l.faixa)}</td><td class="num">${pts}</td>${cmp ? `<td class="num">${outroTxt}</td><td class="num">${difTxt}</td>` : ''}</tr>`;
   }
@@ -23775,7 +23779,7 @@ function renderIGP() {
   const cartaoOficial = (M, planilha, ate, mes) => {
     const L = M.linhas, tl = (M.letra === 'A' || M.letra === 'B') ? ['EXCELENTE', 'Meta atingida com sucesso!', 'ok'] : (M.letra === 'C' || M.letra === 'D') ? ['BOM', 'Dentro da faixa esperada', 'bom'] : (M.letra === 'E' || M.letra === 'F') ? ['ATENÇÃO', 'Abaixo do esperado', 'at'] : ['CRÍTICO', 'Plano de ação necessário', 'cr'];
     const pesos = L.map(l => `<div class="igpo-l"><i style="background:${KPI_DOT[l.it.k]}"></i><span>${kpiNome(l.it.k, mes)}</span><b>${l.peso == null ? '-' : l.peso}</b></div>`).join('');
-    const res = L.map(l => `<div class="igpo-l igpo-r"><i style="background:${KPI_DOT[l.it.k]}"></i><span>${kpiNome(l.it.k, mes)}</span><em><u style="width:${l.x ? Math.max(1.5, Math.min(100, l.x.v * 100)) : 0}%;background:${KPI_DOT[l.it.k]}"></u></em><b>${l.x ? (l.x.v * 100).toFixed(2).replace('.', ',') + '%' : '—'}</b><b class="igpo-pt">${l.pts == null ? '-' : fPts(l.pts)}</b></div>`).join('');
+    const res = L.map(l => `<div class="igpo-l igpo-r"><i style="background:${KPI_DOT[l.it.k]}"></i><span>${kpiNome(l.it.k, mes)}</span><em><u style="width:${l.x && l.x.v != null ? Math.max(1.5, Math.min(100, l.x.v * 100)) : 0}%;background:${KPI_DOT[l.it.k]}"></u></em><b>${l.x && l.x.v != null ? (l.x.v * 100).toFixed(2).replace('.', ',') + '%' : (l.x && l.x.assumido && l.x.fracao != null ? 'sem dado' : '—')}</b><b class="igpo-pt">${l.pts == null ? '-' : fPts(l.pts)}</b></div>`).join('');
     const maxPts = L.reduce((t, l) => t + (l.peso || 0), 0), aprov = maxPts ? M.total / maxPts * 100 : 0, pct = Math.max(0, Math.min(100, aprov)), C = 2 * Math.PI * 54;
     const corAnel = M.letra === 'A' || M.letra === 'B' ? '#16a34a' : M.letra === 'C' || M.letra === 'D' ? '#2563eb' : M.letra === 'E' || M.letra === 'F' ? '#ea580c' : '#b91c1c';
     return `<div class="igpo">
@@ -23791,6 +23795,7 @@ function renderIGP() {
         <div class="igpo-bloco"><div class="igpo-h"><span>INDICADORES</span><em>PESO KPI</em></div>${pesos}<div class="igpo-tot"><span>TOTAL</span><b>${maxPts}</b></div></div>
         <div class="igpo-bloco"><div class="igpo-h"><span>RESULTADOS</span><span class="igpo-pils"><em>% DE PERFORMANCE</em><em class="igpo-h-pt">PONTOS</em></span></div>${res}<div class="igpo-tot"><span>TOTAL</span><b>${fPts(M.total)}</b></div></div>
       </div>
+      ${L.some(l => l.x && l.x.assumido && l.x.fracao != null) ? '<p class="igpo-nota">Eficiência de vendas: <b>sem dado</b> no sistema (as vendas brutas são da GIGA). Entra na pontuação pela <b>meta mínima</b> (80% do peso) para não alterar a faixa. Botão vermelho: sem entrantes, pontuação cheia.</p>' : ''}
     </div>`;
   };
   // ---------- IGP ACESSO: nova apresentação por grupos (31/10/2026) — só muda o visual; metas, pesos, mínimos garantidos e pontos vêm de igpAcessoCalcular ----------
