@@ -3939,7 +3939,7 @@ table.fisc-clicavel tbody tr:hover td, table.ml-clicavel tbody tr:hover td { bac
 .enps-q:first-of-type { border-top: 0; padding-top: 2px; }
 .enps-q-t { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 9px; font-size: 15.5px; color: var(--text-primary); line-height: 1.4; }
 .enps-q-t b { flex: 0 0 24px; height: 24px; border-radius: 50%; background: color-mix(in srgb, var(--cat) 16%, transparent); color: var(--cat); display: grid; place-items: center; font-size: 12.5px; }
-.enps-esc { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 7px; }
+.enps-esc { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-width: 520px; }   /* pergunta em cima e as 6 respostas embaixo, 2 em 2 (31/10/2026, pedido do cliente) */
 .enps-op { border: 1.5px solid color-mix(in srgb, var(--c) 45%, var(--border)); background: color-mix(in srgb, var(--c) 7%, var(--card-bg)); color: var(--c); border-radius: 12px; padding: 11px 6px; min-height: 46px; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; transition: transform .1s, background .15s; line-height: 1.15; }
 .enps-op:hover { background: color-mix(in srgb, var(--c) 16%, var(--card-bg)); }
 .enps-op.on { background: var(--c); border-color: var(--c); color: #fff; box-shadow: 0 3px 10px color-mix(in srgb, var(--c) 40%, transparent); transform: translateY(-1px); }
@@ -3994,7 +3994,7 @@ table.fisc-clicavel tbody tr:hover td, table.ml-clicavel tbody tr:hover td { bac
 .enps-det-obs { margin: 10px 0; padding: 10px 12px; background: var(--card-bg-2, rgba(100,116,139,.1)); border-radius: 12px; } .enps-det-obs small { color: var(--text-muted); font-weight: 700; text-transform: uppercase; font-size: 11.5px; } .enps-det-obs p { margin: 4px 0 0; white-space: pre-wrap; }
 select.enps-st { padding: 6px 10px; border-radius: 999px; border: 1.5px solid var(--border); font-weight: 700; font: inherit; font-size: 13px; background: var(--card-bg); color: var(--text-primary); }
 select.enps-st.st-aberto { border-color: #dc2626; color: #b91c1c; } select.enps-st.st-em_andamento { border-color: #d97706; color: #b45309; } select.enps-st.st-concluido { border-color: #16a34a; color: #15803d; } select.enps-st.st-cancelado { color: var(--text-muted); }
-@media (max-width: 900px) { .enps-esc { grid-template-columns: repeat(3, minmax(0, 1fr)); } .enps-nps { grid-template-columns: repeat(6, minmax(0, 1fr)); } .enps-grade { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .enps-nps { grid-template-columns: repeat(6, minmax(0, 1fr)); } .enps-grade { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .enps-topo { padding: 14px; } .enps-topo h2 { font-size: 20px; } .enps-sec { padding: 14px; } .enps-barra { padding: 10px 12px; flex-wrap: wrap; } .enps-msg { max-width: none; flex-basis: 100%; order: -1; } .enps-abas button { flex: 1; padding: 9px 8px; font-size: 13.5px; } .enps-op { font-size: 13px; min-height: 48px; } }
 /* ===== /E-NPS ===== */
 
@@ -24107,7 +24107,7 @@ const ENPS_IC = {   // ícones de traço (grade 18x18), na cor do texto
   trend: '<path d="M2 13l4.5-4.5 3 3L16 5"/><path d="M11.5 5H16v4.5"/>',
 };
 const enpsSvg = (n, tam = 20) => `<svg viewBox="0 0 18 18" width="${tam}" height="${tam}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ENPS_IC[n] || ''}</svg>`;
-const ENPS_EMAILS_ESCRITORIO = ['thais@jhtelecom.com.br', 'rebeca@jhtelecom.com.br'];   // pessoas do escritório que usam conta de Supervisor/Coordenador: só preenchem (igual à função enps_papel do banco)
+const ENPS_EMAILS_COMPLETOS = ['thais@jhtelecom.com.br', 'rebeca@jhtelecom.com.br'];   // Thaís e Rebeca (31/10/2026, pedido do cliente): preenchem E veem os resultados, igual ao Analista (espelho da função enps_papel do banco)
 const ENPS_RESPONSAVEIS = ['Rebeca', 'Daniela', 'Luma', 'Vitória', 'Márcia', 'Sândila', 'Thaís'];
 const ENPS_STATUS = { aberto: 'Aberto', em_andamento: 'Em andamento', concluido: 'Concluído', cancelado: 'Cancelado' };
 const ENPS_LS = 'jh_enps_rascunho_v1';
@@ -24118,7 +24118,8 @@ function enpsPapel() {
   if (!currentUser) return null;
   const email = String(currentUser.email || '').toLowerCase(), role = perfilValido(currentUser.role);
   if (role === 'analista') return 'analista';
-  if (role === 'escritorio' || ENPS_EMAILS_ESCRITORIO.includes(email)) return 'escritorio';
+  if (ENPS_EMAILS_COMPLETOS.includes(email)) return 'analista';
+  if (role === 'escritorio') return 'escritorio';
   if (role === 'admin' || role === 'gestao') return 'gestor';
   return null;
 }
@@ -27781,9 +27782,11 @@ function renderImprodutivasDoDia() {
       ${campoTiposServico('imp-tipos')}
       <div class="field"><label>Situação agora</label><select id="imp-sit"><option value="">Em campo (todas)</option><option value="pendente">Pendente</option><option value="em_rota">Em rota</option><option value="iniciado">Iniciado</option></select></div>
       <div class="field"><label>Visitas improdutivas</label><select id="imp-vis"><option value="1">1 ou mais</option><option value="2">2 ou mais</option><option value="3">3 ou mais</option></select></div>
+      <div class="field"><label>Improdutiva a partir de</label><input type="date" id="imp-de" title="Só ordens que tiveram visita improdutiva a partir desta data (vazio = desde o começo)"></div>
+      <div class="field"><label>Improdutiva até</label><input type="date" id="imp-ate" title="Só ordens que tiveram visita improdutiva até esta data (vazio = até o dia escolhido)"></div>
       <button class="btn" id="f-apply">Filtrar</button>
     </div>
-    <p style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">Ordens que estão em campo hoje (pendente, em rota ou iniciado) e que já tiveram visita improdutiva — quem visitou na 1ª, na 2ª, na 3ª… e o motivo de cada uma. <b>Clique na linha da O.S</b> pra ver a 1ª improdutiva, os motivos e os técnicos que visitaram. Vem do CSV de atividades importado na PCR.</p>
+    <p style="font-size:13px;color:var(--text-secondary);margin:0 0 1rem">Ordens que estão em campo hoje (pendente, em rota ou iniciado) e que já tiveram visita improdutiva — quem visitou na 1ª, na 2ª, na 3ª… e o motivo de cada uma. <b>Clique na linha da O.S</b> pra ver a 1ª improdutiva, os motivos e os técnicos que visitaram. Vem do CSV de atividades importado na PCR. Com o <b>período</b> preenchido, só entram as ordens que tiveram improdutiva nessas datas (o total de visitas continua contando todas).</p>
     <div id="imp-body"></div>`;
   wireMultiCityField('imp-cidades');
   ligarCampoTipos('imp-tipos');
@@ -27796,13 +27799,16 @@ function renderImprodutivasDoDia() {
     const cids = new Set(getSelectedCities('imp-cidades').map(normalizeCidade));
     const tipoOk = filtroTiposDe('imp-tipos');
     const sit = document.getElementById('imp-sit').value, minVis = +document.getElementById('imp-vis').value || 1;
+    // período da visita improdutiva (31/10/2026, pedido do cliente: "selecionar o início até tal data"): a ordem entra se alguma visita improdutiva dela caiu entre as duas datas
+    const de = document.getElementById('imp-de').value, ate = document.getElementById('imp-ate').value;
     const body = document.getElementById('imp-body');
     if (!doCsv.length) { body.innerHTML = '<div class="panel"><div class="empty">Sem atividades do CSV nesse dia. Importe o CSV de atividades na aba PCR (ou pelo botão da barra lateral).</div></div>'; return; }
     const todas = improdutivasDoDia(dia, 0)
-      .filter(o => cids.has(normalizeCidade(o.r.cidade)) && tipoOk(o.r.tipo_atividade) && (!sit || o.bucket === sit) && o.n >= minVis)
+      .map(o => ({ ...o, np: o.visitas.filter(v => (!de || v.data >= de) && (!ate || v.data <= ate)).length }))
+      .filter(o => ((!de && !ate) || o.np > 0) && cids.has(normalizeCidade(o.r.cidade)) && tipoOk(o.r.tipo_atividade) && (!sit || o.bucket === sit) && o.n >= minVis)
       .sort((a, b) => b.n - a.n || (a.r.limite ? +new Date(a.r.limite) : Infinity) - (b.r.limite ? +new Date(b.r.limite) : Infinity));
     const sub = formatDate(dia), SIT = { pendente: 'Pendente', em_rota: 'Em rota', iniciado: 'Iniciado' };
-    if (!todas.length) { body.innerHTML = '<div class="panel"><div class="empty">Nenhuma ordem em campo com visita improdutiva nesse dia/filtros. 👍</div></div>'; return; }
+    if (!todas.length) { body.innerHTML = '<div class="panel"><div class="empty">Nenhuma ordem em campo com visita improdutiva nesse dia/período/filtros. 👍</div></div>'; return; }
     const linhas = lista => lista.map(o => o.r);
     const com = n => todas.filter(o => n >= 3 ? o.n >= 3 : o.n === n);
     const totalVis = todas.reduce((s, o) => s + o.n, 0);
@@ -27841,7 +27847,7 @@ function renderImprodutivasDoDia() {
       <div class="panel"><h3>Ordens em campo que já tiveram visita improdutiva</h3>
         <p style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px;line-height:1.5">Mais visitas primeiro. "Técnico agora" é quem está com a ordem hoje; da 1ª visita em diante é quem já foi até o cliente e não conseguiu concluir.</p>
         <div class="table-wrap"><table class="data-table" id="imp-tab"><thead><tr><th>Visitas improdutivas</th><th>No contrato (todas as O.S)</th><th>Tipo de serviço</th><th>O.S</th><th>Contrato</th><th>Cliente</th><th>Cidade</th><th>Bairro</th><th>Técnico agora</th><th>Situação agora</th><th>Janela</th><th>Abertura</th><th>Limite</th><th>Prazo</th></tr></thead><tbody>
-        ${todas.map((o, i) => { const r = o.r; return `<tr data-i="${i}" style="cursor:pointer" title="Clique pra ver as visitas improdutivas desta O.S"><td><span class="badge warn">${o.n}</span></td><td>${(() => { const q = visitasImprodutivasDaOS(r.os, null, r.contrato).length; return `<span class="badge ${q > o.n ? 'amber' : 'neutral'}" title="${q > o.n ? 'O contrato teve improdutivas em outra(s) O.S também' : 'todas as improdutivas do contrato'}">${q}</span>`; })()}</td><td>${esc(r.tipo_atividade)}</td><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td><td class="cat-cell">${esc(r.cliente || r.nome || '')}</td><td>${esc(rotuloCidadeGeral(r.cidade))}</td><td>${esc(extrairBairro(r.endereco) || '-')}</td><td>${esc(r.recurso) || '-'}</td><td>${SIT[o.bucket]}</td><td>${esc(r.periodo_sistema || '-')}</td>
+        ${todas.map((o, i) => { const r = o.r; return `<tr data-i="${i}" style="cursor:pointer" title="Clique pra ver as visitas improdutivas desta O.S"><td><span class="badge warn">${o.n}</span>${(de || ate) ? `<div style="font-size:11px;color:var(--text-muted);white-space:nowrap">${o.np} no período</div>` : ''}</td><td>${(() => { const q = visitasImprodutivasDaOS(r.os, null, r.contrato).length; return `<span class="badge ${q > o.n ? 'amber' : 'neutral'}" title="${q > o.n ? 'O contrato teve improdutivas em outra(s) O.S também' : 'todas as improdutivas do contrato'}">${q}</span>`; })()}</td><td>${esc(r.tipo_atividade)}</td><td>${esc(r.os)}</td><td>${esc(r.contrato)}</td><td class="cat-cell">${esc(r.cliente || r.nome || '')}</td><td>${esc(rotuloCidadeGeral(r.cidade))}</td><td>${esc(extrairBairro(r.endereco) || '-')}</td><td>${esc(r.recurso) || '-'}</td><td>${SIT[o.bucket]}</td><td>${esc(r.periodo_sistema || '-')}</td>
           <td>${r.abertura ? fmtDT(new Date(r.abertura)) : '-'}</td><td>${r.limite ? fmtDT(new Date(r.limite)) : '-'}</td><td>${falta(r)}</td></tr>`; }).join('')}
         </tbody></table></div></div>
       ${painelMot}`;
