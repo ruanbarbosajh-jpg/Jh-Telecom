@@ -25534,10 +25534,22 @@ function fcMascaraTel(v) {
 }
 function fcNovoId() { try { return crypto.randomUUID(); } catch (e) { return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); } }
 // procura a O.S no CSV da PCR (a linha mais recente dela): dá cliente, cidade, contrato, tipo e técnico pra conferir na hora
+// qual linha do CSV vale pra O.S (03/11/2026, achado com o contrato 6945972: o formulário mostrou o técnico que fez a visita IMPRODUTIVA — Sinvaldo — e não o que CONCLUIU — Gleydson):
+// a O.S aparece em várias linhas (remanejamento, cada tentativa) e a ordem delas no CSV não é a do tempo, então "a última lida" não serve. Vale o dia mais recente; no mesmo dia a
+// CONCLUÍDA vence (é a baixa final); senão a de Início mais tarde. Mesma ideia de `linhasDoCsvPorDia`, que já escolhe por Início.
+function fcLinhaVale(a, r) {
+  if (!a) return r;
+  const da = String(a.data), dr = String(r.data);
+  if (dr !== da) return dr > da ? r : a;
+  const ca = isConcluido(a.status), cr = isConcluido(r.status);
+  if (ca !== cr) return cr ? r : a;
+  const t = x => x.inicio ? +new Date(x.inicio) : -1;
+  return t(r) >= t(a) ? r : a;
+}
 function fcBuscaOs(os) {
   if (!os) return null;
   let achou = null;
-  DB.pcr.forEach(r => { if (String(r.os) === String(os) && (!achou || String(r.data) >= String(achou.data))) achou = r; });
+  DB.pcr.forEach(r => { if (String(r.os) === String(os)) achou = fcLinhaVale(achou, r); });
   return achou;
 }
 // o campo também aceita o CONTRATO (28/10/2026, pedido do cliente): acha as O.S desse contrato no CSV da PCR e usa a mais recente CONCLUÍDA (senão a mais recente);
@@ -25546,7 +25558,7 @@ function fcBuscaContrato(ctt) {
   const c = String(ctt || '').replace(/\D/g, '');
   if (!c) return null;
   const porOs = new Map();
-  DB.pcr.forEach(r => { if (r.os && String(r.contrato || '').replace(/\D/g, '') === c) { const a = porOs.get(String(r.os)); if (!a || String(r.data) >= String(a.data)) porOs.set(String(r.os), r); } });
+  DB.pcr.forEach(r => { if (r.os && String(r.contrato || '').replace(/\D/g, '') === c) { porOs.set(String(r.os), fcLinhaVale(porOs.get(String(r.os)), r)); } });
   if (!porOs.size) return null;
   const lista = [...porOs.values()].sort((a, b) => String(b.data).localeCompare(String(a.data)));
   return { escolhida: lista.find(r => isConcluido(r.status)) || lista[0], lista };
