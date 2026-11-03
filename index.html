@@ -670,6 +670,7 @@
   .fc-aside-d:empty::before { content: 'Digite o número da O.S para ver os detalhes.'; font-size: 12.5px; color: var(--text-muted); }
   .fc-aside-d dt { font-size: 11.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; }
   .fc-aside-d dd { margin: 2px 0 0; font-size: 13.5px; font-weight: 600; color: var(--text-primary); word-break: break-word; }
+  .fc-obs-tec { margin-top: 0; padding: 16px 14px 18px; }
   .fc-qgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .fc-q { flex-direction: row; gap: 14px; padding: 18px 22px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); align-items: flex-start; }
   .fc-q:nth-child(3n), .fc-q.fc-q-2 { border-right: 0; }
@@ -25338,7 +25339,7 @@ async function certFormSalvar(reg) {
 function certFormComoResposta(r) {
   const d = r.criado_em ? new Date(r.criado_em) : new Date(), dd = n => String(n).padStart(2, '0');
   return { status: 'CERTIFICADA', atendente: r.atendente || '', certificadaPor: r.certificada_por || '', correta: String(r.certificada_corretamente || '').toUpperCase(), chamar: String(r.chamar || '').toUpperCase(),
-    dataHoraTexto: `${dd(d.getDate())}/${dd(d.getMonth() + 1)}/${d.getFullYear()} ${dd(d.getHours())}:${dd(d.getMinutes())}:${dd(d.getSeconds())}`, telefone: r.telefone || '', _q: +d };
+    dataHoraTexto: `${dd(d.getDate())}/${dd(d.getMonth() + 1)}/${d.getFullYear()} ${dd(d.getHours())}:${dd(d.getMinutes())}:${dd(d.getSeconds())}`, telefone: r.telefone || '', obsTecnico: r.obs_tecnico || '', _q: +d };
 }
 const FC_ICONES = {
   clip: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h4"/>',
@@ -25457,7 +25458,8 @@ function renderFormCertificacao() {
         ${pergunta('senha_wifi', 'smile', 'Está satisfeito(a) com a senha do Wi-Fi?', simNao)}
         ${pergunta('roteador', 'router', 'O roteador está instalado no local desejado?', simNao)}
         ${pergunta('certificada_corretamente', 'shield', 'A ordem foi certificada corretamente pelo técnico?', simNao)}
-        ${pergunta('cabo', 'cable', 'Foi reutilizado cabo?', cabo, ' fc-q-2')}</div>`)}
+        ${pergunta('cabo', 'cable', 'Foi reutilizado cabo?', cabo, ' fc-q-2')}</div>
+        <div class="fc-campo larga fc-obs-tec" data-campo="obs_tecnico"><label for="fc-obs_tecnico">Observação sobre a certificação <span class="fc-opc">(opcional)</span></label><textarea class="fc-input fc-area" id="fc-obs_tecnico" name="obs_tecnico" rows="2" maxlength="300" placeholder="O que o técnico esqueceu ou certificou incorretamente (ex.: não testou a velocidade, roteador mal posicionado)…"></textarea>${erro('obs_tecnico')}</div>`)}
       ${cartao(3, 'Contato e fechamento', 'Informe o contato com o cliente e finalize a certificação.', `<div class="fc-grid">
         ${texto('telefone', 'Telefone para contato (WhatsApp)', 'phone', '(13) 99999-9999', { inputmode: 'tel', max: 16 })}
         ${texto('quem_atendeu', 'Quem atendeu o técnico?', 'user', 'Ex.: Maria (esposa do titular)', { max: 80 })}
@@ -25474,7 +25476,7 @@ function renderFormCertificacao() {
   const radio = nome => { const r = form.querySelector(`input[name="${nome}"]:checked`); return r ? r.value : ''; };
   const ler = () => ({ certificada_por: radio('certificada_por'), atendente: $('atendente').value, os: fcSoDigitos($('os').value), tecnico: $('tecnico').value.trim().replace(/\s+/g, ' '),
     baixa: $('baixa').value.trim(), defeito: $('defeito').value.trim(), explicou_rede: radio('explicou_rede'), senha_wifi: radio('senha_wifi'), roteador: radio('roteador'), cabo: radio('cabo'),
-    certificada_corretamente: radio('certificada_corretamente'), telefone: $('telefone').value.trim(), quem_atendeu: $('quem_atendeu').value.trim(), nota: radio('nota'), observacao: $('observacao').value.trim(), chamar: radio('chamar') });
+    certificada_corretamente: radio('certificada_corretamente'), telefone: $('telefone').value.trim(), quem_atendeu: $('quem_atendeu').value.trim(), nota: radio('nota'), observacao: $('observacao').value.trim(), obs_tecnico: $('obs_tecnico').value.trim(), chamar: radio('chamar') });
   const sujo = () => Object.values(ler()).some(x => x);
   const mostrarErros = erros => {
     form.querySelectorAll('.fc-campo').forEach(c => {
@@ -25579,7 +25581,7 @@ function renderFormCertificacao() {
     const achada = fcBuscaOs(v.os), ed = CERTFORM.editando;   // em edição vale o criado_em/criado_por original (a linha da planilha é atualizada no lugar)
     const reg = { id: CERTFORM.id, criado_em: ed && ed.criado_em ? ed.criado_em : new Date().toISOString(), criado_por: ed && ed.criado_por ? ed.criado_por : waQuemChama(), certificada_por: v.certificada_por, atendente: v.atendente, tecnico: v.tecnico, os: v.os, baixa: v.baixa, defeito: v.defeito,
       explicou_rede: v.explicou_rede, senha_wifi: v.senha_wifi, roteador: v.roteador, cabo: v.cabo, certificada_corretamente: v.certificada_corretamente, telefone: fcSoDigitos(v.telefone),
-      quem_atendeu: v.quem_atendeu, nota: v.nota ? +v.nota : null, observacao: v.observacao || null, chamar: v.chamar,
+      quem_atendeu: v.quem_atendeu, nota: v.nota ? +v.nota : null, observacao: v.observacao || null, obs_tecnico: v.obs_tecnico || null, chamar: v.chamar,
       cliente: achada ? achada.cliente || null : (ed ? ed.cliente || null : null), contrato: achada ? achada.contrato || null : (ed ? ed.contrato || null : null), cidade: achada ? achada.cidade || null : (ed ? ed.cidade || null : null) };
     let r; try { r = await certFormSalvar(reg); } catch (e) { r = { ok: false, erro: String(e && e.message || e) }; }
     CERTFORM.salvando = false; btn.disabled = false; btn.classList.remove('carregando'); txtBtn.textContent = ed ? 'Salvar alterações' : 'Salvar certificação';
@@ -25631,7 +25633,7 @@ function renderFormCertificacao() {
     const set = (id, x) => { if (x != null && x !== '') $(id).value = x; };
     const at = $('atendente'); if (reg.atendente && ![...at.options].some(o => o.value === reg.atendente)) at.add(new Option(reg.atendente, reg.atendente));   // atendente antigo que saiu da lista continua selecionável
     set('atendente', reg.atendente); set('os', reg.os); set('tecnico', reg.tecnico); set('baixa', reg.baixa); set('defeito', reg.defeito);
-    set('telefone', reg.telefone ? fcMascaraTel(reg.telefone) : ''); set('quem_atendeu', reg.quem_atendeu); set('observacao', reg.observacao);
+    set('telefone', reg.telefone ? fcMascaraTel(reg.telefone) : ''); set('quem_atendeu', reg.quem_atendeu); set('observacao', reg.observacao); set('obs_tecnico', reg.obs_tecnico);
     ['certificada_por', 'explicou_rede', 'senha_wifi', 'roteador', 'cabo', 'certificada_corretamente', 'nota', 'chamar'].forEach(n => {
       const v = reg[n]; if (v == null || v === '') return;
       const i = [...form.querySelectorAll('input[name="' + n + '"]')].find(x => x.value === String(v)); if (i) i.checked = true;
@@ -25657,7 +25659,7 @@ function renderFormCertificacao() {
     const rasc = JSON.parse(localStorage.getItem(CERTFORM_RASCUNHO) || 'null');
     if (rasc && rasc.v && Date.now() - (rasc.t || 0) < 3 * 86400000) {
       const v = rasc.v, set = (id, x) => { if (x != null && x !== '') $(id).value = x; };
-      set('atendente', v.atendente); set('os', v.os); set('tecnico', v.tecnico); set('baixa', v.baixa); set('defeito', v.defeito); set('telefone', v.telefone ? fcMascaraTel(v.telefone) : ''); set('quem_atendeu', v.quem_atendeu); set('observacao', v.observacao);
+      set('atendente', v.atendente); set('os', v.os); set('tecnico', v.tecnico); set('baixa', v.baixa); set('defeito', v.defeito); set('telefone', v.telefone ? fcMascaraTel(v.telefone) : ''); set('quem_atendeu', v.quem_atendeu); set('observacao', v.observacao); set('obs_tecnico', v.obs_tecnico);
       ['certificada_por', 'explicou_rede', 'senha_wifi', 'roteador', 'cabo', 'certificada_corretamente', 'nota', 'chamar'].forEach(n => { if (v[n]) { const i = [...form.querySelectorAll(`input[name="${n}"]`)].find(x => x.value === String(v[n])); if (i) i.checked = true; } });
       $('cont-obs').textContent = `${$('observacao').value.length} / 500`; $('os-x').hidden = !$('os').value;
       aviso(`Rascunho recuperado (${new Date(rasc.t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}) — continue de onde parou ou clique em Cancelar para descartar.`, 'info');
@@ -25696,7 +25698,7 @@ function abrirEditorCertificacao(o) {
     certificada_por: cp === 'TÉCNICO' || cp === 'ATENDENTE' ? cp : '', atendente: reg ? reg.atendente || '' : (b.atendente || ''), os: String(o.os || ''), tecnico: reg ? reg.tecnico || '' : (o.tecnico || ''),
     baixa: reg ? reg.baixa || '' : '', defeito: reg ? reg.defeito || '' : '', explicou_rede: reg ? reg.explicou_rede || '' : '', senha_wifi: reg ? reg.senha_wifi || '' : '', roteador: reg ? reg.roteador || '' : '', cabo: reg ? reg.cabo || '' : '',
     certificada_corretamente: corr === 'NAO' ? 'NÃO' : corr, telefone: reg ? reg.telefone || '' : (CERT_FONE_FORM.get(String(o.os)) || ''), quem_atendeu: reg ? reg.quem_atendeu || '' : '', nota: reg && reg.nota != null ? String(reg.nota) : '',
-    observacao: reg ? reg.observacao || '' : '', chamar: reg ? reg.chamar || '' : '' };
+    observacao: reg ? reg.observacao || '' : '', obs_tecnico: reg ? reg.obs_tecnico || '' : '', chamar: reg ? reg.chamar || '' : '' };
   const req = '<span class="fc-req" aria-hidden="true">*</span>';
   const erro = id => `<div class="fc-erro" id="ce-erro-${id}" role="alert"></div>`;
   const txt = (id, rot, ic, o2 = {}) => `<div class="fc-campo${o2.larga ? ' larga' : ''}" data-campo="${id}"><label for="ce-${id}">${rot} ${o2.opc ? '<span class="fc-opc">(opcional)</span>' : req}</label><div class="fc-entrada">${fcIc(ic)}<input class="fc-input" type="text" id="ce-${id}" value="${esc(id === 'telefone' && v0.telefone ? fcMascaraTel(v0.telefone) : v0[id])}" ${o2.max ? `maxlength="${o2.max}"` : ''} autocomplete="off"></div>${erro(id)}</div>`;
@@ -25718,6 +25720,7 @@ function abrirEditorCertificacao(o) {
       ${seg('senha_wifi', 'Está satisfeito(a) com a senha do Wi-Fi?', sn)}
       ${seg('roteador', 'O roteador está instalado no local desejado?', sn)}
       ${seg('certificada_corretamente', 'A ordem foi certificada corretamente pelo técnico?', sn)}
+      <div class="fc-campo larga" data-campo="obs_tecnico"><label for="ce-obs_tecnico">Observação sobre a certificação <span class="fc-opc">(opcional)</span></label><textarea class="fc-input fc-area" id="ce-obs_tecnico" rows="2" maxlength="300" placeholder="O que o técnico esqueceu ou certificou incorretamente…">${esc(v0.obs_tecnico)}</textarea>${erro('obs_tecnico')}</div>
       ${seg('cabo', 'Foi reutilizado cabo?', cabos, true)}
       ${txt('telefone', 'Telefone para contato (WhatsApp)', 'phone', { max: 16 })}
       ${txt('quem_atendeu', 'Quem atendeu o técnico?', 'user', { max: 80 })}
@@ -25730,7 +25733,7 @@ function abrirEditorCertificacao(o) {
   const $ = id => m.querySelector('#ce-' + id), radio = n => { const r = m.querySelector(`input[name="ce_${n}"]:checked`); return r ? r.value : ''; };
   const ler = () => ({ certificada_por: radio('certificada_por'), atendente: $('atendente').value, os: fcSoDigitos(o.os), tecnico: $('tecnico').value.trim().replace(/\s+/g, ' '), baixa: $('baixa').value.trim(), defeito: $('defeito').value.trim(),
     explicou_rede: radio('explicou_rede'), senha_wifi: radio('senha_wifi'), roteador: radio('roteador'), cabo: radio('cabo'), certificada_corretamente: radio('certificada_corretamente'), telefone: $('telefone').value.trim(),
-    quem_atendeu: $('quem_atendeu').value.trim(), nota: radio('nota'), observacao: $('observacao').value.trim(), chamar: radio('chamar') });
+    quem_atendeu: $('quem_atendeu').value.trim(), nota: radio('nota'), observacao: $('observacao').value.trim(), obs_tecnico: $('obs_tecnico').value.trim(), chamar: radio('chamar') });
   const fechar = () => m.classList.remove('active');
   $('telefone').addEventListener('input', () => { $('telefone').value = fcMascaraTel($('telefone').value); });
   m.addEventListener('input', ev => { const c = ev.target.closest('.fc-campo'); if (c) { c.classList.remove('erro'); const e = $('erro-' + c.dataset.campo); if (e) e.textContent = ''; } });
@@ -25745,7 +25748,7 @@ function abrirEditorCertificacao(o) {
     aviso.hidden = true; salvando = true; const bt = $('salvar'), tx = bt.querySelector('.fc-txt'); bt.disabled = true; tx.textContent = 'Salvando…';
     const novo = { id: reg ? reg.id : fcNovoId(), criado_em: reg ? reg.criado_em : new Date().toISOString(), criado_por: reg ? reg.criado_por : waQuemChama(), certificada_por: v.certificada_por, atendente: v.atendente, tecnico: v.tecnico, os: v.os,
       baixa: v.baixa, defeito: v.defeito, explicou_rede: v.explicou_rede, senha_wifi: v.senha_wifi, roteador: v.roteador, cabo: v.cabo, certificada_corretamente: v.certificada_corretamente, telefone: fcSoDigitos(v.telefone),
-      quem_atendeu: v.quem_atendeu, nota: v.nota ? +v.nota : null, observacao: v.observacao || null, chamar: v.chamar,
+      quem_atendeu: v.quem_atendeu, nota: v.nota ? +v.nota : null, observacao: v.observacao || null, obs_tecnico: v.obs_tecnico || null, chamar: v.chamar,
       cliente: o.cliente || (reg && reg.cliente) || null, contrato: o.contrato || (reg && reg.contrato) || null, cidade: o.cidade || (reg && reg.cidade) || null };
     let r; try { r = await certFormSalvar(novo); } catch (e) { r = { ok: false, erro: String(e && e.message || e) }; }
     salvando = false; bt.disabled = false; tx.textContent = 'Salvar alterações';
@@ -25831,7 +25834,7 @@ function renderCertificacoes() {
         os: r.os, contrato: r.contrato, tecnico: r.recurso, cliente: r.cliente,
         cidade: r.cidade || 'Não informado', periodo: r.periodo || '-',
         certificada, statusTexto,
-        atendente: m ? m.atendente : '', certificadaPor: m ? m.certificadaPor : '', correta: m && m.correta ? m.correta : '',
+        atendente: m ? m.atendente : '', certificadaPor: m ? m.certificadaPor : '', correta: m && m.correta ? m.correta : '', obsTecnico: m && m.obsTecnico ? m.obsTecnico : '',
         horarioConcluida: fmtHora(r.encerramento),
         horarioCertificada: dataHoraCert ? fmtHora(dataHoraCert) : '-',
         tempo: certificada ? tempoEntre(r.encerramento, dataHoraCert) : tempoEntre(r.encerramento, agora),
@@ -25893,9 +25896,9 @@ function renderCertificacoes() {
         ${podeChamarClientes() ? '<button type="button" class="btn-sinalizar fora-da-imagem" id="cert-chamar" title="Só ordens concluídas de ativação, mudança de endereço e reparo: abre o WhatsApp de cada cliente com a mensagem de verificação de qualidade">📞 Chamar Clientes</button>' : ''}
       </div>
       <div class="table-wrap rolagem-inteira-na-imagem"><table class="data-table" id="tab-certificacoes-detalhe"><thead><tr>
-        <th class="fora-da-imagem">O.S</th><th class="fora-da-imagem">Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th class="fora-da-imagem">Período</th><th>Status</th><th class="fora-da-imagem">Atendente</th><th class="fora-da-imagem">Certificada por</th>${podeVerRespostasCert() ? '<th>Certificada corretamente pelo técnico?</th>' : ''}<th class="fora-da-imagem">Horário Concluída</th><th class="fora-da-imagem">Horário Certificada</th><th class="fora-da-imagem">Tempo</th>${podeUsarFormCert() ? '<th class="fora-da-imagem">Ações</th>' : ''}
+        <th class="fora-da-imagem">O.S</th><th class="fora-da-imagem">Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th class="fora-da-imagem">Período</th><th>Status</th><th class="fora-da-imagem">Atendente</th><th class="fora-da-imagem">Certificada por</th>${podeVerRespostasCert() ? '<th>Certificada corretamente pelo técnico?</th><th class="fora-da-imagem">Observação (certificação)</th>' : ''}<th class="fora-da-imagem">Horário Concluída</th><th class="fora-da-imagem">Horário Certificada</th><th class="fora-da-imagem">Tempo</th>${podeUsarFormCert() ? '<th class="fora-da-imagem">Ações</th>' : ''}
       </tr></thead><tbody>
-        ${linhas.map(l => `<tr><td class="fora-da-imagem">${esc(l.os)||'-'}</td><td class="fora-da-imagem">${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td class="fora-da-imagem">${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td>${podeVerRespostasCert() ? `<td>${l.correta === 'SIM' ? '<span class="badge ok">Sim</span>' : l.correta === 'NÃO' || l.correta === 'NAO' ? '<span class="badge warn">Não</span>' : '-'}</td>` : ''}<td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td>${podeUsarFormCert() ? `<td class="fora-da-imagem"><button type="button" class="fc-btn fc-btn-sec" data-cert-edit="${esc(l.os)}" style="padding:3px 10px;font-size:12.5px;min-height:0;white-space:nowrap" title="${temRegForm(l.os) ? 'Corrigir a certificação feita pelo formulário do sistema' : 'Registrar/corrigir a certificação desta O.S'}">${temRegForm(l.os) || l.certificada ? '✎ Editar' : '✎ Certificar'}</button></td>` : ''}</tr>`).join('')}
+        ${linhas.map(l => `<tr><td class="fora-da-imagem">${esc(l.os)||'-'}</td><td class="fora-da-imagem">${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td class="fora-da-imagem">${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td>${podeVerRespostasCert() ? `<td>${l.correta === 'SIM' ? '<span class="badge ok">Sim</span>' : l.correta === 'NÃO' || l.correta === 'NAO' ? '<span class="badge warn">Não</span>' : '-'}</td><td class="fora-da-imagem" style="min-width:200px;max-width:360px;white-space:normal">${esc(l.obsTecnico) || '-'}</td>` : ''}<td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td>${podeUsarFormCert() ? `<td class="fora-da-imagem"><button type="button" class="fc-btn fc-btn-sec" data-cert-edit="${esc(l.os)}" style="padding:3px 10px;font-size:12.5px;min-height:0;white-space:nowrap" title="${temRegForm(l.os) ? 'Corrigir a certificação feita pelo formulário do sistema' : 'Registrar/corrigir a certificação desta O.S'}">${temRegForm(l.os) || l.certificada ? '✎ Editar' : '✎ Certificar'}</button></td>` : ''}</tr>`).join('')}
       </tbody></table></div>
       <div class="panels-grid fora-da-imagem" id="cert-graficos" style="margin-top:1.25rem">
         <div class="panel"><h3>Certificadas × Não certificadas</h3><div id="cert-g1"></div></div>
