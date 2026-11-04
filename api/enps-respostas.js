@@ -18,7 +18,7 @@ module.exports = async (req, res) => {
   if (!ok) return res.status(403).json({ ok: false, codigo: 'origem' });
   let corpo = req.body;
   try { if (typeof corpo === 'string') corpo = JSON.parse(corpo); } catch (e) { return res.status(400).json({ ok: false, codigo: 'corpo_invalido' }); }
-  if (JSON.stringify(corpo || {}).length > 2000) return res.status(413).json({ ok: false, codigo: 'corpo_grande' });
+  if (JSON.stringify(corpo || {}).length > 4000) return res.status(413).json({ ok: false, codigo: 'corpo_grande' });
   const auth = String(req.headers.authorization || ''), token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
   try {
     const out = await processar({ env: process.env, fetchFn: fetch, corpo, token });

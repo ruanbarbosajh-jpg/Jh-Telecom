@@ -24978,6 +24978,8 @@ const ENPSR_MSG = {
   limite_minuto: 'Muitas consultas seguidas. Aguarde um minuto e tente de novo.',
   enps_indisponivel: 'Não foi possível ler as respostas agora. Tente de novo em instantes.',
   erro_interno: 'Erro ao consultar os resultados. Tente de novo em instantes.',
+  so_analista: 'Só o Analista pode gerenciar respostas.',
+  pedido_invalido: 'Pedido inválido. Atualize a lista e tente de novo.',
 };
 
 async function enprObterToken() {
@@ -24988,6 +24990,15 @@ async function enprBuscar(periodo, agrupar) {
   const token = await enprObterToken();
   let r;
   try { r = await fetch(ENPSR_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ periodo, agrupar }) }); }
+  catch (e) { return { status: 0, corpo: { codigo: 'rede' } }; }
+  let corpo = null; try { corpo = await r.json(); } catch (e) {}
+  return { status: r.status, corpo: corpo || {} };
+}
+// chamada de gerenciamento (listar / excluir): o SERVIDOR só aceita se o perfil for Analista; aqui o botão só esconde o que não é da pessoa
+async function enprAcao(corpoPedido) {
+  const token = await enprObterToken();
+  let r;
+  try { r = await fetch(ENPSR_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(corpoPedido) }); }
   catch (e) { return { status: 0, corpo: { codigo: 'rede' } }; }
   let corpo = null; try { corpo = await r.json(); } catch (e) {}
   return { status: r.status, corpo: corpo || {} };
@@ -25003,6 +25014,7 @@ const enprRotuloPeriodo = p => {   // "2026-10" -> "out/2026"; "2026-10-05" -> "
 
 function enprDesenhar(d, agrupar) {
   const r = d.resumo, rotCat = id => ENPSR_CATS.find(c => c.id === id);
+  const corEnps = r.enps >= 50 ? 'positive' : r.enps >= 0 ? '' : 'negative';
   let h = `<div class="stat-cards">
     ${statCard(r.enps >= 0 ? 'verde' : 'vermelho', icOk, 'E-NPS', (r.enps > 0 ? '+' : '') + r.enps, 'de −100 a +100 (% promotores − % detratores)')}
     ${statCard('azul', icOk, 'Respostas', r.total, 'pesquisas anônimas')}
@@ -25058,9 +25070,50 @@ function renderEnpsRespostas() {
       <button class="btn" id="f-apply">Filtrar</button>
     </div>
     <div class="panel" style="padding:12px 16px"><p style="margin:0;font-size:13px;color:var(--text-muted)">Pesquisa <b>anônima</b> em que os técnicos avaliam o escritório. O sistema mostra só resultados somados, nunca respostas individuais, e só quando há 5 respostas ou mais. Não é a mesma coisa que a aba "E-NPS Escritório".</p></div>
-    <div id="enr-body"><div class="empty">Carregando…</div></div>`;
+    <div id="enr-body"><div class="empty">Carregando…</div></div>
+    ${ehAnalista() ? '<div id="enr-gerenciar"></div>' : ''}`;
   document.getElementById('f-apply').addEventListener('click', load);
   load();
+  if (ehAnalista()) gerenciar();
+  // GERENCIAR RESPOSTAS — só o Analista (04/11/2026): lista as respostas sem identificação e permite EXCLUIR (nunca editar). A exclusão é conferida de novo no servidor.
+  function gerenciar() {
+    const box = document.getElementById('enr-gerenciar'); if (!box) return;
+    box.innerHTML = `<div class="section-heading"><h3>Gerenciar respostas <span style="font-weight:400;font-size:12px;color:var(--text-muted)">(só o Analista)</span></h3></div>
+      <div class="panel" id="enr-ger-panel"><p style="margin:0 0 10px;color:var(--text-muted);font-size:13px">Use para apagar respostas de teste ou enviadas por engano. Cada linha é uma resposta anônima: não existe nome, e-mail ou IP. <b>A exclusão é definitiva</b> e não existe edição: o conteúdo de uma pesquisa anônima não pode ser alterado.</p>
+      <button class="btn" id="enr-ger-carregar" type="button">Carregar respostas</button><div id="enr-ger-lista" style="margin-top:12px"></div></div>`;
+    document.getElementById('enr-ger-carregar').addEventListener('click', listar);
+  }
+  async function listar() {
+    const lista = document.getElementById('enr-ger-lista'); if (!lista) return;
+    lista.innerHTML = '<div class="empty">Carregando…</div>';
+    const { status, corpo } = await enprAcao({ acao: 'listar' });
+    if (!document.getElementById('enr-ger-lista')) return;
+    if (status !== 200 || !corpo.ok) { lista.innerHTML = enprAviso(ENPSR_MSG[corpo.codigo] || (corpo.codigo === 'so_analista' ? 'Só o Analista pode gerenciar respostas.' : 'Não foi possível carregar a lista.'), 'erro'); return; }
+    const rs = corpo.respostas || [];
+    if (!rs.length) { lista.innerHTML = '<div class="empty">Nenhuma resposta cadastrada.</div>'; return; }
+    const dmy = d => String(d || '').replace(/^(\d{4})-(\d{2})-(\d{2}).*$/, '$3/$2/$1');
+    const com = r => [['Faz bem', r.faz_bem], ['Melhorar', r.melhorar], ['Sugestões', r.sugestoes]].filter(x => x[1]).map(x => `<b>${x[0]}:</b> ${esc(x[1])}`).join('<br>') || '<span style="color:var(--text-muted)">sem comentários</span>';
+    lista.innerHTML = `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span style="color:var(--text-muted);font-size:13px">${rs.length} resposta(s), da mais recente para a mais antiga</span><button class="btn btn-secundario" id="enr-ger-todas" type="button">Marcar todas</button><button class="btn" id="enr-ger-excluir" type="button" style="background:var(--danger);border-color:var(--danger);color:#fff" disabled>Excluir marcadas (0)</button></div>
+      <div class="table-wrap"><table class="data-table" data-sem-ordenar="1"><thead><tr><th style="width:36px"></th><th>Data</th><th>Nota (0–10)</th><th>Média (1–5)</th><th>Comentários</th></tr></thead><tbody>${rs.map(r => `<tr><td><input type="checkbox" class="enr-ger-ck" data-id="${esc(r.id)}" aria-label="Marcar resposta"></td><td>${esc(dmy(r.dia))}</td><td>${r.nota == null ? '–' : r.nota}</td><td>${r.media == null ? '–' : enprFmt(r.media, 2)}</td><td style="max-width:520px;white-space:normal;word-break:break-word">${com(r)}</td></tr>`).join('')}</tbody></table></div>`;
+    const cks = () => [...lista.querySelectorAll('.enr-ger-ck')], btn = lista.querySelector('#enr-ger-excluir');
+    const atualiza = () => { const n = cks().filter(c => c.checked).length; btn.disabled = !n; btn.textContent = `Excluir marcadas (${n})`; };
+    lista.addEventListener('change', e => { if (e.target.classList.contains('enr-ger-ck')) atualiza(); });
+    lista.querySelector('#enr-ger-todas').addEventListener('click', () => { const todas = cks().every(c => c.checked); cks().forEach(c => { c.checked = !todas; }); atualiza(); });
+    btn.addEventListener('click', async () => {
+      const ids = cks().filter(c => c.checked).map(c => c.dataset.id); if (!ids.length) return;
+      if (!confirm(`Excluir ${ids.length} resposta(s) do E-NPS dos técnicos?
+
+A exclusão é DEFINITIVA e muda os resultados do painel.`)) return;
+      btn.disabled = true; btn.textContent = 'Excluindo…';
+      let apagadas = 0, erro = '';
+      for (let i = 0; i < ids.length; i += 50) {   // o servidor aceita até 50 por pedido
+        const r = await enprAcao({ acao: 'excluir', ids: ids.slice(i, i + 50), confirmar: true });
+        if (r.status === 200 && r.corpo.ok) apagadas += r.corpo.excluidas || 0; else { erro = ENPSR_MSG[r.corpo.codigo] || 'Não foi possível excluir.'; break; }
+      }
+      toast(erro ? `${apagadas} excluída(s). ${erro}` : `${apagadas} resposta(s) excluída(s).`, erro ? 'aviso' : 'sucesso');
+      await listar(); load();   // refaz a lista e os resultados somados
+    });
+  }
   async function load() {
     const body = document.getElementById('enr-body'); if (!body) return;
     const periodo = document.getElementById('enr-per').value, agrupar = document.getElementById('enr-agr').value;
