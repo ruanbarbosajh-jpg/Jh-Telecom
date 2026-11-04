@@ -4604,7 +4604,7 @@ html[data-tab2="1"] .table-wrap { max-width: 100%; -webkit-overflow-scrolling: t
       <a data-route="cleanup"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M9 1.8c-2.9 0-5.2 2.3-5.2 5.2 0 3.9 5.2 9.2 5.2 9.2s5.2-5.3 5.2-9.2c0-2.9-2.3-5.2-5.2-5.2Z"/><circle cx="9" cy="7" r="2"/></svg></i><span class="nav-txt">Clean Up</span></a>
       <a data-route="improdutivas"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M9 2.2 1.8 15h14.4L9 2.2Z"/><line x1="9" y1="7.4" x2="9" y2="10.8"/><line x1="9" y1="12.9" x2="9" y2="12.92"/></svg></i><span class="nav-txt">Improdutivas do Dia</span></a>
       <a data-route="fiscalizacao"><i class="nav-ic"><svg viewBox="0 0 18 18"><rect x="3" y="2.5" width="12" height="13.5" rx="1.8"/><path d="M6.3 2.5V1.6h5.4v.9"/><path d="m6 9.2 2 2 4-4.2"/></svg></i><span class="nav-txt">Fiscalização em Campo</span></a>
-      <a data-route="enps"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="m9 2 2.1 4.3 4.7.7-3.4 3.3.8 4.7L9 12.8 4.8 15l.8-4.7L2.2 7l4.7-.7z"/></svg></i><span class="nav-txt">E-NPS dos Técnicos</span></a>
+      <a data-route="enps"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="m9 2 2.1 4.3 4.7.7-3.4 3.3.8 4.7L9 12.8 4.8 15l.8-4.7L2.2 7l4.7-.7z"/></svg></i><span class="nav-txt">E-NPS Escritório</span></a>
       <a data-route="enpsresp"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M3 15V8M7.5 15V4M12 15V10M16 15V6"/></svg></i><span class="nav-txt">E-NPS – Respostas dos Técnicos</span></a>
       <a data-route="igp"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M2 15V9M7 15V4M12 15v-7M16 15V2"/></svg></i><span class="nav-txt">IGP</span></a>
       <a data-route="cstab"><i class="nav-ic"><svg viewBox="0 0 18 18"><path d="M9 1.8 16 5v4.3c0 3.6-2.8 6.1-7 7.4-4.2-1.3-7-3.8-7-7.4V5l7-3.2Z"/><path d="M6.4 9.2 8.2 11l3.4-3.6"/></svg></i><span class="nav-txt">CST - A.B</span></a>
@@ -5680,7 +5680,8 @@ function podeAcessar(role, route) {
   if (route === 'enps') return perfil === 'analista' || perfil === 'admin' || perfil === 'gestao' || perfil === 'rh';
   // E-NPS — Respostas dos Técnicos (04/11/2026): resultados ANÔNIMOS da pesquisa em que os técnicos avaliam o escritório. Escritório e Almoxarifado ficam de fora;
   // a regra de verdade é a do SERVIDOR (/api/enps-respostas confere o perfil e responde 403) — esta linha só esconde o menu.
-  if (route === 'enpsresp') return perfil === 'analista' || perfil === 'admin' || perfil === 'gestao' || perfil === 'rh';
+  // 04/11/2026 (pedido do cliente): a Thaís (perfil Escritório) também acessa este painel; o servidor libera pelo perfil dela no banco (admin).
+  if (route === 'enpsresp') return perfil === 'analista' || perfil === 'admin' || perfil === 'gestao' || perfil === 'rh' || (perfil === 'escritorio' && !!currentUser && currentUser.nome === 'Thaís');
   // Fiscalização em Campo (30/10/2026, pedido do cliente): só Supervisor/Coordenador (admin), Analista e GESTÃO JH. Escritório, RH e Almox ficam de fora (a Thaís é Escritório).
   if (route === 'fiscalizacao') return perfil === 'analista' || perfil === 'admin' || perfil === 'gestao';
   // IGP e CST - A.B (30/10/2026, pedido do cliente): EXCLUSIVOS do Analista — nem RH, Supervisores, Gestão ou Escritório entram.
@@ -11249,7 +11250,7 @@ const PAGES = {
   retornosesc: { title: 'Retornos do Dia', render: () => renderPCR('retornos') },
   improdutivas: { title: 'Improdutivas do Dia', render: renderImprodutivasDoDia },
   fiscalizacao: { title: 'Fiscalização em Campo', render: renderFiscalizacao },
-  enps: { title: 'E-NPS — Avaliação dos Técnicos', render: renderEnps },
+  enps: { title: 'E-NPS Escritório', render: renderEnps },
   enpsresp: { title: 'E-NPS – Respostas dos Técnicos', render: renderEnpsRespostas },
   igp: { title: 'IGP', render: renderIGP },
   cstab: { title: 'CST - A.B', render: renderCSTAB },
@@ -24941,7 +24942,7 @@ function renderEnps() {
 
 // ===================== E-NPS — RESPOSTAS DOS TÉCNICOS (04/11/2026) =====================
 // Painel dentro do JH dos resultados da pesquisa ANÔNIMA em que os TÉCNICOS avaliam o ESCRITÓRIO (banco Supabase INDEPENDENTE, sem relação com a
-// aba "E-NPS dos Técnicos", em que o escritório avalia os técnicos). O acesso é pelo login do JH: o navegador manda o token da sessão para
+// aba "E-NPS Escritório", em que o escritório avalia os técnicos). O acesso é pelo login do JH: o navegador manda o token da sessão para
 // /api/enps-respostas, que confere o perfil NO SERVIDOR (Analista, Supervisores/Coordenador, Gestão e RH; Escritório e Almoxarifado = 403) e só
 // então consulta o outro banco com a chave privada (que nunca vem pra cá). Aqui só chegam AGREGADOS: nenhuma resposta individual, data de
 // envio, nome, e-mail ou IP, e nada com menos de 5 respostas. Comentários vêm embaralhados e sem data.
@@ -25056,7 +25057,7 @@ function renderEnpsRespostas() {
       <div class="field"><label>Agrupar a evolução</label><select id="enr-agr"><option value="mes">Por mês</option><option value="sem">Por semana</option></select></div>
       <button class="btn" id="f-apply">Filtrar</button>
     </div>
-    <div class="panel" style="padding:12px 16px"><p style="margin:0;font-size:13px;color:var(--text-muted)">Pesquisa <b>anônima</b> em que os técnicos avaliam o escritório. O sistema mostra só resultados somados, nunca respostas individuais, e só quando há 5 respostas ou mais. Não é a mesma coisa que a aba "E-NPS dos Técnicos".</p></div>
+    <div class="panel" style="padding:12px 16px"><p style="margin:0;font-size:13px;color:var(--text-muted)">Pesquisa <b>anônima</b> em que os técnicos avaliam o escritório. O sistema mostra só resultados somados, nunca respostas individuais, e só quando há 5 respostas ou mais. Não é a mesma coisa que a aba "E-NPS Escritório".</p></div>
     <div id="enr-body"><div class="empty">Carregando…</div></div>`;
   document.getElementById('f-apply').addEventListener('click', load);
   load();
