@@ -5654,8 +5654,9 @@ function podeAcessar(role, route) {
   // diferentes (ROUTE_PERMISSIONS de admin/rh/gestao/escritorio/almox) nem
   // na allowlist da Gestão — bloqueia direto, incondicional.
   if (route === 'presenca') return false;
-  // Presença — Escritório voltou em 03/11/2026 (pedido do cliente), SÓ pro Analista por enquanto. Pra liberar pra outros perfis, trocar esta linha (e a allowlist de cada perfil, se for o caso).
-  if (route === 'presencaescritorio') return perfilValido(role) === 'analista';
+  // Presença — Escritório voltou em 03/11/2026 (pedido do cliente), só pro Analista; em 04/11/2026 foi liberada também pra Thaís e Rebeca (por nome, NOMES_ESCRITORIO_EDITAM — a Thaís é
+  // perfil Escritório e a Rebeca admin, por isso a regra é por nome e vem antes das listas de perfil). Os mesmos nomes editam o quadro (podeEditarPresencaEscritorio).
+  if (route === 'presencaescritorio') return perfilValido(role) === 'analista' || (!!currentUser && NOMES_ESCRITORIO_EDITAM.includes(currentUser.nome));
   // Tela "Financeiro" (cadastro de despesas do ciclo): tirada pra TODOS em
   // 01/10/2026, pedido do cliente. O Dashboard/Relatório do Financeiro continuam
   // lendo DB.financeiro normalmente — só a tela de lançamento some.
@@ -10375,7 +10376,7 @@ const MENU_CATEGORIAS = [
   { id: 'operacao', nome: 'OPERAÇÃO', rotas: ['table', 'prazo', 'prazoativacao', 'ofensoresprazo', 'chamadosgiga'] },
   { id: 'apoio', nome: 'APOIO', rotas: ['contatos', 'cleanup', 'enps', 'enpsresp'] },
 ];
-const MENU_EXTRAS_DIARIO = ['formcert', 'reldia', 'reuniaoprazos', 'relgeral'], MENU_EXTRAS_APOIO = ['saude', 'import'];
+const MENU_EXTRAS_DIARIO = ['formcert', 'reldia', 'reuniaoprazos', 'relgeral'], MENU_EXTRAS_APOIO = ['saude', 'import', 'presencaescritorio'];
 // GESTÃO JH (29/10/2026): menu lateral próprio — 6 relatórios na ordem pedida, Frota e Pedágio (grupo) e "Outras opções" (recolhido) com o resto que ela pode abrir
 function usaMenuGestao() { return !!currentUser && perfilValido(currentUser.role) === 'gestao'; }
 const MENU_GESTAO_PRINCIPAL = ['gerdash', 'relgeral', 'prazoret', 'reldia', 'fingerencial', 'monger'];
@@ -22516,7 +22517,10 @@ const PESSOAS_ESCRITORIO_FIXAS = [
   { nome: 'Caio',     cargo: 'Atendente',    setor: 'CLEAN/UP - CIDADE', horario_fixo: '9h às 18h' },
   { nome: 'Daniela',  cargo: 'Atendente',    setor: 'CIDADE', horario_fixo: '9h às 18h' },
   { nome: 'Gabriele', cargo: 'Atendente',    setor: 'CIDADE', horario_fixo: '7h às 16h' },
-  { nome: 'Kimberly', cargo: 'Atendente',    setor: 'CIDADE', horario_fixo: '8h às 17h' }
+  { nome: 'Kimberly', cargo: 'Atendente',    setor: 'CIDADE', horario_fixo: '8h às 17h' },
+  // 04/11/2026: escritório atual = Sandila, Luma, Caio, Daniela, Gabriele, Kimberly, Ana Carolina e Evelyn (setor e horário das duas últimas ainda não informados)
+  { nome: 'Ana Carolina', cargo: 'Atendente', setor: '', horario_fixo: '' },
+  { nome: 'Evelyn',   cargo: 'Atendente',    setor: '', horario_fixo: '' }
 ];
 // Coordenadora/Supervisora: mesma lista todo santo dia, semana ou fim de
 // semana — o turno dela É o status.
@@ -25051,6 +25055,11 @@ function enprDesenhar(d, agrupar) {
     const l = (d.comentarios && d.comentarios[a.id]) || [];
     h += `<div class="panel"><h3>${esc(a.titulo)} <span style="font-weight:400;font-size:12px;color:var(--text-muted)">(${l.length})</span></h3>${l.length ? l.map(t => `<div style="padding:9px 12px;border-left:3px solid var(--accent);background:var(--card-bg-2, rgba(0,0,0,.03));border-radius:0 8px 8px 0;margin:8px 0;white-space:pre-wrap;word-break:break-word">${esc(t)}</div>`).join('') : '<p style="color:var(--text-muted);margin:0">Sem comentários.</p>'}</div>`;
   });
+  // 04/11/2026: observações sobre as atendentes (pergunta nova do formulário: o técnico escolhe a atendente e escreve a observação)
+  const ats = d.atendentes || [];
+  h += '<div class="section-heading"><h3>Observações sobre as atendentes (anônimas)</h3></div>';
+  h += ats.length ? `<div class="panels-grid">${ats.map(a => `<div class="panel"><h3>${esc(a.nome)} <span style="font-weight:400;font-size:12px;color:var(--text-muted)">(${a.total} ${a.total > 1 ? 'observações' : 'observação'})</span></h3>${a.observacoes.map(t => `<div style="padding:9px 12px;border-left:3px solid var(--accent);background:var(--card-bg-2, rgba(0,0,0,.03));border-radius:0 8px 8px 0;margin:8px 0;white-space:pre-wrap;word-break:break-word">${esc(t)}</div>`).join('')}</div>`).join('')}</div>`
+    : '<div class="panel"><p style="margin:0;color:var(--text-muted)">Ainda não há observações sobre atendentes neste recorte.</p></div>';
   return h;
 }
 
@@ -25092,9 +25101,9 @@ function renderEnpsRespostas() {
     const rs = corpo.respostas || [];
     if (!rs.length) { lista.innerHTML = '<div class="empty">Nenhuma resposta cadastrada.</div>'; return; }
     const dmy = d => String(d || '').replace(/^(\d{4})-(\d{2})-(\d{2}).*$/, '$3/$2/$1');
-    const com = r => [['Faz bem', r.faz_bem], ['Melhorar', r.melhorar], ['Sugestões', r.sugestoes]].filter(x => x[1]).map(x => `<b>${x[0]}:</b> ${esc(x[1])}`).join('<br>') || '<span style="color:var(--text-muted)">sem comentários</span>';
+    const com = r => [['Faz bem', r.faz_bem], ['Melhorar', r.melhorar], ['Sugestões', r.sugestoes], ['Obs. atendente', r.obs_atendente]].filter(x => x[1]).map(x => `<b>${x[0]}:</b> ${esc(x[1])}`).join('<br>') || '<span style="color:var(--text-muted)">sem comentários</span>';
     lista.innerHTML = `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span style="color:var(--text-muted);font-size:13px">${rs.length} resposta(s), da mais recente para a mais antiga</span><button class="btn btn-secundario" id="enr-ger-todas" type="button">Marcar todas</button><button class="btn" id="enr-ger-excluir" type="button" style="background:var(--danger);border-color:var(--danger);color:#fff" disabled>Excluir marcadas (0)</button></div>
-      <div class="table-wrap"><table class="data-table" data-sem-ordenar="1"><thead><tr><th style="width:36px"></th><th>Data</th><th>Nota (0–10)</th><th>Média (1–5)</th><th>Comentários</th></tr></thead><tbody>${rs.map(r => `<tr><td><input type="checkbox" class="enr-ger-ck" data-id="${esc(r.id)}" aria-label="Marcar resposta"></td><td>${esc(dmy(r.dia))}</td><td>${r.nota == null ? '–' : r.nota}</td><td>${r.media == null ? '–' : enprFmt(r.media, 2)}</td><td style="max-width:520px;white-space:normal;word-break:break-word">${com(r)}</td></tr>`).join('')}</tbody></table></div>`;
+      <div class="table-wrap"><table class="data-table" data-sem-ordenar="1"><thead><tr><th style="width:36px"></th><th>Data</th><th>Nota (0–10)</th><th>Média (1–5)</th><th>Atendente</th><th>Comentários</th></tr></thead><tbody>${rs.map(r => `<tr><td><input type="checkbox" class="enr-ger-ck" data-id="${esc(r.id)}" aria-label="Marcar resposta"></td><td>${esc(dmy(r.dia))}</td><td>${r.nota == null ? '–' : r.nota}</td><td>${r.media == null ? '–' : enprFmt(r.media, 2)}</td><td>${r.atendente ? esc(r.atendente) : '–'}</td><td style="max-width:520px;white-space:normal;word-break:break-word">${com(r)}</td></tr>`).join('')}</tbody></table></div>`;
     const cks = () => [...lista.querySelectorAll('.enr-ger-ck')], btn = lista.querySelector('#enr-ger-excluir');
     const atualiza = () => { const n = cks().filter(c => c.checked).length; btn.disabled = !n; btn.textContent = `Excluir marcadas (${n})`; };
     lista.addEventListener('change', e => { if (e.target.classList.contains('enr-ger-ck')) atualiza(); });
