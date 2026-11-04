@@ -4414,6 +4414,13 @@ html[data-tab2="1"] .table-wrap { max-width: 100%; -webkit-overflow-scrolling: t
   .abas-unif button.on { background: var(--accent); color: #fff; } .abas-unif button:not(.on):hover { background: rgba(37, 99, 235, .1); color: var(--accent); }
   .cst-sinalizar { min-height: 54px; font-size: 17px; letter-spacing: .02em; padding: 0 26px; }
   .fx-foto-i video { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; background: #000; }
+  /* ORGANIZAÇÃO EM ABAS DO ANALISTA (04/11/2026) — abas dos relatórios, tabelas grandes com rolagem própria, índice "Nesta aba" some quando há abas */
+  html[data-tab2="1"] .ger-abas { position: sticky; top: var(--altura-topo, 64px); z-index: 8; background: var(--bg-page); padding: 8px 0 10px; margin: 0 0 12px; }
+  html[data-tab2="1"] .ger-abas button { background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border); font-size: 14px; padding: 9px 18px; }
+  html[data-tab2="1"] .ger-abas button:hover { border-color: var(--accent); color: var(--accent); }
+  html[data-tab2="1"] .ger-abas button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  body.abas-analista #indice-aba, body.abas-analista #indice-voltar { display: none !important; }
+  html[data-tab2="1"] .table-wrap.tab-rolagem { max-height: min(64vh, 620px); overflow: auto; }
 </style>
 </head>
 <body>
@@ -11072,7 +11079,7 @@ const GER_GRUPOS_DIA = [
   { id: 'd', nome: 'D · Comparativo integrado', tit: [/^Comparativo integrado/] },
 ];
 const GER_ABA_ATUAL = {};   // grupo escolhido por tela (some no F5)
-function gerAgruparTopicos(rota, grupos, aoAplicar) {
+function gerAgruparTopicos(rota, grupos, aoAplicar, ancoraFn) {
   if (!GER_ABA_ATUAL[rota]) GER_ABA_ATUAL[rota] = grupos[0].id;
   let obs = null, ocupado = false;
   const aplicar = () => {
@@ -11085,20 +11092,62 @@ function gerAgruparTopicos(rota, grupos, aoAplicar) {
       if (!nav) {
         nav = document.createElement('div'); nav.className = 'ger-abas';
         nav.innerHTML = grupos.map(g => `<button type="button" data-g="${g.id}">${esc(g.nome)}</button>`).join('');
-        const ancora = c.querySelector('.ger-topo') || c.querySelector('.toolbar'); if (ancora) ancora.after(nav); else c.prepend(nav);
+        const ancora = (ancoraFn && ancoraFn(c)) || c.querySelector('.ger-topo') || c.querySelector('.toolbar'); if (ancora) ancora.after(nav); else c.prepend(nav);
         nav.onclick = e => { const b = e.target.closest('button[data-g]'); if (b) { GER_ABA_ATUAL[rota] = b.dataset.g; aplicar(); } };
       }
       nav.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.g === GER_ABA_ATUAL[rota]));
       const g = grupos.find(x => x.id === GER_ABA_ATUAL[rota]) || grupos[0];
       c.querySelectorAll('.topico-caixa, .topico-grupo').forEach(t => {
         const tit = String((t.querySelector('h3, .section-heading, .ph-titulo') || t).textContent || '').replace(/\s+/g, ' ').trim();
-        t.style.display = g.tit.some(re => re.test(tit)) ? '' : 'none';
+        const orfa = grupos.semAbaVisivel && !grupos.some(x => x.tit.some(re => re.test(tit)));   // Analista: tópico sem aba fica SEMPRE visível (nada some por esquecimento)
+        t.style.display = (g.tit.some(re => re.test(tit)) || orfa) ? '' : 'none';
       });
     } finally { setTimeout(() => { ocupado = false; }, 0); }
   };
-  setTimeout(aplicar, 600); setTimeout(aplicar, 1500);
+  setTimeout(aplicar, 80); setTimeout(aplicar, 600); setTimeout(aplicar, 1500);
   const c = document.getElementById('content');
   if (c) { obs = new MutationObserver(() => { if (ocupado) return; clearTimeout(gerAgruparTopicos._t); gerAgruparTopicos._t = setTimeout(aplicar, 350); }); obs.observe(c, { childList: true, subtree: true }); }
+}
+// ORGANIZAÇÃO EM ABAS — só o login Analista (04/11/2026, projeto de otimização de layout): cada tópico da tela entra em UMA aba (nada some, nada é recalculado); os indicadores do topo
+// ficam sempre à vista. Tópico que não casa com nenhuma aba fica sempre visível (rede de segurança — o teste confere 0 sem aba).
+const ANALISTA_GRUPOS = {
+  relgeral: [
+    { id: 'resumo', nome: 'Resumo', tit: [/^Visão geral/, /^Ordens do período — status e tipo/, /^Gráficos da operação/] },
+    { id: 'tecnicos', nome: 'Técnicos', tit: [/^Produção por técnico/, /^Resultado por técnico/, /^Produção e deslocamento por técnico/, /^Produtividade diária por técnico/, /^Técnicos — produção e entrega no prazo/] },
+    { id: 'cidades', nome: 'Cidades', tit: [/^Produção geral por cidade/, /^O\.S canceladas por cidade/] },
+    { id: 'prazo', nome: 'Prazo', tit: [/^Prazos — reparo/, /^Cidades com maior perda de prazo/, /^Prazo — principal ofensor por cidade/, /^Perda de prazo por período/] },
+    { id: 'retornos', nome: 'Retornos IFI / IRR', tit: [/^Retornos —/, /^Retornos IRR —/] },
+    { id: 'improd', nome: 'Improdutividade e horários', tit: [/^Técnicos com maior volume de improdutivas/, /^Ordens concluídas após as 18h/, /^Horário de início do dia/] },
+    { id: 'max', nome: 'MAX — reincidência', tit: [/^MAX/] },
+    { id: 'detalhe', nome: 'Detalhamento das ordens', tit: [/^Ordens do período — detalhamento/] },
+  ],
+  dashboard: [
+    { id: 'visao', nome: 'Visão geral', tit: [/^Resultado do ciclo/, /^Indicadores de qualidade/, /^Ranking de técnicos/, /^Produção por tipo de serviço/, /^Comparativo de produção entre ciclos/] },
+    { id: 'fin', nome: 'Financeiro', tit: [/^Resumo financeiro do ciclo/, /^Valor das Ordens/] },
+    { id: 'carros', nome: 'Carros e gasolina', tit: [/^Fechamento — carros/, /^Quem mais gasta gasolina/] },
+    { id: 'tec', nome: 'Relatório por técnico', tit: [/^Relatório Geral completo/] },
+    { id: 'compl', nome: 'Evolução, frota e cidades', tit: [/^Informações complementares/, /^Qualidade & Prazo/, /^Ranking por Cidade/, /^Evolução por fechamento/, /^Cidades e Bairros Atendidos/, /^Bairros — Ranking/] },
+  ],
+};
+// tópicos secundários que nascem recolhidos no Analista (o título continua à vista; "▸ exibir" abre) — repetem informação de outros tópicos ou são detalhe de segunda ordem
+const ANALISTA_NASCE_OCULTO = {
+  relgeral: [/^Gráficos da operação/, /^Retornos IRR — motivo anterior/, /^Produtividade diária por técnico/],
+};
+const textoDoTopicoAnalista = el => String(el.textContent || '').replace(/\s+/g, ' ').trim();
+// tabela com muitas linhas vira caixa com rolagem própria e cabeçalho fixo (as linhas continuam no DOM: Excel, imagem e filtros de coluna enxergam todas)
+function analistaCaixasRolagem(c) {
+  c.querySelectorAll('.table-wrap').forEach(w => {
+    if (w.classList.contains('tab-rolagem') || w.classList.contains('pzand-caixa-rolavel') || w.classList.contains('caixa-tabela-fixa')) return;
+    const t = w.querySelector('table'); if (!t || t.querySelectorAll('tbody tr').length <= 30) return;
+    w.classList.add('tab-rolagem', 'rolagem-inteira-na-imagem');
+  });
+}
+function analistaPosRender(route) {
+  const grupos = menuAnalista() ? ANALISTA_GRUPOS[route] : null;
+  document.body.classList.toggle('abas-analista', !!grupos);
+  if (!grupos) return;
+  grupos.semAbaVisivel = true;
+  gerAgruparTopicos(route, grupos, analistaCaixasRolagem, route === 'dashboard' ? c => c.querySelector('.dash-cabecalho + div') || c.querySelector('.dash-cabecalho') : null);
 }
 // depois de cada tela aberta: a GESTÃO JH recebe os grupos nos relatórios dela
 function gerPosRender(route) {
@@ -11517,6 +11566,7 @@ function navigate(route) {
   if (currentUser) { try { localStorage.setItem('jh_ultima_rota_' + currentUser.role, route); } catch (e) {} }
   PAGES[route].render();
   try { inserirAbasUnificadas(route); } catch (e) { /* a barra de abas é só conforto */ }
+  try { analistaPosRender(route); } catch (e) { /* organização em abas é só conforto */ }
   // recoloca os filtros e refaz a busca com eles — em DUAS passadas. A tela
   // nasce com o período PADRÃO da própria página (não o que a pessoa tinha
   // filtrado), e é ele que decide quais cidades aparecem no painel de
@@ -11597,6 +11647,7 @@ function ativarTogglesDeSecao(raiz) {
     if (chave && !SECOES_JA_VISTAS.has(chave)) {
       SECOES_JA_VISTAS.add(chave);
       if (ROTAS_TOPICOS_NASCEM_OCULTOS.has(ROTA_ATUAL.nome) && tituloEl.classList.contains('section-heading')) SECOES_OCULTAS.add(chave);
+      else if (menuAnalista() && (ANALISTA_NASCE_OCULTO[ROTA_ATUAL.nome] || []).some(re => re.test(textoDoTitulo(tituloEl)))) SECOES_OCULTAS.add(chave);
     }
     b.addEventListener('click', () => {
       const escondido = alvos[0].classList.contains('secao-oculta');
