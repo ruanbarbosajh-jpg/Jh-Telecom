@@ -4495,6 +4495,27 @@ html[data-tab2="1"] .table-wrap { max-width: 100%; -webkit-overflow-scrolling: t
   .noc-olts { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 14px; max-height: 300px; overflow: auto; margin-top: 8px; } .noc-olt-opt { font-size: 13px; display: flex; gap: 7px; align-items: center; }
   .noc-log { background: #0b1220; color: #cbd5e1; border-radius: 10px; padding: 12px 14px; font-size: 12.5px; max-height: 220px; overflow: auto; white-space: pre-wrap; margin: 12px 0; }
   .noc-selo.cinza { display: inline-block; }
+  /* GRÁFICOS — 2ª rodada (05/11/2026, só Analista): barras agrupadas novas, meta nas barras, "Outros" na rosca */
+  .grp2 .grp2-barra { animation: grp2In .7s cubic-bezier(.16,.84,.36,1) both; transform-box: fill-box; transform-origin: 50% 100%; }
+  @keyframes grp2In { from { transform: scaleY(0); opacity: .2; } to { transform: scaleY(1); opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .grp2 .grp2-barra { animation: none; } }
+  .grp2 .grp2-faixa { fill: var(--accent-bg); opacity: .8; pointer-events: none; }
+  .grp2 .grp2-hit { cursor: pointer; }
+  .grp2 .grp2-cat { font-size: 11.5px; fill: var(--text-secondary); font-weight: 600; }
+  .grp2 .grouped-bar-value { font-size: 10.5px; paint-order: stroke; stroke: var(--card-bg); stroke-width: 3px; }
+  .grp2 .grp2-meta { stroke: #dc2626; stroke-width: 1.6; stroke-dasharray: 6 5; }
+  .grp2 .grp2-meta-txt { fill: #dc2626; font-size: 11px; font-weight: 800; paint-order: stroke; stroke: var(--card-bg); stroke-width: 3px; }
+  .bars2 .b2-metabox { position: absolute; left: 0; top: 0; bottom: 22px; pointer-events: none; z-index: 2; }
+  .bars2 .b2-metabox i { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed #dc2626; }
+  .bars2 .b2-metabox em { position: absolute; top: -17px; left: 0; transform: translateX(-50%); font-style: normal; font-size: 11px; font-weight: 800; color: #dc2626; white-space: nowrap; background: var(--card-bg); padding: 0 5px; border-radius: 6px; }
+  .bars2 .b2-row { transition: background .15s ease; border-radius: 8px; }
+  .bars2 .b2-row:hover { background: var(--accent-bg); }
+  .donut2 .d2-outros { margin: 2px 4px 4px 22px; padding: 8px 12px; border-radius: 10px; background: var(--bg-page); border: 1px dashed var(--border); font-size: 12.5px; max-height: 190px; overflow: auto; }
+  .donut2 .d2-outros[hidden] { display: none; }
+  .donut2 .d2-outros div { display: flex; gap: 10px; padding: 3px 0; align-items: baseline; }
+  .donut2 .d2-outros span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+  .donut2 .d2-outros b { font-variant-numeric: tabular-nums; } .donut2 .d2-outros em { font-style: normal; color: var(--text-muted); min-width: 46px; text-align: right; }
+  .donut2 .d2-item.aberto { background: var(--accent-bg); }
 </style>
 </head>
 <body>
@@ -8205,10 +8226,22 @@ const GRAF_V2_IDS = new Set(['rg-g-tmais', 'rg-g-status', 'rg-g-evol']);
 function grafV2(el) { try { return !!el && menuAnalista(); } catch (e) { return false; } }   // 05/11/2026: aprovado — vale para TODOS os gráficos de barras, rosca e linha do Analista (GRAF_V2_IDS ficou sem uso)
 // cor → par de tons (início escuro, fim claro) para o degradê das barras; só verde (positivo), laranja (atenção) e vermelho (negativo) saem do azul JH
 function gradV2(cor) {
-  const c = String(cor || '').toLowerCase();
+  let c = String(cor || '').toLowerCase().replace(/\s+/g, '');
+  // cores de token (success/danger/warning) viram o verde, o vermelho e o âmbar do sistema — antes só o hex fixo era reconhecido e a barra de "prazo" saía toda azul
+  if (/var\(--(success|ok)\)/.test(c)) c = '#16a34a'; else if (/var\(--(danger|erro)\)/.test(c)) c = '#dc2626'; else if (/var\(--(warn|warning|warn-text)\)/.test(c)) c = '#f59e0b';
   if (/^#(22c55e|16a34a|10b981|34d399|86efac)$/.test(c)) return ['#15803d', '#4ade80'];
-  if (/^#(f59e0b|fb923c|f97316|ea580c|eab308)$/.test(c)) return ['#d97706', '#fbbf24'];
-  if (/^#(ef4444|dc2626|b91c1c|f87171)$/.test(c)) return ['#b91c1c', '#f87171'];
+  if (/^#(f59e0b|fb923c|f97316|ea580c|eab308|facc15|fcd34d|d97706)$/.test(c)) return ['#d97706', '#fbbf24'];
+  if (/^#(ef4444|dc2626|b91c1c|f87171|fca5a5|7f1d1d)$/.test(c)) return ['#b91c1c', '#f87171'];
+  const m = c.match(/^#([0-9a-f]{6})$/);
+  if (m) {
+    const r = parseInt(m[1].slice(0, 2), 16), g = parseInt(m[1].slice(2, 4), 16), b = parseInt(m[1].slice(4, 6), 16);
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    const azul = b === mx && b - mn > 40 && g >= r - 10;   // família do azul JH (azul, azul-claro, ciano): mantém o degradê padrão da marca
+    if (!azul && mx - mn > 25) {   // roxo, rosa, cinza-azulado, marrom...: a própria cor, um tom mais escuro no início e mais claro no fim
+      const mix = (k, t) => Math.round(k + (t - k) * (t === 255 ? 0.32 : 0.22)).toString(16).padStart(2, '0');
+      return ['#' + [r, g, b].map(k => mix(k, 0)).join(''), '#' + [r, g, b].map(k => mix(k, 255)).join('')];
+    }
+  }
   return ['#1d6fd8', '#4fb3f5'];
 }
 // cor FIXA por categoria de situação: o mesmo status tem a mesma cor em qualquer gráfico (verde = concluído, azuis = em andamento, laranja = improdutivo, vermelho = cancelado)
@@ -8259,6 +8292,7 @@ function barsChart(elId, items, opts = {}) {
     const gradeDir = `calc(${maiorValor}ch + 14px)`;
     el.innerHTML = seletorOrdem + `<div class="bars-chart bars2${opts.fill ? ' fill' : ''}">
       <div class="b2-grade" style="right:${gradeDir}${eixo ? '' : ';display:none'}"><i></i><i></i><i></i></div>
+      ${opts.meta && opts.meta.valor > 0 && opts.meta.valor <= max ? `<div class="b2-metabox" style="right:${gradeDir}"><i style="left:${(opts.meta.valor / max * 100).toFixed(2)}%"><em>${esc(opts.meta.rotulo || 'Meta')}</em></i></div>` : ''}
       ${items.map((i, k) => { const g = gradV2(i.color || color); return `
       <div class="b2-row${opts.clicavel ? ' bar-row-clicavel' : ''}${k === 0 ? ' b2-top' : ''}"${opts.clicavel ? ` data-label="${esc(i.label)}" title="Clique para ver o detalhe"` : ` title="${esc(i.label)}"`}>
         <div class="b2-label"${i.labelColor ? ` style="color:${i.labelColor};font-weight:700"` : ''}>${esc(i.label)}</div>
@@ -8301,6 +8335,15 @@ function donutChart(elId, items, opts = {}) {
   el.dataset.grafico = '1'; el._xls = { cab: ['Item', 'Valor', '%'], linhas: items.map(i => [i.label, i.display !== undefined ? i.display : i.value, Number((i.value / total * 100).toFixed(1))]) };
   if (grafV2(el)) {
     // rosca nova (SVG): anel mais grosso, total no centro, quantidade e % na legenda ao lado; passar o mouse (ou tocar) numa fatia/legenda mostra o detalhe dela no centro
+    // mais de 7 fatias vira poeira: as menores entram em "Outros (N itens)" (só quando os valores são números puros — com `display` próprio, ex. moeda, não dá pra somar o texto).
+    // Excel e a lista aberta ao clicar em "Outros" continuam com todos os itens.
+    const itensTodos = items; let agrupados = null;
+    if (items.length > 7 && !opts.semAgrupar && items.every(i => i.display === undefined)) {
+      const rank = [...items.keys()].sort((x, y) => items[y].value - items[x].value);
+      const fora = new Set(rank.slice(6)); agrupados = items.filter((_, k) => fora.has(k));
+      items = items.filter((_, k) => !fora.has(k));
+      items.push({ label: `Outros (${agrupados.length} itens)`, value: agrupados.reduce((s, i) => s + i.value, 0), color: '#94a3b8', _outros: true });
+    }
     const R = 15.9155, GAP = items.length > 1 ? 0.7 : 0; let a = 0;
     const cores = items.map((i, idx) => i.color || corSituacaoV2(i.label, idx));
     const segs = items.map((i, idx) => { const len = i.value / total * 100, dash = Math.max(len - GAP, 0.01); const s = `<circle class="d2-seg" data-i="${idx}" cx="21" cy="21" r="${R}" fill="none" stroke="${cores[idx]}" stroke-width="5.4" stroke-dasharray="${dash.toFixed(3)} ${(100 - dash).toFixed(3)}" stroke-dashoffset="${(25 - a - GAP / 2).toFixed(3)}"><title>${esc(i.label)} — ${i.display !== undefined ? i.display : i.value} (${formatPct(len)})</title></circle>`; a += len; return s; }).join('');
@@ -8309,8 +8352,9 @@ function donutChart(elId, items, opts = {}) {
     el.innerHTML = `<div class="donut-wrap donut2">
       <div class="donut-holder d2-holder"><svg viewBox="0 0 42 42" class="d2-svg"><circle cx="21" cy="21" r="${R}" fill="none" class="d2-trilho" stroke-width="5.4"/>${segs}</svg>
         <div class="donut-centro d2-centro"><div class="donut-centro-valor" style="font-size:${corpo}">${totTxt}</div><div class="donut-centro-label">${opts.centroLabel || 'Total'}</div></div></div>
-      <div class="donut-legend d2-legenda">${items.map((i, idx) => `<div class="legend-item d2-item" data-i="${idx}" tabindex="0"><span class="legend-dot" style="background:${cores[idx]}"></span><span class="d2-nome">${esc(i.label)}</span><b>${i.display !== undefined ? i.display : i.value}</b><span class="legend-pct">${formatPct(i.value / total * 100)}</span></div>`).join('')}</div>
+      <div class="donut-legend d2-legenda">${items.map((i, idx) => `<div class="legend-item d2-item" data-i="${idx}" tabindex="0"${i._outros ? ' title="Clique para ver os itens agrupados"' : ''}><span class="legend-dot" style="background:${cores[idx]}"></span><span class="d2-nome">${esc(i.label)}</span><b>${i.display !== undefined ? i.display : i.value}</b><span class="legend-pct">${formatPct(i.value / total * 100)}</span></div>`).join('')}${agrupados ? `<div class="d2-outros" hidden>${agrupados.map(i => `<div><span>${esc(i.label)}</span><b>${i.value}</b><em>${formatPct(i.value / total * 100)}</em></div>`).join('')}</div>` : ''}</div>
     </div>`;
+    if (agrupados) { const li = el.querySelector('.d2-item[data-i="' + (items.length - 1) + '"]'), cx = el.querySelector('.d2-outros'); li.addEventListener('click', () => { cx.hidden = !cx.hidden; li.classList.toggle('aberto', !cx.hidden); }); }
     const centro = el.querySelector('.d2-centro'), padrao = centro.innerHTML; let fixo = -1;
     const mostrar = idx => {
       el.querySelectorAll('.d2-seg').forEach(s => s.classList.toggle('on', +s.dataset.i === idx));
@@ -9233,6 +9277,7 @@ function groupedBarsChart(elId, categorias, series, opts = {}) {
   const el = document.getElementById(elId);
   if (!el) return;
   if (!categorias.length || !series.length) { el.innerHTML = '<div class="empty">Sem dados.</div>'; return; }
+  if (grafV2(el)) return groupedBarsV2(el, categorias, series, opts);
   const max = Math.max(...series.flatMap(s => s.values), 1);
   // largura pelo CONTAINER, não só pela quantidade de categorias — sem isso o
   // viewBox saía pequeno (340-760px) e o preserveAspectRatio "meet" encolhia
@@ -9261,6 +9306,81 @@ function groupedBarsChart(elId, categorias, series, opts = {}) {
         return bars + `<text x="${labelX.toFixed(1)}" y="${H - 10}" text-anchor="middle" class="trend-axis-label">${cat}</text>`;
       }).join('')}
     </svg>`;
+}
+
+// Barras agrupadas no padrão novo (05/11/2026, só Analista): eixo Y com valores, barras de topo arredondado com degradê, valor acima de cada barra,
+// faixa de destaque + cartão de detalhe ao passar o mouse (ou tocar), uma caixa de seleção por série na legenda e redesenho quando a largura muda.
+// opts.meta = { valor, rotulo }: linha tracejada de meta. opts.formatar(v): texto completo (tooltip); opts.formatarCurto(v): rótulo acima da barra.
+function groupedBarsV2(el, categorias, series, opts) {
+  const elId = el.id;
+  el._grpArgs = [categorias, series, opts];
+  if (!el._grpRO && typeof ResizeObserver !== 'undefined') {
+    el._grpRO = new ResizeObserver(() => {
+      const w = el.clientWidth;
+      if (!el.isConnected || !el._grpArgs || !w || Math.abs(w - (el._grpW || 0)) < 24) return;
+      clearTimeout(el._grpRT); el._grpRT = setTimeout(() => { if (el.isConnected && el.id) groupedBarsChart(el.id, ...el._grpArgs); }, 120);
+    });
+    el._grpRO.observe(el);
+  }
+  el.dataset.grafico = '1';
+  el._xls = { cab: ['Categoria', ...series.map(s => s.name)], linhas: categorias.map((c, ci) => [c, ...series.map(s => s.values[ci] || 0)]) };
+  const seletor = series.length > 1 && !opts.semSeletor;
+  const ocultas = seletor ? (el._grpOcultas || (el._grpOcultas = new Set())) : new Set();
+  const vis = series.filter(s => !ocultas.has(s.name));
+  const tag = seletor ? 'label' : 'span';
+  const legenda = `<div class="trend-legend">${series.map(s => `<${tag} class="legend-item"${seletor ? ' style="cursor:pointer"' : ''}>${seletor ? `<input type="checkbox" class="grp-chk" data-nome="${esc(s.name)}"${ocultas.has(s.name) ? '' : ' checked'} style="margin-right:6px;cursor:pointer">` : ''}<span class="legend-dot" style="background:${s.color}"></span>${esc(s.name)}</${tag}>`).join('')}</div>`;
+  const ligar = () => { if (seletor) el.querySelectorAll('.grp-chk').forEach(c => c.addEventListener('change', () => { if (c.checked) ocultas.delete(c.dataset.nome); else ocultas.add(c.dataset.nome); groupedBarsChart(elId, categorias, series, opts); })); };
+  if (!vis.length) { el.innerHTML = legenda + '<div class="empty">Marque ao menos uma série na legenda.</div>'; ligar(); return; }
+  const fmtCheio = opts.formatar || (v => Number(v).toLocaleString('pt-BR'));
+  const fmtCurto = opts.formatarCurto || fmtCompactoV2;
+  const meta = opts.meta && opts.meta.valor > 0 ? opts.meta : null;
+  const topoDados = Math.max(...vis.flatMap(s => s.values.map(v => v || 0)), meta ? meta.valor : 0, 1);
+  // escala "redonda": passo 1, 2, 2,5, 5 ou 10 × potência de 10, com até 5 divisões
+  const bruto = topoDados / 4, pot = 10 ** Math.floor(Math.log10(bruto)), f = bruto / pot;
+  const passo = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * pot;
+  const topo = Math.ceil(topoDados / passo - 1e-9) * passo, nDiv = Math.round(topo / passo);
+  const ncat = categorias.length;
+  const W = Math.max(Math.round(el.clientWidth || 0), 340), H = 252, PADL = 48, PADR = 14, PADT = 22, PADB = 40;
+  el._grpW = W;
+  const corpoH = H - PADT - PADB, y = v => PADT + corpoH - (v / topo) * corpoH;
+  const grupoW = (W - PADL - PADR) / ncat, nv = vis.length, GAP = 3;
+  const barW = Math.max(6, Math.min(36, (grupoW * 0.72 - GAP * (nv - 1)) / nv));
+  const larguraGrupo = nv * barW + (nv - 1) * GAP;
+  const maxChars = Math.max(3, Math.floor(grupoW / 6.4));
+  const nome = c => { c = String(c); return c.length > maxChars ? c.slice(0, maxChars - 1) + '…' : c; };
+  const rotuloBarra = barW >= 17;
+  const grade = Array.from({ length: nDiv + 1 }, (_, k) => k * passo).map(v => `<line x1="${PADL}" y1="${y(v).toFixed(1)}" x2="${W - PADR}" y2="${y(v).toFixed(1)}" class="trend-gridline"/><text x="${PADL - 8}" y="${y(v).toFixed(1)}" dy="3.5" text-anchor="end" class="trend-axis-y-label">${fmtCompactoV2(v)}</text>`).join('');
+  const defs = vis.map((s, k) => `<linearGradient id="${elId}-gb${k}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${s.color}"/><stop offset="1" stop-color="${s.color}" stop-opacity=".72"/></linearGradient>`).join('');
+  const barras = categorias.map((cat, ci) => {
+    const x0 = PADL + ci * grupoW + (grupoW - larguraGrupo) / 2;
+    const bs = vis.map((s, si) => {
+      const v = s.values[ci] || 0, hh = (v / topo) * corpoH;
+      if (!v) return '';
+      const bx = x0 + si * (barW + GAP), by = y(v), r = Math.min(6, barW / 2, hh);
+      return `<path class="grp2-barra" d="M${bx.toFixed(1)},${(by + hh).toFixed(1)} L${bx.toFixed(1)},${(by + r).toFixed(1)} Q${bx.toFixed(1)},${by.toFixed(1)} ${(bx + r).toFixed(1)},${by.toFixed(1)} L${(bx + barW - r).toFixed(1)},${by.toFixed(1)} Q${(bx + barW).toFixed(1)},${by.toFixed(1)} ${(bx + barW).toFixed(1)},${(by + r).toFixed(1)} L${(bx + barW).toFixed(1)},${(by + hh).toFixed(1)} Z" fill="url(#${elId}-gb${si})" style="animation-delay:${(ci * 40 + si * 25)}ms"/>`
+        + (rotuloBarra ? `<text x="${(bx + barW / 2).toFixed(1)}" y="${(by - 5).toFixed(1)}" text-anchor="middle" class="grouped-bar-value">${fmtCurto(v)}</text>` : '');
+    }).join('');
+    const cx = PADL + ci * grupoW + grupoW / 2;
+    return `<rect class="grp2-faixa" data-i="${ci}" x="${(PADL + ci * grupoW + 2).toFixed(1)}" y="${PADT - 6}" width="${(grupoW - 4).toFixed(1)}" height="${(corpoH + 6).toFixed(1)}" rx="8" style="display:none"/>${bs}<text x="${cx.toFixed(1)}" y="${H - 16}" text-anchor="middle" class="trend-axis-label grp2-cat"><title>${esc(cat)}</title>${esc(nome(cat))}</text>`;
+  }).join('');
+  const hits = categorias.map((_, ci) => `<rect class="grp2-hit" data-i="${ci}" x="${(PADL + ci * grupoW).toFixed(1)}" y="${PADT - 6}" width="${grupoW.toFixed(1)}" height="${(corpoH + 6 + PADB).toFixed(1)}" fill="transparent"/>`).join('');
+  const linhaMeta = meta && meta.valor <= topo ? `<line x1="${PADL}" y1="${y(meta.valor).toFixed(1)}" x2="${W - PADR}" y2="${y(meta.valor).toFixed(1)}" class="grp2-meta"/><text x="${W - PADR}" y="${(y(meta.valor) - 5).toFixed(1)}" text-anchor="end" class="grp2-meta-txt">${esc(meta.rotulo || 'Meta')}</text>` : '';
+  el.innerHTML = `${legenda}<div class="trend-chart-wrap t2"><svg viewBox="0 0 ${W} ${H}" class="grouped-bars-svg grp2" preserveAspectRatio="xMidYMid meet" style="height:${H}px"><defs>${defs}</defs>${grade}${linhaMeta}${barras}${hits}</svg><div class="trend-tooltip" style="display:none"></div></div>`;
+  ligar();
+  const svg = el.querySelector('.grp2'), tip = el.querySelector('.trend-tooltip');
+  const sair = () => { tip.style.display = 'none'; svg.querySelectorAll('.grp2-faixa').forEach(r => { r.style.display = 'none'; }); };
+  const mostrar = ci => {
+    svg.querySelectorAll('.grp2-faixa').forEach(r => { r.style.display = +r.dataset.i === ci ? '' : 'none'; });
+    tip.innerHTML = `<div class="trend-tooltip-data">${esc(categorias[ci])}</div>` + vis.map(s => `<div class="trend-tooltip-item"><span class="legend-dot" style="background:${s.color}"></span>${esc(s.name)}<b>${fmtCheio(s.values[ci] || 0)}</b></div>`).join('');
+    tip.style.display = 'block';
+    const rect = svg.getBoundingClientRect(), pxX = ((PADL + ci * grupoW + grupoW / 2) / W) * rect.width;
+    const larg = tip.offsetWidth || 170;
+    let left = pxX + grupoW / W * rect.width / 2 + 6;
+    if (left + larg > svg.closest('.trend-chart-wrap').clientWidth) left = pxX - grupoW / W * rect.width / 2 - larg - 6;
+    tip.style.left = Math.max(0, left) + 'px';
+  };
+  svg.querySelectorAll('.grp2-hit').forEach(r => { r.addEventListener('mouseenter', () => mostrar(+r.dataset.i)); r.addEventListener('click', () => mostrar(+r.dataset.i)); });
+  svg.addEventListener('mouseleave', sair);
 }
 
 // ===================== IMPORTADOR DE EXCEL (cabeçalhos reais das planilhas JH) =====================
