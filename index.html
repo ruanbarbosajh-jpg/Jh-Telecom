@@ -4563,6 +4563,18 @@ html[data-tab2="1"] .table-wrap { max-width: 100%; -webkit-overflow-scrolling: t
   .donut2 .d2-holder.d2-semi .d2-centro { top: auto; bottom: 2px; }
   .donut2 .d2-sem-centro { display: none; }
   .trend2 .t2-no { filter: drop-shadow(0 1px 1px rgba(15, 23, 42, .2)); }
+  /* FILTROS PADRONIZADOS EM TODO O SISTEMA (05/11/2026, pedido do cliente: "o mesmo padrão da imagem em TODOS os filtros") — o desenho em "chips" da NCA vale pra toda barra .toolbar:
+     ícone + rótulo azul + valor numa caixa arredondada de 46 px. Fora: campo de arquivo, caixa de marcar e o que tiver a classe .sem-chip. */
+  .toolbar:not(.sem-chip) { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+  .toolbar:not(.sem-chip) .field:not(.sem-chip):not(:has(input[type=file])):not(:has(.campo-arquivo)):not(:has(> label > input[type=checkbox])) { display: inline-flex !important; flex-direction: row !important; align-items: center; gap: 8px !important; padding: 4px 8px 4px 14px !important; min-height: 46px; border: 1px solid var(--border); border-radius: 14px; background: var(--card-bg); }
+  .toolbar:not(.sem-chip) .field:not(.sem-chip):not(:has(input[type=file])):not(:has(.campo-arquivo)):not(:has(> label > input[type=checkbox])) > label { display: inline-flex; align-items: center; gap: 7px; margin: 0 !important; font-size: 13px !important; font-weight: 700 !important; color: var(--accent) !important; white-space: nowrap; text-transform: none !important; letter-spacing: 0 !important; }
+  .toolbar:not(.sem-chip) .field > label .nca-ic { width: 16px; height: 16px; margin: 0; flex: 0 0 auto; }
+  .toolbar:not(.sem-chip) .field:not(.sem-chip):not(:has(input[type=file])):not(:has(.campo-arquivo)):not(:has(> label > input[type=checkbox])) > select, .toolbar:not(.sem-chip) .field:not(.sem-chip):not(:has(input[type=file])):not(:has(.campo-arquivo)):not(:has(> label > input[type=checkbox])) > input { border: 0 !important; background-color: transparent !important; box-shadow: none !important; min-width: 0 !important; width: auto !important; height: auto !important; padding: 6px 26px 6px 4px !important; font-size: 13px !important; font-weight: 600; color: var(--text-primary); }
+  .toolbar:not(.sem-chip) .field > input[type=date], .toolbar:not(.sem-chip) .field > input[type=time] { padding-right: 4px !important; }
+  .toolbar:not(.sem-chip) .field > input[type=search], .toolbar:not(.sem-chip) .field > input[type=text] { padding-right: 4px !important; min-width: 120px !important; }
+  .toolbar:not(.sem-chip) .field .multiselect-toggle { border: 0 !important; background: transparent !important; min-width: 0 !important; padding: 6px 4px !important; color: var(--text-primary) !important; box-shadow: none !important; }
+  .toolbar:not(.sem-chip) > .btn, .toolbar:not(.sem-chip) > button.btn, .toolbar:not(.sem-chip) > .btn-export-xls { min-height: 46px; border-radius: 14px; padding: 0 20px; font-weight: 700; }
+  @media (max-width: 640px) { .toolbar:not(.sem-chip) .field:not(.sem-chip) { width: 100%; } .toolbar:not(.sem-chip) .field > select, .toolbar:not(.sem-chip) .field > input { flex: 1 1 auto; } }
 </style>
 </head>
 <body>
@@ -10783,6 +10795,21 @@ const MENU_ANALISTA = [
   { id: 'sistema', nome: 'SISTEMA', rotas: ['saude', 'import'] },
 ];
 // barra de abas no topo da tela (só Analista) — chamada depois de cada render
+// ===== Filtros padronizados (05/11/2026): ícone no rótulo de todo filtro das barras .toolbar, no mesmo desenho da NCA =====
+const FILTRO_ICONES = [[/turno|manh|tarde/, 'sun'], [/hora|hor[aá]rio|tempo/, 'clock'], [/data|per[ií]odo|^de\b|^at[eé]\b|ciclo|m[eê]s|\bdia\b|in[ií]cio|fim|semana/, 'cal'], [/cidade|bairro|regi[aã]o|endere/, 'pin'],
+  [/t[eé]cnico|condutor|colaborador|usu[aá]rio|supervisor|atendente|motorista|ofensor|respons[aá]vel|perfil|pessoa/, 'user'], [/servi[cç]o|tipo|categoria|motivo|atividade/, 'wrench'], [/status|situa[cç]|resultado|faixa|classe|origem/, 'tag'],
+  [/cliente|o\.s|contrato|buscar|pesquis|placa|nome|ve[ií]culo|serial|protocolo|c[oó]digo/, 'doc'], [/olt|slot|pon|cto|mostrar|quantos|limite|top|ordenar|classificar|agrupar/, 'box']];
+function padronizarFiltros(raiz) {
+  if (typeof NCA_IC === 'undefined') return;
+  (raiz || document).querySelectorAll('.toolbar:not(.sem-chip) .field > label').forEach(l => {
+    if (l.dataset.ic || l.querySelector('.nca-ic') || l.querySelector('input')) return;
+    const txt = normalizeHeader(l.textContent || ''); let k = 'tag'; for (const [re, ic] of FILTRO_ICONES) { if (re.test(txt)) { k = ic; break; } }
+    l.dataset.ic = k; l.insertAdjacentHTML('afterbegin', NCA_IC[k]);
+  });
+}
+(function () { let t = null; const rodar = () => { clearTimeout(t); t = setTimeout(() => { try { padronizarFiltros(); } catch (e) { /* só enfeite */ } }, 250); };
+  const iniciar = () => { try { new MutationObserver(rodar).observe(document.body, { childList: true, subtree: true }); rodar(); } catch (e) { /* sem observer */ } };
+  if (document.body) iniciar(); else document.addEventListener('DOMContentLoaded', iniciar); })();
 function inserirAbasUnificadas(route) {
   const antiga = document.getElementById('abas-unif'); if (antiga) antiga.remove();
   const g = grupoDaRota(route); if (!g || !menuAnalista()) return;
@@ -11898,7 +11925,7 @@ function navigate(route) {
   if (PCR_LIVE_TIMER) { clearInterval(PCR_LIVE_TIMER); PCR_LIVE_TIMER = null; }
   guardarFiltros(ROTA_ATUAL.nome);
   // Central Rede (05/11/2026): as rotas antigas (noc, u2000, relu2000) abrem a aba certa da Central Rede
-  if (route !== 'rede' && typeof redePararMapa === 'function') redePararMapa();   // sair da Central Rede remove o mapa (Leaflet) e o relógio
+  if (route !== 'rede' && typeof redePararMapaTudo === 'function') redePararMapaTudo();   // sair da Central Rede remove o mapa (Leaflet) e o relógio
   if (REDE_ALIAS[route] && currentUser && podeAcessar(currentUser.role, 'rede') && (route !== 'noc' || ehAnalista())) { REDE.aba = REDE_ALIAS[route]; route = 'rede'; }
   if (!PAGES[route] || (currentUser && !podeAcessar(currentUser.role, route))) route = getFirstAllowedRoute(currentUser ? currentUser.role : 'admin');
   document.querySelectorAll('.sidebar-nav a').forEach(a => a.classList.toggle('active', a.dataset.route === route || (a.dataset.grupo || '').split(',').includes(route)));   // grupo = telas unificadas numa aba só (Analista)
@@ -26071,8 +26098,8 @@ const nocNum = v => { const n = parseFloat(String(v).replace(',', '.')); return 
 
 // ------------------------------------------------------------ LEITORES DE ARQUIVO (tudo no navegador; os arquivos de origem não são alterados)
 function nocCsv(texto) {
-  const L = texto.replace(/^﻿/, '').split(/\r?\n/), cab0 = L.shift() || '', dl = cab0.split(';').length >= cab0.split(',').length ? ';' : ',', cab = cab0.split(dl).map(s => s.trim()), out = [];
-  for (const l of L) { if (!l) continue; const c = l.split(dl), o = {}; cab.forEach((k, i) => { o[k] = (c[i] || '').trim(); }); out.push(o); }
+  const L = texto.replace(/^﻿/, '').split(/\r?\n/), cab0 = L.shift() || '', dl = cab0.split(';').length >= cab0.split(',').length ? ';' : ',', cab = cab0.split(dl).map(s => s.trim().replace(/^"(.*)"$/, '$1')), out = [];   // aspas em volta do cabeçalho/valor (XP - Postes.csv) saem; antes o cabeçalho "Latitude" não casava e nenhum poste era lido
+  for (const l of L) { if (!l) continue; const c = l.split(dl), o = {}; cab.forEach((k, i) => { o[k] = (c[i] || '').trim().replace(/^"(.*)"$/, '$1'); }); out.push(o); }
   return out;
 }
 // shapefile de linhas (.shp) + atributos (.dbf), mesma ordem de registros
@@ -26253,6 +26280,91 @@ async function nocImportarAreas(files, tipo, log) {
   await nocSubir(tipo, { v: 1, areas: mesclado }); log(`✔ ${sel.length} área(s) lida(s) (${areas.length - sel.length} fora das 6 cidades ignorada(s)); camada "${tipo}" agora com ${mesclado.length}.`);
 }
 
+// ------------------------------------------------------------ PASTA GEOGRÁFICA (File System Access API) — 05/11/2026
+// A pessoa escolhe a pasta UMA vez (showDirectoryPicker); o navegador guarda a permissão da pasta (IndexedDB própria, fora do cache do sistema) e a cada abertura basta um clique para
+// reautorizar — sem escolher arquivo nenhum. O sistema compara o que está na pasta com o que já foi importado e envia SÓ o que mudou. Não altera a pasta (permissão só de leitura)
+// e não apaga nada do Supabase: as importações são as mesmas de antes (upsert).
+// Quem lê: Chrome/Edge no computador (a API não existe no Firefox/Safari/celular — lá continua a importação arquivo a arquivo).
+function nocIdb() { return new Promise(res => { try { const r = indexedDB.open('jh_rede_pasta', 1); r.onupgradeneeded = () => r.result.createObjectStore('k'); r.onsuccess = () => res(r.result); r.onerror = () => res(null); r.onblocked = () => res(null); } catch (e) { res(null); } }); }
+async function nocIdbGet(k) { const db = await nocIdb(); if (!db) return null; return new Promise(res => { try { const q = db.transaction('k').objectStore('k').get(k); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); } catch (e) { res(null); } }); }
+async function nocIdbPut(k, v) { const db = await nocIdb(); if (!db) return false; return new Promise(res => { try { const tx = db.transaction('k', 'readwrite'); tx.objectStore('k').put(v, k); tx.oncomplete = () => res(true); tx.onerror = () => res(false); } catch (e) { res(false); } }); }
+const nocPastaSuportada = () => typeof window.showDirectoryPicker === 'function';
+async function nocPastaPermissao(h, pedir) { if (!h) return 'nenhuma'; try { let p = await h.queryPermission({ mode: 'read' }); if (p !== 'granted' && pedir) p = await h.requestPermission({ mode: 'read' }); return p; } catch (e) { return 'erro'; } }
+async function nocPastaEscolher() { const h = await window.showDirectoryPicker({ id: 'jh-geo', mode: 'read' }); await nocIdbPut('handle', h); return h; }
+async function nocFilho(dir, casa) { for await (const [nome, h] of dir.entries()) { if (casa(nome, h)) return h; } return null; }
+async function nocFilhos(dir, casa) { const r = []; for await (const [nome, h] of dir.entries()) { if (casa(nome, h)) r.push(h); } return r; }
+// procura, dentro da pasta escolhida, os arquivos que a Central Rede usa (pelo nome — a pasta pode ter sido movida ou ter outro nome)
+async function nocPastaAlvos(raiz) {
+  const nk = s => normalizeHeader(s || ''), alvos = [];
+  const arq = async (h) => (h ? [await h.getFile()] : []);
+  const ctos = await nocFilho(raiz, (n, h) => h.kind === 'file' && /^niu_ctos\.csv$/i.test(n));
+  alvos.push({ id: 'ctos', rotulo: 'CTOs (NIU_CTOs.csv)', files: await arq(ctos), principais: [0] });
+  const dCabos = await nocFilho(raiz, (n, h) => h.kind === 'directory' && /segmentos mesclados com cor/.test(nk(n)));
+  let cabos = [];
+  if (dCabos) { const shp = await nocFilho(dCabos, (n, h) => h.kind === 'file' && /cor por pon\.shp$/i.test(n)), dbf = await nocFilho(dCabos, (n, h) => h.kind === 'file' && /cor por pon\.dbf$/i.test(n)); if (shp && dbf) cabos = [await shp.getFile(), await dbf.getFile()]; }
+  alvos.push({ id: 'cabos', rotulo: 'Cabos (shapefile "Cor por PON")', files: cabos, principais: [0] });
+  const dExtr = await nocFilho(raiz, (n, h) => h.kind === 'directory' && /^extract original$/.test(nk(n)));
+  const postes = dExtr ? await nocFilho(dExtr, (n, h) => h.kind === 'file' && /^xp - postes\.csv$/i.test(n)) : null;
+  alvos.push({ id: 'postes', rotulo: 'Postes (XP - Postes.csv)', files: await arq(postes), principais: [0] });
+  const cob = await nocFilho(raiz, (n, h) => h.kind === 'file' && /^cobertura rede niu.*\.kmz$/i.test(n));
+  alvos.push({ id: 'cobertura', rotulo: 'Cobertura da rede (kmz)', files: await arq(cob), principais: [0] });
+  const dBl = await nocFilho(raiz, (n, h) => h.kind === 'directory' && /areas bloqueadas/.test(nk(n)));
+  const kmls = dBl ? await nocFilhos(dBl, (n, h) => h.kind === 'file' && (/\.kml$/i.test(n) || !/\./.test(n))) : [];   // alguns arquivos da pasta são KML sem extensão
+  alvos.push({ id: 'bloqueios', rotulo: 'Áreas bloqueadas (kml)', files: await Promise.all(kmls.map(h => h.getFile())), porArquivo: true });
+  return alvos;
+}
+const nocAssin = f => `${f.size}|${f.lastModified}`;
+// compara com o que já foi importado: 1º pela assinatura (tamanho + data) guardada neste navegador; sem ela, pelo conteúdo (SHA-256) contra o que o Supabase já tem (noc_geo_fonte)
+async function nocPastaAnalisar(raiz) {
+  const alvos = await nocPastaAlvos(raiz), manifest = (await nocIdbGet('manifest')) || {};
+  let fontes = null;
+  const shaFontes = async () => { if (!fontes) { fontes = new Map(); try { (await fetchAllRows('noc_geo_fonte')).sort((a, b) => String(a.importado_em).localeCompare(String(b.importado_em))).forEach(f => fontes.set(f.arquivo, f.sha256)); } catch (e) { /* sem tabela */ } } return fontes; };
+  for (const a of alvos) {
+    a.mudaram = []; a.estado = 'ok';
+    if (!a.files.length) { a.estado = 'ausente'; continue; }
+    const man = manifest[a.id] || {};
+    for (const f of a.files) {
+      if (man[f.name] === nocAssin(f)) continue;
+      // sem assinatura local (1ª vez, outro navegador ou cache limpo): confere o conteúdo contra o Supabase
+      const principal = a.porArquivo || f === a.files[0];
+      if (!principal && !man[f.name] && man[a.files[0].name] === nocAssin(a.files[0])) { man[f.name] = nocAssin(f); continue; }   // .dbf anda junto com o .shp
+      if (principal && !man[f.name]) { const sha = await nocSha256(await f.arrayBuffer()), fs = await shaFontes(); if (sha && fs.get(f.name) === sha) { man[f.name] = nocAssin(f); a._aprendeu = true; continue; } a.novo = a.novo || !fs.has(f.name); }
+      a.mudaram.push(f);
+    }
+    manifest[a.id] = man;
+    if (a.mudaram.length) { a.estado = a.novo ? 'novo' : 'mudou'; if (a.id === 'cabos') a.mudaram = a.files.slice(); }   // shp e dbf andam juntos
+  }
+  await nocIdbPut('manifest', manifest);   // guarda o que foi reconhecido pelo conteúdo
+  return alvos;
+}
+async function nocPastaSincronizar(raiz, log, so) {
+  const alvos = await nocPastaAnalisar(raiz), manifest = (await nocIdbGet('manifest')) || {}, feitos = [];
+  const marca = a => { const m = manifest[a.id] || (manifest[a.id] = {}); a.files.forEach(f => { if (a.mudaram.includes(f) || !m[f.name]) m[f.name] = nocAssin(f); }); };
+  for (const a of alvos) {
+    if (so && !so.includes(a.id)) continue;
+    if (a.estado === 'ausente') { log(`⚠ ${a.rotulo}: não encontrei na pasta.`); continue; }
+    if (!a.mudaram.length) { log(`= ${a.rotulo}: igual ao que já está no sistema (nada a enviar).`); continue; }
+    log(`→ ${a.rotulo}: ${a.mudaram.length} arquivo(s) ${a.estado === 'novo' ? 'novo(s)' : 'alterado(s)'}.`);
+    if (a.id === 'ctos') { await nocImportarCtos(a.mudaram[0], log); await nocCarregarBase(); }
+    else if (a.id === 'cabos') { if (!NOC.ctos || !NOC.ctos.length) await nocCarregarBase(); await nocImportarCabos(a.files[0], a.files[1], log); }
+    else if (a.id === 'postes') await nocImportarPostes(a.mudaram[0], log);
+    else if (a.id === 'cobertura') await nocImportarAreas(a.mudaram, 'cobertura', log);
+    else if (a.id === 'bloqueios') await nocImportarAreas(a.mudaram, 'bloqueios', log);
+    marca(a); await nocIdbPut('manifest', manifest); feitos.push(a.id);
+  }
+  await nocIdbPut('ultima', new Date().toISOString());
+  if (feitos.length) { NOC.geo = {}; if (typeof REDE !== 'undefined') REDE.cabosMeta = null; }   // o mapa relê a geometria nova
+  return feitos;
+}
+// resumo leve para a Central Rede: só olha a pasta se a permissão JÁ está concedida (nunca abre janela sozinho)
+async function nocPastaResumo() {
+  if (!nocPastaSuportada()) return { estado: 'sem-suporte' };
+  const h = await nocIdbGet('handle'); if (!h) return { estado: 'sem-pasta' };
+  const perm = await nocPastaPermissao(h, false); if (perm !== 'granted') return { estado: 'precisa-autorizar', nome: h.name };
+  try { const alvos = await nocPastaAnalisar(h); const mud = alvos.filter(a => a.estado === 'novo' || a.estado === 'mudou'); return { estado: mud.length ? 'mudou' : 'ok', nome: h.name, mudaram: mud.map(a => a.rotulo), ausentes: alvos.filter(a => a.estado === 'ausente').map(a => a.rotulo) }; }
+  catch (e) { return { estado: 'erro', nome: h.name, erro: String((e && e.message) || e) }; }
+}
+
 // ------------------------------------------------------------ TELA
 function renderNoc(opc) {
   opc = opc || {};   // 05/11/2026: a Central Rede usa as abas POP → OLT e Base geográfica daqui (opc.host, opc.aba, opc.semCabecalho)
@@ -26400,14 +26512,37 @@ function renderNoc(opc) {
   async function pintarBase() {
     const corpo = $('noc-corpo'); corpo.innerHTML = '<div class="empty">Carregando…</div>'; await recarregar(false); if (NOC.aba !== 'base') return;
     let fontes = []; try { fontes = (await fetchAllRows('noc_geo_fonte')).sort((a, b) => String(b.importado_em).localeCompare(String(a.importado_em))); } catch (e) { /* sem tabela */ }
-    corpo.innerHTML = `<div class="stat-cards">${statCard('blue', icServicos, 'CTOs carregadas', (NOC.ctos || []).length.toLocaleString('pt-BR'), '6 cidades da JH')}${statCard('purple', icServicos, 'POPs', (NOC.pops || []).length, 'dos arquivos')}${statCard('green', icOk, 'Correspondências POP → OLT', (NOC.popOlt || []).filter(x => x.ativo).length, 'confirmadas')}${statCard('orange', icAviso, 'POPs sem OLT', (NOC.pops || []).filter(p => !(NOC.popOlt || []).some(x => x.pop === p.pop && x.ativo)).length, 'aguardando confirmação')}</div>
+    corpo.innerHTML = `<section class="panel" id="nb-pasta"><h3>Pasta geográfica — sincronização</h3><div id="nb-pasta-st"><div class="empty">Verificando…</div></div><div id="nb-pasta-bt" style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0"></div><pre id="nb-plog" class="noc-log" hidden></pre></section>
+      <div class="stat-cards">${statCard('blue', icServicos, 'CTOs carregadas', (NOC.ctos || []).length.toLocaleString('pt-BR'), '6 cidades da JH')}${statCard('purple', icServicos, 'POPs', (NOC.pops || []).length, 'dos arquivos')}${statCard('green', icOk, 'Correspondências POP → OLT', (NOC.popOlt || []).filter(x => x.ativo).length, 'confirmadas')}${statCard('orange', icAviso, 'POPs sem OLT', (NOC.pops || []).filter(p => !(NOC.popOlt || []).some(x => x.pop === p.pop && x.ativo)).length, 'aguardando confirmação')}</div>
+      <details class="panel"><summary style="cursor:pointer;font-weight:700">Plano B — importar arquivo a arquivo (navegador sem acesso a pastas, ou só um arquivo)</summary>
       <div class="panels-grid"><section class="panel"><h3>1 · CTOs (NIU_CTOs.csv)</h3><p class="noc-aviso-pequeno">Só as 6 cidades entram. Os POPs vêm do mesmo arquivo.</p><input type="file" id="nb-cto" accept=".csv,text/csv"><button type="button" class="fisc-btn" id="nb-cto-ok">Importar CTOs</button></section>
       <section class="panel"><h3>2 · Cabos (shapefile)</h3><p class="noc-aviso-pequeno">Selecione os arquivos <b>.shp</b> e <b>.dbf</b> juntos. A cor original do cabo é guardada só como informação visual. Precisa das CTOs importadas antes.</p><input type="file" id="nb-shp" accept=".shp,.dbf" multiple><button type="button" class="fisc-btn" id="nb-shp-ok">Importar cabos</button></section>
       <section class="panel"><h3>3 · Postes (opcional)</h3><p class="noc-aviso-pequeno">XP - Postes.csv (latitude e longitude). Fica só no Storage, como camada opcional.</p><input type="file" id="nb-pos" accept=".csv,text/csv"><button type="button" class="fisc-btn" id="nb-pos-ok">Importar postes</button></section>
       <section class="panel"><h3>4 · Cobertura e áreas bloqueadas</h3><p class="noc-aviso-pequeno">Arquivos .kml ou .kmz (polígonos). Escolha o tipo.</p><select id="nb-tipo"><option value="cobertura">Cobertura da rede</option><option value="bloqueios">Áreas bloqueadas</option></select><input type="file" id="nb-kml" accept=".kml,.kmz" multiple><button type="button" class="fisc-btn" id="nb-kml-ok">Importar áreas</button></section></div>
-      <pre id="nb-log" class="noc-log">Aguardando um arquivo. Os arquivos escolhidos só são LIDOS: nenhum é alterado ou enviado inteiro — o sistema grava só as CTOs das 6 cidades e a geometria reduzida.</pre>
+      <pre id="nb-log" class="noc-log">Aguardando um arquivo. Os arquivos escolhidos só são LIDOS: nenhum é alterado ou enviado inteiro — o sistema grava só as CTOs das 6 cidades e a geometria reduzida.</pre></details>
       <section class="panel"><h3>Cargas anteriores</h3>${fontes.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Quando</th><th>Arquivo</th><th>Formato</th><th>Registros</th><th>Quem</th></tr></thead><tbody>${fontes.map(f => `<tr><td>${esc(fiscDataHora(f.importado_em))}</td><td>${esc(f.arquivo)}</td><td>${esc(f.formato)}</td><td>${f.registros == null ? '-' : f.registros}</td><td>${esc(f.importado_por || '-')}</td></tr>`).join('')}</tbody></table></div>` : '<p style="color:var(--text-muted)">Nenhuma carga ainda.</p>'}</section>`;
-    const log = t => { const e = $('nb-log'); if (e) { e.textContent += '\n' + t; e.scrollTop = e.scrollHeight; } };
+    const log = t => { const e = $('nb-log'); if (e) { e.textContent += '\n' + t; e.scrollTop = e.scrollHeight; } const p = $('nb-plog'); if (p) { p.hidden = false; p.textContent += (p.textContent ? '\n' : '') + t; p.scrollTop = p.scrollHeight; } };
+    const pintarPasta = async () => {
+      const st = $('nb-pasta-st'), bt = $('nb-pasta-bt'); if (!st) return;
+      if (!nocPastaSuportada()) { st.innerHTML = '<p class="noc-aviso-pequeno">Este navegador não deixa o site ler pastas (só Chrome ou Edge no computador). Use o <b>Plano B</b> abaixo.</p>'; bt.innerHTML = ''; return; }
+      const h = await nocIdbGet('handle'), ult = await nocIdbGet('ultima');
+      if (!h) { st.innerHTML = '<p>Nenhuma pasta vinculada. Escolha a pasta <b>Migração MK</b> (a que tem o <code>NIU_CTOs.csv</code> e as pastas dos cabos) <b>uma vez</b>; depois é só clicar em sincronizar. O site só LÊ — não altera nem apaga nada na pasta.</p>'; bt.innerHTML = '<button type="button" class="fisc-btn" id="np-escolher">📁 Escolher a pasta</button>'; $('np-escolher').addEventListener('click', async () => { try { await nocPastaEscolher(); await pintarPasta(); } catch (e) { if (e && e.name !== 'AbortError') toast('Não consegui abrir a pasta: ' + String(e.message || e), 'aviso'); } }); return; }
+      const perm = await nocPastaPermissao(h, false);
+      if (perm !== 'granted') {
+        st.innerHTML = `<p>Pasta vinculada: <b>${esc(h.name)}</b> — o Chrome pede para <b>autorizar de novo</b> (acontece ao reabrir o navegador). Um clique resolve; nada precisa ser reconfigurado${ult ? ` · última sincronização: ${esc(fiscDataHora(ult))}` : ''}.</p>`;
+        bt.innerHTML = '<button type="button" class="fisc-btn" id="np-aut">🔓 Autorizar a pasta e conferir</button><button type="button" class="fisc-btn sec" id="np-troc">Escolher outra pasta</button>';
+        $('np-aut').addEventListener('click', async () => { const p = await nocPastaPermissao(h, true); if (p !== 'granted') toast('A pasta não foi autorizada.', 'aviso'); await pintarPasta(); }); $('np-troc').addEventListener('click', async () => { try { await nocPastaEscolher(); await pintarPasta(); } catch (e) { /* cancelou */ } }); return;
+      }
+      let alvos; try { alvos = await nocPastaAnalisar(h); } catch (e) { st.innerHTML = `<p style="color:var(--danger)">Não consegui ler a pasta <b>${esc(h.name)}</b> (${esc(String(e.message || e))}). Ela pode ter sido movida ou renomeada — escolha de novo; o histórico do que já foi importado continua no Supabase e só o que for diferente será enviado.</p>`; bt.innerHTML = '<button type="button" class="fisc-btn" id="np-troc">📁 Escolher a pasta de novo</button>'; $('np-troc').addEventListener('click', async () => { try { await nocPastaEscolher(); await pintarPasta(); } catch (e2) { /* cancelou */ } }); return; }
+      const rot = { ok: ['Atualizado', 'verde'], novo: ['Novo — ainda não importado', 'laranja'], mudou: ['Mudou na pasta', 'laranja'], ausente: ['Não achei na pasta', 'cinza'] };
+      const pend = alvos.filter(a => a.estado === 'novo' || a.estado === 'mudou');
+      st.innerHTML = `<p>Pasta vinculada: <b>${esc(h.name)}</b> (permissão ativa) · última sincronização: <b>${ult ? esc(fiscDataHora(ult)) : 'nunca neste navegador'}</b>. ${pend.length ? `<b>${pend.length}</b> grupo(s) com arquivo novo ou alterado.` : 'Tudo igual ao que já está no sistema.'}</p>
+        <div class="table-wrap"><table class="data-table" data-sem-ordenar="1"><thead><tr><th>Grupo</th><th>Arquivos</th><th>Situação</th><th>Tamanho / alterado em</th></tr></thead><tbody>${alvos.map(a => `<tr><td>${esc(a.rotulo)}</td><td>${a.files.length}${a.mudaram.length ? ` (${a.mudaram.length} a enviar)` : ''}</td><td>${fiscSelo(rot[a.estado][0], rot[a.estado][1])}</td><td>${a.files.length ? esc((a.files.reduce((s, f) => s + f.size, 0) / 1048576).toFixed(1).replace('.', ',')) + ' MB · ' + esc(fiscDataHora(new Date(Math.max(...a.files.map(f => f.lastModified))).toISOString())) : '-'}</td></tr>`).join('')}</tbody></table></div>`;
+      bt.innerHTML = `<button type="button" class="fisc-btn" id="np-sync"${pend.length ? '' : ' title="Nada mudou: reenviar só se quiser forçar"'}>⟳ Sincronizar${pend.length ? ' agora' : ' (nada mudou)'}</button><button type="button" class="fisc-btn sec" id="np-troc">Escolher outra pasta</button>`;
+      $('np-sync').addEventListener('click', async e => { const b = e.currentTarget; b.disabled = true; $('nb-plog').textContent = ''; try { const f = await nocPastaSincronizar(h, log); log(f.length ? `✔ Sincronizado: ${f.length} grupo(s) enviado(s).` : '✔ Nada a enviar.'); } catch (er) { log('✖ ' + String((er && er.message) || er)); } b.disabled = false; await pintarPasta(); });
+      $('np-troc').addEventListener('click', async () => { try { await nocPastaEscolher(); await pintarPasta(); } catch (er) { /* cancelou */ } });
+    };
+    pintarPasta();
     const rodar = (btn, fn) => btn.addEventListener('click', async () => { btn.disabled = true; try { await fn(); } catch (e) { log('✖ ' + String((e && e.message) || e)); } btn.disabled = false; });
     rodar($('nb-cto-ok'), async () => { const f = $('nb-cto').files[0]; if (!f) throw new Error('Escolha o arquivo NIU_CTOs.csv.'); await nocImportarCtos(f, log); await nocCarregarBase(); });
     rodar($('nb-shp-ok'), async () => { const fs = [...$('nb-shp').files], s = fs.find(x => /\.shp$/i.test(x.name)), d = fs.find(x => /\.dbf$/i.test(x.name)); if (!s || !d) throw new Error('Selecione o .shp e o .dbf juntos.'); await nocImportarCabos(s, d, log); });
@@ -26416,6 +26551,7 @@ function renderNoc(opc) {
   }
   mostrar(opc.aba || NOC.aba);
 }
+// ===== fim da Central NOC =====
 // ===================== CENTRAL REDE (05/11/2026) =====================
 // Uma entrada só no menu para tudo o que era "Central NOC" + "Monitoramento": mapa da rede (CTOs, cabos, clientes do AutoISP, OLTs), tabela de sinal dos assinantes,
 // Monitoramento do U2000, Analítico, correspondência POP → OLT e base geográfica. Reaproveita o que já existe (NOC, U2K, AutoISP) — nada foi apagado.
@@ -26423,11 +26559,11 @@ function renderNoc(opc) {
 // cor original do cabo é informação da infraestrutura (do MK), nunca status; cinza = sem leitura (não é "desconectado").
 const REDE = {
   aba: 'mapa', cidades: null, f: { olt: '', slot: '', pon: '', cto: '' },
-  camadas: { cabos: true, ctos: true, clientes: true, olts: true, postes: false, cobertura: false, bloqueios: false },
+  camadas: { cabos: true, ctos: true, clientes: true, olts: true, vlans: false, postes: false, cobertura: false, bloqueios: false },
   st: { problema: true, atencao: true, ok: true, sem: true }, clientes: null, clientesEm: 0, cabosMeta: null, lateral: true,
 };
 const REDE_ABAS = [['mapa', 'Mapa da rede'], ['sinal', 'Sinal dos assinantes'], ['u2k', 'Monitoramento U2000'], ['analitico', 'Analítico'], ['pop', 'POP → OLT'], ['base', 'Base geográfica']];
-const REDE_ABAS_ANALISTA = new Set(['mapa', 'pop', 'base']);   // as tabelas da base geográfica só o Analista lê (RLS pode_noc)
+const REDE_ABAS_ANALISTA = new Set(['pop', 'base']);   // a correspondência POP → OLT e a base geográfica só o Analista lê/edita (RLS pode_noc); o mapa abre pra todos (sem CTOs/cabos pra quem não é Analista)
 const REDE_ALIAS = { noc: 'mapa', u2000: 'u2k', relu2000: 'analitico' };   // rotas antigas abrem a aba certa da Central Rede
 const REDE_SIT = { problema: { cor: '#ef4444', rot: 'Com problema' }, atencao: { cor: '#f59e0b', rot: 'Atenção' }, ok: { cor: '#22c55e', rot: 'Sem problema' }, sem: { cor: '#94a3b8', rot: 'Sem leitura' } };
 const REDE_STATUS_TXT = { ok: 'OK', warning: 'Atenção (sinal)', critical: 'Crítico (sinal)', power_fail: 'Sem energia', loss_signal: 'LOS (sem sinal)', down: 'Offline' };
@@ -26458,6 +26594,7 @@ async function redeCarregarClientes(forcar) {
     if (falhou && !lista.length) { REDE.erroClientes = true; return REDE.clientes || []; }
     REDE.erroClientes = false; if (!falhou) cacheGravar('rede_clientes', { t: Date.now(), d: lista }).catch(() => {});
   }
+  await redeAplicarSinal(lista);
   // coordenada que se repete em 10+ clientes é o ponto padrão da cidade/OLT que o AutoISP devolve quando não tem o endereço: não é localização do cliente
   const rep = new Map(); lista.forEach(c => { if (c.lat != null && c.lng != null) { const k = (+c.lat).toFixed(5) + ',' + (+c.lng).toFixed(5); rep.set(k, (rep.get(k) || 0) + 1); } });
   let maxIso = '';
@@ -26468,6 +26605,79 @@ async function redeCarregarClientes(forcar) {
   });
   REDE.clientes = lista; REDE.clientesEm = Date.now(); REDE.leitura = maxIso; return lista;
 }
+// ---------------------------------------------------------------- SINAL SINCRONIZADO (extensão do Chrome → tabela rede_sinal, PASSO-73)
+// Leitura só de GET no AutoISP, com o login do próprio Chrome do Analista; nada de sessão guardada. Cada leitura grava contrato, OLT, PON, sinal, status e a hora.
+// A tabela só traz o que é mais novo que o último que já temos (egress mínimo) e é aplicada por cima da leitura antiga de monitor_olt_clientes.
+const redeSemTabela = e => !!e && (e.code === '42P01' || e.code === 'PGRST205' || (/rede_sinal/.test(String(e.message || '')) && /does not exist|schema cache|not find/i.test(String(e.message || ''))));
+async function redeAplicarSinal(lista) {
+  const mapa = REDE._sinalMap || (REDE._sinalMap = new Map());
+  if (supa && REDE.sinalTabela !== false) {
+    try {
+      for (let ini = 0; ini < 60000; ini += 1000) {
+        let q = supa.from('rede_sinal').select('contrato,serial,int6,olt,ponlink,sinal,status,acs_ultimo_contato,lido_em').order('lido_em').order('contrato');
+        if (REDE._sinalMax) q = q.gt('lido_em', REDE._sinalMax);
+        const r = await q.range(ini, ini + 999);
+        if (r.error) { if (redeSemTabela(r.error)) REDE.sinalTabela = false; break; }
+        REDE.sinalTabela = true; (r.data || []).forEach(s => { mapa.set(String(s.contrato), s); if (!REDE._sinalMax || String(s.lido_em) > REDE._sinalMax) REDE._sinalMax = String(s.lido_em); });
+        if (!r.data || r.data.length < 1000) break;
+      }
+    } catch (e) { /* sem rede: segue com o que já tem */ }
+  }
+  lista.forEach(c => {
+    const s = mapa.get(String(c.contrato)); if (!s || String(s.lido_em) <= String(c.checado_em || '')) return;
+    c.sinal = s.sinal; c.status = s.status; c.acs_ultimo_contato = s.acs_ultimo_contato || c.acs_ultimo_contato; c.checado_em = s.lido_em; if (s.olt) c.olt = s.olt; if (s.ponlink) c.ponlink = s.ponlink;
+  });
+}
+const redeOltsDaConta = async () => { if (REDE._oltsConta && Date.now() - REDE._oltsContaEm < 1800000) return REDE._oltsConta; const r = await consultarExtensao('olts', {}); if (!r.ok) throw new Error(r.erro || 'a extensão não respondeu'); REDE._oltsConta = new Set((r.dados || []).map(o => o.hostname)); REDE._oltsContaEm = Date.now(); return REDE._oltsConta; };
+const redeExtensaoOk = () => typeof extensaoAtende === 'function' && typeof EXT_JH !== 'undefined' && !!EXT_JH.versao && extensaoAtende('1.4.1');
+// quem pode ser lido: tem serial e a OLT dele está entre as que a conta do AutoISP lista (o resto a busca nem enxerga)
+async function redeCandidatos() {
+  const oltsOk = await redeOltsDaConta(), cl = REDE.clientes || [], ordem = { problema: 0, atencao: 1, sem: 2, ok: 3 };
+  const lista = cl.filter(c => c.serial && c.olt && oltsOk.has(c.olt) && c.estado !== 'fora');
+  lista.sort((a, b) => (ordem[a._sit] - ordem[b._sit]) || String(a.checado_em || '').localeCompare(String(b.checado_em || '')));   // problema primeiro; dentro do grupo, a leitura mais velha primeiro
+  return { lista, naConta: lista.length, foraDaConta: cl.length - lista.length };
+}
+async function redeSincronizarSinal(op) {
+  op = op || {};
+  if (REDE._sincronizando) return { ok: false, erro: 'já está sincronizando' };
+  if (!redeExtensaoOk()) return { ok: false, erro: 'extensão do Chrome (1.4.1 ou mais nova) não encontrada neste navegador' };
+  REDE._sincronizando = true; const t0 = Date.now();
+  try {
+    const cand = op.alvo ? { lista: op.alvo, naConta: op.alvo.length } : await redeCandidatos(), alvo = cand.lista.slice(0, op.limite || 200);
+    if (!alvo.length) return { ok: true, lidos: 0, naoAchados: 0, mensagem: 'ninguém para ler' };
+    const r = await u2kAispConsultar(alvo.map(c => ({ sn: c.serial, contrato: c.contrato })), { atualizar: false, aoAndar: op.aoAndar });
+    if (!r.ok) throw new Error(r.erro || 'a extensão não respondeu (entre no AutoISP neste Chrome)');
+    const agora = new Date().toISOString(), quem = typeof nocQuem === 'function' ? nocQuem() : '', linhas = []; let naoAchados = 0;
+    alvo.forEach(c => {
+      const d = aispGet(c.serial); if (!d || d.achou === false || d.sinal_rx == null) { naoAchados++; return; }
+      linhas.push({ contrato: String(c.contrato), serial: c.serial, int6: d.int6 || null, olt: d.olt || c.olt, ponlink: d.ponlink || c.ponlink, sinal: d.sinal_rx, status: d.status_onu || null, acs_ultimo_contato: d.acs_ultimo_contato || null, lido_em: agora, lido_por: quem });
+    });
+    let gravado = false, erroGravar = '';
+    if (linhas.length && supa && REDE.sinalTabela !== false) {
+      gravado = true;
+      for (let i = 0; i < linhas.length; i += 500) {
+        const g = await supa.from('rede_sinal').upsert(linhas.slice(i, i + 500), { onConflict: 'contrato' });
+        if (g.error) { gravado = false; erroGravar = redeSemTabela(g.error) ? 'a tabela rede_sinal não existe — rode o sql/PASSO-73-rede-sinal.sql' : String(g.error.message || g.error); if (redeSemTabela(g.error)) REDE.sinalTabela = false; break; }
+      }
+    } else if (linhas.length) erroGravar = 'a tabela rede_sinal não existe — rode o sql/PASSO-73-rede-sinal.sql';
+    // aplica na tela de qualquer jeito (mesmo sem gravar), para o Analista ver o que leu
+    const mapa = REDE._sinalMap || (REDE._sinalMap = new Map()); linhas.forEach(l => mapa.set(l.contrato, l)); await redeAplicarSinal(REDE.clientes || []);
+    (REDE.clientes || []).forEach(c => { c._sit = redeSitCliente(c); const p = String(c.ponlink || '').split('/'); c._slot = p.length === 3 ? p[1] : ''; c._pon = p.length === 3 ? p[2] : ''; });
+    REDE.leitura = (REDE.clientes || []).reduce((m, c) => (String(c.checado_em || '') > m ? String(c.checado_em) : m), '');
+    REDE.ultimaSync = { em: agora, lidos: linhas.length, naoAchados, gravado, erro: erroGravar, ms: Date.now() - t0, restantes: Math.max(0, cand.naConta - alvo.length) };
+    try { localStorage.setItem('jh_rede_sync', JSON.stringify(REDE.ultimaSync)); } catch (e) { /* sem armazenamento */ }
+    cacheGravar('rede_clientes', null).catch(() => {});   // a cópia local antiga não vale mais
+    return { ok: true, ...REDE.ultimaSync };
+  } catch (e) { REDE.ultimaSync = { ...(REDE.ultimaSync || {}), erro: String((e && e.message) || e), falhouEm: new Date().toISOString() }; return { ok: false, erro: REDE.ultimaSync.erro }; }
+  finally { REDE._sincronizando = false; }
+}
+// sincronização automática: só enquanto a Central Rede está aberta num Chrome com a extensão, a cada 10 min, em lotes pequenos (problema primeiro)
+function redeAutoLigar() {
+  redeAutoParar(); let lig = false; try { lig = localStorage.getItem('jh_rede_auto') === '1'; } catch (e) { /* sem armazenamento */ }
+  if (!lig || !ehAnalista()) return;
+  REDE._auto = setInterval(async () => { if (ROTA_ATUAL.nome !== 'rede' || document.visibilityState !== 'visible' || !redeExtensaoOk()) return; const r = await redeSincronizarSinal({ limite: 100 }); if (r.ok && REDE._aoSync) REDE._aoSync(); }, 600000);
+}
+function redeAutoParar() { if (REDE._auto) { clearInterval(REDE._auto); REDE._auto = null; } }
 async function redeCarregarCabosMeta() {
   if (REDE.cabosMeta) return REDE.cabosMeta;
   const m = new Map(); try { (await fetchAllRows('noc_geo_cabo')).forEach(c => m.set(String(c.cod_cabo), c)); } catch (e) { /* sem tabela */ }
@@ -26475,9 +26685,10 @@ async function redeCarregarCabosMeta() {
 }
 const redeFiltroGeo = c => (!REDE.cidades || REDE.cidades.has(c._cid)) && (!REDE.f.olt || c.olt === REDE.f.olt) && (!REDE.f.slot || c._slot === REDE.f.slot) && (!REDE.f.pon || c._pon === REDE.f.pon);
 
+function redePararMapaTudo() { redePararMapa(); redeAutoParar(); }
 function redePararMapa() { if (REDE._parar) { try { REDE._parar(); } catch (e) { /* já saiu */ } REDE._parar = null; } }   // remove o mapa anterior (e o relógio de 5 min) ao sair da tela ou refazê-la
 function renderRede() {
-  redePararMapa();
+  redePararMapa(); redeAutoLigar();
   if (!podeAcessar(currentUser.role, 'rede')) { document.getElementById('content').innerHTML = '<div class="panel"><div class="empty">Sem acesso à Central Rede.</div></div>'; return; }
   const analista = ehAnalista();
   const abas = REDE_ABAS.filter(([k]) => analista || !REDE_ABAS_ANALISTA.has(k));
@@ -26497,6 +26708,12 @@ function renderRede() {
   document.querySelectorAll('.rede-abas button').forEach(b => b.addEventListener('click', () => mostrar(b.dataset.aba)));
   mostrar(REDE.aba);
 }
+// os mapas que existiam dentro do U2000/Analítico (ONUs com problema e VLANs) foram unificados no mapa da Central Rede: no lugar deles fica este atalho
+function redeCartaoMapa(box, camada, texto) {
+  if (!box) return;
+  box.innerHTML = `<div class="panel rede-cartao-mapa"><h3>🗺 Mapa unificado na Central Rede</h3><p style="margin:0 0 10px;color:var(--text-secondary)">${texto}</p><button type="button" class="fisc-btn" data-ir-mapa>Abrir o mapa</button></div>`;
+  box.querySelector('[data-ir-mapa]').addEventListener('click', () => { if (camada) REDE.camadas[camada] = true; REDE.aba = 'mapa'; navigate('rede'); });
+}
 function redeAbaU2k(host) { host.innerHTML = '<div id="rede-host"></div>'; renderU2000(); }
 function redeAbaAnalitico(host) { host.innerHTML = '<div id="rede-host"></div>'; renderRelU2000(); }
 
@@ -26512,9 +26729,10 @@ async function redeAbaMapa(host) {
   (NOC.popOlt || []).filter(x => x.ativo).forEach(x => { if (!oltsDoPop.has(x.pop)) oltsDoPop.set(x.pop, []); oltsDoPop.get(x.pop).push(x.olt); });
   const olts = [...new Set(clientes.map(c => c.olt).filter(Boolean))].sort();
   const aviso = NOC.erro === 'tabela' ? '<div class="fisc-alerta">As tabelas da Central NOC não existem no banco (rode o sql/PASSO-72-noc-etapa1.sql). Sem elas o mapa mostra só os clientes.</div>' : '';
+  const semBase = !ehAnalista() ? '<div class="fisc-alerta" style="background:var(--accent-bg);border-color:var(--accent);color:var(--text-primary)">CTOs, cabos e a correspondência POP → OLT são exclusivas do Analista; aqui aparecem os clientes (sinal), as OLTs e as VLANs.</div>' : '';
   const alerta = !clientes.length ? '<div class="fisc-alerta">Não achei clientes do AutoISP no banco (monitor_olt_clientes) — sem conexão ou sem permissão.</div>' : '';
   const velho = REDE.leitura && (Date.now() - Date.parse(String(REDE.leitura).replace(' ', 'T'))) > 3 * 86400000;
-  host.innerHTML = `${aviso}${alerta}${velho ? `<div class="fisc-alerta">A última leitura do sinal dos clientes é de <b>${esc(formatDate(String(REDE.leitura).slice(0, 10)))}</b> (${esc(redeLeitura(REDE.leitura))}). Os pontos aparecem esmaecidos; use <b>Sinal dos assinantes › Atualizar pela extensão</b> para ler o sinal de agora.</div>` : ''}
+  host.innerHTML = `${aviso}${semBase}${alerta}${velho ? `<div class="fisc-alerta">A última leitura do sinal dos clientes é de <b>${esc(formatDate(String(REDE.leitura).slice(0, 10)))}</b> (${esc(redeLeitura(REDE.leitura))}). Os pontos aparecem esmaecidos; use <b>Sinal dos assinantes › Atualizar pela extensão</b> para ler o sinal de agora.</div>` : ''}
     <div class="rede-chips" id="rm-chips"></div>
     <div class="rede-wrap${REDE.lateral ? '' : ' sem-lateral'}">
       <aside class="rede-lateral" id="rm-lat"><div class="rede-lat-tit">Filtros <button type="button" class="rede-limpar" id="rm-limpar">Limpar</button></div>
@@ -26535,15 +26753,15 @@ async function redeAbaMapa(host) {
   $('rm-cid').innerHTML = Object.entries(NOC_CID).map(([k, r]) => `<label class="rede-cid"><input type="checkbox" value="${k}"${REDE.cidades.has(k) ? ' checked' : ''}> ${esc(r)}</label>`).join('');
   $('rm-olt').value = REDE.f.olt; $('rm-cto').value = REDE.f.cto;
   const map = window.L.map('rm-mapa', { preferCanvas: true, scrollWheelZoom: true, zoomSnap: 0.5 }).setView([-23.96, -46.33], 11); NOC.mapa = map; jhMapaBase(map);
-  REDE._parar = () => { try { map.remove(); } catch (e) { /* já saiu */ } if (NOC.mapa === map) NOC.mapa = null; };
+  REDE._parar = () => { try { window.L.Util.cancelAnimFrame(canvas._redrawRequest); canvas._redrawRequest = null; canvas._redraw = () => {}; canvas._requestRedraw = () => {}; } catch (e) { /* sem canvas */ } try { map.remove(); } catch (e) { /* já saiu */ } if (NOC.mapa === map) NOC.mapa = null; };   // o redesenho agendado do Leaflet não pode rodar depois de remover o mapa (dava "clearRect de undefined")
   const morto = () => NOC.mapa !== map || !host.isConnected;   // mapa já removido (troca de aba / nova abertura): nenhuma camada pode mais ser adicionada a ele
   setTimeout(() => { try { map.invalidateSize(); } catch (e) { /* saiu */ } }, 200);
   const canvas = window.L.canvas({ padding: 0.4, tolerance: 7 });
-  const G = { postes: window.L.layerGroup(), cobertura: window.L.layerGroup(), bloqueios: window.L.layerGroup(), cabos: window.L.layerGroup(), ctos: window.L.layerGroup(), clientes: window.L.layerGroup(), olts: window.L.layerGroup() };
+  const G = { vlans: window.L.layerGroup(), postes: window.L.layerGroup(), cobertura: window.L.layerGroup(), bloqueios: window.L.layerGroup(), cabos: window.L.layerGroup(), ctos: window.L.layerGroup(), clientes: window.L.layerGroup(), olts: window.L.layerGroup() };
   const painel = $('rm-painel'), abrir = html => { painel.innerHTML = `<button type="button" class="noc-x" aria-label="Fechar">✕</button>${html}`; painel.hidden = false; painel.querySelector('.noc-x').addEventListener('click', () => { painel.hidden = true; limparSel(); }); };
   const lin = (k, v) => `<div class="noc-lin"><small>${k}</small><b>${v == null || v === '' ? '-' : v}</b></div>`;
-  const TAM = [{ cabo: 3, cto: 5, cli: 3.4 }, { cabo: 4.2, cto: 7, cli: 4.6 }, { cabo: 5.6, cto: 9.5, cli: 6.4 }, { cabo: 8, cto: 13, cli: 9 }];
-  const tier = () => { const z = map.getZoom(); return z <= 11.5 ? 0 : z <= 13.5 ? 1 : z <= 15.5 ? 2 : 3; };
+  const TAM = [{ cabo: 2.2, cto: 3, cli: 3 }, { cabo: 2.6, cto: 3.6, cli: 3.4 }, { cabo: 3.2, cto: 4.4, cli: 4 }, { cabo: 4, cto: 5.2, cli: 4.8 }, { cabo: 5, cto: 6.5, cli: 5.6 }, { cabo: 6.4, cto: 8.5, cli: 7 }, { cabo: 8, cto: 11, cli: 9 }, { cabo: 10, cto: 13, cli: 11 }];
+  const tier = () => { const z = map.getZoom(); return z <= 11.5 ? 0 : z <= 12.5 ? 1 : z <= 13.5 ? 2 : z <= 14.5 ? 3 : z <= 15.5 ? 4 : z <= 16.5 ? 5 : z <= 17.5 ? 6 : 7; };
   let tierAtual = tier(), selecionado = null;
   const limparSel = () => { if (selecionado) { try { selecionado.restaurar(); } catch (e) { /* camada saiu */ } selecionado = null; } };
   const geoFiltrados = () => clientes.filter(redeFiltroGeo);
@@ -26589,33 +26807,70 @@ async function redeAbaMapa(host) {
   // ---- desenho das camadas
   const corCabo = c => (c === '#000' || c === '#000000') ? (redeEscuro() ? '#cbd5e1' : '#1f2937') : c;
   const lonlat = p => { const ll = []; for (let i = 0; i < p.length; i += 2) ll.push([p[i + 1], p[i]]); return ll; };
+  // Desempenho (medido com os dados reais, 05/11/2026): trocar de nível de zoom reconstruía ~57 mil objetos (0,8–1 s de travamento). Agora os cabos são criados UMA vez por conjunto de cidades
+  // e, no zoom, só se troca a espessura/raio no lugar (estilizar); CTOs e clientes só são recriados quando um filtro muda. Tooltips são criados no primeiro mouseover, não 20 mil de uma vez.
+  const S = { cabos: [], ctos: [], cli: [], chaveCabos: '', seq: 0 };
+  const tip = (obj, texto) => obj.on('mouseover', () => { if (!obj.getTooltip()) obj.bindTooltip(texto, { sticky: true }).openTooltip(); });
+  const estilizar = () => {
+    const T = TAM[tierAtual], fino = tierAtual <= 3;
+    S.cabos.forEach(o => { o.casing.setStyle({ weight: T.cabo + 2.5, opacity: tierAtual === 0 ? 0 : .85 }); if (selecionado === null || selecionado.obj !== o.ln) o.ln.setStyle({ weight: T.cabo }); });
+    S.ctos.forEach(m => { if (selecionado && selecionado.obj === m) return; m.setStyle({ radius: T.cto, weight: fino ? 1.2 : 2.4 }); });
+    S.cli.forEach(m => { if (selecionado && selecionado.obj === m) return; m.setStyle({ radius: T.cli, weight: fino ? 1 : 1.8 }); });
+  };
   const desenharCabos = async () => {
-    if (morto()) return; G.cabos.clearLayers(); if (!REDE.camadas.cabos) return; const T = TAM[tierAtual], escuro = redeEscuro();
+    if (morto() || !REDE.camadas.cabos) return;
+    const chave = [...REDE.cidades].sort().join(','); if (S.chaveCabos === chave) return;
+    const meu = ++S.seq; G.cabos.clearLayers(); S.cabos = []; S.chaveCabos = '';
+    const T = TAM[tierAtual], escuro = redeEscuro();
     for (const b of Object.keys(NOC_CID)) { if (!REDE.cidades.has(b)) continue;
-      const t = await nocBaixar('cabos-' + b); if (morto()) return; if (!t) continue; const por = new Map();
+      const t = await nocBaixar('cabos-' + b); if (morto() || meu !== S.seq) return; if (!t) continue; const por = new Map();
       t.seg.forEach(([cod, ci, p]) => { const k = cod + '|' + ci; if (!por.has(k)) por.set(k, { cor: t.cores[ci], cod, partes: [] }); por.get(k).partes.push(lonlat(p)); });
       por.forEach(g => {
         const cor = corCabo(g.cor), meta = cabosMeta.get(String(g.cod));
-        window.L.polyline(g.partes, { color: escuro ? '#0b1220' : '#ffffff', weight: T.cabo + 2.5, opacity: .85, interactive: false, renderer: canvas }).addTo(G.cabos);
-        const ln = window.L.polyline(g.partes, { color: cor, weight: T.cabo, opacity: .96, renderer: canvas }).addTo(G.cabos);
-        ln.bindTooltip(meta ? `${meta.nome} · ${meta.qtd_fibras || '?'} fibras` : 'Cabo ' + g.cod, { sticky: true });
-        ln.on('click', ev => { window.L.DomEvent.stopPropagation(ev); limparSel(); ln.setStyle({ weight: T.cabo + 4, color: '#facc15' }); selecionado = { restaurar: () => ln.setStyle({ weight: T.cabo, color: cor }) }; painelCabo(g, meta); });
+        const casing = window.L.polyline(g.partes, { color: escuro ? '#0b1220' : '#ffffff', weight: T.cabo + 2.5, opacity: tierAtual === 0 ? 0 : .85, interactive: false, smoothFactor: 1.5, renderer: canvas }).addTo(G.cabos);
+        const ln = window.L.polyline(g.partes, { color: cor, weight: T.cabo, opacity: .96, smoothFactor: 1.5, renderer: canvas }).addTo(G.cabos);
+        tip(ln, meta ? `${meta.nome} · ${meta.qtd_fibras || '?'} fibras` : 'Cabo ' + g.cod);
+        ln.on('click', ev => { window.L.DomEvent.stopPropagation(ev); limparSel(); ln.setStyle({ weight: TAM[tierAtual].cabo + 4, color: '#facc15' }); selecionado = { obj: ln, restaurar: () => ln.setStyle({ weight: TAM[tierAtual].cabo, color: cor }) }; painelCabo(g, meta); });
+        S.cabos.push({ casing, ln });
       }); }
+    if (meu === S.seq) S.chaveCabos = chave;
   };
   const desenharCtos = () => {
-    if (morto()) return; G.ctos.clearLayers(); if (!REDE.camadas.ctos) return; const T = TAM[tierAtual];
+    if (morto()) return; G.ctos.clearLayers(); S.ctos = []; if (!REDE.camadas.ctos) return; const T = TAM[tierAtual], fino = tierAtual <= 3;
     ctos.filter(ctoOk).forEach(c => { if (REDE.f.cto && !String(c.cto).toLowerCase().includes(REDE.f.cto.toLowerCase())) return;
-      const m = window.L.circleMarker([c.lat, c.lon], { radius: T.cto, weight: 2.4, color: '#ffffff', fillColor: '#0284c7', fillOpacity: 1, renderer: canvas }).addTo(G.ctos);
-      m.bindTooltip(c.cto, { sticky: true }); m.on('click', ev => { window.L.DomEvent.stopPropagation(ev); limparSel(); m.setStyle({ radius: T.cto + 4, color: '#facc15' }); selecionado = { restaurar: () => m.setStyle({ radius: T.cto, color: '#ffffff' }) }; painelCto(c); }); });
+      const m = window.L.circleMarker([c.lat, c.lon], { radius: T.cto, weight: fino ? 1.2 : 2.4, color: '#ffffff', fillColor: '#0284c7', fillOpacity: 1, renderer: canvas }).addTo(G.ctos);
+      tip(m, c.cto); m.on('click', ev => { window.L.DomEvent.stopPropagation(ev); limparSel(); m.setStyle({ radius: TAM[tierAtual].cto + 4, color: '#facc15' }); selecionado = { obj: m, restaurar: () => m.setStyle({ radius: TAM[tierAtual].cto, color: '#ffffff' }) }; painelCto(c); }); S.ctos.push(m); });
   };
   const stale = c => { const d = Date.parse(String(c.checado_em || '').replace(' ', 'T')); return !d || Date.now() - d > 3 * 86400000; };
   const desenharClientes = () => {
-    if (morto()) return; G.clientes.clearLayers(); if (!REDE.camadas.clientes) return; const T = TAM[tierAtual];
+    if (morto()) return; G.clientes.clearLayers(); S.cli = []; if (!REDE.camadas.clientes) return; const T = TAM[tierAtual], fino = tierAtual <= 3;
     geoFiltrados().filter(c => c._local && REDE.st[c._sit]).forEach(c => {
       const s = REDE_SIT[c._sit], velho = stale(c);
-      const m = window.L.circleMarker([c._lat, c._lng], { radius: T.cli, weight: 1.8, color: velho ? s.cor : '#ffffff', fillColor: s.cor, fillOpacity: velho ? .32 : .95, renderer: canvas }).addTo(G.clientes);
-      m.bindTooltip(`${c.nome || c.contrato} · ${s.rot}`, { sticky: true }); m.on('click', ev => { window.L.DomEvent.stopPropagation(ev); limparSel(); m.setStyle({ radius: T.cli + 4, color: '#facc15', weight: 3 }); selecionado = { restaurar: () => m.setStyle({ radius: T.cli, weight: 1.8, color: velho ? s.cor : '#ffffff' }) }; painelCliente(c); });
+      const m = window.L.circleMarker([c._lat, c._lng], { radius: T.cli, weight: fino ? 1 : 1.8, color: velho ? s.cor : '#ffffff', fillColor: s.cor, fillOpacity: velho ? .32 : .95, renderer: canvas }).addTo(G.clientes);
+      tip(m, `${c.nome || c.contrato} · ${s.rot}`); m.on('click', ev => { window.L.DomEvent.stopPropagation(ev); limparSel(); m.setStyle({ radius: TAM[tierAtual].cli + 4, color: '#facc15', weight: 3 }); selecionado = { obj: m, restaurar: () => m.setStyle({ radius: TAM[tierAtual].cli, weight: 1.8, color: velho ? s.cor : '#ffffff' }) }; painelCliente(c); });
+      S.cli.push(m);
     });
+  };
+  // VLANs por bairro (o "Mapa das VLANs" que existia dentro do U2000, agora camada deste mapa): cor = VLAN; contagem de ONUs só se o U2000 já foi carregado nesta sessão
+  const painelVlan = (l, ar, vs, porCV) => {
+    const tot = vs.reduce((s, v) => { const e = porCV.get(l.cidade + '|' + v); return e ? { total: s.total + e.total, online: s.online + e.online, offline: s.offline + e.offline } : s; }, { total: 0, online: 0, offline: 0 });
+    const outros = [...new Set(vs.flatMap(v => VLAN_LISTA.filter(x => x.cidade === l.cidade && x.bairro !== l.bairro && u2kVlans(x.vlan).includes(v)).map(x => x.bairro)))];
+    abrir(`<h3>${esc(l.bairro)}</h3><div class="noc-estado" style="border-color:${l.vlan ? u2kCorVlan(vs[0]) : '#94a3b8'}"><b>VLAN ${esc(l.vlan || 'sem VLAN definida')}</b> · ${esc(u2kRotCidade(l.cidade))}</div>
+      ${lin('Equipamento a usar', esc(l.equip))}${lin('Observação', esc(l.obs))}${(U2K.onus || []).length ? lin('ONUs com essa VLAN nas OLTs da cidade', tot.total.toLocaleString('pt-BR') + (tot.total ? ` · ${tot.online} online · ${tot.offline} offline` : '')) : '<p class="noc-aviso-pequeno">A contagem de ONUs por VLAN aparece depois que o Monitoramento U2000 for aberto nesta sessão.</p>'}
+      ${outros.length ? `<h4>A mesma VLAN também atende</h4><p class="noc-aviso-pequeno">${esc(outros.slice(0, 25).join(', '))}${outros.length > 25 ? '…' : ''}</p>` : ''}
+      <p class="noc-aviso-pequeno">${ar.aprox ? 'Área aproximada (a região mais perto deste bairro que dos vizinhos), não o contorno oficial.' : 'Contorno do bairro (OpenStreetMap).'} A VLAN aqui é a da LISTA de bairros (Rev. 03), não a lida na ONU.</p>`);
+  };
+  const desenharVlans = () => {
+    if (morto()) return; G.vlans.clearLayers(); if (!REDE.camadas.vlans) return;
+    const porCV = new Map(); (U2K.onus || []).forEach(o => { if (!o.vlanPerfil || !o.cidade) return; const k = o.cidade + '|' + o.vlanPerfil; let e = porCV.get(k); if (!e) { e = { total: 0, online: 0, offline: 0 }; porCV.set(k, e); } e.total++; if (o.status === 'Online') e.online++; else if (o.status === 'Offline') e.offline++; });
+    VLAN_LISTA.filter(l => l.bairro !== '*' && REDE.cidades.has(redeCidadeCod(u2kRotCidade(l.cidade)))).forEach(l => {
+      const ar = u2kAreaDe(l.cidade, l.bairro); if (!ar) return; const vs = u2kVlans(l.vlan), cor = vs[0] ? u2kCorVlan(vs[0]) : '#94a3b8';
+      const est = { color: cor, weight: ar.aprox ? 1.4 : 2, dashArray: ar.aprox ? '4 4' : null, fillColor: cor, fillOpacity: .28, renderer: canvas };
+      const forma = (ar.p ? window.L.polygon(ar.p, est) : window.L.circle(ar.c, { ...est, radius: ar.r || 600 })).addTo(G.vlans);
+      tip(forma, `${l.bairro} · VLAN ${l.vlan || 'sem VLAN definida'}`);
+      forma.on('click', ev => { window.L.DomEvent.stopPropagation(ev); limparSel(); painelVlan(l, ar, vs, porCV); });
+    });
+    G.vlans.eachLayer(l => { try { l.bringToBack(); } catch (e) { /* ainda sem mapa */ } });
   };
   const desenharOlts = () => {
     if (morto()) return; G.olts.clearLayers(); if (!REDE.camadas.olts) return;
@@ -26630,14 +26885,16 @@ async function redeAbaMapa(host) {
   // ---- chips de situação, KPIs, legenda, camadas, filtros
   const pintarChips = () => {
     const base = geoFiltrados(), n = resumoSit(base), semLocal = base.filter(c => !c._local).length;
-    $('rm-chips').innerHTML = `<div class="rede-kpis"><span><b>${ctos.filter(ctoOk).length.toLocaleString('pt-BR')}</b> CTOs</span><span><b>${cabosMeta.size.toLocaleString('pt-BR')}</b> cabos</span><span><b>${base.filter(c => c._local).length.toLocaleString('pt-BR')}</b> clientes no mapa</span></div>
+    $('rm-chips').innerHTML = `<div class="rede-kpis">${ctos.length ? `<span><b>${ctos.filter(ctoOk).length.toLocaleString('pt-BR')}</b> CTOs</span><span><b>${cabosMeta.size.toLocaleString('pt-BR')}</b> cabos</span>` : ''}<span><b>${base.filter(c => c._local).length.toLocaleString('pt-BR')}</b> clientes no mapa</span></div>
       <div class="rede-st">${Object.entries(REDE_SIT).map(([k, s]) => `<button type="button" class="rede-stchip${REDE.st[k] ? ' on' : ''}" data-st="${k}" style="--c:${s.cor}"><i></i>${s.rot}: <b>${n[k].toLocaleString('pt-BR')}</b>${REDE.st[k] ? '<span class="rede-x">✕</span>' : ''}</button>`).join('')}
+        <span class="rede-semlocal" id="rm-sync" title="Leitura mais recente do sinal dos clientes">${esc(redeLeitura(REDE.leitura))}${ehAnalista() && redeExtensaoOk() ? ' · <a href="#" id="rm-sync-go">⚡ sincronizar</a>' : ''}</span>
         ${semLocal ? `<span class="rede-semlocal" title="O AutoISP devolveu a coordenada padrão da cidade/OLT (ou nenhuma), então estes clientes não têm localização precisa e não aparecem no mapa — continuam na aba Sinal dos assinantes.">${semLocal.toLocaleString('pt-BR')} sem localização precisa</span>` : ''}</div>`;
     $('rm-chips').querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', () => { REDE.st[b.dataset.st] = !REDE.st[b.dataset.st]; pintarChips(); desenharClientes(); }));
+    const sg = $('rm-sync-go'); if (sg) sg.addEventListener('click', async e => { e.preventDefault(); sg.textContent = 'lendo…'; const r = await redeSincronizarSinal({ limite: 200 }); if (!r.ok) toast('Sincronização: ' + r.erro, 'aviso'); else toast(`Sinal lido de ${r.lidos} assinante(s)${r.gravado ? ' e gravado' : ''}${r.erro ? ' — ' + r.erro : ''}.`, r.erro ? 'aviso' : 'sucesso'); if (host.isConnected) { pintarChips(); desenharClientes(); const f = document.getElementById('rede-fontes'); if (f) f.innerHTML = nocSelo(REDE.leitura, 'Sinal dos clientes (AutoISP)'); } });
   };
   const pintarCamadas = () => {
-    $('rm-cam').innerHTML = [['cabos', 'Cabos de fibra'], ['ctos', 'CTOs'], ['clientes', 'Clientes (AutoISP)'], ['olts', 'OLTs e massivas'], ['postes', 'Postes'], ['cobertura', 'Cobertura'], ['bloqueios', 'Áreas bloqueadas']].map(([k, r]) => `<label class="rede-cam"><input type="checkbox" data-cam="${k}"${REDE.camadas[k] ? ' checked' : ''}> ${r}</label>`).join('');
-    $('rm-cam').querySelectorAll('[data-cam]').forEach(i => i.addEventListener('change', async () => { REDE.camadas[i.dataset.cam] = i.checked; if (i.dataset.cam === 'cabos') await desenharCabos(); if (i.dataset.cam === 'ctos') desenharCtos(); if (i.dataset.cam === 'clientes') desenharClientes(); if (i.dataset.cam === 'olts') desenharOlts(); await aplicarGrupos(); }));
+    $('rm-cam').innerHTML = [['cabos', 'Cabos de fibra'], ['ctos', 'CTOs'], ['clientes', 'Clientes (AutoISP)'], ['olts', 'OLTs e massivas'], ['vlans', 'VLANs por bairro (lista)'], ['postes', 'Postes'], ['cobertura', 'Cobertura'], ['bloqueios', 'Áreas bloqueadas']].map(([k, r]) => `<label class="rede-cam"><input type="checkbox" data-cam="${k}"${REDE.camadas[k] ? ' checked' : ''}> ${r}</label>`).join('');
+    $('rm-cam').querySelectorAll('[data-cam]').forEach(i => i.addEventListener('change', async () => { REDE.camadas[i.dataset.cam] = i.checked; if (i.dataset.cam === 'cabos') await desenharCabos(); if (i.dataset.cam === 'ctos') desenharCtos(); if (i.dataset.cam === 'clientes') desenharClientes(); if (i.dataset.cam === 'olts') desenharOlts(); if (i.dataset.cam === 'vlans') desenharVlans(); await aplicarGrupos(); if (i.dataset.cam === 'vlans') G.vlans.eachLayer(l => { try { l.bringToBack(); } catch (e) { /* ainda sem mapa */ } }); }));
     $('rm-leg').innerHTML = `<b>Clientes</b>${Object.values(REDE_SIT).map(s => `<span><i style="background:${s.cor}"></i>${s.rot}</span>`).join('')}<span><i class="rede-leg-cto"></i>CTO</span><span><i class="rede-leg-cabo"></i>Cabo (cor original do MK)</span><em>Ponto esmaecido = leitura com mais de 3 dias</em>`;
   };
   const opcoesSlotPon = () => {
@@ -26648,7 +26905,7 @@ async function redeAbaMapa(host) {
   };
   const texto = () => { const n = geoFiltrados().filter(c => c._local).length; $('rm-nota').innerHTML = `${n.toLocaleString('pt-BR')} cliente(s) com localização no mapa. Cliente × CTO e cabo × CTO são <b>estimativas por proximidade</b> (os arquivos e o AutoISP não informam o vínculo físico).`; };
   const enquadrar = () => { const pts = geoFiltrados().filter(c => c._local && (REDE.f.olt || REDE.f.slot || REDE.f.pon)).map(c => [c._lat, c._lng]); if (pts.length) { try { map.fitBounds(window.L.latLngBounds(pts), { padding: [40, 40], maxZoom: 17, animate: false }); } catch (e) { /* sem pontos */ } } };
-  const refazer = async (ajustar) => { pintarChips(); desenharCtos(); desenharClientes(); desenharOlts(); texto(); if (ajustar) enquadrar(); await aplicarGrupos(); };
+  const refazer = async (ajustar) => { pintarChips(); desenharCtos(); desenharClientes(); desenharOlts(); desenharVlans(); texto(); if (ajustar) enquadrar(); await aplicarGrupos(); };
   const mudouCidades = async () => { await desenharCabos(); await refazer(); };
   // eventos
   $('rm-cid').addEventListener('change', async () => { REDE.cidades = new Set([...$('rm-cid').querySelectorAll('input:checked')].map(i => i.value)); if (!REDE.cidades.size) REDE.cidades = new Set(Object.keys(NOC_CID)); await mudouCidades(); });
@@ -26661,7 +26918,8 @@ async function redeAbaMapa(host) {
   $('rm-limpar').addEventListener('click', async () => { REDE.f = { olt: '', slot: '', pon: '', cto: '' }; REDE.cidades = new Set(Object.keys(NOC_CID)); REDE.st = { problema: true, atencao: true, ok: true, sem: true }; $('rm-olt').value = ''; $('rm-cto').value = ''; $('rm-cid').querySelectorAll('input').forEach(i => { i.checked = true; }); opcoesSlotPon(); await mudouCidades(); if (ctos.length) { try { map.fitBounds(window.L.latLngBounds(ctos.map(c => [c.lat, c.lon])), { padding: [20, 20], animate: false }); } catch (e) { /* sem pontos */ } } });
   $('rm-latbtn').addEventListener('click', () => { REDE.lateral = !REDE.lateral; host.querySelector('.rede-wrap').classList.toggle('sem-lateral', !REDE.lateral); setTimeout(() => map.invalidateSize(), 150); });
   map.on('click', () => { painel.hidden = true; limparSel(); });
-  map.on('zoomend', () => { const t = tier(); if (t !== tierAtual) { tierAtual = t; clearTimeout(REDE._zt); REDE._zt = setTimeout(async () => { limparSel(); await desenharCabos(); desenharCtos(); desenharClientes(); await aplicarGrupos(); }, 120); } });
+  map.on('zoomend', () => { const t = tier(); if (t !== tierAtual) { tierAtual = t; clearTimeout(REDE._zt); REDE._zt = setTimeout(() => { if (!morto()) estilizar(); }, 60); } });
+  REDE._aoSync = () => { if (host.isConnected && REDE.aba === 'mapa') { pintarChips(); desenharClientes(); } };
   pintarCamadas(); opcoesSlotPon(); texto();
   await desenharCabos(); await refazer(); if (morto()) return;
   if (ctos.length) { const f = ctos.filter(ctoOk); try { map.fitBounds(window.L.latLngBounds(f.map(c => [c.lat, c.lon])), { padding: [20, 20], animate: false }); } catch (e) { /* sem pontos */ } }
@@ -26676,15 +26934,15 @@ async function redeAbaSinal(host) {
   await redeCarregarClientes(); if (REDE.aba !== 'sinal' || !host.isConnected) return;
   const clientes = REDE.clientes || [], fontes = document.getElementById('rede-fontes'); if (fontes) fontes.innerHTML = nocSelo(REDE.leitura, 'Sinal dos clientes (AutoISP)');
   const olts = [...new Set(clientes.map(c => c.olt).filter(Boolean))].sort(), F = { cid: '', olt: '', sit: '', q: '', max: 300 };
-  const extOk = typeof extensaoAtende === 'function' && EXT_JH && EXT_JH.versao && extensaoAtende('1.4.1');
+  const extOk = redeExtensaoOk();
   host.innerHTML = `<div class="toolbar nca-toolbar rede-filtros-h">
       <div class="field"><label>Cidade</label><select id="rs-cid"><option value="">Todas</option>${Object.entries(NOC_CID).map(([k, r]) => `<option value="${k}">${r}</option>`).join('')}</select></div>
       <div class="field"><label>OLT</label><select id="rs-olt"><option value="">Todas</option>${olts.map(o => `<option>${esc(o)}</option>`).join('')}</select></div>
       <div class="field"><label>Situação</label><select id="rs-sit"><option value="">Todas</option>${Object.entries(REDE_SIT).map(([k, s]) => `<option value="${k}">${s.rot}</option>`).join('')}</select></div>
       <div class="field"><label>Buscar</label><input type="search" id="rs-q" placeholder="nome, contrato ou serial"></div>
       <div class="field"><label>Mostrar</label><select id="rs-max"><option>100</option><option selected>300</option><option>1000</option><option value="999999">Todos</option></select></div>
-      <button type="button" class="btn-export-xls" id="rs-xls">⤓ Excel</button><button type="button" class="fisc-btn" id="rs-ext" ${extOk ? '' : 'disabled title="Precisa da extensão JH Monitor OLT (1.4.1 ou mais nova) no Chrome"'}>⚡ Atualizar pela extensão</button></div>
-    <div id="rs-info" class="rede-info"></div><div id="rs-tab"></div>`;
+      <button type="button" class="btn-export-xls" id="rs-xls">⤓ Excel</button></div>
+    <div id="rs-sync" class="rede-sync"></div><div id="rs-info" class="rede-info"></div><div id="rs-tab"></div>`;
   const $ = id => document.getElementById(id);
   const lista = () => clientes.filter(c => (!F.cid || c._cid === F.cid) && (!F.olt || c.olt === F.olt) && (!F.sit || c._sit === F.sit) && (!F.q || normalizeHeader([c.nome, c.contrato, c.serial].join(' ')).includes(normalizeHeader(F.q))));
   const desenhar = () => {
@@ -26694,18 +26952,38 @@ async function redeAbaSinal(host) {
       return `<tr><td>${esc(c.contrato)}</td><td>${esc(c.nome || '-')}</td><td>${esc(c.olt || '-')}</td><td>${esc(c._slot)}</td><td>${esc(c._pon)}</td><td>${esc(c.cidade || '-')}</td><td>${esc(c.bairro || '-')}</td><td>${c.sinal != null && c.sinal !== '' ? esc(c.sinal) + ' dBm' : '-'}</td><td><span class="rede-pill" style="--c:${s.cor}"><i></i>${esc(REDE_STATUS_TXT[String(c.status || '').toLowerCase()] || s.rot)}</span></td><td>${ao ? aispSinalHtml(ao) : '<span style="color:var(--text-muted)">—</span>'}</td><td>${esc(c.acs_ultimo_contato ? redeLeitura(c.acs_ultimo_contato) : '-')}</td><td>${esc(redeLeitura(c.checado_em))}</td></tr>`; }).join('') || '<tr><td colspan="12" class="empty">Nenhum assinante com esses filtros.</td></tr>'}</tbody></table></div>${l.length > vis.length ? `<p class="noc-nota">Mostrando ${vis.length.toLocaleString('pt-BR')} de ${l.length.toLocaleString('pt-BR')} — o Excel leva todos.</p>` : ''}`;
     if (typeof ativarFiltrosDeColuna === 'function') ativarFiltrosDeColuna($('rs-tab'));
   };
+  // ---- painel de sincronização (extensão do Chrome → AutoISP, só leitura → tabela rede_sinal)
+  const idade = c => { const d = Date.parse(String(c.checado_em || '').replace(' ', 'T')); return d ? (Date.now() - d) / 3600000 : 1e9; };
+  const pintarSync = async () => {
+    const box = $('rs-sync'); if (!box || !box.isConnected) return;
+    const cl = REDE.clientes || [], h24 = cl.filter(c => idade(c) <= 24).length, d3 = cl.filter(c => idade(c) > 72).length, us = REDE.ultimaSync || (() => { try { return JSON.parse(localStorage.getItem('jh_rede_sync') || 'null'); } catch (e) { return null; } })();
+    let conta = ''; if (redeExtensaoOk()) { try { const c = await redeCandidatos(); conta = `<b>${c.naConta.toLocaleString('pt-BR')}</b> assinante(s) estão em OLTs que a conta do AutoISP lista (dá para atualizar); <b>${c.foraDaConta.toLocaleString('pt-BR')}</b> estão em OLT não listada ou sem serial (a busca da extensão não enxerga — continuam com a última leitura gravada).`; } catch (e) { conta = 'Não consegui conferir as OLTs da conta: ' + esc(String(e.message || e)); } }
+    const ana = ehAnalista(), auto = (() => { try { return localStorage.getItem('jh_rede_auto') === '1'; } catch (e) { return false; } })();
+    box.innerHTML = `<div class="rede-sync-l"><b>Sincronização do sinal</b>
+        <span>${us && us.em ? `última: <b>${esc(new Date(us.em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}</b> — leu ${us.lidos}, não achou ${us.naoAchados}${us.gravado ? ', gravado no banco' : ''}${us.erro ? ` · <span style="color:var(--danger)">${esc(us.erro)}</span>` : ''}` : 'nenhuma sincronização feita neste navegador'}</span>
+        <span>Leitura gravada mais recente: <b>${esc(redeLeitura(REDE.leitura))}</b> · lida nas últimas 24 h: <b>${h24.toLocaleString('pt-BR')}</b> de ${cl.length.toLocaleString('pt-BR')} · <span style="color:${d3 ? 'var(--danger)' : 'inherit'}">com mais de 3 dias (desatualizada): <b>${d3.toLocaleString('pt-BR')}</b></span></span>
+        <span>${redeExtensaoOk() ? `Extensão ${esc(EXT_JH.versao)} conectada. ${conta}` : '<span style="color:var(--text-muted)">Extensão do Chrome (1.4.1+) não encontrada neste navegador: só dá para ver o que já está gravado.</span>'}</span>
+        ${REDE.sinalTabela === false ? '<span style="color:var(--danger)">A tabela <b>rede_sinal</b> ainda não existe no banco (rode o <b>sql/PASSO-73-rede-sinal.sql</b>): a leitura vale só nesta sessão.</span>' : ''}</div>
+      ${ana ? `<div class="rede-sync-a"><select id="rs-lim"><option>100</option><option selected>200</option><option>500</option><option>1000</option></select>
+        <label class="rede-cam" title="Lê só quem está na lista filtrada abaixo (em vez de problema primeiro / leitura mais velha primeiro)"><input type="checkbox" id="rs-so-filtro"> só a lista filtrada</label>
+        <button type="button" class="fisc-btn" id="rs-sync-go" ${redeExtensaoOk() ? '' : 'disabled'}>⚡ Sincronizar agora</button>
+        <label class="rede-cam" title="A cada 10 minutos, enquanto a Central Rede estiver aberta neste Chrome, lê 100 assinantes (problema primeiro). Nada é guardado do seu login do AutoISP."><input type="checkbox" id="rs-auto"${auto ? ' checked' : ''}> automático (10 min, com a tela aberta)</label>
+        <span id="rs-sync-msg" class="rede-nota"></span></div>` : '<div class="rede-sync-a"><span class="rede-nota">Só o Analista sincroniza.</span></div>'}`;
+    const go = $('rs-sync-go'); if (go) go.addEventListener('click', async () => {
+      go.disabled = true; const msg = $('rs-sync-msg'), so = $('rs-so-filtro').checked;
+      const r = await redeSincronizarSinal({ limite: +$('rs-lim').value, alvo: so ? lista().filter(c => c.serial) : null, aoAndar: (f, tot) => { if (msg) msg.textContent = `lendo ${f} de ${tot}…`; } });
+      go.disabled = false; if (!r.ok) toast('Sincronização: ' + r.erro, 'aviso'); else toast(`Sinal lido de ${r.lidos} assinante(s)${r.gravado ? ' e gravado' : ''}${r.erro ? ' — ' + r.erro : ''}.`, r.erro ? 'aviso' : 'sucesso');
+      desenhar(); pintarSync();
+    });
+    const au = $('rs-auto'); if (au) au.addEventListener('change', () => { try { localStorage.setItem('jh_rede_auto', au.checked ? '1' : '0'); } catch (e) { /* sem armazenamento */ } redeAutoLigar(); });
+  };
+  REDE._aoSync = () => { if (document.getElementById('rs-sync')) { desenhar(); pintarSync(); } };
   const resumoSitRede = l => { const n = { problema: 0, atencao: 0, ok: 0, sem: 0 }; l.forEach(c => n[c._sit]++); return n; };
   [['rs-cid', 'cid'], ['rs-olt', 'olt'], ['rs-sit', 'sit']].forEach(([id, k]) => $(id).addEventListener('change', e => { F[k] = e.target.value; desenhar(); }));
   $('rs-q').addEventListener('input', e => { F.q = e.target.value; clearTimeout(F._t); F._t = setTimeout(desenhar, 250); });
   $('rs-max').addEventListener('change', e => { F.max = +e.target.value; desenhar(); });
   $('rs-xls').addEventListener('click', () => exportarQuadroPresenca('sinal-assinantes-' + hojeISOLocal(), ['Contrato', 'Cliente', 'OLT', 'Slot', 'PON', 'Cidade', 'Bairro', 'Sinal gravado (dBm)', 'Situação', 'Último contato do equipamento', 'Leitura gravada em'], lista().map(c => [c.contrato, c.nome || '', c.olt || '', c._slot, c._pon, c.cidade || '', c.bairro || '', c.sinal != null ? c.sinal : '', REDE_STATUS_TXT[String(c.status || '').toLowerCase()] || REDE_SIT[c._sit].rot, c.acs_ultimo_contato || '', c.checado_em || '']), 'Sinal dos assinantes'));
-  $('rs-ext').addEventListener('click', async () => {
-    const l = lista().filter(c => c.serial || c.contrato).slice(0, 60), btn = $('rs-ext'); if (!l.length) return;
-    if (!confirm(`Ler o sinal de ${l.length} assinante(s) no AutoISP pela extensão do Chrome (só consulta; não manda a OLT atualizar)?`)) return;
-    btn.disabled = true; const r = await u2kAispConsultar(l.map(c => ({ sn: c.serial, contrato: c.contrato })), { aoAndar: (f, t) => { btn.textContent = `Lendo ${f}/${t}…`; } });
-    btn.disabled = false; btn.textContent = '⚡ Atualizar pela extensão'; if (!r.ok) toast('Extensão: ' + (r.erro || 'não respondeu'), 'aviso'); else toast(`Sinal de ${r.feitos} assinante(s) lido no AutoISP.`, 'sucesso'); desenhar();
-  });
-  desenhar();
+  desenhar(); pintarSync();
 }
 // ===== fim da Central Rede =====
 
@@ -41559,7 +41837,7 @@ function renderRelU2000() {
     tab('ru-t-todas', [{ t: 'Situação', h: sit, x: e => e.sit === 'aberta' ? 'Em aberto' : e.sit === 'resolvida' ? 'Resolvida' : 'Sem confirmação' }, { t: 'OLT', f: e => e.olt }, { t: 'Porta completa', h: e => `<b>${esc(u2kPortaCompleta(e))}</b>`, x: e => u2kPortaCompleta(e) }, { t: 'Tipo', f: e => tipoCurto(e.tipo) },
       { t: 'Início', f: e => u2kFmtData(e.ini) }, { t: 'Resolvida em', f: e => e.sit === 'resolvida' ? u2kFmtData(e.resolvidoEm || e.fim) : '' }, { t: 'Duração', f: e => e.dur == null ? '' : u2kDur(e.dur) }, { t: 'ONUs afetadas', f: e => e.onus }, { t: 'ONUs na porta', f: e => e.total || '' }, { t: '% da porta', f: e => e.pct == null ? '' : formatPct(e.pct, 0) },
       { t: 'VLAN', f: e => vlanDe(e) }, { t: 'ONU IDs', f: e => e.ids, s: 'font-size:12px;white-space:normal' }], lista);
-    u2kPainelMapas(document.getElementById('ru-mapas'), onus.filter(o => okCid(o.olt)), alm.filter(a => okCid(a.fonte)), 'rum');
+    redeCartaoMapa(document.getElementById('ru-mapas'), 'vlans', 'Os mapas de problemas e de VLANs deste relatório foram unificados no mapa da Central Rede (camadas <b>Clientes</b>, <b>OLTs e massivas</b> e <b>VLANs por bairro</b>).');
     ativarFiltrosDeColuna(body); ativarTogglesDeSecao(body); ativarBotoesImagem(body);
     // ---- IFI / IRR durante ou depois das massivas (14/10/2026, pedido do cliente) ----
     // Cliente da porta com massiva: o contrato vem do AutoISP guardado (pelo SN) ou, sem ele, o nome do alias. Chamado = reparo da Produção/PCR aberto entre
@@ -42317,8 +42595,8 @@ function renderU2000() {
     const el = document.getElementById('u2-aba-corpo'), titulo = (t, sub) => `<div class="section-heading"${sub ? ` title="${esc(sub)}"` : ''}>${esc(t)}</div>`;
     const fmtDia = d => u2kFmtData(d + ' 00:00').slice(0, 10);
     ({ resumo: abaResumo, diag: () => { const g = U2K_DIAG_GRUPOS.find(x => x[0] === U2K._diagGrupo) || U2K_DIAG_GRUPOS[0]; abaDiag(g[0], 'Diagnóstico das ONUs — ' + g[1], g[2]); },
-      acomp: abaAcomp, hoje: abaHoje, portas: abaPortas, vlan: abaVlan, alarmes: abaAlarmes, mapas: () => u2kPainelMapas(el, onus, alm, 'u2mp'), tec: abaTecnicos,
-      vlanmapa: () => { abaVlan(); el.insertAdjacentHTML('afterbegin', '<div id="u2-vm-mapa" style="margin-bottom:14px"></div>'); u2kPainelMapas(document.getElementById('u2-vm-mapa'), onus, alm, 'u2mp'); } })[U2K._aba]();
+      acomp: abaAcomp, hoje: abaHoje, portas: abaPortas, vlan: abaVlan, alarmes: abaAlarmes, mapas: () => redeCartaoMapa(el, 'vlans', 'O mapa das VLANs e dos problemas agora é uma camada do mapa da Central Rede.'), tec: abaTecnicos,
+      vlanmapa: () => { abaVlan(); el.insertAdjacentHTML('afterbegin', '<div id="u2-vm-mapa" style="margin-bottom:14px"></div>'); redeCartaoMapa(document.getElementById('u2-vm-mapa'), 'vlans', 'O mapa das VLANs (cada bairro pintado com a cor da VLAN) e o dos problemas agora são camadas do mapa da Central Rede — um mapa só, com filtros de cidade, OLT, slot e PON.'); } })[U2K._aba]();
 
     // ---------------- abas ----------------
     function abaResumo() {
@@ -42486,7 +42764,7 @@ function renderU2000() {
         document.getElementById('u2d-ativos').innerHTML = ativos.length ? ativos.map(k => `<button type="button" class="u2f-at" data-rm="${k}">${rot[k]}: <b>${esc(val[k] || F[k])}</b> ✕</button>`).join('') + '<button type="button" class="u2f-at u2f-at-limpar" data-rm="*">Limpar tudo</button>' : '';
         if (evoc.dias.length) trendChart('u2d-trend', [{ name: 'Entraram na lista', color: '#dc2626', points: evoc.dias.map(d => ({ label: d.dia.slice(8, 10) + '/' + d.dia.slice(5, 7), value: d.novos })) }, { name: 'Saíram da lista', color: '#16a34a', points: evoc.dias.map(d => ({ label: d.dia.slice(8, 10) + '/' + d.dia.slice(5, 7), value: d.saiu })) }], { height: 190, semSeletor: true, onPonto: i => { const d = evoc.dias[i]; if (d) { F.dia = F.dia === d.dia ? '' : d.dia; atual(); } } });
         else document.getElementById('u2d-trend').innerHTML = '<div class="u2d-vazio">Sem histórico por dia importado.</div>';
-        const mb = document.getElementById('u2d-mapa-box'); if (mb) { try { u2kPainelMapas(mb, os, almF, 'u2ov', { so: 'onus', altura: 320, semTitulo: true, semFiltros: true }); } catch (e) { mb.innerHTML = '<div class="u2d-vazio">Mapa indisponível.</div>'; } }
+        const mb = document.getElementById('u2d-mapa-box'); if (mb) redeCartaoMapa(mb, 'clientes', 'Os clientes com problema, as OLTs com massiva e as VLANs agora ficam num mapa só, na aba <b>Mapa da rede</b>.');
       }
       function evolucao() {
         const porDia = new Map();
