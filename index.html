@@ -4757,6 +4757,17 @@ html .fv2-fecha td { padding-top: 6px; padding-bottom: 6px; }
   .cert-sinal-motivo { font-size: 12px; color: var(--text-secondary); margin-top: 3px; } .cert-os-link { font-weight: 700; color: var(--accent); text-decoration: none; } .cert-os-link:hover { text-decoration: underline; }
   .cert-ficha-bt { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-bottom: 12px; }
   @media (max-width: 640px) { .cert-card div[style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; } .cert-ficha-bt .fc-btn, .cert-ficha-bt .btn-secundario { flex: 1 1 45%; } }
+/* IGP — layout da planilha da GIGA (06/11/2026) */
+.sh { margin-top: 10px; } .sh-topo { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0; background: #f1f4f9; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 14px; overflow: hidden; }
+.sh-topo > div { text-align: center; padding: 8px 6px; border-right: 1px solid var(--border); } .sh-topo > div:last-child { border-right: 0; } .sh-topo span { display: block; font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; color: #64748b; font-weight: 700; }
+.sh-topo b { font-size: 26px; color: #12509b; font-weight: 800; } .sh-pos { color: #15803d !important; } .sh-neg { color: #b91c1c !important; }
+.sh-duas { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; align-items: start; } .sh-col { min-width: 0; }
+.sh-barra { background: #d9e2f1; color: #0b2a5b; font-weight: 800; font-size: 12.5px; letter-spacing: .05em; padding: 6px 10px; margin: 8px 0 0; }
+.sh-tab { width: 100%; border-collapse: collapse; font-size: 13.5px; } .sh-tab th { background: #0b2a5b; color: #fff; padding: 6px 8px; font-size: 12px; text-align: center; font-weight: 800; }
+.sh-tab td { padding: 5px 8px; text-align: center; border-bottom: 1px solid var(--border); color: var(--text-primary); } .sh-tab .e { text-align: left; } .sh-tab td.c { text-align: center; }
+.sh-tab .sh-sent { color: var(--text-muted); font-size: 12px; } .sh-tot td { background: #eef1f6; font-weight: 800; color: #0b2a5b; } .sh-real { font-weight: 800; border-left: 1px solid #0b2a5b; } .sh-pt { font-weight: 800; color: #0b2a5b; border-left: 1px solid #0b2a5b; } .sh-pt.ok { color: #15803d; }
+.sh-calc td.e { white-space: nowrap; } .sh-res { max-width: 640px; } .sh-g { font-size: 18px; font-weight: 800; color: #12509b; }
+@media (max-width: 1100px) { .sh-duas { grid-template-columns: 1fr; } .sh-topo { grid-template-columns: repeat(3, 1fr); } .sh-topo > div { border-bottom: 1px solid var(--border); } .sh-calc td.e { white-space: normal; } }
 </style>
 </head>
 <body>
@@ -24856,9 +24867,9 @@ function igpAcessoCalcular(c, R) {
   const proporcional = possivel > 0 ? Math.round(total / possivel * 1000) / 10 : 0;   // aproveitamento dos grupos medidos, em escala de 100
   return { grupos: G, total, possivel, totalBase: base.reduce((s, g) => s + g.pmax, 0), medidos: med.length, naMeta: med.filter(g => g.pontos === g.pmax).length, proporcional, ...igpLetra(total, 'novo') };
 }
-const IGP_MODELOS = { antigo: 'KPI oficial (até out/2026)', out: 'Novo IGP — Performance Review (simulação)', acesso: 'IGP ACESSO (a partir de 01/11/2026)' };
+const IGP_MODELOS = { antigo: 'KPI oficial (até out/2026)', out: 'IGP (a partir de 01/11/2026)' };   // 06/11/2026: saíram o "Novo IGP (simulação)" e o IGP ACESSO — novembro usa o IGP da aba "IGP" da planilha da GIGA (10 indicadores por grupo)
 // 31/10/2026 (cliente): o KPI antigo é o que vale em outubro e nos meses anteriores; o novo começa em novembro
-const igpModeloDoMes = mes => mes < '2026-11' ? 'antigo' : 'acesso';
+const igpModeloDoMes = mes => mes < '2026-11' ? 'antigo' : 'out';
 // ---------- DETALHAMENTO por técnico / cidade (clicar num indicador de RESULTADOS do cartão do KPI) ----------
 // 03/11/2026 (pedido do cliente): o painel abre a MESMA conta do cartão por técnico (ou por cidade): % atual, total de pedidos, dentro/fora e QUANTOS pedidos
 // dentro da meta faltam pra atingir a meta — o total cresce junto (77 de 100 com meta 90% não é "13 pontos": são x pedidos bons que entram no numerador E no denominador).
@@ -25030,6 +25041,39 @@ function renderIGP() {
   const IGPA_COR = { 'Redes': '#0369a1', 'Eficiência': '#0891b2', 'Capex': '#4f46e5', 'Opex': '#7c3aed', 'Qualidade Capex': '#0284c7', 'Qualidade Opex — IRR': '#2563eb', 'Qualidade Opex — IRT': '#475569', 'Agendamento': '#9333ea', 'Acelerador — Churn': '#c026d3' };
   const chip = f => { const c = f === 'Meta 100%' ? ['ok', f] : f === 'Meta mínima' ? ['mid', f] : f === 'Fora da meta' ? ['no', f] : f === 'Mínimo garantido não atingido' ? ['no', f] : ['sem', 'Sem dados']; return `<span class="igpc igpc-${c[0]}">${c[1]}</span>`; };
   const metaDe = (it, v) => v == null ? '—' : (it.maior ? '≥ ' : '≤ ') + (it.un ? String(v).replace('.', ',') + it.un : fPct(v, v * 100 % 1 ? 1 : 0).replace(/(\d),0%/, '$1%'));
+  // IGP a partir de 01/11/2026: o mesmo desenho da aba "IGP" da planilha da GIGA (faixa de resultado no topo, premissas por indicador, mix de atividades, cálculo e pontuação, resultado)
+  function viewSheet(M, g, mix, totMix, cl, nomeCl, bonTxt, nIndMeta, nIndTot) {
+    const ROT = { visita: 'Visita na menor agenda confirmada (Cumprimento Produtiva/Improdutiva)', efic_altas: 'Eficiência - Altas', efic_me: 'Eficiência - ME', altas_ag: 'Altas - Resolutividade mínima agenda', ifi: 'IFI',
+      me_ag: 'ME - Resolutividade mínima agenda', ifime: 'IFIME', rep_ag: 'Reparo - Resolutividade mínima agenda', out_rep: 'Outlier Reparo - Resolutividade mínima agenda', irr: 'IRR' };
+    const LAB = { visita: ['Visita Realizada', 'O.S Agendada'], efic_altas: [], efic_me: [], altas_ag: ['Altas (Agenda)', 'Altas Realizadas'], ifi: ['IFI', 'Altas Realizadas'], me_ag: ['ME (Agenda)', 'ME Realizadas'], ifime: ['IFIME', 'ME Realizadas'],
+      rep_ag: ['Reparo (Agenda)', 'Reparos Realizados'], out_rep: ['Outlier Reparo (Agenda)', 'Reparos Realizados'], irr: ['IRR', 'Reparos Realizados'] };
+    const pctM = v => v == null ? '—' : fPct(v, 1);
+    const somaPeso = M.linhas.reduce((s, l) => s + (l.peso || 0), 0), somaMin = M.linhas.reduce((s, l) => s + (l.it.w[g][1] || 0), 0);
+    const pt = l => l.pts == null || l.pts === 0 ? '-' : fPts(l.pts);
+    return `<div class="sh">
+      <div class="sh-topo">
+        <div><span>Cluster</span><b>${esc(cl)}</b></div><div><span>Pontuação IGP</span><b>${fPts(M.total)}</b></div><div class="sh-l-${M.letra}"><span>Faixa</span><b>${M.letra}</b></div>
+        <div><span>Bonificação</span><b class="${M.bonus > 0 ? 'sh-pos' : M.bonus < 0 ? 'sh-neg' : ''}">${bonTxt}</b></div><div><span>Indicadores na meta 100%</span><b>${nIndMeta} / ${nIndTot}</b></div><div><span>Grupo</span><b>GRUPO ${g + 1}</b></div>
+      </div>
+      <div class="sh-duas">
+        <div class="sh-col"><div class="sh-barra">PREMISSAS POR INDICADOR</div><div class="table-wrap"><table class="sh-tab" data-sem-ordenar="1"><thead><tr><th class="e">INDICADOR</th><th>PESO 100%</th><th>PESO MÍNIMO</th><th>META 100%</th><th>META MÍNIMA</th><th>SENTIDO</th></tr></thead><tbody>
+          ${M.linhas.map(l => `<tr><td class="e">${esc(ROT[l.it.k] || l.it.rot)}</td><td>${fPts(l.it.w[g][0])}</td><td>${fPts(l.it.w[g][1])}</td><td>${pctM(l.it.m100)}</td><td>${pctM(l.it.mmin)}</td><td class="sh-sent">${l.it.maior ? 'Maior melhor' : 'Menor melhor'}</td></tr>`).join('')}
+          <tr class="sh-tot"><td class="e">TOTAL</td><td>${fPts(somaPeso)}</td><td>${fPts(somaMin)}</td><td colspan="3"></td></tr></tbody></table></div></div>
+        <div class="sh-col sh-mix"><div class="sh-barra">MIX DE ATIVIDADES</div><div class="table-wrap"><table class="sh-tab" data-sem-ordenar="1"><thead><tr><th class="e">ATIVIDADE</th><th>VOLUME</th><th>%</th></tr></thead><tbody>
+          ${[['ALTAS', mix.altas], ['REPAROS', mix.reparos], ['ME', mix.me]].map(m => `<tr><td class="e">${m[0]}</td><td>${nf(m[1])}</td><td>${fPct(totMix ? m[1] / totMix : 0, 0)}</td></tr>`).join('')}
+          <tr class="sh-tot"><td class="e">TOTAL</td><td>${nf(totMix)}</td><td>${totMix ? '100%' : '—'}</td></tr></tbody></table></div>
+          <p class="sec-nota">Reparos = ${fPct(totMix ? mix.reparos / totMix : 0, 1)} do mix → Grupo ${g + 1}. O grupo define o peso de cada indicador.</p></div>
+      </div>
+      <div class="sh-barra">CÁLCULO E PONTUAÇÃO</div>
+      <div class="table-wrap"><table class="sh-tab sh-calc" id="igp-tab" data-sem-ordenar="1"><thead><tr><th class="e">INDICADOR</th><th colspan="2">NUMERADOR</th><th colspan="2">DENOMINADOR</th><th>REALIZADO</th><th>PONTUAÇÃO</th></tr></thead><tbody>
+        ${M.linhas.map(l => { const lab = LAB[l.it.k] || [], x = l.x, tem = x && x.d != null, est = x && /estimad/i.test(x.fonte || '');
+          return `<tr><td class="e c">${esc(ROT[l.it.k] || l.it.rot)}</td><td class="e">${esc(lab[0] || '')}</td><td>${tem ? nf(x.n) : ''}</td><td class="e">${esc(lab[1] || '')}</td><td>${tem ? nf(x.d) : ''}</td>
+          <td class="sh-real">${x && x.v != null ? fPct(x.v, 2) : '<span class="igp-sem">sem dado</span>'}${est ? ' <small title="estimado pelo CSV: a GIGA usa as vendas brutas dela">est.</small>' : ''}</td><td class="sh-pt ${l.pts === l.peso && l.peso ? 'ok' : ''}">${pt(l)}</td></tr>`; }).join('')}
+        <tr class="sh-tot"><td class="e c">TOTAL</td><td colspan="4"></td><td></td><td class="sh-pt">${fPts(M.total)}</td></tr></tbody></table></div>
+      <div class="sh-barra">RESULTADO IGP</div>
+      <div class="table-wrap sh-res"><table class="sh-tab" data-sem-ordenar="1"><thead><tr><th>GRUPO</th><th>TOTAL DE PONTOS</th><th>FAIXA</th><th>BONIFICAÇÃO</th></tr></thead><tbody><tr><td class="sh-g">GRUPO ${g + 1}</td><td class="sh-g">${fPts(M.total)}</td><td class="sh-g">${M.letra}</td><td class="sh-g">${bonTxt}</td></tr></tbody></table></div>
+    </div>`;
+  }
   function viewAcesso(A) {
     const G = A.grupos, cont = f => G.filter(g => g.faixa === f).length, nM = cont('Meta 100%'), nMin = cont('Meta mínima'), nFora = G.filter(g => g.faixa === 'Fora da meta' || g.faixa === 'Mínimo garantido não atingido').length, nSem = G.filter(g => g.pontos == null).length;
     const maxBase = A.totalBase, pctTot = maxBase ? Math.min(100, A.total / maxBase * 100) : 0, minLetra = IGP_LETRAS_NOVO[IGP_LETRAS_NOVO.length - 1][1], pontoC = IGP_LETRAS_NOVO.find(x => x[0] === 'C')[1];
@@ -25266,14 +25310,14 @@ function renderIGP() {
     const vigente = igpModeloDoMes(mes);
     const nIndMeta = modelo === 'acesso' ? M.naMeta : M.naMeta, nIndTot = modelo === 'acesso' ? M.grupos.filter(x => !x.acelerador).length : (modelo === 'out' ? M.linhas.filter(l => l.peso > 0).length : M.pontuam);
     $('igp-corpo').innerHTML = `
-      <section class="igp-hero">
+      ${modelo === 'out' ? '' : `<section class="igp-hero">
         <div class="igp-id"><span class="igp-chip">JH — ${esc(planilha ? cl : 'C.10')}</span><h2>${esc(planilha && c ? c.nome : 'Litoral Sul')}</h2><p>${esc(nomeMes(mes))}${dTxt && !planilha ? ' · até ' + esc(dm(ate)) : ''}</p><span class="igp-origem ${planilha ? 'igp-o-ok' : semPcr ? 'igp-o-par' : 'igp-o-auto'}">${fonteTxt}</span></div>
         <div class="igp-kpi"><span class="igp-kt">Pontuação IGP</span><b class="igp-kv">${fPts(M.total)}</b><span class="igp-ks">de ${fPts(M.possivel)} pontos medidos${modelo === 'acesso' && parcial ? ' (≈ ' + String(M.proporcional).replace('.', ',') + '% de aproveitamento)' : ''}</span><div class="igp-bar"><i style="width:${Math.min(100, M.possivel ? M.total / M.possivel * 100 : 0)}%"></i></div></div>
         <div class="igp-kpi igp-l-${M.letra}"><span class="igp-kt">Faixa</span><b class="igp-circ">${M.letra}</b><span class="igp-ks">${parcial ? 'faixa de referência — faltam dados' : prox ? `faltam ${fPts(falta)} pts para a faixa ${prox[0]}` : 'faixa máxima'}</span></div>
         <div class="igp-kpi"><span class="igp-kt">Bonificação</span><b class="igp-kv ${M.bonus > 0 ? 'igp-pos' : M.bonus < 0 ? 'igp-neg' : ''}">${bonTxt}</b><span class="igp-ks">sobre o faturamento da faixa ${M.letra}</span></div>
         <div class="igp-kpi"><span class="igp-kt">${modelo === 'acesso' ? 'Grupos na meta 100%' : 'Indicadores na meta 100%'}</span><b class="igp-kv">${nIndMeta}<small> de ${nIndTot}</small></b><span class="igp-ks">que pontuam</span></div>
         ${modelo === 'out' ? `<div class="igp-kpi"><span class="igp-kt">Grupo</span><b class="igp-kv">Grupo ${g + 1}</b><span class="igp-ks">reparos = ${fPct(share, 1)} do mix</span></div>` : ''}
-      </section>
+      </section>`}
       <div class="igp-seg" role="tablist">${Object.keys(IGP_MODELOS).map(k => `<button type="button" data-m="${k}" class="${modelo === k ? 'on' : ''}">${IGP_MODELOS[k]}${k === vigente ? ' <small>· vale neste mês</small>' : ''}</button>`).join('')}</div>
       ${imp ? `<div class="igp-seg igp-seg2" role="tablist"><button type="button" data-f="auto" class="${!planilha ? 'on' : ''}">Cálculo do sistema</button><button type="button" data-f="planilha" class="${planilha ? 'on' : ''}">Planilha importada (${esc(nomeMes(mes))})</button></div>` : ''}
       ${semPcr ? `<div class="igp-aviso">Este mês não tem CSV da PCR importado, então o sistema só consegue medir IFI, IFIME, IRR${modelo === 'antigo' ? ', prazo de reparo e outliers' : ''}. Agenda e eficiência dependem do CSV de atividades do dia.</div>` : ''}
@@ -25282,7 +25326,8 @@ function renderIGP() {
       ${modelo === 'antigo' ? `<section class="panel igpo-painel"><h3>Relatório do KPI — JH Litoral Sul</h3>${cartaoOficial(M, planilha, ate, mes)}</section>` : ''}
       ${modelo === 'antigo' ? '<div id="igp-det"></div>' : ''}
       ${modelo === 'acesso' ? viewAcesso(M) : ''}
-      ${modelo !== 'acesso' ? `<section class="panel"><h3>Cálculo e pontuação — ${esc(IGP_MODELOS[modelo])}</h3>
+      ${modelo === 'out' ? viewSheet(M, g, mix, totMix, planilha ? cl : 'C.10', planilha && c ? c.nome : 'Litoral Sul', bonTxt, nIndMeta, nIndTot) : ''}
+      ${modelo === 'antigo' ? `<section class="panel"><h3>Cálculo e pontuação — ${esc(IGP_MODELOS[modelo])}</h3>
         <div class="table-wrap"><table class="data-table igp-tab" id="igp-tab">${modelo === 'acesso' ? tabelaAcesso(M) : `${cabTab(cmp ? rotOutro : '')}<tbody>${M.linhas.map(l => linhaHtml(l, Vo, cmp)).join('')}
           <tr class="total-row"><td><b>TOTAL</b></td><td class="num">${fPts(M.linhas.reduce((s, l) => s + (l.peso || 0), 0))}</td><td colspan="5"></td><td class="num"><b>${fPts(M.total)}</b> <small>/ ${fPts(M.possivel)}</small></td>${cmp ? '<td colspan="2"></td>' : ''}</tr></tbody>`}</table></div>
         <p class="sec-nota">${modelo === 'acesso'
