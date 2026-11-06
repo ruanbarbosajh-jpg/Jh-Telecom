@@ -4751,7 +4751,7 @@ html .fv2-fecha td { padding-top: 6px; padding-bottom: 6px; }
   /* Certificações — sinalização (06/11/2026) */
   .cert-acoes { display: inline-flex; gap: 4px; white-space: nowrap; } .cert-td-acoes, .cert-th-acoes { min-width: 168px; text-align: left !important; }
   .cert-ib { height: 28px; padding: 0 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text-primary); font-size: 12.5px; font-weight: 600; cursor: pointer; }
-  .cert-ib:hover { border-color: var(--accent); color: var(--accent); } .cert-ib.on { background: #fee2e2; border-color: #dc2626; color: #b91c1c; }
+  .cert-ib:hover { border-color: var(--accent); color: var(--accent); } .cert-ib.on { background: #fee2e2; border-color: #dc2626; color: #b91c1c; } .cert-ib-del:hover { border-color: #dc2626; color: #b91c1c; }
   table.data-table tr.cert-sinal-linha > td { background: rgba(220, 38, 38, .08) !important; } table.data-table tr.cert-sinal-linha > td:first-child { box-shadow: inset 4px 0 0 #dc2626; }
   table.data-table tr.cert-sinal-ok > td:first-child { box-shadow: inset 4px 0 0 #94a3b8; }
   .cert-sinal-motivo { font-size: 12px; color: var(--text-secondary); margin-top: 3px; } .cert-os-link { font-weight: 700; color: var(--accent); text-decoration: none; } .cert-os-link:hover { text-decoration: underline; }
@@ -27464,7 +27464,7 @@ async function certFormCarregar(forcar) {
   try {
     const j = await certSheetsChamar({ acao: 'listar' });
     if (j) {
-      daPlanilha = (j.linhas || []).map(r => ({ ...r, nota: r.nota === '' ? null : r.nota })).sort((a, b) => String(b.criado_em).localeCompare(String(a.criado_em)));
+      daPlanilha = (j.linhas || []).filter(r => !r.excluida_em).map(r => ({ ...r, nota: r.nota === '' ? null : r.nota })).sort((a, b) => String(b.criado_em).localeCompare(String(a.criado_em)));
       // o que foi guardado só neste navegador (antes de a planilha estar ligada, ou sem rede) sobe sozinho agora; o id é o mesmo, então nunca duplica
       const pend = certFormLocal();
       if (pend.length) {
@@ -27494,6 +27494,17 @@ async function certFormSalvar(reg) {
     CERTFORM.linhas = [{ ...reg, _local: true }, ...CERTFORM.linhas.filter(r => r.id !== reg.id)];
     return { ok: true, local: true, reg };
   } catch (e) { return { ok: false, erro: 'não consegui guardar neste navegador' }; }
+}
+// exclui UMA certificação feita pelo formulário do sistema. "Excluir" não apaga: o script marca a linha da planilha (excluida_em / excluida_por) e o sistema deixa de contá-la.
+// Certificação que só existe na Base Certificações / Google Forms antigo é da planilha do Google: o sistema não mexe nela.
+async function certFormExcluir(reg) {
+  const quem = waQuemChama();
+  if (reg._local) { try { localStorage.setItem(CERTFORM_LOCAL, JSON.stringify(certFormLocal().filter(r => r.id !== reg.id))); } catch (e) { /* segue */ } CERTFORM.linhas = CERTFORM.linhas.filter(r => r.id !== reg.id); CERT_BASE_CACHE.quando = 0; return { ok: true, local: true }; }
+  try {
+    const j = await certSheetsChamar({ acao: 'excluir', id: reg.id, por: quem });
+    if (!j) return { ok: false, erro: 'a planilha do Google não está ligada' };
+    CERTFORM.linhas = CERTFORM.linhas.filter(r => r.id !== reg.id); CERT_BASE_CACHE.quando = 0; return { ok: true };
+  } catch (e) { const m = String(e && e.message || e); return { ok: false, erro: /desconhecida/.test(m) ? 'o script do Google ainda é a versão antiga: cole o código novo de apps-script/certificacoes.gs e publique uma NOVA VERSÃO da implantação' : m }; }
 }
 // linha da tabela -> o mesmo formato das respostas da planilha do Google Forms (o resto da tela Certificações não precisa saber de onde veio)
 function certFormComoResposta(r) {
@@ -28044,7 +28055,7 @@ async function abrirFichaCert(l, ctx) {
   const pinta = async () => {
     const atual = { ...l, sinal: CERT_SINAL.mapa.get(certSinalChave(l.os)) || null }, hist = atual.sinal ? await certSinalHistorico(l.os) : [];
     m.innerHTML = `<div class="modal-card modal-largo" style="max-width:min(660px,96vw);width:96vw;padding:16px 18px;max-height:94vh;overflow:auto">
-      <div class="cert-ficha-bt">${ctx.pode ? '<button type="button" class="fc-btn fc-btn-sec" data-a="editar">✎ Editar certificação</button>' : ''}${ctx.pode ? `<button type="button" class="fc-btn fc-btn-sec" data-a="sinalizar">🚩 ${atual.sinal ? 'Editar sinalização' : 'Sinalizar'}</button>` : ''}<button type="button" class="fc-btn fc-btn-pri" data-a="imagem">🖼 Gerar imagem</button><button type="button" class="btn-secundario" data-a="fechar">Fechar</button></div>
+      <div class="cert-ficha-bt">${ctx.pode ? '<button type="button" class="fc-btn fc-btn-sec" data-a="editar">✎ Editar certificação</button>' : ''}${ctx.pode ? `<button type="button" class="fc-btn fc-btn-sec" data-a="sinalizar">🚩 ${atual.sinal ? 'Editar sinalização' : 'Sinalizar'}</button>` : ''}${ctx.pode && ctx.temReg && ctx.temReg(l) ? '<button type="button" class="fc-btn fc-btn-sec" data-a="excluir" style="color:#b91c1c;border-color:#fecaca">🗑 Excluir certificação</button>' : ''}<button type="button" class="fc-btn fc-btn-pri" data-a="imagem">🖼 Gerar imagem</button><button type="button" class="btn-secundario" data-a="fechar">Fechar</button></div>
       ${certCardHtml(atual)}
       ${hist.length ? `<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:700;font-size:13px">Histórico da sinalização (${hist.length})</summary><div class="table-wrap" style="margin-top:8px"><table class="data-table" data-sem-ordenar="1"><thead><tr><th>Quando</th><th>Ação</th><th>O que está incorreto</th><th>Motivo</th><th>Quem</th></tr></thead><tbody>${hist.map(h => `<tr><td>${certQuando(h.em)}</td><td>${esc(h.acao)}</td><td>${esc(h.incorreto)}</td><td style="white-space:normal;max-width:280px">${esc(h.motivo)}</td><td>${esc(h.por)}</td></tr>`).join('')}</tbody></table></div></details>` : ''}</div>`;
   };
@@ -28056,7 +28067,29 @@ async function abrirFichaCert(l, ctx) {
     else if (a === 'imagem') certGerarImagem({ ...l, sinal: CERT_SINAL.mapa.get(certSinalChave(l.os)) || null });
     else if (a === 'sinalizar') abrirSinalizacaoCert(l, async () => { await pinta(); if (ctx.aoMudar) ctx.aoMudar(); });
     else if (a === 'editar') { m.classList.remove('active'); if (ctx.editar) ctx.editar(l); }
+    else if (a === 'excluir') { m.classList.remove('active'); if (ctx.excluir) ctx.excluir(l); }
   };
+}
+// Pede a senha antes de excluir uma certificação (06/11/2026, pedido do cliente: senha 2026). ATENÇÃO: é uma trava contra exclusão sem querer — a senha está no código da página e qualquer
+// pessoa que abra "ver código-fonte" consegue ler; não é segurança de verdade.
+const CERT_SENHA_EXCLUIR = '2026';
+function pedirSenhaExclusaoCert(l) {
+  return new Promise(resolve => {
+    const m = document.createElement('div'); m.className = 'modal-backdrop active'; m.style.zIndex = 5400; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true');
+    m.innerHTML = `<div class="modal-card" style="max-width:min(440px,94vw);width:94vw;padding:20px 22px">
+      <h3 style="margin:0 0 6px">🗑 Excluir certificação — O.S ${esc(l.os)}</h3>
+      <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">${esc(l.cliente || '')}${l.cliente ? ' · ' : ''}Ela deixa de contar como certificada. A linha continua guardada na planilha, marcada como excluída (não é apagada).</p>
+      <label for="cx-senha" style="display:block;font-size:13px;margin:0 0 6px">Senha para excluir</label>
+      <input type="password" id="cx-senha" class="fc-input" autocomplete="off" inputmode="numeric" style="width:100%;box-sizing:border-box">
+      <div id="cx-erro" role="alert" style="color:#b91c1c;font-size:12.5px;min-height:18px;margin-top:6px"></div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px"><button type="button" class="fc-btn fc-btn-sec" id="cx-cancelar">Cancelar</button><button type="button" class="fc-btn fc-btn-pri" id="cx-ok" style="background:#dc2626;border-color:#dc2626">Excluir</button></div></div>`;
+    document.body.appendChild(m);
+    const $ = id => m.querySelector('#cx-' + id), fim = ok => { m.remove(); resolve(ok); };
+    const conferir = () => { if ($('senha').value === CERT_SENHA_EXCLUIR) fim(true); else { $('erro').textContent = 'Senha incorreta.'; $('senha').value = ''; $('senha').focus(); } };
+    $('cancelar').addEventListener('click', () => fim(false)); $('ok').addEventListener('click', conferir);
+    m.addEventListener('keydown', e => { if (e.key === 'Enter') conferir(); else if (e.key === 'Escape') fim(false); });
+    $('senha').focus();
+  });
 }
 // ===== fim Certificações — sinalização =====
 function renderCertificacoes() {
@@ -28203,7 +28236,7 @@ function renderCertificacoes() {
       <div class="table-wrap rolagem-inteira-na-imagem"><table class="data-table" id="tab-certificacoes-detalhe"><thead><tr>
         ${podeUsarFormCert() ? '<th class="fora-da-imagem cert-th-acoes">Ações</th>' : ''}<th class="fora-da-imagem">O.S</th><th class="fora-da-imagem">Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th class="fora-da-imagem">Período</th><th>Status</th><th class="fora-da-imagem">Atendente</th><th class="fora-da-imagem">Certificada por</th>${podeVerRespostasCert() ? '<th>Certificada corretamente pelo técnico?</th><th class="fora-da-imagem">Observação (certificação)</th>' : ''}<th class="fora-da-imagem">Sinalização</th><th class="fora-da-imagem">Horário Concluída</th><th class="fora-da-imagem">Horário Certificada</th><th class="fora-da-imagem">Tempo</th>
       </tr></thead><tbody>
-        ${linhas.map(l => `<tr class="${l.sinal ? (l.sinal.status === 'sinalizada' ? 'cert-sinal-linha' : 'cert-sinal-ok') : ''}">${podeUsarFormCert() ? `<td class="fora-da-imagem cert-td-acoes"><span class="cert-acoes"><button type="button" class="cert-ib" data-cert-edit="${esc(l.os)}" title="${temRegForm(l.os) ? 'Corrigir a certificação feita pelo formulário do sistema' : 'Registrar/corrigir a certificação desta O.S'}">✎ ${temRegForm(l.os) || l.certificada ? 'Editar' : 'Certificar'}</button><button type="button" class="cert-ib${l.sinal && l.sinal.status === 'sinalizada' ? ' on' : ''}" data-cert-sinal="${esc(l.os)}" title="${l.sinal ? 'Editar a sinalização e a observação' : 'Sinalizar certificação incorreta ou que precisa de revisão'}">🚩</button><button type="button" class="cert-ib" data-cert-img="${esc(l.os)}" title="Gerar imagem da certificação">🖼</button></span></td>` : ''}<td class="fora-da-imagem"><a href="#" class="cert-os-link" data-cert-ficha="${esc(l.os)}" title="Abrir o card desta certificação">${esc(l.os)||'-'}</a></td><td class="fora-da-imagem">${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td class="fora-da-imagem">${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td>${podeVerRespostasCert() ? `<td>${l.correta === 'SIM' ? '<span class="badge ok">Sim</span>' : l.correta === 'NÃO' || l.correta === 'NAO' ? '<span class="badge warn">Não</span>' : '-'}</td><td class="fora-da-imagem" style="min-width:200px;max-width:360px;white-space:normal">${esc(l.obsTecnico) || '-'}</td>` : ''}<td class="fora-da-imagem" style="min-width:200px;max-width:340px;white-space:normal">${l.sinal ? `<span class="badge ${l.sinal.status === 'sinalizada' ? 'warn' : 'ok'}">${l.sinal.status === 'sinalizada' ? '🚩' : '✔'} ${esc(l.sinal.incorreto)}</span><div class="cert-sinal-motivo">${esc(l.sinal.motivo)}</div>` : '-'}</td><td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td></tr>`).join('')}
+        ${linhas.map(l => `<tr class="${l.sinal ? (l.sinal.status === 'sinalizada' ? 'cert-sinal-linha' : 'cert-sinal-ok') : ''}">${podeUsarFormCert() ? `<td class="fora-da-imagem cert-td-acoes"><span class="cert-acoes"><button type="button" class="cert-ib" data-cert-edit="${esc(l.os)}" title="${temRegForm(l.os) ? 'Corrigir a certificação feita pelo formulário do sistema' : 'Registrar/corrigir a certificação desta O.S'}">✎ ${temRegForm(l.os) || l.certificada ? 'Editar' : 'Certificar'}</button><button type="button" class="cert-ib${l.sinal && l.sinal.status === 'sinalizada' ? ' on' : ''}" data-cert-sinal="${esc(l.os)}" title="${l.sinal ? 'Editar a sinalização e a observação' : 'Sinalizar certificação incorreta ou que precisa de revisão'}">🚩</button><button type="button" class="cert-ib" data-cert-img="${esc(l.os)}" title="Gerar imagem da certificação">🖼</button>${temRegForm(l.os) ? `<button type="button" class="cert-ib cert-ib-del" data-cert-del="${esc(l.os)}" title="Excluir esta certificação (pede senha)">🗑</button>` : ''}</span></td>` : ''}<td class="fora-da-imagem"><a href="#" class="cert-os-link" data-cert-ficha="${esc(l.os)}" title="Abrir o card desta certificação">${esc(l.os)||'-'}</a></td><td class="fora-da-imagem">${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td class="fora-da-imagem">${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td>${podeVerRespostasCert() ? `<td>${l.correta === 'SIM' ? '<span class="badge ok">Sim</span>' : l.correta === 'NÃO' || l.correta === 'NAO' ? '<span class="badge warn">Não</span>' : '-'}</td><td class="fora-da-imagem" style="min-width:200px;max-width:360px;white-space:normal">${esc(l.obsTecnico) || '-'}</td>` : ''}<td class="fora-da-imagem" style="min-width:200px;max-width:340px;white-space:normal">${l.sinal ? `<span class="badge ${l.sinal.status === 'sinalizada' ? 'warn' : 'ok'}">${l.sinal.status === 'sinalizada' ? '🚩' : '✔'} ${esc(l.sinal.incorreto)}</span><div class="cert-sinal-motivo">${esc(l.sinal.motivo)}</div>` : '-'}</td><td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td></tr>`).join('')}
       </tbody></table></div>
       <div class="panels-grid fora-da-imagem" id="cert-graficos" style="margin-top:1.25rem">
         <div class="panel"><h3>Certificadas × Não certificadas</h3><div id="cert-g1"></div></div>
@@ -28226,14 +28259,24 @@ function renderCertificacoes() {
     const tabDet = document.getElementById('tab-certificacoes-detalhe');
     const abrirEdicao = l => abrirEditorCertificacao({ os: l.os, tecnico: l.tecnico, cliente: l.cliente, contrato: l.contrato, cidade: l.cidade === 'Não informado' ? '' : l.cidade, reg: regForm(l.os), base: baseCert.get(l.os),
       aoSalvar: novo => { baseCert.set(String(novo.os), { ...(baseCert.get(String(novo.os)) || {}), ...certFormComoResposta(novo) }); render(); } });
-    const ctxCard = () => ({ pode: podeUsarFormCert(), editar: abrirEdicao, aoMudar: () => render() });
+    const excluirCert = async l => {
+      if (!podeUsarFormCert()) return;
+      const reg = regForm(l.os);
+      if (!reg) { toast('Esta certificação vem da planilha do Google (Base Certificações ou Google Forms antigo): o sistema só exclui as feitas pelo formulário do sistema. Apague a linha direto na planilha.', 'aviso', 9000); return; }
+      if (!(await pedirSenhaExclusaoCert(l))) return;   // senha de exclusão + explicação do que acontece
+      const r = await certFormExcluir(reg);
+      if (!r.ok) { toast('Não consegui excluir: ' + r.erro, 'erro', 9000); return; }
+      toast('Certificação da O.S ' + l.os + ' excluída.', 'ok'); load(true, true);
+    };
+    const ctxCard = () => ({ pode: podeUsarFormCert(), editar: abrirEdicao, excluir: excluirCert, temReg: l => temRegForm(l.os), aoMudar: () => render() });
     if (tabDet) tabDet.addEventListener('click', ev => {
-      const el = ev.target.closest('[data-cert-edit],[data-cert-sinal],[data-cert-img],[data-cert-ficha]'); if (!el) return;
+      const el = ev.target.closest('[data-cert-edit],[data-cert-sinal],[data-cert-img],[data-cert-ficha],[data-cert-del]'); if (!el) return;
       ev.preventDefault();
-      const os = el.dataset.certEdit || el.dataset.certSinal || el.dataset.certImg || el.dataset.certFicha, l = linhas.find(x => String(x.os) === String(os)); if (!l) return;
+      const os = el.dataset.certEdit || el.dataset.certSinal || el.dataset.certImg || el.dataset.certFicha || el.dataset.certDel, l = linhas.find(x => String(x.os) === String(os)); if (!l) return;
       if (el.dataset.certEdit !== undefined) { if (podeUsarFormCert()) abrirEdicao(l); }
       else if (el.dataset.certSinal !== undefined) { if (podeUsarFormCert()) abrirSinalizacaoCert(l, () => render()); }
       else if (el.dataset.certImg !== undefined) certGerarImagem(l);
+      else if (el.dataset.certDel !== undefined) excluirCert(l);
       else abrirFichaCert(l, ctxCard());
     });
     const btnExport = document.getElementById('cert-export');
