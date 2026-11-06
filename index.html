@@ -4748,6 +4748,15 @@ html .fv2-fecha td { padding-top: 6px; padding-bottom: 6px; }
 .grp2h-linha.clicavel:hover .grp2h-nome { fill: var(--accent); text-decoration: underline; }
 .trend-tooltip-dica { margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-muted); }
 /* ===== fim FOLHA V3 CSS ===== */
+  /* Certificações — sinalização (06/11/2026) */
+  .cert-acoes { display: inline-flex; gap: 4px; white-space: nowrap; } .cert-td-acoes, .cert-th-acoes { min-width: 168px; text-align: left !important; }
+  .cert-ib { height: 28px; padding: 0 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text-primary); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+  .cert-ib:hover { border-color: var(--accent); color: var(--accent); } .cert-ib.on { background: #fee2e2; border-color: #dc2626; color: #b91c1c; }
+  table.data-table tr.cert-sinal-linha > td { background: rgba(220, 38, 38, .08) !important; } table.data-table tr.cert-sinal-linha > td:first-child { box-shadow: inset 4px 0 0 #dc2626; }
+  table.data-table tr.cert-sinal-ok > td:first-child { box-shadow: inset 4px 0 0 #94a3b8; }
+  .cert-sinal-motivo { font-size: 12px; color: var(--text-secondary); margin-top: 3px; } .cert-os-link { font-weight: 700; color: var(--accent); text-decoration: none; } .cert-os-link:hover { text-decoration: underline; }
+  .cert-ficha-bt { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-bottom: 12px; }
+  @media (max-width: 640px) { .cert-card div[style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; } .cert-ficha-bt .fc-btn, .cert-ficha-bt .btn-secundario { flex: 1 1 45%; } }
 </style>
 </head>
 <body>
@@ -4914,7 +4923,7 @@ html .fv2-fecha td { padding-top: 6px; padding-bottom: 6px; }
   <div class="sidebar-backdrop" id="sidebar-backdrop" aria-hidden="true"></div>
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand"><h1>JH <span class="brand-gradient-text">TELECOM</span></h1><p>OPERATIONS</p></div>
-    <button type="button" class="btn-importar-lateral" id="btn-importar-csv" hidden title="Escolha o CSV de atividades: ele já é importado (PCR, retornos e prazos)">📥 Importar CSV de atividades</button><input type="file" id="menu-csv-pcr" accept=".csv,text/csv" hidden>
+    <button type="button" class="btn-importar-lateral" id="btn-importar-csv" hidden title="Escolha um ou VÁRIOS CSVs de atividades (Ctrl/Shift): cada um é importado em sequência (PCR, retornos e prazos)">📥 Importar CSV de atividades</button><input type="file" id="menu-csv-pcr" accept=".csv,text/csv" multiple hidden>
     <nav class="sidebar-nav" id="sidebar-nav">
       <!-- Fica no TOPO e destacado de propósito (pedido do cliente): é a tela
            que abre a reunião técnica, então precisa ser a primeira coisa que a
@@ -6565,33 +6574,42 @@ function aplicarRotulosDoPerfil() {
 }
 // ---- Importar CSV de atividades direto da barra lateral (20/10/2026, pedido do cliente: "quando clicar já importar o arquivo") ----
 // Mesmo caminho da tela PCR (trava de importação → importarCsvPCR → Produção/Prazo dos dias anteriores → salva no servidor), sem precisar abrir a PCR.
-async function importarCsvAtividadesPeloMenu(f) {
-  if (!f) return;
-  toast('Lendo ' + f.name + '…', 'ok', 2000);
-  let texto = ''; try { texto = await f.text(); } catch (e) { toast('Não consegui ler o arquivo.', 'erro'); return; }
+async function importarCsvAtividadesPeloMenu(arquivos) {
+  // 06/11/2026 (pedido do cliente: "importar mais de um arquivo"): aceita vários CSVs. A trava da PCR é pega UMA vez pro lote todo e cada arquivo só começa depois que o
+  // anterior terminou de salvar (duas importações ao mesmo tempo é a corrida do sincronizarPCR); a tela é refeita uma vez só, no fim.
+  const fs = Array.from(arquivos || []).filter(Boolean);
+  if (!fs.length) return;
   const trava = await pcrTravaPegar();
   if (!trava.ok) { toast(String(pcrTravaAviso(trava)).replace(/<[^>]*>/g, ''), 'aviso', 7000); return; }
-  const r = importarCsvPCR(texto);
-  if (r.erro || !r.syncPromise) pcrTravaSoltar(); else r.syncPromise.then(pcrTravaSoltar, pcrTravaSoltar);
-  if (r.erro) { toast(String(r.erro).replace(/<[^>]*>/g, ''), 'erro', 7000); return; }
-  const comp = complementarProducaoDoCsv(texto, f.name);
-  toast(`${r.total} atividades importadas de ${f.name}${comp ? ' · Produção/Prazo atualizados' : ''}${supa ? ' — salvando…' : ''}`, 'ok', 5000);
+  const limpa = e => String(e).replace(/<[^>]*>/g, '');
+  const res = { ok: [], falhas: [], dias: [], atividades: 0, comp: 0, salvou: true };
+  try {
+    for (let i = 0; i < fs.length; i++) {
+      const f = fs[i];
+      toast(`Lendo ${i + 1} de ${fs.length}: ${f.name}…`, 'ok', 2000);
+      let texto = ''; try { texto = await f.text(); } catch (e) { res.falhas.push(`${f.name}: não consegui ler o arquivo`); continue; }
+      const r = importarCsvPCR(texto);
+      if (r.erro) { res.falhas.push(`${f.name}: ${limpa(r.erro)}`); continue; }
+      res.ok.push(f.name); res.atividades += r.total; (r.dias || []).forEach(d => res.dias.push(d));
+      if (complementarProducaoDoCsv(texto, f.name)) res.comp++;
+      if (r.syncPromise) { const s = await r.syncPromise.catch(() => null); if (!(s && s.ok)) res.salvou = false; }
+    }
+  } finally { pcrTravaSoltar(); }
+  if (!res.ok.length) { toast(res.falhas.length ? res.falhas.join(' | ') : 'Nada foi importado.', 'erro', 8000); return; }
+  toast(`${res.ok.length} arquivo(s) importado(s): ${res.atividades} atividades${res.comp ? ' · Produção/Prazo atualizados' : ''}${res.falhas.length ? ` · ${res.falhas.length} com problema: ${res.falhas.join(' | ')}` : ''}${supa ? (res.salvou ? ' — salvo no servidor (todo mundo vê).' : ' — NÃO consegui salvar tudo no servidor: vale só nesta sessão.') : ''}`, res.falhas.length || !res.salvou ? 'aviso' : 'ok', 9000);
   if (ROTAS_COM_PCR.has(ROTA_ATUAL.nome)) {
-    // 22/10/2026 (pedido do cliente: "o mapa deve atualizar a cada importação do CSV"): a tela é refeita com o CSV novo, mas o filtro de dia lembrado
-    // (PCR, Contatos, Relatório do Dia…) segurava o dia antigo e o mapa seguia mostrando o dia de antes — passa pro dia que acabou de entrar
-    // (o `navigate` guarda os filtros da tela ANTES de refazê-la, então o dia novo é posto no próprio campo, não só na memória)
-    const novo = (r.dias || []).slice(-1)[0];
+    // 22/10/2026 (pedido do cliente: "o mapa deve atualizar a cada importação do CSV"): o filtro de dia lembrado segurava o dia antigo; passa pro dia mais novo que entrou
+    const novo = [...new Set(res.dias)].sort().slice(-1)[0];
     if (novo) document.querySelectorAll('#content select[id$="-dia"]').forEach(sel => { if (![...sel.options].some(o => o.value === novo)) sel.add(new Option(novo, novo)); sel.value = novo; });
     navigate(ROTA_ATUAL.nome);
   }
   atualizarRotuloImportacao();
-  if (r.syncPromise) r.syncPromise.then(res => toast(res && res.ok ? 'CSV salvo no servidor (todo mundo vê).' : 'Não consegui salvar no servidor — vale só nesta sessão.', res && res.ok ? 'ok' : 'erro', 5000));
 }
 function ligarImportarCsvLateral() {
   const b = document.getElementById('btn-importar-csv'), inp = document.getElementById('menu-csv-pcr'); if (!b || !inp || b.dataset.ligado) return;
   b.dataset.ligado = '1';
   b.addEventListener('click', () => { inp.value = ''; inp.click(); });
-  inp.addEventListener('change', () => { const f = inp.files && inp.files[0]; inp.value = ''; importarCsvAtividadesPeloMenu(f); });
+  inp.addEventListener('change', () => { const fs = inp.files ? Array.from(inp.files) : []; inp.value = ''; importarCsvAtividadesPeloMenu(fs); });
 }
 // ---- TOPO V2 (só Analista, 23/10/2026, pedido do cliente: "deixe o topo assim" + print): barra azul-marinho com a marca, o ícone e o nome da tela, sino de avisos e o usuário ----
 const IC_ANTENA = '<svg viewBox="0 0 48 48" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="16" r="4" fill="#3b82f6" stroke="#3b82f6"/><path d="M16.5 8.5a10.6 10.6 0 0 0 0 15M31.5 8.5a10.6 10.6 0 0 1 0 15M10.5 4a19 19 0 0 0 0 24M37.5 4a19 19 0 0 1 0 24"/><path d="M24 22 14 44M24 22l10 22M18 36h12"/></svg>';
@@ -17591,7 +17609,7 @@ function renderCartaoPrazo(opts) {
   const { id, titulo, rotulo, badgeLabel, pct, meta, within, total, byCity, totals } = opts;
   const corGeral = pct >= meta ? '#22c55e' : '#ef4444';
   // casas decimais: o MÊS usa 1 e o DIA mantém 2 (pedido do cliente, 07/10/2026)
-  const casas = id === 'pzcard-mes' ? 1 : 2;
+  const casas = 2;   // 06/11/2026 (pedido do cliente: "mais uma casa decimal"): o MÊS voltou de 1 pra 2 casas (88,12%), igual ao DIA
   const pctPill = c => {
     const p = c.total ? (c.ate24 / c.total) * 100 : 0;
     return `<span class="pzcard-pct-pill ${p >= meta ? 'ok' : 'warn'}">${c.total ? formatPct(p, casas) : '-'}</span>`;
@@ -20120,7 +20138,7 @@ function renderPCR(modoArg) {
   const ultimaGeral = ultimaAtualizacaoPCR();
   document.getElementById('content').innerHTML = `
     <div class="toolbar">
-      <div class="field"${soUmAssunto ? ' style="display:none"' : ''}>${campoArquivo('pcr-file', 'CSV de atividades', '.csv,text/csv')}</div>
+      <div class="field"${soUmAssunto ? ' style="display:none"' : ''}>${campoArquivo('pcr-file', 'CSV de atividades', '.csv,text/csv', ' multiple')}</div>
       ${dias.length ? `<div class="field"><label>Dia</label><select id="pcr-dia">${dias.map(d=>`<option value="${d}">${formatDate(d)}</option>`).join('')}</select></div>` : ''}
       ${dias.length ? `<div class="field"><label>Período do prazo</label><select id="pcr-periodo">
         <option value="">Manhã e tarde</option><option value="MANHÃ">Só manhã</option><option value="TARDE">Só tarde</option>
@@ -20136,6 +20154,10 @@ function renderPCR(modoArg) {
     const f = ev.target.files[0];
     if (!f) return;
     const msg = document.getElementById('pcr-msg');
+    if (ev.target.files.length > 1) {   // vários arquivos: o mesmo importador do botão lateral (um de cada vez, uma trava só, tela refeita no fim)
+      const lote = Array.from(ev.target.files); ev.target.value = ''; msg.textContent = `Importando ${lote.length} arquivos…`;
+      importarCsvAtividadesPeloMenu(lote).then(() => { const m2 = document.getElementById('pcr-msg'); if (m2) m2.textContent = ''; }); return;
+    }
     msg.textContent = 'Lendo ' + f.name + '...';
     const leitor = new FileReader();
     leitor.onload = async () => {
@@ -27864,6 +27886,135 @@ function abrirEditorCertificacao(o) {
     if (o.aoSalvar) o.aoSalvar(novo);
   });
 }
+// ===================== CERTIFICAÇÕES — SINALIZAÇÃO, FICHA E IMAGEM (06/11/2026) =====================
+// Pedido do cliente: sinalizar uma certificação incorreta/que precisa de revisão, com observação (o que está incorreto + motivo) que fica no card, pode ser editada e NÃO some ao atualizar a página;
+// gerar a imagem da certificação; botão Editar à esquerda de cada linha. Nada é apagado: a sinalização só muda de situação (Sinalizada → Resolvida) e cada ação entra no histórico (tabela só de INSERT).
+// Banco: sql/PASSO-76-certificacoes-sinalizacao.sql (cert_sinalizacoes + cert_sinalizacoes_hist). Sem ele a sinalização vale só neste navegador (localStorage) e a tela avisa.
+const CERT_SINAL = { mapa: new Map(), carregado: false, local: false, erro: '' };
+const CERT_SINAL_LS = 'jh_cert_sinal_v1', CERT_SINAL_HIST_LS = 'jh_cert_sinal_hist_v1';
+const CERT_INCORRETO = ['Baixa realizada', 'Defeito encontrado', 'Certificada por (técnico/atendente)', 'Dados do cliente', 'Wi-Fi / senha', 'Roteador', 'Cabo', 'Telefone', 'Outro'];
+const certSinalChave = os => fcSoDigitos(os);
+const certLsLer = chave => { try { return JSON.parse(localStorage.getItem(chave) || '[]') || []; } catch (e) { return []; } };
+const certLsGravar = (chave, v) => { try { localStorage.setItem(chave, JSON.stringify(v)); } catch (e) { /* sem armazenamento: vale só na tela */ } };
+const certQuando = iso => iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
+async function certSinalCarregar(forcar) {
+  if (CERT_SINAL.carregado && !forcar) return CERT_SINAL;
+  CERT_SINAL.carregado = true; CERT_SINAL.erro = ''; CERT_SINAL.local = false;
+  let lista = [];
+  if (typeof supa !== 'undefined' && supa) {
+    try { const { data, error } = await supa.from('cert_sinalizacoes').select('*'); if (error) throw error; lista = data || []; }
+    catch (e) { CERT_SINAL.local = true; CERT_SINAL.erro = /does not exist|schema cache|42P01|PGRST205/i.test(String(e && (e.message || e.code))) ? 'A tabela de sinalizações ainda não existe no banco (rode sql/PASSO-76-certificacoes-sinalizacao.sql): por enquanto as sinalizações valem só neste navegador.' : 'Não consegui ler as sinalizações do banco agora: mostrando as deste navegador.'; }
+  } else CERT_SINAL.local = true;
+  if (CERT_SINAL.local) lista = certLsLer(CERT_SINAL_LS);
+  CERT_SINAL.mapa = new Map(lista.map(x => [String(x.os), x]));
+  return CERT_SINAL;
+}
+async function certSinalGravar(l, v) {
+  const k = certSinalChave(l.os), ant = CERT_SINAL.mapa.get(k) || null, agora = new Date().toISOString(), quem = waQuemChama();
+  const reg = { os: k, contrato: l.contrato || null, cliente: l.cliente || null, tecnico: l.tecnico || null, incorreto: v.incorreto, motivo: v.motivo, status: v.status,
+    criado_por: ant ? ant.criado_por : quem, criado_em: ant ? ant.criado_em : agora, atualizado_por: quem, atualizado_em: agora };
+  const acao = !ant ? 'sinalizou' : v.status !== ant.status ? (v.status === 'resolvida' ? 'resolveu' : 'reabriu') : 'editou';
+  const hist = { os: k, acao, incorreto: v.incorreto, motivo: v.motivo, status: v.status, por: quem, em: agora };
+  if (!CERT_SINAL.local && typeof supa !== 'undefined' && supa) {
+    const { error } = await supa.from('cert_sinalizacoes').upsert(reg, { onConflict: 'os' });
+    if (error) return { ok: false, erro: error.message };
+    await supa.from('cert_sinalizacoes_hist').insert(hist);   // histórico só de INSERT; se falhar a sinalização já está salva
+  } else {
+    const lista = certLsLer(CERT_SINAL_LS).filter(x => String(x.os) !== k); lista.push(reg); certLsGravar(CERT_SINAL_LS, lista);
+    const h = certLsLer(CERT_SINAL_HIST_LS); h.push(hist); certLsGravar(CERT_SINAL_HIST_LS, h);
+  }
+  CERT_SINAL.mapa.set(k, reg);
+  return { ok: true, local: CERT_SINAL.local };
+}
+async function certSinalHistorico(os) {
+  const k = certSinalChave(os);
+  if (!CERT_SINAL.local && typeof supa !== 'undefined' && supa) { try { const { data } = await supa.from('cert_sinalizacoes_hist').select('*').eq('os', k).order('em', { ascending: false }); return data || []; } catch (e) { return []; } }
+  return certLsLer(CERT_SINAL_HIST_LS).filter(x => String(x.os) === k).sort((a, b) => String(b.em).localeCompare(String(a.em)));
+}
+// ---- o card da certificação (a mesma peça aparece na ficha da tela e na imagem; estilos inline, fundo claro: é o único caso em que cor fixa é certa) ----
+function certCardHtml(l, { fixo } = {}) {
+  const s = l.sinal || null, ativa = s && s.status === 'sinalizada';
+  const campo = (rot, val) => `<div style="min-width:0"><div style="font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:#64748b;font-weight:700">${esc(rot)}</div><div style="font-size:14px;font-weight:600;color:#0b1f4d;word-break:break-word">${esc(val) || '-'}</div></div>`;
+  const corStatus = l.certificada ? ['#dcfce7', '#15803d'] : ['#fef3c7', '#b45309'];
+  const sim = l.correta === 'SIM' ? 'Sim' : (l.correta === 'NÃO' || l.correta === 'NAO') ? 'Não' : '';
+  return `<div class="cert-card" style="${fixo ? 'width:600px;' : 'width:100%;'}box-sizing:border-box;background:#ffffff;border:2px solid ${ativa ? '#dc2626' : '#cbd9f5'};border-radius:16px;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#0b1f4d">
+    <div style="background:linear-gradient(135deg,#102a43,#1769e0);color:#fff;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px">
+      <div><div style="font-size:18px;font-weight:800;letter-spacing:.03em">JH TELECOM</div><div style="font-size:12px;opacity:.85">Certificação de serviço</div></div>
+      <div style="text-align:right"><div style="font-size:12px;opacity:.85">O.S</div><div style="font-size:20px;font-weight:800">${esc(l.os) || '-'}</div></div>
+    </div>
+    <div style="padding:16px 20px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"><span style="background:${corStatus[0]};color:${corStatus[1]};padding:4px 12px;border-radius:999px;font-weight:700;font-size:12.5px">${l.certificada ? '✔ Certificada' : 'Não certificada'}</span>${ativa ? '<span style="background:#fee2e2;color:#b91c1c;padding:4px 12px;border-radius:999px;font-weight:700;font-size:12.5px">🚩 Sinalizada para revisão</span>' : s ? '<span style="background:#e2e8f0;color:#475569;padding:4px 12px;border-radius:999px;font-weight:700;font-size:12.5px">Sinalização resolvida</span>' : ''}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 18px">
+        ${campo('Cliente', l.cliente)}${campo('Contrato', l.contrato)}${campo('Técnico', l.tecnico)}${campo('Cidade', l.cidade)}
+        ${campo('Período', l.periodo)}${campo('Atendente', l.atendente)}${campo('Certificada por', l.certificadaPor)}${campo('Certificada corretamente pelo técnico?', sim)}
+        ${campo('Concluída às', l.horarioConcluida)}${campo('Certificada às', l.horarioCertificada)}${campo('Tempo até certificar', l.tempo)}${l.obsTecnico ? campo('Observação da certificação', l.obsTecnico) : ''}
+      </div>
+      ${s ? `<div style="margin-top:16px;border:1px solid ${ativa ? '#fecaca' : '#cbd5e1'};background:${ativa ? '#fef2f2' : '#f1f5f9'};border-radius:12px;padding:12px 14px">
+        <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:800;color:${ativa ? '#b91c1c' : '#475569'}">${ativa ? '🚩 O que está incorreto' : 'Sinalização (resolvida)'}</div>
+        <div style="font-size:14.5px;font-weight:700;margin-top:2px">${esc(s.incorreto) || '-'}</div>
+        <div style="font-size:13.5px;margin-top:6px;white-space:pre-wrap;word-break:break-word">${esc(s.motivo) || ''}</div>
+        <div style="font-size:11.5px;color:#64748b;margin-top:8px">Sinalizada por ${esc(s.criado_por) || '-'} em ${certQuando(s.criado_em)}${s.atualizado_em && s.atualizado_em !== s.criado_em ? ` · atualizada por ${esc(s.atualizado_por) || '-'} em ${certQuando(s.atualizado_em)}` : ''}</div></div>` : ''}
+      <div style="margin-top:14px;font-size:11px;color:#94a3b8;text-align:right">Gerado pelo sistema JH Telecom em ${certQuando(new Date().toISOString())}</div>
+    </div></div>`;
+}
+async function certGerarImagem(l) {
+  const w = document.createElement('div'); w.style.cssText = 'position:fixed;left:-10000px;top:0;background:#ffffff;padding:0;z-index:-1';
+  w.innerHTML = certCardHtml(l, { fixo: true }); document.body.appendChild(w);
+  try { await capturarElementoComoImagem(w.firstElementChild, `certificacao-os-${fcSoDigitos(l.os) || 'sem-os'}`); } catch (e) { toast('Não consegui gerar a imagem: ' + (e && e.message || e), 'erro'); } finally { w.remove(); }
+}
+// ---- janela de sinalização (criar, editar a observação, marcar como resolvida/reabrir) ----
+function abrirSinalizacaoCert(l, aoSalvar) {
+  let m = document.getElementById('modal-cert-sinal');
+  if (!m) { m = document.createElement('div'); m.id = 'modal-cert-sinal'; m.className = 'modal-backdrop'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); document.body.appendChild(m); m.style.zIndex = 5300; }
+  const s = CERT_SINAL.mapa.get(certSinalChave(l.os)) || null, resolvida = s && s.status === 'resolvida';
+  const opcoes = [...CERT_INCORRETO]; if (s && s.incorreto && !opcoes.includes(s.incorreto)) opcoes.push(s.incorreto);
+  m.innerHTML = `<div class="modal-card modal-largo" style="max-width:min(620px,96vw);width:96vw;padding:20px 22px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h3 style="margin:0">🚩 ${s ? 'Editar sinalização' : 'Sinalizar certificação'} — O.S ${esc(l.os)}</h3><button type="button" class="btn-secundario" id="cs-fechar">Fechar</button></div>
+    <p style="font-size:12.5px;color:var(--text-muted);margin:6px 0 12px">${esc([l.cliente, l.tecnico, l.cidade].filter(Boolean).join(' · '))}</p>
+    ${CERT_SINAL.local ? `<div class="giga-alerta aviso" style="margin-bottom:10px">${esc(CERT_SINAL.erro || 'A sinalização vale só neste navegador.')}</div>` : ''}
+    <div class="fc-banner fc-banner-erro" id="cs-aviso" hidden role="alert"></div>
+    <div class="fc-campo" data-campo="incorreto"><label for="cs-incorreto">O que está incorreto <span class="fc-req" aria-hidden="true">*</span></label><div class="fc-entrada"><select class="fc-input fc-select" id="cs-incorreto"><option value="">Selecione…</option>${opcoes.map(o => `<option${s && s.incorreto === o ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select></div></div>
+    <div class="fc-campo larga" data-campo="motivo" style="margin-top:12px"><label for="cs-motivo">Motivo da sinalização / observação <span class="fc-req" aria-hidden="true">*</span></label><textarea class="fc-input fc-area" id="cs-motivo" rows="4" maxlength="500" placeholder="Descreva o que precisa ser revisado…">${esc(s ? s.motivo : '')}</textarea></div>
+    ${s ? `<p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">Sinalizada por ${esc(s.criado_por) || '-'} em ${certQuando(s.criado_em)}${s.atualizado_em !== s.criado_em ? ` · última edição por ${esc(s.atualizado_por) || '-'} em ${certQuando(s.atualizado_em)}` : ''}. Nada é apagado: cada mudança fica no histórico.</p>` : ''}
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px;flex-wrap:wrap">${s ? `<button type="button" class="fc-btn fc-btn-sec" id="cs-status">${resolvida ? '↺ Reabrir sinalização' : '✔ Marcar como resolvida'}</button>` : ''}<button type="button" class="fc-btn fc-btn-sec" id="cs-cancelar">Cancelar</button><button type="button" class="fc-btn fc-btn-pri" id="cs-salvar"><span class="fc-txt">${s ? 'Salvar observação' : 'Sinalizar'}</span></button></div></div>`;
+  m.classList.add('active');
+  const $ = id => m.querySelector('#cs-' + id), fechar = () => m.classList.remove('active');
+  $('fechar').addEventListener('click', fechar); $('cancelar').addEventListener('click', fechar);
+  let ocupado = false;
+  const salvar = async novoStatus => {
+    if (ocupado) return; const incorreto = $('incorreto').value, motivo = $('motivo').value.trim(), aviso = $('aviso');
+    if (!incorreto || motivo.length < 3) { aviso.textContent = !incorreto ? 'Escolha o que está incorreto.' : 'Escreva o motivo da sinalização (pelo menos 3 letras).'; aviso.hidden = false; return; }
+    aviso.hidden = true; ocupado = true; m.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    const r = await certSinalGravar(l, { incorreto, motivo, status: novoStatus || (s ? s.status : 'sinalizada') });
+    ocupado = false; m.querySelectorAll('button').forEach(b => { b.disabled = false; });
+    if (!r.ok) { aviso.textContent = `Não consegui salvar (${r.erro}). O que você escreveu continua na janela.`; aviso.hidden = false; return; }
+    fechar(); toast(r.local ? 'Sinalização guardada só neste navegador (falta rodar o PASSO-76 no banco).' : 'Sinalização salva.', r.local ? 'aviso' : 'ok'); if (aoSalvar) aoSalvar();
+  };
+  $('salvar').addEventListener('click', () => salvar(null));
+  const st = $('status'); if (st) st.addEventListener('click', () => salvar(resolvida ? 'sinalizada' : 'resolvida'));
+}
+// ---- ficha (o card): dados da certificação + sinalização + botões ----
+async function abrirFichaCert(l, ctx) {
+  let m = document.getElementById('modal-cert-ficha');
+  if (!m) { m = document.createElement('div'); m.id = 'modal-cert-ficha'; m.className = 'modal-backdrop'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); document.body.appendChild(m); m.style.zIndex = 5250; }
+  const pinta = async () => {
+    const atual = { ...l, sinal: CERT_SINAL.mapa.get(certSinalChave(l.os)) || null }, hist = atual.sinal ? await certSinalHistorico(l.os) : [];
+    m.innerHTML = `<div class="modal-card modal-largo" style="max-width:min(660px,96vw);width:96vw;padding:16px 18px;max-height:94vh;overflow:auto">
+      <div class="cert-ficha-bt">${ctx.pode ? '<button type="button" class="fc-btn fc-btn-sec" data-a="editar">✎ Editar certificação</button>' : ''}${ctx.pode ? `<button type="button" class="fc-btn fc-btn-sec" data-a="sinalizar">🚩 ${atual.sinal ? 'Editar sinalização' : 'Sinalizar'}</button>` : ''}<button type="button" class="fc-btn fc-btn-pri" data-a="imagem">🖼 Gerar imagem</button><button type="button" class="btn-secundario" data-a="fechar">Fechar</button></div>
+      ${certCardHtml(atual)}
+      ${hist.length ? `<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:700;font-size:13px">Histórico da sinalização (${hist.length})</summary><div class="table-wrap" style="margin-top:8px"><table class="data-table" data-sem-ordenar="1"><thead><tr><th>Quando</th><th>Ação</th><th>O que está incorreto</th><th>Motivo</th><th>Quem</th></tr></thead><tbody>${hist.map(h => `<tr><td>${certQuando(h.em)}</td><td>${esc(h.acao)}</td><td>${esc(h.incorreto)}</td><td style="white-space:normal;max-width:280px">${esc(h.motivo)}</td><td>${esc(h.por)}</td></tr>`).join('')}</tbody></table></div></details>` : ''}</div>`;
+  };
+  await pinta(); m.classList.add('active');
+  m.onclick = ev => {
+    if (ev.target === m) { m.classList.remove('active'); return; }
+    const b = ev.target.closest('button[data-a]'); if (!b) return; const a = b.dataset.a;
+    if (a === 'fechar') m.classList.remove('active');
+    else if (a === 'imagem') certGerarImagem({ ...l, sinal: CERT_SINAL.mapa.get(certSinalChave(l.os)) || null });
+    else if (a === 'sinalizar') abrirSinalizacaoCert(l, async () => { await pinta(); if (ctx.aoMudar) ctx.aoMudar(); });
+    else if (a === 'editar') { m.classList.remove('active'); if (ctx.editar) ctx.editar(l); }
+  };
+}
+// ===== fim Certificações — sinalização =====
 function renderCertificacoes() {
   const diasComPcr = [...new Set(DB.pcr.map(r => r.data))].sort().reverse();
   const dataPadrao = diasComPcr[0] || hojeISOLocal();
@@ -27905,6 +28056,7 @@ function renderCertificacoes() {
       if (!document.body.contains(body)) return;
       document.getElementById('cert-atualizado').textContent = 'Base Certificações atualizada às ' + new Date(CERT_BASE_CACHE.quando || Date.now()).toLocaleTimeString('pt-BR') + ` (${baseCert.size.toLocaleString('pt-BR')} O.S no histórico)`;
     }
+    await certSinalCarregar(forcarBusca);
     render();
     if (CHAMAR_CLIENTE_PEDIDO) { CHAMAR_CLIENTE_PEDIDO = false; if (ehAnalista()) abrirChamarCertificacoesDoFormulario(baseCert, document.getElementById('cert-chamar')); }   // veio do link do formulário
   }
@@ -27940,7 +28092,7 @@ function renderCertificacoes() {
         os: r.os, contrato: r.contrato, tecnico: r.recurso, cliente: r.cliente,
         cidade: r.cidade || 'Não informado', periodo: r.periodo || '-',
         certificada, statusTexto,
-        atendente: m ? m.atendente : '', certificadaPor: m ? m.certificadaPor : '', correta: m && m.correta ? m.correta : '', obsTecnico: m && m.obsTecnico ? m.obsTecnico : '',
+        sinal: CERT_SINAL.mapa.get(certSinalChave(r.os)) || null, atendente: m ? m.atendente : '', certificadaPor: m ? m.certificadaPor : '', correta: m && m.correta ? m.correta : '', obsTecnico: m && m.obsTecnico ? m.obsTecnico : '',
         horarioConcluida: fmtHora(r.encerramento),
         horarioCertificada: dataHoraCert ? fmtHora(dataHoraCert) : '-',
         tempo: certificada ? tempoEntre(r.encerramento, dataHoraCert) : tempoEntre(r.encerramento, agora),
@@ -27970,6 +28122,8 @@ function renderCertificacoes() {
     const listaCert = (chave, titulo, arr) => cartaoListaCustom(chave, titulo, formatDate(data), ['O.S', 'Contrato', 'Cliente', 'Técnico', 'Cidade', 'Período', 'Status', 'Atendente', 'Certificada por', 'Horário concluída', 'Horário certificada', 'Tempo'],
       arr.map(l => ({ tipo: '', celulas: [esc(l.os) || '-', esc(l.contrato) || '-', esc(l.cliente) || '-', esc(l.tecnico) || '-', esc(l.cidade) || '-', esc(l.periodo) || '-', l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>', esc(l.atendente) || '-', esc(l.certificadaPor) || '-', esc(l.horarioConcluida), esc(l.horarioCertificada), esc(l.tempo)] })));
     // 28/10/2026 (pedido do cliente): cartão "Certificadas incorretamente" = certificadas em que a resposta do formulário diz que o técnico NÃO certificou corretamente
+    const icBandeira = '<svg viewBox="0 0 18 18"><path d="M4 16V2.5M4 3h9l-2 3.2L13 9.5H4"/></svg>';
+    const sinalizadas = linhas.filter(l => l.sinal && l.sinal.status === 'sinalizada');
     const incorretas = podeVerRespostasCert() ? certificadas.filter(l => l.correta === 'NÃO' || l.correta === 'NAO') : [];
     // 29/10/2026 (pedido do cliente): quantas certificações cada atendente (Sândila e Daniela) fez no dia — conta as O.S certificadas cujo atendente é ela (casa sem acento/maiúscula: "Sândila", "SANDILA")
     const icPessoa = '<svg viewBox="0 0 18 18"><circle cx="9" cy="5.8" r="3"/><path d="M3 15.5c.5-3 3-4.6 6-4.6s5.5 1.6 6 4.6"/></svg>';
@@ -27981,6 +28135,7 @@ function renderCertificacoes() {
         ${statCard('purple', icPessoa, 'Certificações da Sândila', certSandila.length, 'O.S certificadas por ela no dia', listaCert('cert|sandila', 'Certificações da Sândila', certSandila))}
         ${statCard('purple', IC_FOTO_DANIELA, 'Certificações da Daniela', certDaniela.length, 'O.S certificadas por ela no dia', listaCert('cert|daniela', 'Certificações da Daniela', certDaniela))}
         ${podeVerRespostasCert() ? statCard('orange', icAlerta, 'Certificadas incorretamente', incorretas.length, 'o técnico não certificou corretamente (resposta do formulário)', listaCert('cert|inc', 'Certificadas incorretamente', incorretas)) : ''}
+        ${statCard('red', icBandeira, 'Sinalizadas', sinalizadas.length, CERT_SINAL.local ? 'só neste navegador (falta o PASSO-76)' : 'marcadas para revisão', listaCert('cert|sin', 'Sinalizadas', sinalizadas))}
         ${statCard('red', icAlerta, 'Não certificadas', naoCertificadas.length, naoCertificadas.length ? '<button type="button" class="stat-link" id="cert-ver-lista">Ver lista de revisão →</button>' : '', listaCert('cert|nao', 'Não certificadas', naoCertificadas))}
         ${statCard('blue', icPct, '% de Certificação', formatPct(pct, 1), `<div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.min(100, Math.max(0, pct))}%"></div></div>`, listaCert('cert|todas', '% de Certificação — todas as O.S', linhas))}
         ${statCard('neutral', icPasta, 'Total de O.S', linhas.length, `Cálculo: Certificadas (${certificadas.length}) + Não certificadas (${naoCertificadas.length})`, listaCert('cert|total', 'Total de O.S', linhas))}
@@ -28002,9 +28157,9 @@ function renderCertificacoes() {
         ${podeChamarClientes() ? '<button type="button" class="btn-sinalizar fora-da-imagem" id="cert-chamar" title="Só ordens concluídas de ativação, mudança de endereço e reparo: abre o WhatsApp de cada cliente com a mensagem de verificação de qualidade">📞 Chamar Clientes</button>' : ''}
       </div>
       <div class="table-wrap rolagem-inteira-na-imagem"><table class="data-table" id="tab-certificacoes-detalhe"><thead><tr>
-        <th class="fora-da-imagem">O.S</th><th class="fora-da-imagem">Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th class="fora-da-imagem">Período</th><th>Status</th><th class="fora-da-imagem">Atendente</th><th class="fora-da-imagem">Certificada por</th>${podeVerRespostasCert() ? '<th>Certificada corretamente pelo técnico?</th><th class="fora-da-imagem">Observação (certificação)</th>' : ''}<th class="fora-da-imagem">Horário Concluída</th><th class="fora-da-imagem">Horário Certificada</th><th class="fora-da-imagem">Tempo</th>${podeUsarFormCert() ? '<th class="fora-da-imagem">Ações</th>' : ''}
+        ${podeUsarFormCert() ? '<th class="fora-da-imagem cert-th-acoes">Ações</th>' : ''}<th class="fora-da-imagem">O.S</th><th class="fora-da-imagem">Contrato</th><th>Técnico</th><th>Cidade</th><th>Cliente</th><th class="fora-da-imagem">Período</th><th>Status</th><th class="fora-da-imagem">Atendente</th><th class="fora-da-imagem">Certificada por</th>${podeVerRespostasCert() ? '<th>Certificada corretamente pelo técnico?</th><th class="fora-da-imagem">Observação (certificação)</th>' : ''}<th class="fora-da-imagem">Sinalização</th><th class="fora-da-imagem">Horário Concluída</th><th class="fora-da-imagem">Horário Certificada</th><th class="fora-da-imagem">Tempo</th>
       </tr></thead><tbody>
-        ${linhas.map(l => `<tr><td class="fora-da-imagem">${esc(l.os)||'-'}</td><td class="fora-da-imagem">${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td class="fora-da-imagem">${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td>${podeVerRespostasCert() ? `<td>${l.correta === 'SIM' ? '<span class="badge ok">Sim</span>' : l.correta === 'NÃO' || l.correta === 'NAO' ? '<span class="badge warn">Não</span>' : '-'}</td><td class="fora-da-imagem" style="min-width:200px;max-width:360px;white-space:normal">${esc(l.obsTecnico) || '-'}</td>` : ''}<td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td>${podeUsarFormCert() ? `<td class="fora-da-imagem"><button type="button" class="fc-btn fc-btn-sec" data-cert-edit="${esc(l.os)}" style="padding:3px 10px;font-size:12.5px;min-height:0;white-space:nowrap" title="${temRegForm(l.os) ? 'Corrigir a certificação feita pelo formulário do sistema' : 'Registrar/corrigir a certificação desta O.S'}">${temRegForm(l.os) || l.certificada ? '✎ Editar' : '✎ Certificar'}</button></td>` : ''}</tr>`).join('')}
+        ${linhas.map(l => `<tr class="${l.sinal ? (l.sinal.status === 'sinalizada' ? 'cert-sinal-linha' : 'cert-sinal-ok') : ''}">${podeUsarFormCert() ? `<td class="fora-da-imagem cert-td-acoes"><span class="cert-acoes"><button type="button" class="cert-ib" data-cert-edit="${esc(l.os)}" title="${temRegForm(l.os) ? 'Corrigir a certificação feita pelo formulário do sistema' : 'Registrar/corrigir a certificação desta O.S'}">✎ ${temRegForm(l.os) || l.certificada ? 'Editar' : 'Certificar'}</button><button type="button" class="cert-ib${l.sinal && l.sinal.status === 'sinalizada' ? ' on' : ''}" data-cert-sinal="${esc(l.os)}" title="${l.sinal ? 'Editar a sinalização e a observação' : 'Sinalizar certificação incorreta ou que precisa de revisão'}">🚩</button><button type="button" class="cert-ib" data-cert-img="${esc(l.os)}" title="Gerar imagem da certificação">🖼</button></span></td>` : ''}<td class="fora-da-imagem"><a href="#" class="cert-os-link" data-cert-ficha="${esc(l.os)}" title="Abrir o card desta certificação">${esc(l.os)||'-'}</a></td><td class="fora-da-imagem">${esc(l.contrato)||'-'}</td><td class="cat-cell">${esc(l.tecnico)||'-'}</td><td>${esc(l.cidade)||'-'}</td><td>${esc(l.cliente)||'-'}</td><td class="fora-da-imagem">${esc(l.periodo)||'-'}</td><td>${l.certificada ? '<span class="badge ok">Certificada</span>' : '<span class="badge warn">Não certificada</span>'}</td><td class="fora-da-imagem">${esc(l.atendente)||'-'}</td><td class="fora-da-imagem">${esc(l.certificadaPor)||'-'}</td>${podeVerRespostasCert() ? `<td>${l.correta === 'SIM' ? '<span class="badge ok">Sim</span>' : l.correta === 'NÃO' || l.correta === 'NAO' ? '<span class="badge warn">Não</span>' : '-'}</td><td class="fora-da-imagem" style="min-width:200px;max-width:360px;white-space:normal">${esc(l.obsTecnico) || '-'}</td>` : ''}<td class="fora-da-imagem" style="min-width:200px;max-width:340px;white-space:normal">${l.sinal ? `<span class="badge ${l.sinal.status === 'sinalizada' ? 'warn' : 'ok'}">${l.sinal.status === 'sinalizada' ? '🚩' : '✔'} ${esc(l.sinal.incorreto)}</span><div class="cert-sinal-motivo">${esc(l.sinal.motivo)}</div>` : '-'}</td><td class="fora-da-imagem">${esc(l.horarioConcluida)}</td><td class="fora-da-imagem">${esc(l.horarioCertificada)}</td><td class="fora-da-imagem">${esc(l.tempo)}</td></tr>`).join('')}
       </tbody></table></div>
       <div class="panels-grid fora-da-imagem" id="cert-graficos" style="margin-top:1.25rem">
         <div class="panel"><h3>Certificadas × Não certificadas</h3><div id="cert-g1"></div></div>
@@ -28025,11 +28180,17 @@ function renderCertificacoes() {
     const btnChamar = document.getElementById('cert-chamar');
     if (btnChamar) btnChamar.addEventListener('click', () => abrirChamarCertificacoes(data, baseCert, btnChamar));
     const tabDet = document.getElementById('tab-certificacoes-detalhe');
-    if (tabDet && podeUsarFormCert()) tabDet.addEventListener('click', ev => {
-      const bt = ev.target.closest('[data-cert-edit]'); if (!bt) return;
-      const l = linhas.find(x => String(x.os) === bt.dataset.certEdit); if (!l) return;
-      abrirEditorCertificacao({ os: l.os, tecnico: l.tecnico, cliente: l.cliente, contrato: l.contrato, cidade: l.cidade === 'Não informado' ? '' : l.cidade, reg: regForm(l.os), base: baseCert.get(l.os),
-        aoSalvar: novo => { baseCert.set(String(novo.os), { ...(baseCert.get(String(novo.os)) || {}), ...certFormComoResposta(novo) }); render(); } });
+    const abrirEdicao = l => abrirEditorCertificacao({ os: l.os, tecnico: l.tecnico, cliente: l.cliente, contrato: l.contrato, cidade: l.cidade === 'Não informado' ? '' : l.cidade, reg: regForm(l.os), base: baseCert.get(l.os),
+      aoSalvar: novo => { baseCert.set(String(novo.os), { ...(baseCert.get(String(novo.os)) || {}), ...certFormComoResposta(novo) }); render(); } });
+    const ctxCard = () => ({ pode: podeUsarFormCert(), editar: abrirEdicao, aoMudar: () => render() });
+    if (tabDet) tabDet.addEventListener('click', ev => {
+      const el = ev.target.closest('[data-cert-edit],[data-cert-sinal],[data-cert-img],[data-cert-ficha]'); if (!el) return;
+      ev.preventDefault();
+      const os = el.dataset.certEdit || el.dataset.certSinal || el.dataset.certImg || el.dataset.certFicha, l = linhas.find(x => String(x.os) === String(os)); if (!l) return;
+      if (el.dataset.certEdit !== undefined) { if (podeUsarFormCert()) abrirEdicao(l); }
+      else if (el.dataset.certSinal !== undefined) { if (podeUsarFormCert()) abrirSinalizacaoCert(l, () => render()); }
+      else if (el.dataset.certImg !== undefined) certGerarImagem(l);
+      else abrirFichaCert(l, ctxCard());
     });
     const btnExport = document.getElementById('cert-export');
     if (btnExport) btnExport.addEventListener('click', () => {
