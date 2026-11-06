@@ -24778,7 +24778,7 @@ function igpValoresAntigo(c, R, mes) {
     V.efvendas = igpEf(c.efic_altas, 'Planilha'); V.botao = igpBotaoAssumido();
   } else {
     IGP_ANTIGO.forEach(it => { const s = it.sis ? igpSisDe(it, R, mes) : null; V[it.k] = s ? { n: s.n, d: s.d, v: igpArred3(s.v), fonte: 'Sistema' } : null; });
-    V.efvendas = igpEficAssumida(); V.botao = igpBotaoAssumido();
+    V.efvendas = igpEficInformada(mes) || igpEficAssumida(); V.botao = igpBotaoAssumido();   // 06/11/2026: se o resultado OFICIAL da eficiência de vendas foi digitado pro mês, vale ele (outubro: 79,29% = 0 pontos; a suposição dava 8)
   }
   return V;
 }
@@ -24786,6 +24786,12 @@ function igpValoresAntigo(c, R, mes) {
 const igpBotaoAssumido = () => ({ n: 0, d: null, v: 0, fonte: 'Assumido', assumido: true, nota: 'O sistema não tem este dado: considera nenhum entrante (0,00%) e pontuação cheia, como na planilha oficial.' });
 // Eficiência de vendas = vendas realizadas ÷ vendas brutas da GIGA, que o sistema não tem (a estimativa pelo CSV errava muito no mês fechado: 63% contra 84,2% oficial em setembro).
 // 31/10/2026 (cliente): fica "sem dado" e pontua pela META MÍNIMA (80% do peso) pra não puxar a faixa nem pra cima nem pra baixo.
+// Resultado oficial da eficiência de vendas, digitado na tela do IGP (por mês, só neste navegador). Conferido em 06/11/2026 com a planilha oficial de outubro: 79,29% (abaixo de 80% = 0 pontos),
+// enquanto a suposição "meta mínima" dava 8 pontos e fazia o sistema marcar 86 (faixa B) contra 78 (faixa D) da GIGA.
+const IGP_EFIC_STORE = 'jh_igp_efic_v1';
+const igpEficLer = () => { try { return JSON.parse(localStorage.getItem(IGP_EFIC_STORE) || '{}') || {}; } catch (e) { return {}; } };
+const igpEficGravar = (mes, pct) => { const m = igpEficLer(); if (pct == null || isNaN(pct)) delete m[mes]; else m[mes] = pct; try { localStorage.setItem(IGP_EFIC_STORE, JSON.stringify(m)); } catch (e) { /* sem armazenamento: vale só nesta tela */ } };
+const igpEficInformada = mes => { const v = igpEficLer()[mes]; return v == null ? null : { n: null, d: null, v: igpArred3(v / 100), fonte: 'Informado', nota: 'Resultado oficial digitado na tela (a GIGA usa as vendas brutas dela, que o sistema não tem).' }; };
 const igpEficAssumida = () => ({ n: null, d: null, v: null, fonte: 'Assumido', assumido: true, fracao: 0.8, faixaFixa: 'Meta mínima', nota: 'Sem dado no sistema (vendas brutas da GIGA). Pontuado pela meta mínima (80% do peso) para não distorcer a faixa.' });
 function igpPontuar(itens, V, pesoDe, modelo) {
   const linhas = itens.map(it => { const peso = pesoDe(it), x = V[it.k] || null, pts = x && peso != null ? (x.assumido ? peso * (x.fracao == null ? 1 : x.fracao) : igpPts(it, x.v, peso)) : null; return { it, peso, x, pts, faixa: x && it.m100 != null ? (x.assumido ? (x.faixaFixa || 'Meta 100%') : igpFaixa(it, x.v)) : null }; });
@@ -24935,6 +24941,7 @@ function renderIGP() {
     <div class="toolbar"><div class="field"><label>Mês</label><select id="igp-mes">${meses0.map(m => `<option value="${m}"${m === padrao ? ' selected' : ''}>${nomeMes(m)}</option>`).join('')}</select></div>
       <div class="field"><label>Acumulado até o dia</label><select id="igp-dia"></select></div>
       <div class="field" id="igp-cl-box" style="display:none"><label>Cluster (planilha)</label><select id="igp-cl"></select></div>
+      <div class="field" title="Resultado oficial da GIGA para o mês (o sistema não tem as vendas brutas). Vazio = pontuação pela meta mínima."><label>Eficiência de vendas oficial (%)</label><input type="number" id="igp-efic" step="0.01" min="0" max="100" placeholder="ex.: 79,29" style="width:150px"></div>
       <button type="button" class="btn" id="igp-xls">⤓ Excel</button></div>
     <div id="igp-corpo"></div>
     <details class="igp-conf"><summary>Conferir com a planilha da GIGA (opcional — o sistema não depende dela)</summary>
@@ -25306,7 +25313,9 @@ function renderIGP() {
       trendChart('igp-evol-g', [{ name: 'Pontuação', color: '#2563eb', points: pontos }, { name: 'Faixa C (80 pts)', color: '#16a34a', tracejado: true, semArea: true, points: pontos.map(p => ({ label: p.label, value: 80 })) }], { expandir: true, yMin: 0, yMax: Math.max(100, ...pontos.map(p => p.value)), legendaSemTotal: true, maxLabels: 12 });
     }, 40);
   }
-  $('igp-mes').addEventListener('change', () => { $('igp-dia').dataset.mes = ''; desenhar(); }); $('igp-dia').addEventListener('change', desenhar); $('igp-cl').addEventListener('change', desenhar);
+  const lerEfic = () => { const v = igpEficLer()[$('igp-mes').value]; $('igp-efic').value = v == null ? '' : String(v); }; lerEfic();
+  $('igp-efic').addEventListener('change', () => { const t = $('igp-efic').value.trim(); igpEficGravar($('igp-mes').value, t === '' ? null : parseFloat(t.replace(',', '.'))); desenhar(); });
+  $('igp-mes').addEventListener('change', () => { $('igp-dia').dataset.mes = ''; lerEfic(); desenhar(); }); $('igp-dia').addEventListener('change', desenhar); $('igp-cl').addEventListener('change', desenhar);
   $('igp-file').addEventListener('change', async ev => {
     const f = ev.target.files[0]; if (!f) return;
     try {
